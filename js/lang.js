@@ -29,6 +29,13 @@ function setLang(lang) {
     document.documentElement.lang = shown;
     localStorage.setItem('javascript-essentials-lang', lang);
 
+    // the tab title: a page keeps its English title in data-en; every other language shows the Russian one
+    var title = document.querySelector('title[data-en]');
+    if (title) {
+        if (!title.dataset.ru) title.dataset.ru = title.textContent;
+        document.title = shown === 'en' ? title.dataset.en : title.dataset.ru;
+    }
+
     document.querySelectorAll('.lang-btn').forEach(function(btn) {
         btn.textContent = shown === 'ru' ? 'EN' : 'RU';
     });

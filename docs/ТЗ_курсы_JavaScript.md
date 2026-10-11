@@ -89,7 +89,7 @@ internal / concrete / numeric method), 527 — встроенные функци
 ### Нынешний курс
 
 - Репозиторий `TheSeydiCharyyev/javascript-essentials` (с 30.09.2026 — `learn-javascript`, решение 14), публичный; файла лицензии не было — добавлен 20.09.2026 (решение 13).
-- План на 36 дней: `План_курса_JavaScript_v1.md` (9 модулей).
+- План на 36 дней: `План_курса_JavaScript_v1.md` (9 модулей); удалён 11.10.2026, заменён `docs/plan-0-overview.md` и `docs/plan-1-essentials.md`. Тогда же удалены страницы старого курса `notebook.html`, `reference.html` и папка упражнений `my_files/`.
 - На день: `lessons/Lesson-N/lecture.html`, `student.html` (конспект), `tasks.html` (задания).
 - Заполнены дни 1–4; дни 5–36 — пустые заготовки.
 - Языки: русский и английский везде; туркменский и турецкий только в днях 1–3 и на `index.html`.

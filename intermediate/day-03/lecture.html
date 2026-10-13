@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 3 — Строгий режим и глобальный объект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+        h3 { color: #075985; }
+        .step-number { background: #0ea5e9; }
+        .toc a { color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 3</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 3 &bull; урок 1</span>
+        <h1>Строгий режим и глобальный объект</h1>
+        <p>Курс 2, Intermediate. Модуль «Области видимости, замыкания и this» — третий день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>включать строгий режим и проверять, действует ли он в данном месте;</li>
+            <li>называть тихие ошибки обычного режима, которые строгий превращает в явные;</li>
+            <li>предсказывать <code>this</code> вызова без объекта в обоих режимах;</li>
+            <li>узнавать семь синтаксических запретов строгого режима по тексту ошибки Chrome;</li>
+            <li>объяснять, что такое глобальный объект, чем <code>globalThis</code> лучше
+                <code>window</code> и почему <code>var</code> и <code>let</code> на верхнем уровне
+                ведут себя по-разному.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#silent">Тихие ошибки</a></li>
+            <li><a href="#enable">Как включить строгий режим</a></li>
+            <li><a href="#loud">Ошибки вместо тишины</a></li>
+            <li><a href="#this">this без объекта</a></li>
+            <li><a href="#syntax">Запреты в самом тексте программы</a></li>
+            <li><a href="#arguments">arguments и eval</a></li>
+            <li><a href="#annex">Приложение C спецификации</a></li>
+            <li><a href="#not">Чего строгий режим не ловит</a></li>
+            <li><a href="#global">Глобальный объект и globalThis</a></li>
+            <li><a href="#halves">Две половины глобальной области</a></li>
+            <li><a href="#name">Загадка name разгадана</a></li>
+            <li><a href="#practice">globalThis на практике</a></li>
+            <li><a href="#cards">«Карточки» в строгом режиме</a></li>
+            <li><a href="#when">Когда писать "use strict"</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="silent">1. Тихие ошибки</h2>
+
+    <p>За два дня курса мы трижды встретили одну и ту же неприятность: программа делает
+    неправильно и <strong>молчит</strong>. Соберём их вместе — все они уже знакомы.</p>
+
+    <pre class="code js">let total = 0;
+totl = total + 5;                  // день 4 Essentials: опечатка создала глобальную переменную
+
+const marks = Object.freeze([5, 4]);
+marks[0] = 2;                      // тоже день 4: запись в замороженный массив пропала
+
+const card = {
+  word: "teacher",
+  show() {
+    return `Карточка: ${this.word}`;
+  },
+};
+const show = card.show;            // вчера: метод отделили от объекта
+
+console.log(total, marks[0], show());   // 0 5 Карточка: undefined</pre>
+
+    <p>Три строки — три ошибки, и ни одного красного сообщения. Такие ошибки самые дорогие: их не
+    видно в момент, когда они случились, и находят их по последствиям — неверному числу, пустому
+    слову, — часто через неделю.</p>
+
+    <p>Почему язык так себя ведёт? В 1995 году JavaScript делали для маленьких скриптов на страницах,
+    и решили: пусть лучше скрипт доработает хоть как-нибудь, чем упадёт. Через десять лет программы
+    выросли, и стало ясно, что тишина вредит. Но поменять поведение уже было нельзя — сломались бы
+    миллионы сайтов. Решение нашли в 2009 году, в редакции ES5: <strong>строгий режим</strong>,
+    который каждый включает для своего кода сам.</p>
+
+    <table>
+        <thead><tr><th>Год</th><th>Редакция</th><th>Что произошло</th></tr></thead>
+        <tbody>
+            <tr><td>1995</td><td>первая версия языка</td><td>тихий режим — единственный</td></tr>
+            <tr><td>2009</td><td>ES5</td><td>появился строгий режим и директива <code>"use strict"</code></td></tr>
+            <tr><td>2015</td><td>ES2015</td><td>классы и модули — строгие всегда, без директивы</td></tr>
+            <tr><td>2020</td><td>ES2020</td><td>одно имя глобального объекта — <code>globalThis</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Отсюда и план дня: сначала строгий режим, потом глобальный объект — та часть языка, где
+    тихий режим наследил больше всего.</p>
+
+    <h2 id="enable">2. Как включить строгий режим</h2>
+
+    <p>Строгий режим включается строкой-директивой — обычной строкой <code>"use strict"</code>,
+    стоящей <strong>первой инструкцией</strong> скрипта или функции:</p>
+
+    <pre class="code js">"use strict";
+
+let total = 0;
+totl = total + 5;   // ReferenceError: totl is not defined</pre>
+
+    <p>Старые движки, не знавшие строгого режима, видели здесь просто строку, которая ничего
+    не делает, и не ломались. Новые понимают её как приказ. Отсюда и странная форма — строка
+    в кавычках, а не новое слово языка.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 230" role="img" aria-label="Где действует директива use strict: первой строкой файла — весь файл; первой строкой функции — только функция; не первой — нигде">
+            <rect x="10" y="12" width="190" height="130" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="105" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#166534">первой строкой файла</text>
+            <text x="24" y="60" font-family="Consolas, monospace" font-size="11.5" fill="#166534">"use strict";</text>
+            <text x="24" y="80" font-family="Consolas, monospace" font-size="11.5" fill="#334155">let a = 1;</text>
+            <text x="24" y="100" font-family="Consolas, monospace" font-size="11.5" fill="#334155">function f() { … }</text>
+            <text x="105" y="130" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">строгий весь файл</text>
+
+            <rect x="215" y="12" width="190" height="130" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="310" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">первой строкой функции</text>
+            <text x="229" y="60" font-family="Consolas, monospace" font-size="11.5" fill="#334155">function f() {</text>
+            <text x="243" y="80" font-family="Consolas, monospace" font-size="11.5" fill="#1d4ed8">"use strict";</text>
+            <text x="243" y="100" font-family="Consolas, monospace" font-size="11.5" fill="#334155">…</text>
+            <text x="229" y="116" font-family="Consolas, monospace" font-size="11.5" fill="#334155">}</text>
+            <text x="310" y="134" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#1d4ed8">строгая только f</text>
+
+            <rect x="420" y="12" width="190" height="130" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="515" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#991b1b">не первой строкой</text>
+            <text x="434" y="60" font-family="Consolas, monospace" font-size="11.5" fill="#334155">let a = 1;</text>
+            <text x="434" y="80" font-family="Consolas, monospace" font-size="11.5" fill="#991b1b">"use strict";</text>
+            <text x="434" y="100" font-family="Consolas, monospace" font-size="11.5" fill="#334155">totl = 5;</text>
+            <text x="515" y="130" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">просто строка, режим обычный</text>
+
+            <rect x="10" y="156" width="600" height="64" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="178" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Перед директивой можно ставить только комментарии и другие такие же строки-директивы.</text>
+            <text x="310" y="196" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Модули (день 30) и классы (день 8) строгие всегда — директива там не нужна.</text>
+            <text x="310" y="213" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Выключить строгий режим внутри строгого кода нельзя.</text>
+        </svg>
+        <figcaption>Директива работает, только если стоит первой — иначе это просто строка</figcaption>
+    </figure>
+
+    <p>Третий случай схемы — самая частая ошибка с директивой: её нет смысла ставить посередине.
+    Проверим:</p>
+
+    <pre class="code js">console.log("старт");
+"use strict";                 // уже не первая инструкция — просто строка
+totl = 5;
+console.log(globalThis.totl); // 5 — режим остался обычным</pre>
+
+    <p>Узнать, строгий ли код в данном месте, проще всего по <code>this</code> вызова без
+    объекта — к нему мы придём в разделе 4:</p>
+
+    <pre class="code js">function isStrict() {
+  "use strict";
+  return this === undefined;
+}
+
+function isSloppy() {
+  return this === globalThis;
+}
+
+console.log(isStrict(), isSloppy());   // true true</pre>
+
+    <p>Обычный режим по-английски часто называют <em>sloppy mode</em> — «небрежный режим». Название
+    неофициальное, но вы его встретите в статьях и на MDN.</p>
+
+    <div class="pro-tip">
+        В консоли Chrome каждая введённая порция кода — отдельный скрипт. Чтобы проверить что-то
+        в строгом режиме, пишите <code>"use strict";</code> первой строкой <strong>в том же
+        вводе</strong>, что и проверяемый код: строка, введённая отдельно, на следующий ввод
+        не подействует.
+    </div>
+
+    <h2 id="loud">3. Ошибки вместо тишины</h2>
+
+    <p>Первая группа изменений: то, что в обычном режиме молча не срабатывало, в строгом
+    бросает ошибку.</p>
+
+    <table>
+        <thead><tr><th>Что делаем</th><th>Обычный режим</th><th>Строгий режим</th></tr></thead>
+        <tbody>
+            <tr><td>присвоить необъявленной: <code>totl = 5</code></td><td>создаётся глобальная переменная</td><td><code>ReferenceError: totl is not defined</code></td></tr>
+            <tr><td>записать в замороженный объект: <code>o.x = 2</code></td><td>молча не записывается</td><td><code>TypeError: Cannot assign to read only property 'x' of object '#&lt;Object&gt;'</code></td></tr>
+            <tr><td>добавить свойство замороженному: <code>o.y = 2</code></td><td>молча не добавляется</td><td><code>TypeError: Cannot add property y, object is not extensible</code></td></tr>
+            <tr><td>удалить свойство замороженного: <code>delete o.x</code></td><td>возвращает <code>false</code></td><td><code>TypeError: Cannot delete property 'x' of #&lt;Object&gt;</code></td></tr>
+            <tr><td>переписать <code>undefined</code> или <code>NaN</code></td><td>молча не переписывается</td><td><code>TypeError: Cannot assign to read only property 'undefined' of object '#&lt;Window&gt;'</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Обычный режим для сравнения — все три изменения замороженного объекта проходят без звука:</p>
+
+    <pre class="code js">const o = Object.freeze({ x: 1 });
+o.x = 2;
+o.y = 3;
+console.log(delete o.x, JSON.stringify(o));   // false {"x":1}</pre>
+
+    <p>И строгий — первая же строка останавливает программу:</p>
+
+    <pre class="code js">"use strict";
+const o = Object.freeze({ x: 1 });
+o.x = 2;   // TypeError: Cannot assign to read only property 'x' of object '#&lt;Object&gt;'</pre>
+
+    <p>Последняя строка таблицы любопытна: <code>undefined</code> и <code>NaN</code> — не слова языка,
+    а свойства глобального объекта, защищённые от записи. В обычном режиме
+    <code>undefined = 1</code> не делает ничего, в строгом — честно отказывает. Глобальный объект
+    разберём в разделе 9.</p>
+
+    <h2 id="this">4. this без объекта</h2>
+
+    <p>Вчера таблица вызовов сказала: «<code>f()</code> — в обычном скрипте глобальный объект,
+    в строгом режиме <code>undefined</code>». Теперь вторая половина:</p>
+
+    <pre class="code js">"use strict";
+
+function who() {
+  return this;
+}
+
+console.log(who());                // undefined — вызвали без объекта
+console.log(who.call(null));       // null — передали null, его и получили
+console.log(typeof who.call(5));   // number — число не обёрнуто</pre>
+
+    <p>Сравните со вчерашним разделом 8: там <code>call(null)</code> давал глобальный объект,
+    а <code>call(5)</code> — объект-обёртку. В строгом режиме <code>this</code> — <strong>ровно то,
+    что передали</strong>, без подмен.</p>
+
+    <p>Главный практический выигрыш — потерянный метод теперь падает сразу и с понятным текстом.
+    Вчерашний пример с прогрессом:</p>
+
+    <pre class="code js">"use strict";
+
+const progress = {
+  learned: [1, 2],
+  count() {
+    return this.learned.length;
+  },
+};
+
+const count = progress.count;
+count();   // TypeError: Cannot read properties of undefined (reading 'learned')</pre>
+
+    <p>Вчера в обычном режиме ошибка говорила <code>(reading 'length')</code>: <code>this</code> был
+    окном, <code>this.learned</code> давал <code>undefined</code>, и падение случалось на шаг позже.
+    Сегодня <code>this</code> сам <code>undefined</code>, и текст указывает прямо на
+    <code>learned</code> — на то место, где объект потерялся. А метод, который читал бы
+    <code>this.word</code> и тихо возвращал <code>undefined</code>, теперь тоже упадёт.</p>
+
+    <div class="important">
+        Классы, которые придут на дне 8, — строгие всегда. Поэтому метод класса, отделённый
+        от объекта, всегда падает с этой ошибкой, а не врёт молча. Всё, что вчера говорилось
+        о <code>bind</code> и стрелочных обёртках, для классов обязательно.
+    </div>
+
+    <h2 id="syntax">5. Запреты в самом тексте программы</h2>
+
+    <p>Вторая группа изменений — запреты, которые проверяются <strong>до запуска</strong>.
+    Код с таким нарушением не начнёт работать вовсе: <code>SyntaxError</code>, как опечатка в скобках
+    из дня 8 Essentials. Вот семь таких ошибок, у каждой своя страница на MDN:</p>
+
+    <table>
+        <thead><tr><th>Что написали в строгом коде</th><th>Сообщение Chrome</th><th>Почему запрещено</th></tr></thead>
+        <tbody>
+            <tr><td><code>let eval = 1;</code>, <code>function f(arguments) {}</code></td><td><code>SyntaxError: Unexpected eval or arguments in strict mode</code></td><td>эти имена заняты служебными вещами языка</td></tr>
+            <tr><td><code>let x = 1; delete x;</code></td><td><code>SyntaxError: Delete of an unqualified identifier in strict mode.</code></td><td><code>delete</code> удаляет свойства, а не переменные</td></tr>
+            <tr><td><code>function f(a = 1) { "use strict"; }</code></td><td><code>SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list</code></td><td>параметры по умолчанию разобраны раньше, чем прочитана директива</td></tr>
+            <tr><td><code>let package = 1;</code></td><td><code>SyntaxError: Unexpected strict mode reserved word</code></td><td>слово оставлено языку на будущее</td></tr>
+            <tr><td><code>label: function f() {}</code></td><td><code>SyntaxError: In strict mode code, functions can only be declared at top level or inside a block.</code></td><td>функция с меткой (день 10 Essentials) ничего не даёт</td></tr>
+            <tr><td><code>010</code></td><td><code>SyntaxError: Octal literals are not allowed in strict mode.</code></td><td>ведущий ноль путали с десятичным числом</td></tr>
+            <tr><td><code>"\05"</code></td><td><code>SyntaxError: Octal escape sequences are not allowed in strict mode.</code></td><td>тот же ноль, но внутри строки</td></tr>
+        </tbody>
+    </table>
+
+    <p>Несколько пояснений.</p>
+
+    <p><strong>Зарезервированные слова.</strong> В строгом режиме нельзя называть переменные девятью
+    словами: <code>implements</code>, <code>interface</code>, <code>let</code>, <code>package</code>,
+    <code>private</code>, <code>protected</code>, <code>public</code>, <code>static</code>,
+    <code>yield</code>. Их отложили для будущих возможностей языка, и часть уже пригодилась:
+    <code>let</code> вы знаете, <code>static</code> придёт на дне 9, <code>yield</code> — на дне 12.</p>
+
+    <p><strong>Восьмеричные числа.</strong> В обычном режиме <code>010</code> — это 8, а не 10:
+    ведущий ноль включал восьмеричную систему. Ошибка была слишком частой, поэтому в строгом
+    режиме такая запись запрещена. Восьмеричное число пишут явно — <code>0o10</code>, запись
+    из дня 3 Essentials. То же внутри строк: вместо <code>"\05"</code> пишут <code>"\x05"</code>
+    или <code>"\u0005"</code>.</p>
+
+    <pre class="code js">console.log(010, 0o10);   // 8 8 — в обычном режиме ноль впереди меняет систему счисления</pre>
+
+    <p><strong>Директива и параметры по умолчанию.</strong> Запрет выглядит странно, пока не вспомнишь
+    порядок работы. Параметры с умолчаниями (день 14 Essentials) — это код, и разобрать его нужно
+    раньше тела функции. Директива же стоит в теле. Получилось бы, что выражения в скобках уже прочитаны
+    по одним правилам, а директива задним числом требует других. Чтобы такого спора не было,
+    спецификация разрешает директиву внутри функции только при простых параметрах — без умолчаний,
+    без <code>...rest</code> и без деструктуризации. Выход простой: директива в начале файла делает
+    строгим всё сразу, включая параметры.</p>
+
+    <p><strong>Повтор имён параметров.</strong> На дне 14 Essentials мы видели: в обычном режиме
+    <code>function f(a, a)</code> разрешена ради старого кода. В строгом — всегда
+    <code>SyntaxError: Duplicate parameter name not allowed in this context</code>.</p>
+
+    <p><strong><code>with</code></strong> — устаревшая инструкция, которая подмешивает свойства
+    объекта в область видимости. В строгом режиме она запрещена целиком; разберём её в курсе 3,
+    вместе с той самой Object Environment Record из таблицы дня 1.</p>
+
+    <h2 id="arguments">6. arguments и eval</h2>
+
+    <p>Строгий режим меняет и две служебные вещи.</p>
+
+    <p><strong><code>arguments</code></strong> в обычной функции связан с параметрами: поменяли
+    параметр — поменялся и <code>arguments</code>. В строгой — это просто копия на момент вызова:</p>
+
+    <pre class="code js">function sloppy(a) {
+  a = 10;
+  return arguments[0];
+}
+
+function strict(a) {
+  "use strict";
+  a = 10;
+  return arguments[0];
+}
+
+console.log(sloppy(1), strict(1));   // 10 1</pre>
+
+    <p>Подробно об <code>arguments</code> — завтра, на дне 4, вместе с его устаревшим свойством
+    <code>callee</code>, которое строгий режим тоже запрещает.</p>
+
+    <p><strong><code>eval</code></strong> — функция, которая выполняет строку как код. В обычном
+    режиме переменные, объявленные внутри такой строки, просачиваются наружу; в строгом — остаются
+    внутри. Саму <code>eval</code> разбираем в курсе 3, и это тот редкий случай, когда хороший совет —
+    не пользоваться ею вовсе.</p>
+
+    <h2 id="annex">7. Приложение C спецификации</h2>
+
+    <p>Все отличия строгого режима собраны в одном месте спецификации —
+    <a href="https://tc39.es/ecma262/2026/#sec-strict-mode-of-ecmascript">приложении C</a>,
+    «The Strict Mode of ECMAScript». Пометка <em>informative</em> в его заголовке значит
+    «пояснительное»: само приложение правил не устанавливает. Правила записаны в основном тексте,
+    в разделах о присваивании, <code>delete</code>, функциях, а приложение собирает их в список
+    и у каждого пункта даёт номер раздела, где правило записано. Это удобная точка входа.</p>
+
+    <p>Перескажем пункты приложения, сгруппировав их по смыслу:</p>
+
+    <ul>
+        <li><strong>слова:</strong> девять зарезервированных слов; запрет имён <code>eval</code> и
+            <code>arguments</code> — для переменных, параметров, параметра <code>catch</code>
+            и для присваивания им;</li>
+        <li><strong>числа и строки:</strong> нельзя восьмеричные числа с ведущим нулём и восьмеричные
+            escape-последовательности;</li>
+        <li><strong>присваивание:</strong> необъявленное имя — <code>ReferenceError</code> вместо новой
+            глобальной переменной; запись в свойство только для чтения, в свойство без сеттера
+            (день 5) или новое свойство нерасширяемого объекта (день 6) — <code>TypeError</code>;</li>
+        <li><strong><code>delete</code>:</strong> удалять имя переменной — <code>SyntaxError</code>;
+            удалять неудаляемое свойство — <code>TypeError</code>;</li>
+        <li><strong>функции:</strong> <code>this</code> не подменяется ни на глобальный объект,
+            ни на обёртку; повтор имён параметров запрещён; <code>arguments</code> не связан
+            с параметрами, а его <code>callee</code> бросает ошибку;</li>
+        <li><strong>прочее:</strong> <code>with</code> запрещён; <code>eval</code> не объявляет
+            переменных снаружи.</li>
+    </ul>
+
+    <p>Два пункта вы ещё не можете проверить — свойства без сеттера и нерасширяемые объекты.
+    Они появятся на днях 5 и 6, и тогда строгий режим снова окажется полезным: без него
+    оба случая — опять тишина.</p>
+
+    <h2 id="not">8. Чего строгий режим не ловит</h2>
+
+    <p>Строгий режим — не проверка всего подряд. Опечатку в имени <strong>переменной</strong>
+    он ловит, а в имени <strong>свойства</strong> — нет:</p>
+
+    <pre class="code js">"use strict";
+
+const quiz = { position: 0 };
+quiz.positon = 1;               // опечатка в свойстве — ошибки нет
+console.log(quiz.position);     // 0
+console.log(Object.keys(quiz)); // (2) ['position', 'positon']</pre>
+
+    <p>Добавлять новые свойства обычному объекту законно, и строгий режим не может знать, что
+    <code>positon</code> — опечатка, а не новое поле. Защитить объект от новых свойств можно,
+    и способов несколько — <code>Object.seal</code> и его соседи, день 6. А редактор с линтером
+    из дня 4 Essentials найдёт и то, и другое ещё до запуска.</p>
+
+    <p>Не ловит строгий режим и логических ошибок: неверную формулу, перепутанный порядок
+    аргументов, лишнюю единицу. Он делает громче только то, что язык и так считал подозрительным.</p>
+
+    <h2 id="global">9. Глобальный объект и globalThis</h2>
+
+    <p>Теперь вторая тема дня. <strong>Глобальный объект</strong> — объект, который существует
+    до начала любого скрипта и хранит встроенное: <code>Math</code>, <code>JSON</code>,
+    <code>parseInt</code>, <code>undefined</code>, <code>NaN</code> из языка и сотни вещей
+    окружения — в браузере это <code>document</code>, <code>alert</code>,
+    <code>setTimeout</code>, <code>localStorage</code>.</p>
+
+    <p>Называется он в разных местах по-разному: в браузере — <code>window</code>, в фоновых
+    потоках браузера (курс 4) — <code>self</code>, в Node.js — <code>global</code>. Код,
+    который должен работать везде, долго подбирал имя на ходу. С 2020 года есть одно имя на все
+    случаи — <strong><code>globalThis</code></strong>:</p>
+
+    <pre class="code js">console.log(globalThis === window, globalThis === self);   // true true
+console.log(globalThis.Math === Math);                       // true
+console.log(typeof globalThis.setTimeout);                   // function</pre>
+
+    <p>Имя выбрано не случайно: это значение <code>this</code> на верхнем уровне обычного скрипта.
+    В спецификации у глобальной записи окружения так и есть поле <code>[[GlobalThisValue]]</code> —
+    то, что возвращает <code>this</code> вне всех функций. И здесь строгий режим ничего не меняет:
+    правило раздела 4 касается вызовов функций, а не верхнего уровня.</p>
+
+    <pre class="code js">"use strict";
+
+console.log(this === globalThis);   // true — верхний уровень скрипта
+
+function who() {
+  return this;
+}
+console.log(who());                 // undefined — а вызов без объекта уже строгий</pre>
+
+    <p>В модулях (день 30) <code>this</code> на верхнем уровне — <code>undefined</code>, поэтому
+    код, которому нужен глобальный объект, пишет <code>globalThis</code>, а не <code>this</code>.</p>
+
+    <h3>Элементы с id — тоже во дворе</h3>
+
+    <p>Есть у браузера и совсем неожиданное содержимое глобального объекта: каждый элемент страницы
+    с атрибутом <code>id</code> становится его свойством, и к нему можно обратиться просто по имени:</p>
+
+    <pre class="code js">const box = document.createElement("div");
+box.id = "progressBox";
+document.body.append(box);
+
+console.log(globalThis.progressBox === box);   // true — элемент стал свойством окна
+console.log(progressBox === box);              // true — и виден как глобальное имя</pre>
+
+    <p>Это наследство самых первых браузеров. Пользоваться им не нужно: элементы ищут через
+    <code>querySelector</code> и <code>getElementById</code> из дня 24 Essentials, чтобы по коду
+    было видно, откуда взялось значение. А помнить о нём стоит из-за ошибок: если опечатка в имени
+    переменной совпала с <code>id</code> на странице, <strong>чтение</strong> не упадёт
+    с <code>ReferenceError</code> даже в строгом режиме — поиск найдёт элемент, и вместо числа вы получите
+    кусок страницы. Присваивание такому имени строгий режим всё же остановит. Объявленная переменная
+    с тем же именем элемент заслоняет.</p>
+
+    <div class="analogy">
+        Глобальный объект — как общий двор многоквартирного дома. Всё, что вынесено во двор,
+        видно из любой квартиры: скамейка <code>Math</code>, почтовый ящик <code>alert</code>.
+        Но двор общий, и если каждый будет выносить туда свои вещи, однажды кто-то унесёт чужое,
+        приняв за своё. Хороший жилец держит вещи дома.
+    </div>
+
+    <h2 id="halves">10. Две половины глобальной области</h2>
+
+    <p>На дне 4 Essentials мы видели странность: <code>var</code> на верхнем уровне становится
+    свойством глобального объекта, а <code>let</code> — нет. Почему одна и та же «глобальная»
+    переменная живёт по-разному? Ответ — в разделе спецификации
+    <a href="https://tc39.es/ecma262/2026/#sec-global-environment-records">9.1.1.4</a>,
+    Global Environment Records. Перескажем.</p>
+
+    <p>Глобальная запись окружения — та, что на самом верху цепочки из дня 1, — устроена
+    из <strong>двух частей</strong>. Объектная часть хранит имена прямо в глобальном объекте:
+    встроенные, а также всё, что объявлено через <code>var</code> и <code>function</code>.
+    Декларативная часть — обычная запись, как у функции или блока: в ней <code>let</code>,
+    <code>const</code> и <code>class</code>. Поиск имени заглядывает в обе, поэтому для кода разницы
+    почти нет. А для <code>globalThis</code> разница есть: он видит только первую часть.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 250" role="img" aria-label="Глобальная запись окружения из двух частей: объектная — сам глобальный объект со встроенными именами, var и function; декларативная — let, const, class; globalThis видит только объектную">
+            <rect x="10" y="10" width="600" height="168" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#334155">глобальная запись окружения — верх цепочки дня 1</text>
+
+            <rect x="26" y="44" width="280" height="122" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="166" y="66" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#92400e">объектная часть = глобальный объект</text>
+            <text x="42" y="90" font-family="Consolas, monospace" font-size="11.5" fill="#92400e">Math  JSON  undefined  NaN</text>
+            <text x="42" y="110" font-family="Consolas, monospace" font-size="11.5" fill="#92400e">document  alert  name</text>
+            <text x="42" y="130" font-family="Consolas, monospace" font-size="11.5" fill="#92400e">var a = 1;</text>
+            <text x="42" y="150" font-family="Consolas, monospace" font-size="11.5" fill="#92400e">function c() { }</text>
+
+            <rect x="316" y="44" width="278" height="122" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="455" y="66" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#166534">декларативная часть</text>
+            <text x="332" y="90" font-family="Consolas, monospace" font-size="11.5" fill="#166534">let b = 2;</text>
+            <text x="332" y="110" font-family="Consolas, monospace" font-size="11.5" fill="#166534">const KEY = "cards:learned";</text>
+            <text x="332" y="130" font-family="Consolas, monospace" font-size="11.5" fill="#166534">class Card { }</text>
+            <text x="332" y="150" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">(классы — день 8)</text>
+
+            <path d="M 166 214 L 166 172" fill="none" stroke="#f59e0b" stroke-width="2"/>
+            <path d="M 166 168 L 162 178 L 170 178 Z" fill="#f59e0b"/>
+            <rect x="96" y="214" width="140" height="28" rx="6" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+            <text x="166" y="233" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#92400e">globalThis</text>
+
+            <text x="455" y="200" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">поиск имени из кода смотрит</text>
+            <text x="455" y="218" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">в обе части; globalThis —</text>
+            <text x="455" y="236" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">только в объектную</text>
+        </svg>
+        <figcaption>Одна глобальная область, два способа хранить имена</figcaption>
+    </figure>
+
+    <pre class="code js">var a = 1;
+let b = 2;
+function c() {}
+
+console.log(a, b);                        // 1 2 — из кода видны обе
+console.log(globalThis.a, globalThis.b);  // 1 undefined — globalThis видит только var
+console.log(typeof globalThis.c);         // function — и объявления function</pre>
+
+    <p>У декларативной части есть своё следствие: <code>let</code> верхнего уровня видна
+    <strong>во всех обычных скриптах страницы</strong>, хотя в глобальном объекте её нет. Подключите
+    к странице два скрипта — второй прочтёт переменную первого, а повторный <code>let</code> с тем же
+    именем во втором скрипте даст <code>SyntaxError: Identifier '…' has already been declared</code>.
+    Глобальная область одна на всю страницу, сколько бы файлов ни было.</p>
+
+    <h2 id="name">11. Загадка name разгадана</h2>
+
+    <p>В первый день мы видели: <code>console.log(name)</code> на верхнем уровне печатает пустую
+    строку. Теперь понятно почему: <code>name</code> — свойство глобального объекта, которое браузер
+    создал заранее (имя окна, в котором открыта страница). Поиск имени дошёл до объектной части
+    глобальной записи и нашёл его там.</p>
+
+    <p>А вот что бывает, если объявить своё <code>name</code>:</p>
+
+    <pre class="code js">var name = 5;
+console.log(typeof name, name);   // string 5</pre>
+
+    <p>Мы положили число, а получили строку! <code>var</code> на верхнем уровне записывает
+    <strong>в свойство глобального объекта</strong>, а свойство <code>name</code> у окна особое:
+    всё, что в него кладут, оно хранит строкой. Наша переменная оказалась не нашей.</p>
+
+    <p>Следующий опыт делайте в <strong>новой вкладке</strong>. Строка <code>var name = 5</code> записала
+    <code>"5"</code> в имя окна, а окно помнит своё имя даже после обновления страницы: на той же вкладке
+    вместо пустой строки вы увидите <code>"5"</code>.</p>
+
+    <pre class="code js">let name = 5;
+console.log(typeof name, name);            // number 5
+console.log(JSON.stringify(globalThis.name));   // "" — свойство окна не тронуто</pre>
+
+    <p>С <code>let</code> всё в порядке: переменная легла в декларативную часть, поиск находит её
+    там первой, а свойство окна осталось само по себе. Ещё один довод за <code>let</code>
+    и <code>const</code>.</p>
+
+    <div class="mistake">
+        Некоторые имена глобального объекта заняты так, что объявить своё нельзя даже через
+        <code>let</code>:
+        <pre class="code js">let undefined = 5;
+// SyntaxError: Identifier 'undefined' has already been declared</pre>
+        <code>undefined</code>, <code>NaN</code> и <code>Infinity</code> — свойства глобального
+        объекта, которые нельзя ни переписать, ни удалить. Спецификация не даёт заслонить их
+        <code>let</code> на верхнем уровне, и Chrome сообщает об этом как о повторном объявлении.
+        Внутри функции или блока — можно, но лучше никогда.
+    </div>
+
+    <h2 id="practice">12. globalThis на практике</h2>
+
+    <p>Три случая, когда к глобальному объекту обращаются осознанно.</p>
+
+    <p><strong>Проверить, есть ли возможность.</strong> Старый браузер может не знать какой-то
+    функции. Обращение к несуществующему имени упадёт с <code>ReferenceError</code>, а к свойству
+    глобального объекта — просто даст <code>undefined</code>:</p>
+
+    <pre class="code js">function has(feature) {
+  return typeof globalThis[feature] !== "undefined";
+}
+
+console.log(has("fetch"), has("surelyNotThere"));   // true false — и никакого ReferenceError</pre>
+
+    <p><strong>Найти случайную глобальную.</strong> Приём дня 4 Essentials: если подозреваете
+    опечатку без строгого режима, наберите <code>globalThis.totl</code>. В строгом режиме этот
+    приём не нужен — опечатка упадёт сама.</p>
+
+    <p><strong>Поделиться данными между скриптами.</strong> Если двум обычным скриптам страницы
+    действительно нужно общее, заводят <strong>одно</strong> имя с объектом внутри, а не десяток
+    отдельных переменных:</p>
+
+    <pre class="code js">globalThis.cards = { version: 2, words: [] };   // одно имя на весь проект
+console.log(globalThis.cards.version);           // 2</pre>
+
+    <p>Так меньше шансов столкнуться с чужим <code>config</code> из чужой библиотеки — та беда,
+    о которой говорил день 4. А правильное решение этой задачи — модули, день 30: там у каждого
+    файла своя область, и делиться можно только явно.</p>
+
+    <h2 id="cards">13. «Карточки» в строгом режиме</h2>
+
+    <p>Возьмём кусок «Карточек» с двумя ошибками дня: опечаткой в имени переменной и потерянным
+    <code>this</code>. Обе ловушки поставлены нарочно, а каждая проверка обёрнута в
+    <code>try...catch</code> из дня 11, чтобы увидеть все ошибки за один запуск.</p>
+
+    <pre class="code js">"use strict";
+
+const words = ["bread", "water", "apple"];
+let position = 0;
+
+function show(label) {
+  console.log(`${label}: ${words[position]}`);
+}
+
+function next() {
+  positon = (position + 1) % words.length;   // опечатка: positon вместо position
+  show("дальше");
+}
+
+const quiz = {
+  flipped: false,
+  flip() {
+    this.flipped = !this.flipped;
+    console.log(`перевёрнута: ${this.flipped}`);
+  },
+};
+
+show("сейчас");
+try {
+  next();
+} catch (error) {
+  console.log(`next — ${error.name}: ${error.message}`);
+}
+try {
+  const flip = quiz.flip;                     // метод без объекта
+  flip();
+} catch (error) {
+  console.log(`flip — ${error.name}: ${error.message}`);
+}
+quiz.flip();</pre>
+
+    <div class="result-box">
+        сейчас: bread<br>
+        next — ReferenceError: positon is not defined<br>
+        flip — TypeError: Cannot read properties of undefined (reading 'flipped')<br>
+        перевёрнута: true
+    </div>
+
+    <p>Теперь уберите первую строку и запустите снова. Вывод станет таким:</p>
+
+    <table>
+        <thead><tr><th>Строка</th><th>Строгий режим</th><th>Обычный режим</th></tr></thead>
+        <tbody>
+            <tr><td>1</td><td><code>сейчас: bread</code></td><td><code>сейчас: bread</code></td></tr>
+            <tr><td>2</td><td><code>next — ReferenceError: positon is not defined</code></td><td><code>дальше: bread</code> — карточка не сдвинулась</td></tr>
+            <tr><td>3</td><td><code>flip — TypeError: … (reading 'flipped')</code></td><td><code>перевёрнута: true</code> — перевернулось окно, а не карточка</td></tr>
+            <tr><td>4</td><td><code>перевёрнута: true</code></td><td><code>перевёрнута: true</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>В обычном режиме программа отработала до конца без единой ошибки — и дважды сделала не то.
+    «Дальше» показало то же слово: число записалось в новую глобальную <code>positon</code>.
+    Потерянный <code>flip</code> перевернул не карточку, а окно: после запуска
+    <code>globalThis.flipped</code> равно <code>true</code>, а в глобальном объекте появились
+    два лишних свойства. Строгий режим остановил оба места, и каждое сообщение называет
+    виноватое имя.</p>
+
+    <div class="try-it">
+        Два опыта.
+        <br><br>
+        <strong>Первый.</strong> В обычном режиме после запуска наберите
+        <code>globalThis.positon</code> и <code>globalThis.flipped</code>. Откуда они взялись — по
+        одной строке программы на каждое.
+        <br><br>
+        <strong>Второй.</strong> Почините обе ошибки — опечатку и потерю <code>this</code> (способом
+        из вчерашнего раздела 9) — и убедитесь, что строгий режим молчит, а «дальше» показывает
+        <code>water</code>.
+    </div>
+
+    <h2 id="when">14. Когда писать "use strict"</h2>
+
+    <table>
+        <thead><tr><th>Где код</th><th>Нужна ли директива</th></tr></thead>
+        <tbody>
+            <tr><td>модуль, <code>&lt;script type="module"&gt;</code> (день 30)</td><td>нет — модуль строгий сам</td></tr>
+            <tr><td>класс (день 8)</td><td>нет — тело класса строгое всегда</td></tr>
+            <tr><td>обычный скрипт, <code>&lt;script src="app.js"&gt;</code></td><td><strong>да</strong>, первой строкой файла</td></tr>
+            <tr><td>одна функция в чужом обычном скрипте</td><td>можно первой строкой функции, если у неё простые параметры</td></tr>
+        </tbody>
+    </table>
+
+    <p>Совет на весь курс: <strong>новый обычный скрипт начинайте со строки
+    <code>"use strict";</code></strong>. Это бесплатная страховка: всё, что она ломает, было ошибкой
+    и раньше, только тихой. Старый чужой код включать в строгий режим нужно осторожнее —
+    там тихие ошибки могли стать частью поведения, и «починка» что-нибудь сломает.</p>
+
+    <h3>Как перевести старый скрипт</h3>
+
+    <p>Порядок, который работает и на своём проекте, и на чужом.</p>
+
+    <div class="step"><span class="step-number">1</span>
+        <div><p>Убедитесь, что у программы есть проверки — хотя бы список действий, которые вы пройдёте
+        руками: «добавить слово», «перевернуть», «обновить страницу». Без них не понять, что сломалось.</p></div>
+    </div>
+    <div class="step"><span class="step-number">2</span>
+        <div><p>Если файл большой, начните с одной функции: директива первой строкой её тела.
+        Пройдите проверки, потом следующая функция. Когда строгими стали все — перенесите директиву
+        в начало файла.</p></div>
+    </div>
+    <div class="step"><span class="step-number">3</span>
+        <div><p>Читайте ошибки по таблице разделов 3 и 5. Чаще всего всплывают три вещи: случайные
+        глобальные переменные, потерянный <code>this</code> в обработчиках и таймерах, восьмеричные
+        числа с ведущим нулём в старых данных.</p></div>
+    </div>
+    <div class="step"><span class="step-number">4</span>
+        <div><p>Каждую ошибку чините по смыслу, а не так, чтобы она замолчала. Случайную глобальную —
+        объявить там, где ей место; потерянный <code>this</code> — <code>bind</code> или стрелочной
+        обёрткой из дня 2; <code>010</code> — решить, что имелось в виду: 8 или 10.</p></div>
+    </div>
+
+    <p>Последний пункт важнее, чем кажется. <code>010</code> в старом коде мог означать «десять с нулём
+    для красоты» — и тогда программа годами работала с восьмёркой. Строгий режим этот вопрос задаст,
+    но ответ знаете только вы.</p>
+
+    <h2 id="next">15. Что будет завтра</h2>
+
+    <p>Завтра, на дне 4, последний день модуля: <strong>функция как объект</strong>. У функции есть
+    свойства — <code>name</code>, <code>length</code> из дня 12 Essentials и другие, — объект
+    <code>arguments</code> со своими сюрпризами, которые сегодня мы только упомянули, и конструктор
+    <code>Function</code>, создающий функции из строк. Заодно откроем в спецификации раздел о функциях
+    как объектах.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Strict_mode">Strict mode</a></td><td>как включить; ошибки вместо тишины; this; запреты; eval и arguments</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/globalThis">globalThis</a></td><td>единое имя глобального объекта; зачем появилось</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-strict-mode-of-ecmascript">ECMA-262, приложение C</a></td><td>все ограничения строгого режима списком, со ссылками на разделы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_strict_arguments_eval">Ошибка: eval и arguments как имена</a></td><td><code>Unexpected eval or arguments in strict mode</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Delete_in_strict_mode">Ошибка: delete имени</a></td><td><code>Delete of an unqualified identifier in strict mode.</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Strict_non_simple_params">Ошибка: директива при сложных параметрах</a></td><td><code>Illegal 'use strict' directive in function with non-simple parameter list</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Reserved_identifier">Ошибка: зарезервированное слово</a></td><td><code>Unexpected strict mode reserved word</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Function_label">Ошибка: функция с меткой</a></td><td><code>functions can only be declared at top level or inside a block.</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Deprecated_octal_literal">Ошибка: восьмеричное число</a></td><td><code>Octal literals are not allowed in strict mode.</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Deprecated_octal_escape_sequence">Ошибка: восьмеричная последовательность</a></td><td><code>Octal escape sequences are not allowed in strict mode.</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// "use strict";  ПЕРВОЙ инструкцией файла или функции; иначе — просто строка
+// модули и классы — строгие всегда; выключить строгий режим нельзя
+
+// тихо → громко
+// totl = 5                 ReferenceError: totl is not defined
+// замороженный o.x = 2     TypeError: Cannot assign to read only property 'x' …
+// o.y = 2 / delete o.x     TypeError (обычный режим: молчит / false)
+// undefined = 1            TypeError
+
+// this без объекта: undefined; call(null) — null; call(5) — 5 (без обёртки)
+
+// до запуска (SyntaxError): eval/arguments как имена, delete имени,
+// "use strict" при сложных параметрах, 9 зарезервированных слов,
+// функция с меткой, 010, "\05", повтор параметров, with
+
+// НЕ ловит: опечатку в имени СВОЙСТВА, логические ошибки
+
+// глобальный объект: window / self / global → одно имя globalThis
+// var и function верхнего уровня → свойства globalThis
+// let, const, class → декларативная часть, в globalThis их нет
+// var name = 5 → "5" (свойство окна!);  let name = 5 → 5</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>"use strict"</code> — строка в кавычках, а не новое слово языка?
+                <details class="answer"><summary>Ответ</summary>
+                    Ради старых движков: для них это просто строка, которая ничего не делает,
+                    и код не ломается. Новые движки понимают её как директиву.
+                </details>
+            </li>
+            <li>Код начинается с <code>console.log("старт");</code>, а второй строкой стоит
+                <code>"use strict";</code>. Строгий ли режим?
+                <details class="answer"><summary>Ответ</summary>
+                    Нет. Директива действует, только если стоит первой инструкцией скрипта или
+                    функции; иначе это обычная строка.
+                </details>
+            </li>
+            <li>Чему равен <code>this</code> в функции, вызванной без объекта, в обоих режимах?
+                <details class="answer"><summary>Ответ</summary>
+                    В обычном — глобальный объект (<code>call(null)</code> тоже даст его,
+                    а <code>call(5)</code> — объект-обёртку). В строгом — <code>undefined</code>,
+                    и вообще ровно то, что передали.
+                </details>
+            </li>
+            <li>Поймает ли строгий режим строку <code>quiz.positon = 1</code> с опечаткой?
+                <details class="answer"><summary>Ответ</summary>
+                    Нет: добавить новое свойство объекту законно. Строгий режим ловит опечатки
+                    в именах переменных, а не свойств.
+                </details>
+            </li>
+            <li>Почему <code>var name = 5</code> на верхнем уровне даёт строку, а
+                <code>let name = 5</code> — число?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>var</code> верхнего уровня пишет в свойство глобального объекта, а свойство
+                    окна <code>name</code> хранит только строки. <code>let</code> ложится
+                    в декларативную часть глобальной записи окружения и свойство окна не трогает.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Strict_mode">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

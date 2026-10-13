@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 2 — this: call, apply, bind</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+        h3 { color: #075985; }
+        .step-number { background: #0ea5e9; }
+        .toc a { color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 2</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 2 &bull; урок 1</span>
+        <h1>this: call, apply, bind</h1>
+        <p>Курс 2, Intermediate. Модуль «Области видимости, замыкания и this» — второй день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>определять, чему равен <code>this</code>, по тому, <strong>как</strong> вызвана функция;</li>
+            <li>находить место, где метод потерял свой объект: таймер, обработчик, переменная;</li>
+            <li>вызывать функцию с нужным <code>this</code> через <code>call</code> и <code>apply</code>;</li>
+            <li>закреплять <code>this</code> через <code>bind</code> и понимать, чем он отличается
+                от стрелочной обёртки;</li>
+            <li>узнавать ошибку «метод вызван не на том объекте» в трёх её формулировках V8.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#question">От замыкания к this</a></li>
+            <li><a href="#what">this — скрытый параметр вызова</a></li>
+            <li><a href="#method">Метод: объект слева от точки</a></li>
+            <li><a href="#lost">Потерянный this</a></li>
+            <li><a href="#callbacks">this в колбэках: таймеры и события</a></li>
+            <li><a href="#arrow">Стрелочные функции: свой this не заводят</a></li>
+            <li><a href="#call">call: вызвать с нужным this</a></li>
+            <li><a href="#apply">apply: аргументы массивом</a></li>
+            <li><a href="#bind">bind: закрепить this</a></li>
+            <li><a href="#remove">bind и removeEventListener</a></li>
+            <li><a href="#ways">Три способа не потерять this</a></li>
+            <li><a href="#incompatible">Встроенные методы и чужой this</a></li>
+            <li><a href="#cards">«Карточки»: карточка с методами</a></li>
+            <li><a href="#choose">Замыкание или this</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="question">1. От замыкания к this</h2>
+
+    <p>Вчера мы спрятали прогресс «Карточек» в замыкание: методы <code>learn</code>,
+    <code>count</code> и остальные добирались до массива через запись окружения вызова
+    <code>makeProgress</code>. Это один способ связать данные с действиями над ними.</p>
+
+    <p>Второй способ вы видели на дне 21 Essentials — объект, у которого данные лежат в свойствах,
+    а методы обращаются к ним через слово <code>this</code>:</p>
+
+    <pre class="code js">const group = {
+  title: "1-А",
+  students: [],
+  add(student) {
+    this.students.push(student);
+  },
+  size() {
+    return this.students.length;
+  },
+};
+
+group.add("Аман");
+group.add("Мерет");
+console.log(group.size());   // 2</pre>
+
+    <p>Тогда мы условились: «<code>this</code> — объект, у которого метод вызвали», а полный разбор
+    отложили на курс 2. Отложили не зря. Определение верное, но в нём спрятано слово
+    «<strong>вызвали</strong>», и сегодня весь день будет о нём.</p>
+
+    <p>Вчерашнее главное правило звучало так: <em>что видит функция, решает место, где она
+    написана</em>. У этого правила есть ровно одно исключение, и это <code>this</code>.
+    Его значение решает не место в тексте, а <strong>способ вызова</strong>. Одна и та же
+    функция при разных вызовах получает разный <code>this</code>.</p>
+
+    <h2 id="what">2. this — скрытый параметр вызова</h2>
+
+    <p>Удобнее всего думать о <code>this</code> как о <strong>параметре, которого нет в списке</strong>.
+    Обычные параметры получают значения из скобок вызова. <code>this</code> получает значение
+    из того, <em>как</em> записан вызов:</p>
+
+    <table>
+        <thead><tr><th>Как вызвали</th><th>Чему равен <code>this</code></th><th>Где разбираем</th></tr></thead>
+        <tbody>
+            <tr><td><code>obj.method()</code> — через точку</td><td>объект слева от точки</td><td>раздел 3</td></tr>
+            <tr><td><code>f()</code> — просто по имени</td><td>в обычном скрипте — глобальный объект, в строгом режиме — <code>undefined</code></td><td>раздел 4, день 3</td></tr>
+            <tr><td><code>f.call(x)</code>, <code>f.apply(x)</code>, <code>f.bind(x)</code></td><td>то, что передали: <code>x</code></td><td>разделы 7–9</td></tr>
+            <tr><td><code>new F()</code></td><td>новый, только что созданный объект</td><td>день 7</td></tr>
+            <tr><td>стрелочная функция</td><td>своего нет — берётся снаружи, как обычная переменная</td><td>раздел 6</td></tr>
+        </tbody>
+    </table>
+
+    <p>Таблица — шпаргалка на весь модуль. Строки с глобальным объектом и строгим режимом
+    дорасскажем завтра; сегодня все примеры — обычные скрипты, как в Essentials. В них
+    функция, вызванная просто по имени, получает глобальный объект — в браузере это окно,
+    оно же <code>globalThis</code> из дня 4:</p>
+
+    <pre class="code js">function whoAmI() {
+  return this === globalThis;
+}
+
+console.log(whoAmI());   // true — вызвали без точки</pre>
+
+    <p>В спецификации это отражено прямо: запись окружения вызова функции — та самая
+    Function Environment Record из вчерашней таблицы — хранит не только переменные,
+    но и значение <code>this</code> этого вызова. Каждый вызов — своя запись, значит, и свой
+    <code>this</code>.</p>
+
+    <h2 id="method">3. Метод: объект слева от точки</h2>
+
+    <p>Возьмём одну функцию и положим её в два объекта:</p>
+
+    <pre class="code js">function describe() {
+  return `${this.student}, оценок: ${this.marks.length}`;
+}
+
+const aman = { student: "Аман", marks: [5, 4, 5], describe };
+const meret = { student: "Мерет", marks: [3, 4], describe };
+
+console.log(aman.describe());    // Аман, оценок: 3
+console.log(meret.describe());   // Мерет, оценок: 2</pre>
+
+    <p>Функция одна, объектов два — и <code>this</code> каждый раз свой. Короткая запись
+    <code>{ describe }</code> из дня 21 положила в свойство ссылку на ту же самую функцию:
+    <code>aman.describe === meret.describe</code> — это <code>true</code>. Функция не «принадлежит»
+    ни одному объекту. Она узнаёт, с кем работает, только в момент вызова — по тому,
+    что стоит <strong>слева от точки</strong>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 230" role="img" aria-label="Одна функция describe и три вызова: через aman, через meret и без точки; в каждом свой this">
+            <rect x="220" y="14" width="180" height="40" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="310" y="39" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#92400e">function describe</text>
+
+            <path d="M 260 54 L 120 96" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <path d="M 310 54 L 310 96" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <path d="M 360 54 L 500 96" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+
+            <rect x="20" y="98" width="190" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="115" y="123" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#1d4ed8">aman.describe()</text>
+            <rect x="215" y="98" width="190" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="310" y="123" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#1d4ed8">meret.describe()</text>
+            <rect x="410" y="98" width="190" height="40" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="505" y="123" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#991b1b">describe()</text>
+
+            <text x="115" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#166534">this = aman</text>
+            <text x="310" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#166534">this = meret</text>
+            <text x="505" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#991b1b">this = глобальный объект</text>
+
+            <rect x="20" y="180" width="580" height="40" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="196" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">this определяется в момент вызова — по тому, что стоит слева от точки.</text>
+            <text x="310" y="213" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Нет точки — нет объекта: в обычном скрипте this станет глобальным объектом.</text>
+        </svg>
+        <figcaption>Функция одна, вызовов три — и три разных this</figcaption>
+    </figure>
+
+    <p>Слева от точки может стоять что угодно, что даёт объект: переменная, элемент массива,
+    результат другого вызова. Важен <strong>последний</strong> объект перед точкой:</p>
+
+    <pre class="code js">const school = {
+  group: {
+    title: "1-А",
+    show() {
+      return this.title;
+    },
+  },
+};
+
+console.log(school.group.show());   // 1-А — this это group, а не school</pre>
+
+    <div class="analogy">
+        <code>this</code> — как слово «я» в речи. Фразу «я опоздал» может сказать кто угодно,
+        и «я» каждый раз означает того, кто говорит. Сама фраза не знает, чья она: это решается,
+        когда её произносят. Метод — такая же фраза, а объект слева от точки — тот, кто её
+        произносит.
+    </div>
+
+    <h3>Крайние случаи</h3>
+
+    <p>Правило «слева от точки» работает и там, где точки как будто нет. Четыре записи,
+    которые встречаются в чужом коде:</p>
+
+    <pre class="code js">const card = {
+  word: "bread",
+  show() {
+    return this.word;
+  },
+};
+
+const tools = [
+  function () {
+    return this.length;
+  },
+];
+
+console.log(tools[0]());         // 1 — this это массив tools
+console.log((card.show)());      // bread
+console.log(card.show?.());      // bread
+console.log((0, card.show)());   // undefined</pre>
+
+    <table>
+        <thead><tr><th>Запись</th><th><code>this</code></th><th>Почему</th></tr></thead>
+        <tbody>
+            <tr><td><code>tools[0]()</code></td><td>массив <code>tools</code></td><td>квадратные скобки — такой же доступ к свойству, как точка (день 21)</td></tr>
+            <tr><td><code>(card.show)()</code></td><td><code>card</code></td><td>скобки вокруг только группируют (день 8), метод не отделяется</td></tr>
+            <tr><td><code>card.show?.()</code></td><td><code>card</code></td><td>необязательная цепочка из дня 22 тоже вызывает через объект</td></tr>
+            <tr><td><code>(0, card.show)()</code></td><td>глобальный объект</td><td>оператор «запятая» (день 7) вернул голую функцию без объекта</td></tr>
+        </tbody>
+    </table>
+
+    <p>Последняя запись выглядит как нарочно испорченная — и она действительно нарочная.
+    Её вставляют программы-сборщики, когда им нужно вызвать функцию <strong>без</strong>
+    объекта. Если увидите <code>(0, …)()</code> в коде, собранном такой программой, — это
+    не опечатка, а способ сказать «вызвать без <code>this</code>».</p>
+
+    <h2 id="lost">4. Потерянный this</h2>
+
+    <p>Раз <code>this</code> решается при вызове, его легко потерять: достаточно вызвать метод
+    <strong>без точки</strong>.</p>
+
+    <pre class="code js">const progress = {
+  learned: [1, 2],
+  count() {
+    return this.learned.length;
+  },
+};
+
+console.log(progress.count());   // 2
+
+const count = progress.count;    // взяли метод, объект остался
+console.log(count());            // TypeError: Cannot read properties of undefined (reading 'length')</pre>
+
+    <p>Строка <code>const count = progress.count</code> скопировала в переменную ссылку на функцию —
+    и только. Об объекте <code>progress</code> функция ничего не помнит: свойство — не замыкание.
+    Вызов <code>count()</code> идёт без точки, <code>this</code> становится глобальным объектом,
+    у окна нет свойства <code>learned</code>, получается <code>undefined</code>, а у
+    <code>undefined</code> нет <code>length</code>. Правило дня 5 Essentials: смотрим влево
+    от точки, на <code>this.learned</code>.</p>
+
+    <div class="important">
+        Главное, что нужно запомнить сегодня: <strong>метод, отделённый от объекта, теряет
+        <code>this</code></strong>. Отделяет его любая запись, где после имени метода не стоят
+        сразу круглые скобки: присваивание в переменную, передача аргументом, запись в массив.
+        Скобки <code>progress.count()</code> — вызов с объектом. Без скобок
+        <code>progress.count</code> — просто функция, без объекта.
+    </div>
+
+    <p>Бывает и хуже, чем ошибка: метод тихо работает с чужим объектом. Глобальный объект
+    браузера большой, и в нём есть свойства с самыми обычными именами — <code>name</code>
+    из вчерашнего раздела 4, <code>status</code>, <code>length</code>. Потерянный
+    <code>this.name</code> не упадёт, а вернёт пустую строку. Поэтому проверять надо
+    не только «нет ли ошибки», но и «то ли напечаталось».</p>
+
+    <h3>Как узнать, чей это this</h3>
+
+    <p>Когда метод ведёт себя странно, не гадайте — проверьте. Порядок такой.</p>
+
+    <div class="step"><span class="step-number">1</span>
+        <div><p>Напечатайте в начале метода, чем оказался <code>this</code>. Сравнения
+        с ожидаемым объектом и с <code>globalThis</code> отвечают сразу и коротко.</p></div>
+    </div>
+    <div class="step"><span class="step-number">2</span>
+        <div><p>Найдите <strong>место вызова</strong> — не место, где метод написан, а строку,
+        которая его вызвала. Её показывает стек вызовов из дня 11.</p></div>
+    </div>
+    <div class="step"><span class="step-number">3</span>
+        <div><p>Посмотрите, что стоит слева от точки в этом вызове. Если вызова в вашем коде
+        не видно — метод вызвал таймер, кнопка или метод массива, значит, его отделили.</p></div>
+    </div>
+    <div class="step"><span class="step-number">4</span>
+        <div><p>Выберите лекарство из раздела 11 и снова проверьте шаг 1.</p></div>
+    </div>
+
+    <pre class="code js">const card = {
+  word: "teacher",
+  show() {
+    console.log(this === card, this === globalThis);   // шаг 1
+    console.log(`Карточка: ${this.word}`);
+  },
+};
+
+setTimeout(card.show, 0);
+// false true
+// Карточка: undefined</pre>
+
+    <p>Первая строка вывода уже всё объяснила: <code>this</code> — не карточка, а глобальный
+    объект. Значит, метод вызвали без точки, и виновник — <code>setTimeout</code>.</p>
+
+    <div class="pro-tip">
+        То же видно без единой строки кода. Поставьте в методе <code>debugger</code> из дня 2
+        Essentials и откройте инструменты разработчика: в панели <strong>Scope</strong> справа
+        первой строкой стоит <code>this</code> с его текущим значением, а в панели
+        <strong>Call Stack</strong> — кто вызвал метод. Для <code>setTimeout(card.show, 0)</code>
+        там будет <code>this: Window</code>, и в стеке не окажется ни одной вашей строки
+        с <code>card.show()</code>.
+    </div>
+
+    <h2 id="callbacks">5. this в колбэках: таймеры и события</h2>
+
+    <p>Чаще всего метод отделяют не руками, а передавая его в чужую функцию — колбэком
+    из дня 12. Чужая функция потом вызывает его так, как считает нужным, и точки там нет.</p>
+
+    <h3>Таймер</h3>
+
+    <pre class="code js">const card = {
+  word: "teacher",
+  show() {
+    console.log(`Карточка: ${this.word}`);
+  },
+};
+
+card.show();                 // Карточка: teacher
+setTimeout(card.show, 0);    // Карточка: undefined</pre>
+
+    <p><code>setTimeout</code> получил функцию <code>show</code> без объекта и вызвал её с
+    <code>this</code>, равным окну. <code>window.word</code> не существует — отсюда
+    <code>undefined</code>. Ошибки нет, просто неправда на экране.</p>
+
+    <h3>Метод массива</h3>
+
+    <pre class="code js">const quiz = {
+  prefix: "Слово:",
+  print(word) {
+    console.log(this.prefix, word);
+  },
+};
+
+["bread", "water"].forEach(quiz.print);
+// undefined bread
+// undefined water</pre>
+
+    <p><code>forEach</code> вызывает колбэк без объекта (день 20), и <code>this.prefix</code>
+    ищется у окна. Для таких случаев у <code>forEach</code>, <code>map</code>,
+    <code>filter</code> и соседей есть второй аргумент — что использовать как <code>this</code>:
+    <code>forEach(quiz.print, quiz)</code>. Но его редко помнят, и чаще пользуются способами
+    из разделов 6 и 9.</p>
+
+    <h3>Обработчик события</h3>
+
+    <p>Обработчик, переданный в <code>addEventListener</code>, вызывается не без объекта,
+    а с другим объектом: <code>this</code> — элемент, на котором висит слушатель, тот самый
+    <code>event.currentTarget</code> из дня 27.</p>
+
+    <pre class="code js">const button = document.createElement("button");
+button.textContent = "Знаю";
+document.body.append(button);
+
+button.addEventListener("click", function () {
+  console.log(this === button);   // true — this это кнопка
+});
+
+button.click();</pre>
+
+    <p>Удобно, пока функция написана для кнопки. Но если передать метод объекта, он получит
+    кнопку вместо своего объекта:</p>
+
+    <pre class="code js">const progress = {
+  learned: [],
+  learn() {
+    this.learned.push(7);
+    console.log(this.learned);
+  },
+};
+
+const known = document.createElement("button");
+document.body.append(known);
+known.addEventListener("click", progress.learn);
+known.click();
+// TypeError: Cannot read properties of undefined (reading 'push')</pre>
+
+    <p>У кнопки нет свойства <code>learned</code>. Ошибка появится не при запуске программы,
+    а при первом нажатии — поэтому такие ошибки находят поздно.</p>
+
+    <h2 id="arrow">6. Стрелочные функции: свой this не заводят</h2>
+
+    <p>На дне 13 мы видели: у стрелочной функции нет своего <code>this</code>. Теперь можно
+    сказать точнее, что это значит. Стрелочная функция ищет <code>this</code>
+    <strong>так же, как вчера искались переменные</strong>: снаружи, по тексту программы.
+    Её <code>this</code> — это <code>this</code> той функции, внутри которой стрелочная
+    написана.</p>
+
+    <pre class="code js">const timer = {
+  seconds: 0,
+  start() {
+    setTimeout(() =&gt; {
+      this.seconds = this.seconds + 1;   // this — тот же, что у start
+      console.log(`Прошло: ${this.seconds}`);
+    }, 0);
+  },
+};
+
+timer.start();   // Прошло: 1</pre>
+
+    <p><code>setTimeout</code> вызвал стрелочную функцию без объекта — но ей это безразлично:
+    своего <code>this</code> она не получает, и слово <code>this</code> внутри неё означает
+    <code>this</code> метода <code>start</code>. А <code>start</code> вызвали как
+    <code>timer.start()</code>, значит, это <code>timer</code>.</p>
+
+    <p>В спецификации это выглядит так. У записи окружения обычной функции есть привязка
+    <code>this</code>, у записи стрелочной — нет: её <code>HasThisBinding</code> отвечает «нет»
+    (раздел <a href="https://tc39.es/ecma262/2026/#sec-function-environment-records">9.1.1.3</a>).
+    Поэтому поиск <code>this</code> идёт по <code>[[OuterEnv]]</code> наружу, до первой записи,
+    у которой он есть, — тем же путём, что поиск имени из вчерашнего раздела 5.</p>
+
+    <div class="mistake">
+        Обратная сторона — стрелочная функция <strong>в роли метода</strong>. Её
+        <code>this</code> берётся не от объекта, а оттуда, где написан сам объект:
+        <pre class="code js">const student = {
+  marks: [5, 4],
+  count: () =&gt; this.marks.length,   // this — снаружи объекта
+};
+
+student.count();
+// TypeError: Cannot read properties of undefined (reading 'length')</pre>
+        Фигурные скобки объекта — не функция и не блок со своим <code>this</code>. Снаружи
+        объекта <code>this</code> — глобальный объект, и <code>this.marks</code> не найдено.
+        Отсюда правило дня 13: <strong>методом стрелочную не делают, а внутри метода —
+        делают</strong>.
+    </div>
+
+    <p>И последнее про стрелочные: <code>this</code> у них нельзя поменять ничем, даже
+    <code>call</code> и <code>bind</code>, которые мы сейчас разберём, — их первый аргумент
+    стрелочная функция просто не использует.</p>
+
+    <h2 id="call">7. call: вызвать с нужным this</h2>
+
+    <p>У каждой функции есть три метода, которые позволяют задать <code>this</code> явно.
+    Первый — <code>call</code>: вызывает функцию <strong>прямо сейчас</strong>, первым аргументом
+    принимает <code>this</code>, остальные передаёт как обычные аргументы.</p>
+
+    <pre class="code js">function describe(prefix) {
+  return `${prefix} ${this.student}, оценок: ${this.marks.length}`;
+}
+
+const sapar = { student: "Сапар", marks: [5, 5, 4, 5] };
+
+console.log(describe.call(sapar, "Студент"));   // Студент Сапар, оценок: 4</pre>
+
+    <p>Запись <code>describe.call(sapar, "Студент")</code> — то же, что
+    <code>sapar.describe("Студент")</code>, только класть функцию в объект не пришлось.</p>
+
+    <h3>Заимствование методов</h3>
+
+    <p>Главное применение <code>call</code> — взять метод у одного объекта и вызвать на другом.
+    Например, у <code>arguments</code> из дня 14 нет методов массива, хотя он похож на массив:
+    есть номера и <code>length</code>. Метод <code>join</code> можно одолжить у любого массива,
+    даже пустого:</p>
+
+    <pre class="code js">function list() {
+  return [].join.call(arguments, ", ");
+}
+
+console.log(list("школа", "еда", "дом"));   // школа, еда, дом</pre>
+
+    <p><code>[].join</code> — функция <code>join</code>, взятая у пустого массива. Вызвав её через
+    <code>call</code> с <code>arguments</code> в роли <code>this</code>, мы заставили её склеить
+    чужие элементы. Метод <code>join</code> не проверяет, массив ли перед ним: ему хватает номеров
+    и <code>length</code>. Сегодня такой код пишут через <code>...rest</code> (день 14), но в чужом
+    коде старого стиля вы встретите <code>call</code> много раз.</p>
+
+    <h2 id="apply">8. apply: аргументы массивом</h2>
+
+    <p><code>apply</code> делает то же, что <code>call</code>, но аргументы принимает
+    <strong>одним массивом</strong>:</p>
+
+    <pre class="code js">console.log(describe.apply(sapar, ["Студент"]));   // Студент Сапар, оценок: 4</pre>
+
+    <p>Как не перепутать: <strong>A</strong>pply — <strong>A</strong>rray, массив;
+    <strong>C</strong>all — <strong>C</strong>omma, через запятую.</p>
+
+    <p>До появления <code>...spread</code> (день 22) <code>apply</code> был единственным
+    способом передать массив как список аргументов. Классический пример — максимум
+    из массива:</p>
+
+    <pre class="code js">const marks = [5, 4, 9, 3];
+
+console.log(Math.max.apply(null, marks));   // 9 — старый способ
+console.log(Math.max(...marks));            // 9 — сегодняшний</pre>
+
+    <p><code>Math.max</code> не пользуется <code>this</code>, поэтому первым аргументом передают
+    <code>null</code> — «всё равно что». Сегодня в таких местах пишут <code>...</code>,
+    и <code>apply</code> остаётся для одного случая: когда нужно и задать <code>this</code>,
+    и передать готовый массив аргументов.</p>
+
+    <h3>Если this — не объект</h3>
+
+    <p>Что будет, если передать в <code>call</code> или <code>apply</code> не объект? В обычном
+    скрипте функция всё равно получит объект: <code>null</code> и <code>undefined</code>
+    заменяются глобальным объектом, а число или строка — оборачиваются в объект-обёртку:</p>
+
+    <pre class="code js">function whoAmI() {
+  return this === globalThis;
+}
+
+function kind() {
+  return typeof this;
+}
+
+console.log(whoAmI.call(null));   // true — null заменён глобальным объектом
+console.log(kind.call(5));        // object — число обёрнуто, а не number
+console.log(kind.call("Мары"));   // object</pre>
+
+    <p>Это правило старое и неудобное: передали <code>null</code> — получили окно, передали
+    число — получили не число. В строгом режиме оно отменено, и <code>this</code> остаётся ровно
+    тем, что передали. Как именно — завтра.</p>
+
+    <h2 id="bind">9. bind: закрепить this</h2>
+
+    <p><code>call</code> и <code>apply</code> вызывают функцию сразу. А в разделе 5 нам нужно
+    было другое: <strong>отдать</strong> метод таймеру или кнопке так, чтобы он не потерял объект,
+    когда его вызовут потом. Для этого есть <code>bind</code>: он <strong>не вызывает</strong>
+    функцию, а возвращает новую, у которой <code>this</code> закреплён навсегда.</p>
+
+    <pre class="code js">const card = {
+  word: "teacher",
+  show() {
+    console.log(`Карточка: ${this.word}`);
+  },
+};
+
+const showCard = card.show.bind(card);   // новая функция, this = card
+setTimeout(showCard, 0);                 // Карточка: teacher</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 220" role="img" aria-label="bind создаёт новую функцию, которая помнит this и при любом вызове вызывает исходную функцию с ним">
+            <rect x="20" y="20" width="170" height="44" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="105" y="47" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#92400e">card.show</text>
+
+            <path d="M 192 42 L 252 42" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 260 42 L 250 38 L 250 46 Z" fill="#94a3b8"/>
+            <text x="222" y="32" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#64748b">.bind(card)</text>
+
+            <rect x="262" y="12" width="200" height="94" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="362" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#166534">новая функция showCard</text>
+            <text x="278" y="58" font-family="Consolas, monospace" font-size="11.5" fill="#166534">[[BoundTargetFunction]]</text>
+            <text x="300" y="74" font-family="Consolas, monospace" font-size="11.5" fill="#475569">= card.show</text>
+            <text x="278" y="94" font-family="Consolas, monospace" font-size="11.5" fill="#166534">[[BoundThis]] = card</text>
+
+            <path d="M 362 106 L 362 140" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 362 148 L 358 138 L 366 138 Z" fill="#94a3b8"/>
+            <rect x="262" y="150" width="200" height="30" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="362" y="170" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1d4ed8">setTimeout(showCard)</text>
+
+            <text x="478" y="48" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">кто бы ни вызвал —</text>
+            <text x="478" y="66" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">таймер, кнопка,</text>
+            <text x="478" y="84" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">forEach, — внутри</text>
+            <text x="478" y="102" font-family="Consolas, monospace" font-size="11.5" fill="#166534">this = card</text>
+
+            <rect x="20" y="190" width="580" height="24" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="207" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">bind не вызывает функцию — он делает новую, с this, закреплённым навсегда.</text>
+        </svg>
+        <figcaption>Привязанная функция — обёртка, которая помнит исходную функцию и её this</figcaption>
+    </figure>
+
+    <p>Имена в двойных скобках на схеме — внутренние слоты привязанной функции из спецификации
+    (раздел <a href="https://tc39.es/ecma262/2026/#sec-bound-function-exotic-objects">10.4.1</a>,
+    курс 3). Из кода их не достать, а в консоли Chrome видны похожие: наберите
+    <code>showCard</code> и раскройте вывод — там будут <code>[[TargetFunction]]</code>,
+    <code>[[BoundThis]]</code> и <code>[[BoundArgs]]</code>. Chrome называет их чуть короче,
+    чем спецификация.</p>
+
+    <h3>Закреплено навсегда</h3>
+
+    <p><code>this</code> привязанной функции не меняет уже ничто — ни вызов через точку, ни
+    <code>call</code>, ни второй <code>bind</code>:</p>
+
+    <pre class="code js">const card = { word: "teacher", show() { return this.word; } };
+const other = { word: "water" };
+
+const showCard = card.show.bind(card);
+console.log(showCard.call(other));         // teacher — call не помог
+console.log(showCard.bind(other)());       // teacher — второй bind тоже
+other.show = showCard;
+console.log(other.show());                 // teacher — и точка не помогла</pre>
+
+    <h3>Закрепить и аргументы</h3>
+
+    <p>Кроме <code>this</code>, <code>bind</code> может закрепить первые аргументы. Получается
+    функция с меньшим числом параметров — приём называется <strong>частичным применением</strong>:</p>
+
+    <pre class="code js">function multiply(a, b) {
+  return a * b;
+}
+
+const double = multiply.bind(null, 2);   // this не нужен, a = 2 навсегда
+console.log(double(21));                 // 42
+console.log(double.length);              // 1 — остался один параметр</pre>
+
+    <p>Узнали? Это фабрика из вчерашнего раздела 9, только написанная одной строкой: настройка
+    <code>2</code> «запеклась» в новую функцию.</p>
+
+    <h3>А где же кнопка?</h3>
+
+    <p>Привязали метод к объекту и отдали кнопке — теперь <code>this</code> внутри обработчика
+    объект, а не кнопка. Но кнопка часто тоже нужна: прочитать её <code>data-</code>атрибут,
+    поменять текст. Её не теряют: она приходит в объекте события, в
+    <code>event.currentTarget</code> из дня 27.</p>
+
+    <pre class="code js">const progress = {
+  learned: [],
+  learn(event) {
+    this.learned.push(event.currentTarget.dataset.id);   // объект — this, кнопка — event
+    console.log(this.learned);
+  },
+};
+
+const word = document.createElement("button");
+word.dataset.id = "4";
+document.body.append(word);
+
+word.addEventListener("click", progress.learn.bind(progress));
+word.click();   // (1) ['4']</pre>
+
+    <p>Отсюда правило для обработчиков: <strong>элемент берите из <code>event.currentTarget</code>,
+    а не из <code>this</code></strong>. Так код работает одинаково с обычной функцией,
+    со стрелочной и с привязанной — и не ломается, когда обработчик переписывают из одной
+    формы в другую.</p>
+
+    <h2 id="remove">10. bind и removeEventListener</h2>
+
+    <p>У <code>bind</code> есть ловушка, которая бьёт именно по обработчикам событий.
+    На дне 27 мы выяснили: <code>removeEventListener</code> снимает обработчик, только если
+    ему передали <strong>ту же самую</strong> функцию. А <code>bind</code> при каждом вызове
+    создаёт <strong>новую</strong>:</p>
+
+    <pre class="code js">const counter = {
+  clicks: 0,
+  inc() {
+    this.clicks = this.clicks + 1;
+  },
+};
+
+console.log(counter.inc.bind(counter) === counter.inc.bind(counter));   // false
+
+const plus = document.createElement("button");
+document.body.append(plus);
+
+plus.addEventListener("click", counter.inc.bind(counter));
+plus.removeEventListener("click", counter.inc.bind(counter));   // не снимет: другая функция
+plus.click();
+console.log(counter.clicks);   // 1 — обработчик всё ещё висит</pre>
+
+    <p>Лечится так же, как на дне 27 со стрелочными функциями: привязанную функцию
+    <strong>сохраняют в переменную</strong> и передают и туда, и туда одну и ту же:</p>
+
+    <pre class="code js">const counter = {
+  clicks: 0,
+  inc() {
+    this.clicks = this.clicks + 1;
+  },
+};
+
+const plus = document.createElement("button");
+document.body.append(plus);
+
+const onClick = counter.inc.bind(counter);   // одна функция на оба вызова
+plus.addEventListener("click", onClick);
+plus.click();
+plus.removeEventListener("click", onClick);  // снят
+plus.click();
+console.log(counter.clicks);   // 1 — второе нажатие уже не посчитано</pre>
+
+    <h2 id="ways">11. Три способа не потерять this</h2>
+
+    <p>Соберём вместе. Метод <code>card.show</code> нужно отдать таймеру — три рабочих способа:</p>
+
+    <pre class="code js">const card = {
+  word: "teacher",
+  show() {
+    console.log(`Карточка: ${this.word}`);
+  },
+};
+
+setTimeout(card.show.bind(card), 0);    // 1. bind
+setTimeout(() =&gt; card.show(), 0);       // 2. стрелочная обёртка: вызов через точку
+setTimeout(function () {                // 3. обычная обёртка — то же, длиннее
+  card.show();
+}, 0);
+// Карточка: teacher — трижды</pre>
+
+    <table>
+        <thead><tr><th>Способ</th><th>Как работает</th><th>Когда удобен</th></tr></thead>
+        <tbody>
+            <tr><td><code>bind</code></td><td>новая функция с закреплённым <code>this</code></td><td>нужна функция, которую можно сохранить и потом снять</td></tr>
+            <tr><td>стрелочная обёртка</td><td>внутри обычный вызов через точку</td><td>короткий колбэк по месту; можно добавить аргументы</td></tr>
+            <tr><td>стрелочная внутри метода</td><td>берёт <code>this</code> метода снаружи</td><td>колбэк пишется внутри другого метода того же объекта</td></tr>
+        </tbody>
+    </table>
+
+    <div class="pro-tip">
+        Стрелочная обёртка и <code>bind</code> различаются в одной тонкости. Обёртка
+        <code>() =&gt; card.show()</code> берёт <code>card</code> <strong>в момент вызова</strong>,
+        через замыкание. Если до срабатывания таймера в переменную <code>card</code> положат
+        другой объект, вызовется метод нового. <code>bind</code> запомнил объект
+        <strong>в момент привязки</strong> и об этой переменной больше не знает.
+    </div>
+
+    <h2 id="incompatible">12. Встроенные методы и чужой this</h2>
+
+    <p>Свои методы, потеряв <code>this</code>, обычно падают на чтении свойства или тихо врут.
+    Встроенные ведут себя строже: многие сразу проверяют, на том ли объекте их вызвали,
+    и выдают ошибку об этом. Например, методы даты:</p>
+
+    <pre class="code js">const date = new Date(2026, 9, 14);
+const getYear = date.getFullYear;   // отделили метод от даты
+
+getYear();
+// TypeError: this is not a Date object.</pre>
+
+    <p>Методы страницы — ещё короче:</p>
+
+    <pre class="code js">const find = document.querySelector;
+find("body");
+// TypeError: Illegal invocation</pre>
+
+    <p>И третий вариант, из той же семьи: <code>bind</code>, оторванный от своей функции:</p>
+
+    <pre class="code js">function hello() {
+  return "Салам";
+}
+
+["Аман", "Мерет"].forEach(hello.bind);
+// TypeError: Bind must be called on a function</pre>
+
+    <p><code>forEach</code> вызвал <code>bind</code> без функции слева от точки — и
+    <code>bind</code> честно сказал, что работать ему не с чем.</p>
+
+    <p>На MDN все три — одна страница ошибки, озаглавленная по Firefox: «X.prototype.y called
+    on incompatible type». В Chrome текст каждый раз свой: <code>this is not a Date object.</code>,
+    <code>Illegal invocation</code>, <code>Bind must be called on a function</code>. Смысл
+    одинаковый: <strong>метод вызвали не на том объекте</strong>. Лечится тоже одинаково:</p>
+
+    <pre class="code js">const find = document.querySelector.bind(document);
+console.log(find("body") === document.body);   // true</pre>
+
+    <h2 id="cards">13. «Карточки»: карточка с методами</h2>
+
+    <p>Соберём день в одну программу. Вместо отдельных переменных <code>position</code> и
+    <code>flipped</code>, как на дне 33, сделаем объект-викторину: данные в свойствах, действия —
+    в методах. Три слова темы «еда» — из того же <code>words.json</code>.</p>
+
+    <pre class="code js">const words = [
+  { id: 4, word: "bread", translation: "хлеб" },
+  { id: 5, word: "water", translation: "вода" },
+  { id: 6, word: "apple", translation: "яблоко" },
+];
+
+const quiz = {
+  position: 0,
+  flipped: false,
+
+  current() {
+    return words[this.position];
+  },
+  text() {
+    const w = this.current();
+    return this.flipped ? w.translation : w.word;
+  },
+  flip() {
+    this.flipped = !this.flipped;
+    console.log(`перевернули: ${this.text()}`);
+  },
+  next() {
+    this.position = (this.position + 1) % words.length;
+    this.flipped = false;
+    console.log(`следующая: ${this.text()}`);
+  },
+  autoFlip(ms) {
+    setTimeout(() =&gt; this.flip(), ms);   // стрелочная берёт this у autoFlip
+  },
+};
+
+const flipButton = document.createElement("button");
+flipButton.textContent = "Перевернуть";
+document.body.append(flipButton);
+flipButton.addEventListener("click", quiz.flip.bind(quiz));
+
+console.log(quiz.text());
+quiz.next();
+flipButton.click();       // как будто нажали
+quiz.autoFlip(0);</pre>
+
+    <div class="result-box">
+        bread<br>
+        следующая: water<br>
+        перевернули: вода<br>
+        перевернули: water
+    </div>
+
+    <p>Каждая строка вывода показывает одно правило дня.</p>
+
+    <p><strong><code>quiz.text()</code> и <code>quiz.next()</code></strong> — вызовы через точку:
+    <code>this</code> — <code>quiz</code> (раздел 3). Методы вызывают друг друга тоже через
+    <code>this</code>: <code>this.current()</code>, <code>this.text()</code> — тоже вызов через
+    точку, и <code>this</code> передаётся дальше.</p>
+
+    <p><strong>Кнопка</strong> получила <code>quiz.flip.bind(quiz)</code>. Без <code>bind</code>
+    внутри <code>flip</code> оказалась бы кнопка (раздел 5), и <code>this.text</code> не нашлось бы.</p>
+
+    <p><strong><code>autoFlip</code></strong> отдаёт таймеру стрелочную функцию: своего
+    <code>this</code> у неё нет, она берёт его у <code>autoFlip</code>, а <code>autoFlip</code>
+    вызвали как <code>quiz.autoFlip(0)</code> (раздел 6). Последняя строка вывода появилась
+    позже остальных — таймер сработал, когда программа уже закончилась (день 30), — и всё равно
+    знала свой объект.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите <code>.bind(quiz)</code> у обработчика кнопки. Какая ошибка
+        появится и в какой момент — при запуске или при нажатии? Почему текст ошибки говорит
+        про <code>this.text</code>, а не про <code>this.flipped</code>?
+        <br><br>
+        <strong>Второй.</strong> Замените в <code>autoFlip</code> стрелочную функцию на обычную:
+        <code>setTimeout(function () { this.flip(); }, ms)</code>. Найдите в выводе, что сломалось,
+        и объясните по таблице раздела 2, чему теперь равен <code>this</code>.
+        <br><br>
+        <strong>Третий.</strong> Вызовите <code>quiz.next()</code> ещё два раза. Какое слово будет
+        после <code>apple</code> и какая часть строки <code>(this.position + 1) % words.length</code>
+        за это отвечает?
+    </div>
+
+    <h2 id="choose">14. Замыкание или this</h2>
+
+    <p>Вчера прогресс жил в замыкании, сегодня викторина живёт в объекте с <code>this</code>.
+    Оба способа рабочие, и в чужом коде вы встретите оба. Чем они отличаются:</p>
+
+    <table>
+        <thead><tr><th></th><th>Замыкание, день 1</th><th><code>this</code>, сегодня</th></tr></thead>
+        <tbody>
+            <tr><td>где данные</td><td>в записи окружения вызова фабрики</td><td>в свойствах объекта</td></tr>
+            <tr><td>видны ли снаружи</td><td>нет, только через функции</td><td>да: <code>quiz.position = 99</code> сработает</td></tr>
+            <tr><td>метод отдали колбэком</td><td>работает как есть</td><td>нужен <code>bind</code> или обёртка</td></tr>
+            <tr><td>сколько функций создаётся</td><td>свой набор на каждый вызов фабрики</td><td>методы можно сделать общими для многих объектов (день 7)</td></tr>
+            <tr><td>куда ведёт дальше</td><td>модули, день 30</td><td>прототипы и классы, дни 7–10</td></tr>
+        </tbody>
+    </table>
+
+    <p>Классы, к которым мы придём на дне 8, построены на <code>this</code>. Поэтому всё, что
+    сегодня ломалось — потерянный метод, таймер, обработчик, — будет ломаться у классов точно
+    так же, и лечиться теми же способами.</p>
+
+    <h2 id="next">15. Что будет завтра</h2>
+
+    <p>Сегодня строка таблицы «вызов без точки — глобальный объект» прозвучала с оговоркой:
+    «в обычном скрипте». Завтра, на дне 3, разберём <strong>строгий режим</strong>: в нём
+    потерянный <code>this</code> становится <code>undefined</code>, тихая ошибка превращается
+    в громкую, и ещё десяток правил языка становятся строже. Заодно узнаем, что такое
+    глобальный объект, откуда у него <code>name</code> и чем <code>globalThis</code> лучше
+    <code>window</code>.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/this">this</a></td><td>чему равен <code>this</code> при разных вызовах; колбэки, стрелочные, обработчики событий</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/call">Function.prototype.call()</a></td><td>вызов с заданным <code>this</code>, аргументы через запятую</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/apply">Function.prototype.apply()</a></td><td>то же, аргументы массивом</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/bind">Function.prototype.bind()</a></td><td>новая функция с закреплённым <code>this</code> и аргументами</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Called_on_incompatible_type">Ошибка: вызов не на том объекте</a></td><td>в Chrome: <code>Illegal invocation</code>, <code>this is not a Date object.</code>, <code>Bind must be called on a function</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// this решает СПОСОБ ВЫЗОВА, а не место в тексте
+// obj.method()   this = obj (последний объект перед точкой)
+// f()            обычный скрипт — глобальный объект; строгий режим — undefined (день 3)
+// f.call(x, a, b) / f.apply(x, [a, b])   вызвать сейчас с this = x
+// f.bind(x, a)   НОВАЯ функция, this = x навсегда, первые аргументы закреплены
+// new F()        новый объект (день 7)
+// стрелочная     своего this нет — берёт у функции, внутри которой написана
+
+// метод без скобок — функция без объекта: this ТЕРЯЕТСЯ
+// const f = obj.m; setTimeout(obj.m); arr.forEach(obj.m); addEventListener("click", obj.m)
+
+// три лекарства
+// setTimeout(obj.m.bind(obj), 0);
+// setTimeout(() =&gt; obj.m(), 0);
+// внутри метода: setTimeout(() =&gt; this.m(), 0);
+
+// методом стрелочную НЕ делают; внутри метода — делают
+// bind создаёт новую функцию: для removeEventListener сохраните её в переменную
+// Chrome: Illegal invocation / this is not a Date object. — метод вызван не на том объекте</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Одна функция лежит в двух объектах. Откуда она узнаёт, с каким работать?
+                <details class="answer"><summary>Ответ</summary>
+                    Из вызова: <code>this</code> — объект слева от точки в момент вызова.
+                    Сама функция ни одному объекту не принадлежит.
+                </details>
+            </li>
+            <li>Почему <code>setTimeout(card.show, 0)</code> печатает <code>undefined</code>
+                вместо слова?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>card.show</code> без скобок — просто функция, без объекта. Таймер вызывает
+                    её без точки, <code>this</code> в обычном скрипте становится глобальным объектом,
+                    у которого нет свойства <code>word</code>.
+                </details>
+            </li>
+            <li>Чем <code>call</code> отличается от <code>apply</code>, а оба они — от <code>bind</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>call</code> и <code>apply</code> вызывают функцию сразу; <code>call</code>
+                    принимает аргументы через запятую, <code>apply</code> — массивом.
+                    <code>bind</code> не вызывает, а возвращает новую функцию с закреплённым
+                    <code>this</code> и, если нужно, первыми аргументами.
+                </details>
+            </li>
+            <li>Почему стрелочная функция внутри метода видит объект, а стрелочная функция
+                в роли метода — нет?
+                <details class="answer"><summary>Ответ</summary>
+                    Своего <code>this</code> у стрелочной нет, она берёт его снаружи, по тексту.
+                    Внутри метода «снаружи» — сам метод с его <code>this</code>. В роли метода
+                    «снаружи» — место, где написан объект, а фигурные скобки объекта своего
+                    <code>this</code> не создают.
+                </details>
+            </li>
+            <li>Почему <code>removeEventListener("click", obj.m.bind(obj))</code> не снимает
+                обработчик, добавленный так же?
+                <details class="answer"><summary>Ответ</summary>
+                    Каждый вызов <code>bind</code> создаёт новую функцию, а снять можно только
+                    ту же самую. Привязанную функцию сохраняют в переменную и передают её
+                    в оба вызова.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/this">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

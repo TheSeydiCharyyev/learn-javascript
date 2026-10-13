@@ -67,11 +67,14 @@ try {
   check('an assigned level 1 clause covers only its level 4+ clauses', covered(r.stdout, 'ecma262') === specBefore + 1 + deepB,
     `${specBefore} -> ${covered(r.stdout, 'ecma262')}, deep clauses of B ${deepB}`);
   const s3 = load('ecma262.csv');
-  Object.assign(s3.records.find((x) => x.number === '20.1.2'), { course: '3', day: '3', lesson: '1', depth: 'кратко' });
+  // a level 3 clause with deeper clauses, where neither it nor an ancestor is assigned yet
+  const assigned = (n) => s3.records.some((y) => y.course && (n === y.number || n.startsWith(`${y.number}.`)));
+  const l3 = s3.records.find((x) => x.level === '3' && !assigned(x.number) && s3.records.some((y) => y.number.startsWith(`${x.number}.`)));
+  Object.assign(l3, { course: '3', day: '3', lesson: '1', depth: 'кратко' });
   save('ecma262.csv', s3);
-  const kids = s3.records.filter((x) => x.number.startsWith('20.1.2.')).length;
+  const kids = s3.records.filter((x) => x.number.startsWith(`${l3.number}.`)).length;
   r = run('coverage-check.mjs');
-  check('an assigned level 3 clause covers its deeper clauses', covered(r.stdout, 'ecma262') === specBefore + 1 + deepB + 1 + kids, `kids ${kids}`);
+  check('an assigned level 3 clause covers its deeper clauses', covered(r.stdout, 'ecma262') === specBefore + 1 + deepB + 1 + kids, `${l3.number}, kids ${kids}`);
 
   const api = load('mdn-webapi.csv');
   const flagged = api.records.find((x) => x.status && !x.course);
@@ -101,15 +104,18 @@ try {
   for (const [, , re, what] of wrong) check(`reports ${what}`, re.test(r.stdout));
   check('reports duplicate key', new RegExp(`duplicate path: ${page.path}`).test(r.stdout));
 
-  // 4. the day plan of course 1 matches what is written in the maps
+  // 4. the day plans of courses 1 and 2 match what is written in the maps
   for (const f of Object.keys(original)) fs.writeFileSync(path.join(COV, f), original[f]);
-  const plan = run('plan-days.mjs', ['1']);
-  check('plan-days: every row of course 1 has a day', plan.status === 0 && /rows without a day: 0/.test(plan.stdout));
+  for (const [no, name] of [[1, 'Essentials'], [2, 'Intermediate']]) {
+    const plan = run('plan-days.mjs', [String(no)]);
+    check(`plan-days: every row of course ${no} has a day`, plan.status === 0 && /rows without a day: 0/.test(plan.stdout));
+    const planned = Number(new RegExp(`course ${no} \\(${name}\\): (\\d+) rows`).exec(plan.stdout)?.[1]);
+    const inMaps = Object.keys(original).filter((f) => f.endsWith('.csv'))
+      .reduce((a, f) => a + load(f).records.filter((x) => x.course === String(no)).length, 0);
+    check(`the map holds exactly the planned rows of course ${no}`, planned === inMaps, `plan ${planned}, maps ${inMaps}`);
+  }
   const mods = run('plan-modules.mjs');
   check('plan-modules: every row has a module', mods.status === 0 && /rows without a module: 0/.test(mods.stdout));
-  const planned = Number(/course 1 \(Essentials\): (\d+) rows/.exec(plan.stdout)?.[1]);
-  const inMaps = ['mdn-javascript.csv', 'mdn-webapi.csv'].reduce((a, f) => a + load(f).records.filter((x) => x.course === '1').length, 0);
-  check('the map holds exactly the planned rows of course 1', planned === inMaps, `plan ${planned}, maps ${inMaps}`);
 } finally {
   for (const f of fs.readdirSync(COV)) if (!(f in original)) fs.unlinkSync(path.join(COV, f));
   for (const [f, buf] of Object.entries(original)) fs.writeFileSync(path.join(COV, f), buf);

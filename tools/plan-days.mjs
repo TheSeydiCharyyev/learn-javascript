@@ -3,7 +3,7 @@
 //
 //   node tools/plan-days.mjs 1              load per day; lists rows that no rule matched
 //   node tools/plan-days.mjs 1 --list 16    rows of one day
-//   node tools/plan-days.mjs 1 --markdown   table for docs/plan-1-essentials.md
+//   node tools/plan-days.mjs 1 --markdown   table for docs/plan-1-essentials.md (course 2: plan-2-intermediate.md)
 //   node tools/plan-days.mjs 1 --apply      write course, day, lesson and depth into docs/coverage/*.csv
 import path from 'node:path';
 import { readCsv, writeCsv } from './lib/csv.mjs';
@@ -148,8 +148,144 @@ const RULES_1 = [
   [31, 'кратко', /^(Storage\/(key|length)|encodeURI|decodeURI|Errors\/Malformed_URI)$/],
 ];
 
+const DAYS_2 = [
+  [1, 'I1', 'Области видимости и замыкания'],
+  [2, 'I1', 'this: call, apply, bind'],
+  [3, 'I1', 'Строгий режим и глобальный объект'],
+  [4, 'I1', 'Функция как объект: свойства и arguments'],
+  [5, 'I2', 'Свойства изнутри: дескрипторы, геттеры и сеттеры'],
+  [6, 'I2', 'Защита объектов, Object.is и логическое присваивание'],
+  [7, 'I3', 'Прототипы: цепочка, Object.create, new и instanceof'],
+  [8, 'I3', 'Классы: конструктор, методы, поля'],
+  [9, 'I3', 'Приватные элементы и static'],
+  [10, 'I3', 'Наследование: extends и super'],
+  [11, 'I4', 'Символы и протоколы итерации'],
+  [12, 'I4', 'Генераторы: function* и yield'],
+  [13, 'I4', 'Iterator и его методы'],
+  [14, 'I5', 'Map и WeakMap'],
+  [15, 'I5', 'Set, WeakSet и операции над множествами'],
+  [16, null, 'Мини-проект: журнал группы на классах'],
+  [17, 'I6', 'Регулярные выражения: шаблон, флаги, классы, квантификаторы'],
+  [18, 'I6', 'Группы и проверки позиции: exec, match, matchAll'],
+  [19, 'I6', 'Замена и разбиение: replace, replaceAll, split'],
+  [20, 'I6', 'Unicode в строках и регулярных выражениях'],
+  [21, 'I7', 'BigInt и Date целиком: разбор строк, UTC, сеттеры'],
+  [22, 'I7', 'Temporal: PlainDate, PlainTime, PlainDateTime и Now'],
+  [23, 'I7', 'Temporal: Duration, PlainYearMonth, PlainMonthDay'],
+  [24, 'I7', 'Temporal: Instant, ZonedDateTime и часовые пояса'],
+  [25, 'I7', 'Intl: NumberFormat, DateTimeFormat и локали'],
+  [26, 'I8', 'Ошибки: Error, его виды, cause и свои классы ошибок'],
+  [27, 'I8', 'Промисы целиком: all, allSettled, any, race, withResolvers, try'],
+  [28, 'I8', 'async-функции изнутри и очередь микрозадач'],
+  [29, 'I8', 'Асинхронные итераторы и генераторы, for await...of'],
+  [30, 'I9', 'Модули: import и export'],
+  [31, 'I9', 'Динамический импорт, import.meta и JSON'],
+  [32, null, 'Мини-проект: расписание занятий на модулях'],
+  [33, null, 'Итоговый проект: замысел и план'],
+  [34, null, 'Итоговый проект: реализация'],
+  [35, null, 'Итоговый проект: доработка и проверка'],
+  [36, null, 'Защита проектов'],
+];
+
+// course 2; error pages go to the day where the error first shows up, three of them stay for course 3
+const RULES_2 = [
+  // 1. Области видимости и замыкания
+  [1, 'подробно', /^(Guide\/Closures|sec-environment-records|sec-the-environment-record-type-hierarchy)$/],
+  [1, 'кратко', /^sec-environment-record-operations$/],
+  // 2. this
+  [2, 'подробно', /^(Operators\/this|Function\/(call|apply|bind))$/],
+  [2, 'кратко', /^Errors\/Called_on_incompatible_type$/],
+  // 3. Строгий режим и глобальный объект
+  [3, 'подробно', /^(Strict_mode|globalThis|sec-strict-mode-of-ecmascript)$/],
+  [3, 'кратко', /^Errors\/(Bad_strict_arguments_eval|Delete_in_strict_mode|Strict_non_simple_params|Reserved_identifier|Function_label|Deprecated_octal_literal|Deprecated_octal_escape_sequence)$/],
+  // 4. Функция как объект
+  [4, 'подробно', /^(Function|Function\/(length|name)|Functions\/arguments(\/length)?|sec-function-objects)$/],
+  [4, 'кратко', /^(Function\/(Function|prototype|toString)|Functions\/arguments\/Symbol\.iterator|sec-function-constructor|sec-properties-of-the-function-constructor|sec-properties-of-the-function-prototype-object|sec-function-instances|sec-hosthassourcetextavailable|Errors\/(Bad_return|Deprecated_caller_or_arguments_usage))$/],
+  // 5. Дескрипторы, геттеры, сеттеры
+  [5, 'подробно', /^(Guide\/Enumerability_and_ownership_of_properties|Functions\/(get|set|Method_definitions)|Object\/(defineProperty|getOwnPropertyDescriptor|getOwnPropertyNames|propertyIsEnumerable)|sec-properties-of-the-object-constructor)$/],
+  [5, 'кратко', /^(Object\/(defineProperties|getOwnPropertyDescriptors|hasOwnProperty)|sec-object-objects|sec-object-constructor|Errors\/(Getter_no_arguments|Setter_one_argument|Getter_only|Cant_redefine_property|No_non-null_object))$/],
+  // 6. Защита объектов, сравнение, логическое присваивание
+  [6, 'подробно', /^(Object\/(freeze|isFrozen|seal|isSealed|preventExtensions|isExtensible|is)|Guide\/Equality_comparisons_and_sameness|Operators\/(Logical_AND_assignment|Logical_OR_assignment|Nullish_coalescing_assignment))$/],
+  [6, 'кратко', /^(Object\/(Object|toString|toLocaleString|valueOf)|sec-properties-of-the-object-prototype-object|sec-properties-of-object-instances|Errors\/(Cant_define_property_object_not_extensible|Non_configurable_array_element|Cant_use_nullish_coalescing_unparenthesized|Unparenthesized_unary_expr_lhs_exponentiation))$/],
+  // 7. Прототипы
+  [7, 'подробно', /^(Guide\/Inheritance_and_the_prototype_chain|Object\/(create|getPrototypeOf|setPrototypeOf|isPrototypeOf|constructor)|Operators\/(new|instanceof))$/],
+  [7, 'кратко', /^(Object\/proto|Errors\/(Cant_set_prototype|Cyclic_prototype|Not_a_constructor|Bad_new_optional|invalid_right_hand_side_instanceof_operand))$/],
+  // 8. Классы
+  [8, 'подробно', /^(Guide\/Using_classes|Classes|Classes\/(constructor|Public_class_fields)|Statements\/class|Operators\/class)$/],
+  [8, 'кратко', /^Errors\/(Class_ctor_no_new|Arguments_not_allowed)$/],
+  // 9. Приватные элементы и static
+  [9, 'подробно', /^(Classes\/(Private_elements|static|Static_initialization_blocks)|sec-privateenvironment-records)$/],
+  [9, 'кратко', /^(sec-privateenvironment-record-operations|Errors\/(Cant_delete_private_fields|Either_be_both_static_or_non-static|Get_set_missing_private|Hash_outside_class|Private_double_initialization|Private_setter_only|Undeclared_private_field_or_method))$/],
+  // 10. Наследование
+  [10, 'подробно', /^(Classes\/extends|Operators\/(super|new\.target))$/],
+  [10, 'кратко', /^Errors\/(Bad_super_call|Bad_super_prop|Super_called_twice|Super_not_called|Invalid_derived_return)$/],
+  // 11. Символы и протоколы итерации
+  [11, 'подробно', /^(Symbol|Symbol\/(Symbol|description|iterator)|Iteration_protocols|Array\/(Symbol\.iterator|keys|values|entries)|sec-common-iteration-interfaces)$/],
+  [11, 'кратко', /^(Symbol\/(for|keyFor|toString|valueOf)|String\/Symbol\.iterator|Object\/getOwnPropertySymbols|sec-iteration)$/],
+  // 12. Генераторы
+  [12, 'подробно', /^(Guide\/Iterators_and_generators|Statements\/function\*|Operators\/(function\*|yield|yield\*)|Generator|Generator\/(next|return|throw)|sec-generator-objects)$/],
+  [12, 'кратко', /^(GeneratorFunction(\/.*)?|sec-generatorfunction-.*|sec-properties-of-the-generatorfunction-.*|sec-properties-of-generator-.*|sec-generator-abstract-operations|Errors\/(Already_executing_generator|await_yield_in_parameter))$/],
+  // 13. Iterator и его методы
+  [13, 'подробно', /^(Iterator|Iterator\/(from|map|filter|take|drop|flatMap|reduce|toArray|forEach|some|every|find)|sec-iterator-objects)$/],
+  [13, 'кратко', /^(Iterator\/(Iterator|Symbol\.iterator|Symbol\.dispose|concat|zip|zipKeyed|includes|join|chunks|windows)|sec-iterator-helper-objects|Errors\/Constructor_cant_be_used_directly)$/],
+  // 14. Map и WeakMap
+  [14, 'подробно', /^(Guide\/Keyed_collections|Map|Map\/(Map|set|get|has|delete|size|clear|forEach|keys|values|entries|Symbol\.iterator|groupBy)|WeakMap|WeakMap\/(WeakMap|set|get|has|delete)|sec-map-objects)$/],
+  [14, 'кратко', /^(Map\/(getOrInsert|getOrInsertComputed|Symbol\.species)|WeakMap\/(getOrInsert|getOrInsertComputed)|sec-keyed-collections|sec-map-.*|sec-properties-of-(the-)?map-.*|sec-weakmap-.*|sec-properties-of-(the-)?weakmap-.*|sec-abstract-operations-for-keyed-collections|sec-canonicalizekeyedcollectionkey|Errors\/(Key_not_weakly_held|Builtin_ctor_no_new))$/],
+  // 15. Set, WeakSet
+  [15, 'подробно', /^(Set|Set\/(Set|add|has|delete|size|clear|forEach|union|intersection|difference|symmetricDifference|isSubsetOf|isSupersetOf|isDisjointFrom)|WeakSet|WeakSet\/(WeakSet|add|has|delete)|sec-set-objects)$/],
+  [15, 'кратко', /^(Set\/(keys|values|entries|Symbol\.iterator|Symbol\.species)|sec-set-.*|sec-abstract-operations-for-set-objects|sec-properties-of-(the-)?set-.*|sec-weakset-.*|sec-properties-of-(the-)?weakset-.*|sec-array-objects|sec-array-.*|sec-properties-of-(the-)?array-.*)$/],
+  // 17. Регулярные выражения: основы
+  [17, 'подробно', /^(Guide\/Regular_expressions|Guide\/Regular_expressions\/(Cheatsheet|Character_classes|Quantifiers)|Regular_expressions|Regular_expressions\/(Literal_character|Character_escape|Character_class|Character_class_escape|Wildcard|Quantifier|Disjunction)|RegExp|RegExp\/(RegExp|test|flags|global|ignoreCase)|String\/search|sec-regexp-regular-expression-objects)$/],
+  [17, 'кратко', /^(RegExp\/(source|toString)|sec-patterns|sec-regexp-constructor|sec-abstract-operations-for-regexp-creation|Errors\/(Bad_regexp_flag|Regex_backslash_at_end_of_pattern|Regex_nothing_to_repeat|Regex_numbers_out_of_order_in_quantifier|Regex_invalid_range_in_character_class))$/],
+  // 18. Группы и проверки позиции
+  [18, 'подробно', /^(Guide\/Regular_expressions\/(Assertions|Groups_and_backreferences)|Regular_expressions\/(Input_boundary_assertion|Word_boundary_assertion|Capturing_group|Named_capturing_group|Non-capturing_group|Backreference|Named_backreference|Lookahead_assertion|Lookbehind_assertion)|RegExp\/(exec|lastIndex|multiline)|String\/(match|matchAll)|sec-abstract-operations-for-regexp-matching)$/],
+  [18, 'кратко', /^(Regular_expressions\/(Buffer_boundary_assertion|Modifier)|RegExp\/(sticky|dotAll|hasIndices)|sec-pattern-semantics|sec-properties-of-regexp-instances|sec-regexp-string-iterator-objects|Errors\/(Regex_invalid_group|Regex_invalid_capture_group_name|Regex_duplicate_capture_group_name|Regex_invalid_named_capture_reference|Requires_global_RegExp))$/],
+  // 19. Замена и разбиение
+  [19, 'подробно', /^(String\/(replace|replaceAll|split)|RegExp\/escape)$/],
+  [19, 'кратко', /^(RegExp\/Symbol\.(match|matchAll|replace|search|split|species)|sec-properties-of-the-regexp-prototype-object|sec-properties-of-the-regexp-constructor)$/],
+  // 20. Unicode
+  [20, 'подробно', /^(Regular_expressions\/Unicode_character_class_escape|RegExp\/(unicode|unicodeSets)|String\/(raw|isWellFormed|toWellFormed|normalize)|sec-string-objects)$/],
+  [20, 'кратко', /^(sec-text-processing|sec-string-.*|sec-properties-of-(the-)?string-.*|Errors\/(Regex_incomplete_quantifier|Regex_invalid_char_in_class|Regex_character_class_escape_in_class_range|Regex_invalid_identity_escape|Regex_raw_bracket|Regex_invalid_decimal_escape|Regex_invalid_unicode_escape|Regex_invalid_property_name|Regex_negated_char_class_with_strings|Regex_invalid_class_set_operation|Bad_optional_template|Form_must_be_one_of))$/],
+  // 21. BigInt и Date
+  [21, 'подробно', /^(BigInt|BigInt\/(BigInt|toString)|Guide\/Representing_dates_times|Date\/(parse|UTC|toISOString|getDay|getSeconds|getMilliseconds|getTimezoneOffset|setFullYear|setMonth|setDate|setHours|setMinutes|setSeconds))$/],
+  [21, 'кратко', /^(BigInt\/(asIntN|asUintN|valueOf)|Date\/(getUTC\w+|setUTC\w+|setMilliseconds|setTime|Symbol\.toPrimitive|toDateString|toTimeString|toUTCString|toString|valueOf|toJSON)|Errors\/(BigInt_division_by_zero|BigInt_negative_exponent|Cant_be_converted_to_BigInt_because_it_isnt_an_integer|Cant_convert_BigInt_to_number|Cant_convert_x_to_BigInt|Invalid_BigInt_syntax))$/],
+  // 22. Temporal: Plain* и Now (подробно — PlainDate; у PlainTime и PlainDateTime те же методы, они кратко)
+  [22, 'подробно', /^(Temporal|Temporal\/Now|Temporal\/Now\/plainDateISO|Temporal\/PlainDate|Temporal\/PlainDate\/(PlainDate|from|add|subtract|since|until|with|equals|compare|toString|year|month|day|dayOfWeek|daysInMonth|toPlainDateTime)|Temporal\/PlainTime|Temporal\/PlainTime\/(PlainTime|from|hour|minute)|Temporal\/PlainDateTime|Temporal\/PlainDateTime\/(PlainDateTime|from|toPlainDate|toPlainTime))$/],
+  [22, 'кратко', /^(Temporal\/Now\/(plainDateTimeISO|plainTimeISO|instant|timeZoneId|zonedDateTimeISO)|Temporal\/(PlainDate|PlainTime|PlainDateTime)\/.*)$/],
+  // 23. Temporal: Duration, PlainYearMonth, PlainMonthDay
+  [23, 'подробно', /^(Temporal\/Duration|Temporal\/Duration\/(Duration|from|total|round|toString|with)|Temporal\/(PlainYearMonth|PlainMonthDay)|Temporal\/PlainYearMonth\/(PlainYearMonth|from|toPlainDate)|Temporal\/PlainMonthDay\/(PlainMonthDay|from|toPlainDate))$/],
+  [23, 'кратко', /^Temporal\/(Duration|PlainYearMonth|PlainMonthDay)\/.*$/],
+  // 24. Temporal: Instant, ZonedDateTime; мост из Date
+  [24, 'подробно', /^(Date\/toTemporalInstant|Temporal\/(Instant|ZonedDateTime)|Temporal\/Instant\/(Instant|from|fromEpochMilliseconds|epochMilliseconds|toZonedDateTimeISO)|Temporal\/ZonedDateTime\/(ZonedDateTime|from|timeZoneId|offset|withTimeZone|startOfDay|hoursInDay|toInstant|toPlainDate|add))$/],
+  [24, 'кратко', /^Temporal\/(Instant|ZonedDateTime)\/.*$/],
+  // 25. Intl
+  [25, 'подробно', /^(Guide\/Internationalization|Intl\/(NumberFormat|DateTimeFormat)|Intl\/(NumberFormat|DateTimeFormat)\/(NumberFormat|DateTimeFormat|format|formatToParts|resolvedOptions)|Number\/toLocaleString|Date\/toLocaleString|String\/localeCompare|sec-intl-(numberformat|datetimeformat)-constructor)$/],
+  [25, 'кратко', /^(Intl\/(NumberFormat|DateTimeFormat)\/.*|Array\/toLocaleString|BigInt\/toLocaleString|String\/(toLocaleLowerCase|toLocaleUpperCase))$/],
+  // ECMA-402, главы 11 (DateTimeFormat) и 16 (NumberFormat): id разделов разного вида, ловим по общим словам
+  [25, 'кратко', /^((datetimeformat|numberformat)-objects|sec-.*(datetime|date-time|numberformat|number-format|formatnumber|formatnumeric|numberpattern|notationsubpattern|numberrangepattern|formatmatcher|tolocaltime|offsettimezone|currencydigits|torawprecision|torawfixed|computeexponent|stringintlmv|tointlmathematicalvalue|unsignedroundingmode|formatapproximately|collapsenumberrange).*)$/i],
+  // 26. Ошибки
+  [26, 'подробно', /^(Errors|Error|Error\/(Error|message|name|cause|isError)|(TypeError|RangeError|SyntaxError|ReferenceError)|sec-error-objects)$/],
+  [26, 'кратко', /^(Error\/(stack|captureStackTrace|stackTraceLimit|toString|columnNumber|fileName|lineNumber)|(TypeError|RangeError|SyntaxError|ReferenceError)\/\w+|(EvalError|URIError|InternalError)(\/\w+)?|sec-error-constructor|sec-properties-of-(the-)?error-.*|sec-native-error-types-used-in-this-standard|sec-nativeerror-object-structure|sec-abstract-operations-for-error-objects)$/],
+  // 27. Промисы целиком
+  [27, 'подробно', /^(Promise\/(all|allSettled|any|race|withResolvers|try)|AggregateError|AggregateError\/errors|sec-promise-objects)$/],
+  [27, 'кратко', /^(Promise\/(allKeyed|allSettledKeyed|Symbol\.species)|AggregateError\/AggregateError|sec-aggregate-error-objects|sec-control-abstraction-objects|sec-promise-abstract-operations|sec-promise-constructor|sec-properties-of-the-promise-.*|sec-properties-of-promise-instances|Errors\/Promise_any_all_rejected)$/],
+  // 28. async-функции изнутри
+  [28, 'подробно', /^(Operators\/async_function|sec-promise-jobs)$/],
+  [28, 'кратко', /^(AsyncFunction(\/AsyncFunction)?|sec-async-function-.*|sec-async-functions-abstract-operations|Errors\/Bad_await)$/],
+  // 29. Асинхронные итераторы и генераторы
+  [29, 'подробно', /^(Statements\/(async_function\*|for-await\.\.\.of)|Operators\/async_function\*|AsyncGenerator|AsyncGenerator\/next|Symbol\/asyncIterator|AsyncIterator|Array\/fromAsync|sec-asyncgenerator-objects)$/],
+  [29, 'кратко', /^(AsyncGenerator\/(return|throw)|AsyncGeneratorFunction(\/.*)?|AsyncIterator\/.*|sec-asyncgeneratorfunction-.*|sec-properties-of-asyncgenerator.*|sec-asyncgenerator-abstract-operations|sec-asynciteratorprototype|sec-async-from-sync-iterator-objects)$/],
+  // 30. Модули
+  [30, 'подробно', /^(Guide\/Modules|Statements\/(import|export))$/],
+  [30, 'кратко', /^Errors\/import_decl_module_top_level$/],
+  // 31. Динамический импорт, import.meta, JSON
+  [31, 'подробно', /^(Operators\/(import|import\.meta)|Statements\/import\/with|sec-json\.parse|sec-json\.stringify)$/],
+  [31, 'кратко', /^(Operators\/import\.meta\/resolve|JSON\/(rawJSON|isRawJSON)|sec-json-object|sec-json\.israwjson|sec-json\.rawjson|sec-json-%symbol\.tostringtag%|Errors\/BigInt_not_serializable)$/],
+];
+
 export const PLAN = {
   1: { course: 'Essentials', days: DAYS_1, rules: RULES_1 },
+  2: { course: 'Intermediate', days: DAYS_2, rules: RULES_2 },
 };
 
 export function assign(courseNo) {

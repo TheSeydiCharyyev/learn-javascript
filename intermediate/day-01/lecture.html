@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 1 — Области видимости и замыкания</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+        h3 { color: #075985; }
+        .step-number { background: #0ea5e9; }
+        .toc a { color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 1</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 1 &bull; урок 1</span>
+        <h1>Области видимости и замыкания</h1>
+        <p>Курс 2, Intermediate. Модуль «Области видимости, замыкания и this» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>определять, где видна переменная, по тому, где она написана в тексте программы;</li>
+            <li>прослеживать поиск имени по цепочке окружений и говорить, где он закончится ошибкой;</li>
+            <li>писать функции, которые помнят свои переменные: счётчики, фабрики, спрятанные данные;</li>
+            <li>отличать «функция помнит переменную» от «функция помнит значение» и чинить ловушку
+                <code>var</code> в цикле;</li>
+            <li>находить в спецификации ECMAScript раздел об окружениях и читать его вместе с MDN.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#question">Вопрос, оставшийся от «Карточек»</a></li>
+            <li><a href="#kinds">Четыре области видимости</a></li>
+            <li><a href="#lexical">Важно, где написано, а не где вызвано</a></li>
+            <li><a href="#chain">Как ищется имя</a></li>
+            <li><a href="#spec">Первое чтение спецификации</a></li>
+            <li><a href="#closure">Замыкание: функция и её окружение</a></li>
+            <li><a href="#each-call">Каждый вызов — новое окружение</a></li>
+            <li><a href="#live">Помнит переменную, а не значение</a></li>
+            <li><a href="#factory">Фабрики функций</a></li>
+            <li><a href="#private">Спрятанные данные</a></li>
+            <li><a href="#loop">Замыкания в цикле: var и let</a></li>
+            <li><a href="#events">Замыкания в обработчиках событий</a></li>
+            <li><a href="#memory">Цена замыкания: память</a></li>
+            <li><a href="#cards">«Карточки»: прогресс в замыкании</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="question">1. Вопрос, оставшийся от «Карточек»</h2>
+
+    <p>Курс 2 начинается там, где закончился первый. В конце дня 36 Essentials мы оставили
+    вопрос: почему <code>learned</code>, объявленная в первых строках <code>app.js</code>,
+    видна внутри каждой функции «Карточек»? Вот эти строки — данные дня 33 и функция
+    <code>deck</code>:</p>
+
+    <pre class="code js">const KEY = "cards:learned";
+let words = [];                                              // придут с сервера
+let learned = JSON.parse(localStorage.getItem(KEY)) ?? [];   // номера выученных слов
+let topic = "все";                                           // выбранная тема
+
+function deck() {
+  return words.filter((w) =&gt; !learned.includes(w.id) &amp;&amp; (topic === "все" || w.topic === topic));
+}</pre>
+
+    <p>Внутри <code>deck</code> нет ни одного объявления, а она свободно читает три переменные.
+    В Essentials мы приняли это как факт — «внутрь видно, наружу нет» (дни 4 и 12). Сегодня
+    разберём, <strong>как именно</strong> это устроено, и это окажется ключом к одной из главных
+    тем языка.</p>
+
+    <p>Есть и второй вопрос, который мы тогда не задавали. Проверяя «Карточки», мы писали прямо
+    в консоли:</p>
+
+    <pre class="code js">learned = [1, 2];   // так мы проверяли колоду на дне 33</pre>
+
+    <p>Для проверки удобно. Но это значит, что <strong>любая строка программы и любой человек
+    с консолью</strong> могут заменить прогресс ученика чем угодно. В программе на тридцать строк
+    это не страшно. В программе на три тысячи строк какая-нибудь функция однажды сделает
+    <code>learned = []</code> по ошибке, и искать её придётся долго.</p>
+
+    <p>Сегодня ответим на оба вопроса: почему переменная видна и как сделать, чтобы она была
+    видна <strong>только тем, кому нужно</strong>. Инструмент для второго называется
+    замыканием.</p>
+
+    <h2 id="kinds">2. Четыре области видимости</h2>
+
+    <p><strong>Область видимости</strong> — часть программы, где имя переменной что-то значит.
+    Три вида вы знаете по Essentials, четвёртый появится в конце курса:</p>
+
+    <table>
+        <thead><tr><th>Область</th><th>Что её создаёт</th><th>Где видны её переменные</th><th>Разбирали</th></tr></thead>
+        <tbody>
+            <tr><td>глобальная</td><td>весь скрипт</td><td>везде, в том числе в других обычных скриптах страницы</td><td>день 4</td></tr>
+            <tr><td>функции</td><td>каждый вызов функции</td><td>только внутри этой функции</td><td>день 12</td></tr>
+            <tr><td>блока</td><td>фигурные скобки <code>{ }</code> — у <code>if</code>, <code>for</code>, <code>catch</code> или сами по себе</td><td>внутри блока; только для <code>let</code> и <code>const</code></td><td>день 4</td></tr>
+            <tr><td>модуля</td><td>файл-модуль</td><td>только в этом файле</td><td>курс 2, день 30</td></tr>
+        </tbody>
+    </table>
+
+    <p>Все три знакомые области в одной функции:</p>
+
+    <pre class="code js">const city = "Мары";                    // глобальная
+
+function greet(student) {                // student — область функции
+  if (student) {
+    const text = `Салам, ${student}!`;   // область блока if
+    return text;
+  }
+  return `Салам, ${city}!`;
+}
+
+console.log(greet("Аман"));   // Салам, Аман!
+console.log(greet(""));       // Салам, Мары!
+console.log(typeof text);     // undefined — text осталась в блоке</pre>
+
+    <p>Обратите внимание на последнюю строку. <code>typeof</code> не падает на необъявленном
+    имени — этот приём мы видели на дне 5. Обычное обращение <code>console.log(text)</code>
+    здесь дало бы <code>ReferenceError: text is not defined</code>.</p>
+
+    <div class="important">
+        Блок у <code>var</code> не работает: такая переменная видна во всей функции, даже если
+        объявлена внутри <code>if</code> или цикла. Это одна из причин, почему в новом коде
+        пишут <code>let</code> и <code>const</code> (день 4). Сегодня мы увидим ещё одну —
+        в разделе 11.
+    </div>
+
+    <h2 id="lexical">3. Важно, где написано, а не где вызвано</h2>
+
+    <p>Главное правило дня. Какие переменные видит функция, определяется
+    <strong>местом, где она написана</strong> в тексте программы, — а не тем, кто и откуда
+    её вызывает.</p>
+
+    <pre class="code js">const city = "Мары";
+
+function showCity() {
+  console.log(city);
+}
+
+function trip() {
+  const city = "Ашхабад";
+  showCity();
+}
+
+trip();   // Мары</pre>
+
+    <p>Многие ждут здесь «Ашхабад»: ведь <code>showCity</code> вызвали изнутри <code>trip</code>,
+    где <code>city</code> — Ашхабад. Но <code>showCity</code> написана на верхнем уровне скрипта,
+    вне <code>trip</code>. Своей <code>city</code> у неё нет, и искать она будет там, где
+    стоит в тексте, — на верхнем уровне. Переменная <code>city</code> из <code>trip</code> ей
+    просто не видна: это чужая область, как и в любом вызове.</p>
+
+    <p>Такую область называют <strong>лексической</strong> (от «лексика» — текст программы)
+    или статической: её можно определить, просто читая код, не запуская его. Так устроено
+    большинство современных языков. Бывает и иначе — функция видит переменные того, кто её
+    вызвал, — это называется динамической областью, и она встречается, например, в командной
+    оболочке bash. В JavaScript её нет.</p>
+
+    <div class="analogy">
+        Функция — как письмо с обратным адресом. Где бы его ни читали, «мой город» в письме
+        означает город отправителя, а не того, кто держит письмо в руках. Адрес вписан, когда
+        письмо писали, — функция «прописана» там, где её объявили.
+    </div>
+
+    <p>Функции можно вкладывать друг в друга, и тогда внутренняя видит всё, что видит внешняя,
+    плюс переменные самой внешней:</p>
+
+    <pre class="code js">function report(student) {
+  const school = "школа № 5";
+
+  function line(mark) {
+    return `${student}, ${school}: ${mark}`;   // три имени из трёх мест
+  }
+
+  return line(5);
+}
+
+console.log(report("Мерет"));   // Мерет, школа № 5: 5</pre>
+
+    <p><code>mark</code> — параметр самой <code>line</code>, <code>student</code> и
+    <code>school</code> — переменные <code>report</code>, вокруг которой <code>line</code>
+    написана. Чтобы понять, что видит функция, достаточно посмотреть, <strong>какие фигурные
+    скобки её окружают</strong>.</p>
+
+    <h2 id="chain">4. Как ищется имя</h2>
+
+    <p>Когда движок встречает имя, он ищет его по шагам:</p>
+
+    <div class="step"><span class="step-number">1</span>
+        <div><p>Сначала — в своей области: среди переменных и параметров текущей функции или блока.</p></div>
+    </div>
+    <div class="step"><span class="step-number">2</span>
+        <div><p>Не нашёл — в области, которая окружает её в тексте программы. Потом в той, что
+        окружает эту, и так дальше наружу.</p></div>
+    </div>
+    <div class="step"><span class="step-number">3</span>
+        <div><p>Дошёл до глобальной области и не нашёл — <code>ReferenceError: … is not defined</code>.
+        Первая находка останавливает поиск.</p></div>
+    </div>
+
+    <p>Отсюда и затенение из дня 4: если внутри объявлена переменная с тем же именем, что снаружи,
+    поиск остановится на внутренней, и до внешней не дойдёт.</p>
+
+    <pre class="code js">const mark = 5;                    // весь скрипт
+
+function outer() {
+  const student = "Сапар";         // вызов outer
+
+  function inner() {
+    const mark = 4;                // вызов inner — затеняет внешнюю mark
+    console.log(student, mark);
+  }
+
+  inner();
+  console.log(mark);
+}
+
+outer();
+// Сапар 4
+// 5</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 270" role="img" aria-label="Три вложенные области: весь скрипт, вызов outer, вызов inner; имя ищется изнутри наружу">
+            <rect x="10" y="10" width="600" height="200" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="26" y="32" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">весь скрипт</text>
+            <text x="26" y="50" font-family="Consolas, monospace" font-size="12" fill="#334155">mark = 5&#160;&#160;&#160;outer</text>
+
+            <rect x="26" y="62" width="400" height="136" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="42" y="84" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">вызов outer()</text>
+            <text x="42" y="102" font-family="Consolas, monospace" font-size="12" fill="#1d4ed8">student = "Сапар"&#160;&#160;&#160;inner</text>
+
+            <rect x="42" y="114" width="250" height="72" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="58" y="136" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#166534">вызов inner()</text>
+            <text x="58" y="154" font-family="Consolas, monospace" font-size="12" fill="#166534">mark = 4</text>
+            <text x="58" y="176" font-family="Consolas, monospace" font-size="12" fill="#0f172a">console.log(student, mark)</text>
+
+            <text x="446" y="84" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">ищем student:</text>
+            <text x="446" y="104" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">1. inner — нет</text>
+            <text x="446" y="122" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#1d4ed8">2. outer — нашли</text>
+            <text x="446" y="152" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">ищем mark:</text>
+            <text x="446" y="172" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">1. inner — нашли, 4</text>
+            <text x="446" y="190" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#64748b">до 5 снаружи не дошли</text>
+
+            <rect x="10" y="222" width="600" height="40" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="238" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Имя ищется изнутри наружу — по тому, как вложен текст программы.</text>
+            <text x="310" y="255" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Первая находка побеждает; не нашли нигде — ReferenceError.</text>
+        </svg>
+        <figcaption>Области вложены, как коробки: изнутри видно наружу, снаружи внутрь — нет</figcaption>
+    </figure>
+
+    <div class="mistake">
+        Поиск, дошедший до глобальной области, иногда находит то, чего вы не объявляли.
+        У браузера на верхнем уровне есть свои имена, и одно из них — <code>name</code>:
+        <pre class="code js">console.log(name);         // пустая строка, а не ошибка
+console.log(typeof name);  // string</pre>
+        Это свойство окна браузера, о нём — на дне 3. Поэтому в примерах этого курса
+        переменные называются <code>student</code>, а не <code>name</code>: опечатка в
+        <code>name</code> не упадёт с понятной ошибкой, а тихо подставит пустую строку.
+    </div>
+
+    <p>С присваиванием поиск устроен так же: <code>count = 5</code> ищет <code>count</code>
+    по той же цепочке и меняет первую найденную. Если не нашлось нигде, обычный скрипт молча
+    создаёт глобальную переменную — ловушку из дня 4. В строгом режиме это ошибка, его разберём
+    на дне 3.</p>
+
+    <h2 id="spec">5. Первое чтение спецификации</h2>
+
+    <p>В Essentials мы опирались на MDN. MDN — пересказ, а то, что пересказывают, называется
+    <strong>спецификацией ECMAScript</strong>: документ ECMA-262, который пишет комитет TC39.
+    По нему работают движки всех браузеров, и если MDN и браузер в чём-то расходятся, рассудит
+    спецификация. В курсе 2 мы будем открывать её рядом с темой, которую уже знаем по MDN.</p>
+
+    <p>Свежая редакция лежит по адресу <code>tc39.es/ecma262/2026/</code>. У каждого раздела
+    есть свой якорь, поэтому ссылка ведёт прямо на нужное место. Сегодняшний раздел —
+    <a href="https://tc39.es/ecma262/2026/#sec-environment-records">9.1 Environment Records</a>,
+    «записи окружения». Перескажем его своими словами.</p>
+
+    <ul>
+        <li><strong>Запись окружения</strong> — устройство спецификации, которое хранит, какому имени
+            какая переменная или функция соответствует. Записи связаны так же, как вложен текст
+            программы.</li>
+        <li>Новая запись создаётся <strong>каждый раз</strong>, когда выполняется функция, блок
+            или <code>catch</code>: в неё попадают имена, объявленные в этом коде.</li>
+        <li>У каждой записи есть поле <code>[[OuterEnv]]</code> — ссылка на внешнюю запись,
+            ту, что окружает её в тексте. У самой верхней там <code>null</code>.</li>
+        <li>Это способ <strong>описать</strong> поведение, а не чертёж движка: браузер может
+            хранить переменные как угодно, лишь бы вёл себя так же. Из программы до записей
+            окружения не добраться.</li>
+    </ul>
+
+    <p>Двойные квадратные скобки — обозначение спецификации: так пишут внутренние поля и слоты,
+    которых нет в языке. Написать в коде <code>env.[[OuterEnv]]</code> нельзя — это имя для
+    рассуждений.</p>
+
+    <h3>Виды записей</h3>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-the-environment-record-type-hierarchy">9.1.1</a>
+    перечисляет виды записей. Они устроены как родословная: есть общее понятие и его частные
+    случаи.</p>
+
+    <table>
+        <thead><tr><th>Вид записи</th><th>Когда создаётся</th><th>Где в курсе</th></tr></thead>
+        <tbody>
+            <tr><td>Declarative Environment Record</td><td>блок, <code>catch</code>, объявления <code>let</code>, <code>const</code>, <code>function</code></td><td>сегодня</td></tr>
+            <tr><td>Function Environment Record — частный случай предыдущей</td><td>каждый вызов функции; может хранить и <code>this</code></td><td>сегодня и день 2</td></tr>
+            <tr><td>Module Environment Record — тоже частный случай</td><td>верхний уровень модуля</td><td>день 30</td></tr>
+            <tr><td>Global Environment Record</td><td>верхний уровень обычного скрипта; её <code>[[OuterEnv]]</code> — <code>null</code></td><td>сегодня и день 3</td></tr>
+            <tr><td>Object Environment Record</td><td>устаревшая инструкция <code>with</code></td><td>курс 3</td></tr>
+        </tbody>
+    </table>
+
+    <p>Там же — таблица общих методов записи. Названия говорят сами за себя:
+    <code>HasBinding</code> (есть ли такое имя), <code>CreateMutableBinding</code> и
+    <code>CreateImmutableBinding</code> (завести изменяемую или неизменяемую привязку — это
+    <code>let</code> и <code>const</code>), <code>GetBindingValue</code> и
+    <code>SetMutableBinding</code> (прочитать и записать).</p>
+
+    <h3>Поиск имени в спецификации</h3>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-environment-record-operations">9.1.2</a>
+    описывает операции над записями. Первая из них, <code>GetIdentifierReference</code>, —
+    ровно тот поиск, что мы разобрали в разделе 4. В пересказе её шаги такие:</p>
+
+    <ol>
+        <li>если запись — <code>null</code>, имя не найдено (позже это станет
+            <code>ReferenceError</code>);</li>
+        <li>спросить у записи <code>HasBinding</code>: есть ли у тебя это имя? Если да — нашли;</li>
+        <li>иначе взять <code>[[OuterEnv]]</code> и повторить всё с ним.</li>
+    </ol>
+
+    <p>Три строки — и вся цепочка из схемы раздела 4. Остальные операции раздела создают записи
+    разных видов: <code>NewDeclarativeEnvironment</code>, <code>NewFunctionEnvironment</code>,
+    <code>NewObjectEnvironment</code>, <code>NewGlobalEnvironment</code>, <code>NewModuleEnvironment</code>.</p>
+
+    <div class="pro-tip">
+        Как читать спецификацию, не утонув: <strong>не подряд, а от вопроса</strong>. Найдите
+        тему на MDN — на страницах справочника внизу есть таблица «Specifications» со ссылкой
+        на раздел — и прочитайте в спецификации только этот раздел. Незнакомые слова вроде
+        <code>Reference Record</code> пропускайте: спецификация определяет их в других местах,
+        и для понимания идеи они не нужны. В старых редакциях этот раздел назывался
+        <em>Lexical Environments</em> — слово «лексическое окружение» до сих пор встречается
+        в статьях и на MDN; это то же самое.
+    </div>
+
+    <h2 id="closure">6. Замыкание: функция и её окружение</h2>
+
+    <p>Теперь главное. Посмотрите на функцию, которая создаёт другую функцию и возвращает её:</p>
+
+    <pre class="code js">function makeCounter() {
+  let count = 0;
+  return () =&gt; {
+    count = count + 1;
+    return count;
+  };
+}
+
+const next = makeCounter();
+console.log(next());   // 1
+console.log(next());   // 2
+console.log(next());   // 3</pre>
+
+    <p>Странная вещь: <code>makeCounter</code> закончила работу ещё на строке
+    <code>const next = …</code>. Её вызов окончен, а переменная <code>count</code> продолжает жить
+    и считать. Почему её не выбросили?</p>
+
+    <p>Потому что функция, созданная внутри, <strong>держит ссылку на окружение, в котором
+    её создали</strong>. В спецификации это внутренний слот функции <code>[[Environment]]</code>:
+    запись окружения, над которой функция «замкнута», — когда функцию вызывают, эта запись
+    становится внешней для её кода (раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects">10.2</a>, подробно —
+    в курсе 3). Пока жива стрелочная функция, жива и запись с <code>count</code>.</p>
+
+    <div class="important">
+        <strong>Замыкание</strong> — это функция вместе со ссылкой на окружение, в котором она
+        создана. Так это формулирует и MDN: функция плюс её лексическое окружение. В JavaScript
+        замыкание получает <strong>каждая</strong> функция в момент создания — вы ничего для этого
+        не делаете. Особенным его делает только одно: функция пережила вызов, внутри которого
+        родилась, и унесла с собой его переменные.
+    </div>
+
+    <p>Вы пользовались замыканиями весь первый курс, не называя их. <code>deck</code> из
+    «Карточек» читает <code>learned</code> через своё <code>[[Environment]]</code> — запись
+    верхнего уровня скрипта. Обработчик клика, объявленный внутри функции, помнит её переменные.
+    Счётчик внутри функции, вызванной сразу, — приём из дня 13, — работал по той же причине;
+    тогда мы пообещали объяснить, почему, и вот объяснение.</p>
+
+    <h2 id="each-call">7. Каждый вызов — новое окружение</h2>
+
+    <p>Раз запись окружения создаётся при каждом вызове, два вызова <code>makeCounter</code>
+    дадут две независимые <code>count</code>:</p>
+
+    <pre class="code js">function makeCounter() {
+  let count = 0;
+  return () =&gt; ++count;
+}
+
+const a = makeCounter();
+const b = makeCounter();
+
+a();
+a();
+a();
+console.log(a());   // 4
+console.log(b());   // 1 — у b своя count</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 290" role="img" aria-label="Две функции-счётчика, у каждой своё окружение вызова makeCounter со своей count; оба окружения ссылаются наружу на окружение всего скрипта">
+            <rect x="60" y="16" width="180" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="150" y="41" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#1d4ed8">функция a</text>
+            <rect x="380" y="16" width="180" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="470" y="41" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#1d4ed8">функция b</text>
+
+            <path d="M 150 56 L 150 104" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 150 110 L 146 100 L 154 100 Z" fill="#3b82f6"/>
+            <path d="M 470 56 L 470 104" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 470 110 L 466 100 L 474 100 Z" fill="#3b82f6"/>
+            <text x="160" y="88" font-family="Consolas, monospace" font-size="11.5" fill="#1d4ed8">[[Environment]]</text>
+            <text x="480" y="88" font-family="Consolas, monospace" font-size="11.5" fill="#1d4ed8">[[Environment]]</text>
+
+            <rect x="40" y="112" width="220" height="56" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="150" y="134" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#166534">первый вызов makeCounter()</text>
+            <text x="150" y="156" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#166534">count = 4</text>
+            <rect x="360" y="112" width="220" height="56" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="470" y="134" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#166534">второй вызов makeCounter()</text>
+            <text x="470" y="156" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#166534">count = 1</text>
+
+            <path d="M 150 168 L 150 194" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 150 200 L 146 190 L 154 190 Z" fill="#94a3b8"/>
+            <path d="M 470 168 L 470 194" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 470 200 L 466 190 L 474 190 Z" fill="#94a3b8"/>
+            <text x="160" y="188" font-family="Consolas, monospace" font-size="11" fill="#64748b">[[OuterEnv]]</text>
+            <text x="480" y="188" font-family="Consolas, monospace" font-size="11" fill="#64748b">[[OuterEnv]]</text>
+
+            <rect x="40" y="202" width="540" height="32" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="223" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">весь скрипт: makeCounter, a, b</text>
+
+            <rect x="40" y="246" width="540" height="36" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="310" y="269" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#92400e">Два вызова — две записи окружения. a и b не знают о счётчиках друг друга.</text>
+        </svg>
+        <figcaption>Функция помнит запись окружения того вызова, в котором её создали</figcaption>
+    </figure>
+
+    <p>В спецификации каждый вызов функции начинается с <code>NewFunctionEnvironment</code> —
+    одной из операций раздела 9.1.2. Отсюда и независимость: у <code>a</code> и <code>b</code>
+    разные записи, хотя код у них один.</p>
+
+    <div class="mistake">
+        Если вынести переменную за пределы фабрики, счётчик станет общим на всех:
+        <pre class="code js">let count = 0;                 // снаружи — одна на всех
+
+function makeSharedCounter() {
+  return () =&gt; ++count;
+}
+
+const x = makeSharedCounter();
+const y = makeSharedCounter();
+x();
+x();
+console.log(y());   // 3 — y продолжил чужой счёт</pre>
+        Обе функции созданы в разных вызовах, но <code>count</code> они находят не в своём вызове,
+        а уровнем выше — в общей записи скрипта. <strong>Своё у каждого замыкания только то, что
+        объявлено внутри вызова.</strong>
+    </div>
+
+    <h2 id="live">8. Помнит переменную, а не значение</h2>
+
+    <p>Частое заблуждение: будто замыкание сохраняет <em>значения</em> переменных на момент
+    создания функции, как фотографию. Нет — функция держит саму переменную и каждый раз читает
+    её заново:</p>
+
+    <pre class="code js">let lesson = "замыкания";
+const show = () =&gt; console.log(`Тема: ${lesson}`);
+
+show();               // Тема: замыкания
+lesson = "this";
+show();               // Тема: this</pre>
+
+    <p>Функцию <code>show</code> создали, когда темой были замыкания. Но вызвали её второй раз
+    после того, как <code>lesson</code> поменялась, — и она прочитала новое значение. Запись
+    окружения хранит не копию, а саму привязку имени к переменной.</p>
+
+    <p>Если нужна именно фотография — значение на момент создания, — его кладут в новую
+    переменную, которая больше не меняется. Проще всего — в параметр фабрики:</p>
+
+    <pre class="code js">function remember(value) {
+  return () =&gt; value;   // value — своя переменная этого вызова
+}
+
+let topic = "еда";
+const saved = remember(topic);
+topic = "дом";
+
+console.log(saved());   // еда
+console.log(topic);     // дом</pre>
+
+    <p>Вызов <code>remember(topic)</code> скопировал значение «еда» в параметр
+    <code>value</code> — новую переменную в новой записи окружения. Дальнейшие изменения
+    <code>topic</code> её не касаются.</p>
+
+    <div class="pro-tip">
+        С массивами и объектами осторожнее: в параметр копируется <strong>ссылка</strong>
+        (день 19), и если поменять содержимое массива, это будет видно через обе переменные.
+        «Фотография» массива — это копия: <code>[...marks]</code> из дня 22.
+    </div>
+
+    <h2 id="factory">9. Фабрики функций</h2>
+
+    <p>Функция, которая создаёт и возвращает другие функции, называется
+    <strong>фабрикой</strong>. Параметры фабрики становятся настройками созданной функции —
+    «запекаются» в неё:</p>
+
+    <pre class="code js">function makeRangeCheck(min, max) {
+  return (n) =&gt; n &gt;= min &amp;&amp; n &lt;= max;
+}
+
+const isMark = makeRangeCheck(2, 5);
+const isAge = makeRangeCheck(6, 18);
+
+console.log([5, 9, 3, 0].filter(isMark));   // (2) [5, 3]
+console.log(isAge(17), isAge(25));          // true false</pre>
+
+    <p>Зачем это нужно, если можно написать одну функцию с тремя параметрами
+    <code>inRange(n, min, max)</code>? Посмотрите на <code>filter</code>: он сам вызывает переданную
+    функцию и сам решает, что ей передать, — элемент, его номер и весь массив (день 20).
+    Отдайте ему <code>inRange</code> — и в <code>min</code> попадёт номер элемента,
+    а в <code>max</code> массив. Границы <code>filter</code> не передаёт, а <code>isMark</code>
+    они и не нужны: они уже внутри.</p>
+
+    <p>Кстати, вы и раньше делали то же самое, просто короче:</p>
+
+    <pre class="code js">const min = 2;
+const max = 5;
+console.log([5, 9, 3, 0].filter((n) =&gt; n &gt;= min &amp;&amp; n &lt;= max));   // (2) [5, 3]</pre>
+
+    <p>Стрелочная функция внутри <code>filter</code> — тоже замыкание: она читает
+    <code>min</code> и <code>max</code> из окружения, в котором написана. Фабрика лишь даёт
+    такой функции имя и позволяет создать её много раз с разными настройками.</p>
+
+    <table>
+        <thead><tr><th>Фабрика</th><th>Что запекает</th><th>Что получается</th></tr></thead>
+        <tbody>
+            <tr><td><code>makeRangeCheck(2, 5)</code></td><td>границы</td><td>проверка оценки для <code>filter</code></td></tr>
+            <tr><td><code>makeCounter()</code></td><td>свою <code>count</code></td><td>независимый счётчик</td></tr>
+            <tr><td><code>remember(value)</code></td><td>значение на момент вызова</td><td>«фотография» переменной</td></tr>
+            <tr><td><code>makeDeck(progress)</code> — раздел 14</td><td>источник данных</td><td>колода «Карточек» с одним параметром</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="private">10. Спрятанные данные</h2>
+
+    <p>Вернёмся ко второму вопросу из раздела 1: как сделать переменную видимой только тем,
+    кому нужно. Фабрика может вернуть не одну функцию, а объект с несколькими, и все они будут
+    замкнуты на одну и ту же запись окружения:</p>
+
+    <pre class="code js">function makeScore() {
+  let points = 0;
+
+  return {
+    add: (n) =&gt; {
+      points = points + n;
+    },
+    total: () =&gt; points,
+  };
+}
+
+const score = makeScore();
+score.add(5);
+score.add(4);
+console.log(score.total());   // 9
+console.log(score.points);    // undefined — снаружи до points не добраться</pre>
+
+    <p>У объекта <code>score</code> нет свойства <code>points</code> — переменная живёт в записи
+    окружения вызова <code>makeScore</code>, и путь к ней есть только у двух стрелочных
+    функций. Сломать счёт случайной строкой <code>points = 0</code> где-то в программе теперь
+    нельзя: это имя там просто ничего не значит.</p>
+
+    <p>Это тот самый приём, который на дне 13 работал внутри функции, вызванной сразу. Методы
+    объекта здесь — стрелочные функции; другой способ писать методы, с <code>this</code>,
+    разберём завтра.</p>
+
+    <div class="mistake">
+        Спрятанное легко выдать наружу, вернув его самого вместо копии:
+        <pre class="code js">function makeList() {
+  const items = [];
+  return {
+    add: (item) =&gt; items.push(item),
+    all: () =&gt; items,            // отдали сам массив
+  };
+}
+
+const list = makeList();
+list.add("bread");
+list.all().push("взлом");
+console.log(list.all());   // (2) ['bread', 'взлом']</pre>
+        <code>all</code> вернула ссылку на тот же массив, и снаружи в него дописали. Правило:
+        <strong>наружу — только копии</strong>: <code>all: () =&gt; [...items]</code>.
+        Тогда <code>push</code> изменит копию, а спрятанный массив останется цел.
+    </div>
+
+    <h2 id="loop">11. Замыкания в цикле: var и let</h2>
+
+    <p>Классическая задача с собеседований. Что напечатают два цикла?</p>
+
+    <pre class="code js">for (var i = 1; i &lt;= 3; i++) {
+  setTimeout(() =&gt; console.log("var:", i), 0);
+}
+
+for (let j = 1; j &lt;= 3; j++) {
+  setTimeout(() =&gt; console.log("let:", j), 0);
+}
+// var: 4
+// var: 4
+// var: 4
+// let: 1
+// let: 2
+// let: 3</pre>
+
+    <p>Таймеры срабатывают, когда оба цикла уже закончились (день 30). К этому моменту:</p>
+
+    <ul>
+        <li><code>var i</code> — <strong>одна</strong> переменная на весь скрипт: у <code>var</code>
+            нет области блока. Три стрелочные функции замкнуты на неё одну, а она после цикла
+            равна 4 — на этом значении цикл и остановился;</li>
+        <li><code>let j</code> — <strong>своя</strong> переменная на каждый проход. Цикл
+            <code>for</code> с <code>let</code> создаёт для каждого прохода новую запись
+            окружения и копирует в неё текущее значение. Каждая стрелочная функция замкнута
+            на свою <code>j</code>.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 250" role="img" aria-label="С var три колбэка ссылаются на одну переменную i, равную 4; с let каждый колбэк ссылается на свою j со значениями 1, 2, 3">
+            <text x="150" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#991b1b">var i</text>
+            <text x="470" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#166534">let j</text>
+
+            <rect x="20" y="34" width="110" height="30" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="75" y="54" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">колбэк 1</text>
+            <rect x="20" y="78" width="110" height="30" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="75" y="98" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">колбэк 2</text>
+            <rect x="20" y="122" width="110" height="30" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="75" y="142" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">колбэк 3</text>
+            <path d="M 132 49 L 196 85" fill="none" stroke="#ef4444" stroke-width="1.5"/>
+            <path d="M 132 93 L 196 93" fill="none" stroke="#ef4444" stroke-width="1.5"/>
+            <path d="M 132 137 L 196 101" fill="none" stroke="#ef4444" stroke-width="1.5"/>
+            <rect x="198" y="73" width="96" height="40" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="246" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#991b1b">i = 4</text>
+            <text x="157" y="178" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">одна переменная на весь цикл</text>
+
+            <rect x="340" y="34" width="110" height="30" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="395" y="54" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">колбэк 1</text>
+            <rect x="340" y="78" width="110" height="30" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="395" y="98" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">колбэк 2</text>
+            <rect x="340" y="122" width="110" height="30" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="395" y="142" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">колбэк 3</text>
+            <path d="M 452 49 L 498 49" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+            <path d="M 452 93 L 498 93" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+            <path d="M 452 137 L 498 137" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+            <rect x="500" y="34" width="96" height="30" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="548" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#166534">j = 1</text>
+            <rect x="500" y="78" width="96" height="30" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="548" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#166534">j = 2</text>
+            <rect x="500" y="122" width="96" height="30" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+            <text x="548" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#166534">j = 3</text>
+            <text x="468" y="178" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">на каждый проход — своя j</text>
+
+            <rect x="20" y="196" width="580" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="214" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Когда таймеры срабатывают, циклы уже закончились: i давно равна 4.</text>
+            <text x="310" y="232" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">С let каждый проход получает свою запись окружения — колбэк помнит свою j.</text>
+        </svg>
+        <figcaption>Функции в цикле помнят переменную; вопрос лишь в том, одна она или их три</figcaption>
+    </figure>
+
+    <p>В спецификации копированием переменной на каждый проход занимается операция
+    <code>CreatePerIterationEnvironment</code> — разберём её в курсе 3. Нам важен вывод:
+    <strong>в циклах с функциями внутри — только <code>let</code></strong>.</p>
+
+    <p>В старом коде, написанном до появления <code>let</code>, ту же задачу решали фабрикой —
+    теперь вы понимаете, почему это работает:</p>
+
+    <pre class="code js">function makeLogger(n) {
+  return () =&gt; console.log("фабрика:", n);   // своя n у каждого вызова
+}
+
+for (var k = 1; k &lt;= 3; k++) {
+  setTimeout(makeLogger(k), 0);
+}
+// фабрика: 1
+// фабрика: 2
+// фабрика: 3</pre>
+
+    <p>Каждый вызов <code>makeLogger(k)</code> скопировал текущее значение в параметр
+    <code>n</code> — в новую запись окружения. Это «фотография» из раздела 8.</p>
+
+    <h2 id="events">12. Замыкания в обработчиках событий</h2>
+
+    <p>На странице замыкания работают постоянно. Создадим кнопки тем, как в «Карточках», только
+    без <code>data-</code>атрибутов:</p>
+
+    <pre class="code js">const topics = ["школа", "еда", "дом"];
+const panel = document.createElement("div");
+document.body.append(panel);
+
+for (const topic of topics) {
+  const button = document.createElement("button");
+  button.textContent = topic;
+  button.addEventListener("click", () =&gt; {
+    console.log(`Выбрана тема: ${topic}`);
+  });
+  panel.append(button);
+}
+// нажали «еда»: Выбрана тема: еда</pre>
+
+    <p>Обработчик сработает когда-нибудь потом, когда цикл давно закончился. Но каждый помнит
+    свою <code>topic</code>: <code>for...of</code> с <code>const</code>, как и <code>for</code>
+    с <code>let</code>, создаёт на каждый проход новую переменную.</p>
+
+    <p>В «Карточках» на дне 34 мы сделали иначе — записали тему в <code>data-topic</code>
+    и поставили один слушатель на всю панель. Оба способа правильные:</p>
+
+    <table>
+        <thead><tr><th>Способ</th><th>Где хранится тема</th><th>Когда удобен</th></tr></thead>
+        <tbody>
+            <tr><td>замыкание</td><td>в записи окружения прохода цикла</td><td>кнопок немного, у каждой свои данные любого вида</td></tr>
+            <tr><td>делегирование и <code>dataset</code></td><td>в атрибуте разметки</td><td>кнопок много или они появляются и исчезают</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="memory">13. Цена замыкания: память</h2>
+
+    <p>Пока функция существует, существует и запись окружения, на которую она ссылается, —
+    со всем, что в ней лежит. Обычно это ровно то, что нужно: ради этого замыкания и пишут.
+    Но иногда функция держит больше, чем ей надо.</p>
+
+    <pre class="code js">function showCount(button, words) {
+  const count = words.length;             // нужно только число
+  button.addEventListener("click", () =&gt; {
+    console.log(`Слов: ${count}`);
+  });
+}</pre>
+
+    <p>Слушатель живёт, пока живёт кнопка. По спецификации он держит запись окружения вызова
+    <code>showCount</code> целиком, вместе с <code>words</code>. Движки умнее: обычно они хранят
+    только те переменные, которые упоминает хоть одна вложенная функция. Здесь функция
+    упоминает лишь <code>count</code>, и массив может уйти из памяти. Если бы внутри было
+    <code>words.length</code>, весь массив жил бы, пока жива кнопка.</p>
+
+    <div class="pro-tip">
+        Два практических правила. <strong>Берите в замыкание то, что нужно</strong>, — число,
+        а не весь массив ради его длины. И <strong>снимайте слушатели</strong>, которые больше
+        не нужны, — <code>removeEventListener</code> из дня 27: вместе со слушателем отпустится
+        и его окружение. Как браузер решает, что можно выбросить из памяти, — тема курса 3.
+    </div>
+
+    <h2 id="cards">14. «Карточки»: прогресс в замыкании</h2>
+
+    <p>Соберём всё вместе и ответим на второй вопрос из раздела 1. Спрячем выученные слова
+    «Карточек» в замыкание: пусть менять их можно только через четыре функции. Данные — те же
+    восемь слов из <code>words.json</code> дня 33, без переводов.</p>
+
+    <pre class="code js">const words = [
+  { id: 1, word: "book", topic: "школа" },
+  { id: 2, word: "teacher", topic: "школа" },
+  { id: 3, word: "lesson", topic: "школа" },
+  { id: 4, word: "bread", topic: "еда" },
+  { id: 5, word: "water", topic: "еда" },
+  { id: 6, word: "apple", topic: "еда" },
+  { id: 7, word: "house", topic: "дом" },
+  { id: 8, word: "window", topic: "дом" },
+];
+
+function makeProgress(saved) {
+  const learned = [...saved];          // своя копия: снаружи её не достать
+
+  return {
+    learn: (id) =&gt; {
+      if (!learned.includes(id)) {
+        learned.push(id);
+      }
+    },
+    has: (id) =&gt; learned.includes(id),
+    count: () =&gt; learned.length,
+    list: () =&gt; [...learned],          // наружу — только копия
+  };
+}
+
+function makeDeck(progress) {
+  return (topic) =&gt; words.filter((w) =&gt; !progress.has(w.id) &amp;&amp; (topic === "все" || w.topic === topic));
+}
+
+const progress = makeProgress([1, 2]);
+const deck = makeDeck(progress);
+
+console.log(deck("все").map((w) =&gt; w.word));
+progress.learn(4);
+progress.learn(4);                     // второй раз ничего не изменит
+console.log(deck("еда").map((w) =&gt; w.word));
+console.log(`Выучено: ${progress.count()} из ${words.length}`);
+
+const copy = progress.list();
+copy.push(5);                          // меняем копию, а не прогресс
+console.log(progress.list());
+console.log(typeof learned);</pre>
+
+    <div class="result-box">
+        (6) ['lesson', 'bread', 'water', 'apple', 'house', 'window']<br>
+        (2) ['water', 'apple']<br>
+        Выучено: 3 из 8<br>
+        (3) [1, 2, 4]<br>
+        undefined
+    </div>
+
+    <p>Разберём, что изменилось по сравнению с «Карточками» Essentials.</p>
+
+    <p><strong><code>learned</code> больше не глобальная.</strong> Последняя строка это
+    доказывает: на верхнем уровне скрипта такого имени нет. Массив живёт в записи окружения
+    вызова <code>makeProgress</code>, и путь к нему — только через <code>learn</code>,
+    <code>has</code>, <code>count</code> и <code>list</code>. Строка <code>learned = []</code>
+    по ошибке где-то в программе теперь ничего не сломает — она создаст новую, ни с чем
+    не связанную переменную.</p>
+
+    <p><strong>Повтор не попадает в прогресс.</strong> <code>learn(4)</code> вызвана дважды,
+    а выучено три слова, не четыре: проверка <code>includes</code> внутри сработала оба раза —
+    первый раз пропустила, второй остановила. На дне 34 повтор был невозможен потому, что
+    выученное слово сразу уходит из колоды; теперь прогресс защищает себя сам, кто бы ни вызвал
+    <code>learn</code>.</p>
+
+    <p><strong>Наружу — только копия.</strong> <code>copy.push(5)</code> не изменил прогресс:
+    <code>list</code> отдаёт новый массив. Это правило из раздела 10.</p>
+
+    <p><strong><code>makeDeck</code> — фабрика.</strong> Колода больше не берёт
+    <code>learned</code> и <code>topic</code> из глобальных переменных: прогресс она получила
+    при создании, тему — параметром. Это правило дня 12 — «всё нужное функция получает через
+    параметры» — доведённое до конца с помощью замыкания.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Создайте второй прогресс <code>makeProgress([])</code>,
+        вызовите у него <code>learn(7)</code> и проверьте <code>count()</code> у обоих.
+        Объясните, почему они не мешают друг другу, словами раздела 7.
+        <br><br>
+        <strong>Второй.</strong> Замените в <code>list</code> копию на сам массив:
+        <code>list: () =&gt; learned</code>. Посмотрите, что теперь напечатает
+        <code>progress.list()</code> после <code>copy.push(5)</code>, и найдите в выводе,
+        какое правило нарушилось.
+        <br><br>
+        <strong>Третий.</strong> Уберите копирование в первой строке
+        <code>makeProgress</code>: <code>const learned = saved;</code>. Создайте прогресс
+        из массива <code>start = [1, 2]</code>, выучите слово 4 и посмотрите на
+        <code>start</code>. Почему изменился массив, который вы передали?
+    </div>
+
+    <h2 id="next">15. Что будет завтра</h2>
+
+    <p>Сегодня методы объекта <code>progress</code> добирались до данных через замыкание.
+    Есть второй способ, которым методы находят свой объект, — слово <code>this</code>.
+    Завтра, на дне 2, разберём, чему оно равно в разных вызовах, почему теряется, когда метод
+    передают в <code>setTimeout</code> или обработчик события, и как его закрепить
+    с помощью <code>call</code>, <code>apply</code> и <code>bind</code>.</p>
+
+    <p>А на дне 3 вернёмся к верхней записи цепочки — глобальной: узнаем, что такое
+    глобальный объект, откуда взялась <code>name</code> из раздела 4 и что меняет строгий
+    режим.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Closures">Guide: Closures</a></td><td>глава учебника MDN: лексическая область, замыкания, фабрики, спрятанные данные, ловушка цикла</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-environment-records">ECMA-262, 9.1 Environment Records</a></td><td>что такое запись окружения, поле <code>[[OuterEnv]]</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-the-environment-record-type-hierarchy">ECMA-262, 9.1.1 The Environment Record Type Hierarchy</a></td><td>пять видов записей и их общие методы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-environment-record-operations">ECMA-262, 9.1.2 Environment Record Operations</a></td><td><code>GetIdentifierReference</code> — поиск имени; создание записей</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// область видимости: глобальная, функции, блока (только let/const), модуля (день 30)
+// ЛЕКСИЧЕСКАЯ: что видит функция — решает место в тексте, а не место вызова
+
+// поиск имени: своя область → внешняя по тексту → … → глобальная → ReferenceError
+// первая находка побеждает (затенение)
+
+// ЗАМЫКАНИЕ = функция + ссылка на окружение, где её создали ([[Environment]])
+function makeCounter() {
+  let count = 0;             // у каждого вызова — своя count
+  return () =&gt; ++count;
+}
+const a = makeCounter();     // a() 1, 2, 3 …
+const b = makeCounter();     // b() начинает с 1 — независимо от a
+
+// помнит ПЕРЕМЕННУЮ, а не значение; «фотография» — через параметр
+const remember = (value) =&gt; () =&gt; value;
+
+// фабрика: параметры «запекаются» в созданную функцию
+function makeRangeCheck(min, max) { return (n) =&gt; n &gt;= min &amp;&amp; n &lt;= max; }
+const isMark = makeRangeCheck(2, 5);   // [5, 9, 3].filter(isMark) — [5, 3]
+
+// спрятанные данные: наружу только функции и КОПИИ
+// list: () =&gt; [...items]
+
+// цикл с функциями внутри — только let (своя переменная на каждый проход)
+
+// спецификация: 9.1 записи окружения, [[OuterEnv]]; 9.1.2 GetIdentifierReference</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Функция <code>showCity</code> объявлена на верхнем уровне, а вызвана внутри
+                функции, где есть своя <code>city</code>. Какую <code>city</code> она увидит?
+                <details class="answer"><summary>Ответ</summary>
+                    Верхнего уровня. Область видимости лексическая: что видит функция, решает
+                    место, где она написана, а не место вызова. Переменная вызывающей функции
+                    ей не видна.
+                </details>
+            </li>
+            <li>Что такое замыкание?
+                <details class="answer"><summary>Ответ</summary>
+                    Функция вместе со ссылкой на окружение, в котором она создана. В спецификации
+                    эта ссылка — внутренний слот <code>[[Environment]]</code>. Замыкание есть
+                    у каждой функции; заметным оно становится, когда функция переживает вызов,
+                    внутри которого родилась.
+                </details>
+            </li>
+            <li>Почему два счётчика из <code>makeCounter()</code> считают независимо?
+                <details class="answer"><summary>Ответ</summary>
+                    Каждый вызов функции создаёт новую запись окружения. У каждого счётчика своя
+                    <code>count</code> — в записи своего вызова. Если вынести <code>count</code>
+                    за пределы фабрики, счётчик станет общим.
+                </details>
+            </li>
+            <li>Почему цикл с <code>var</code> и <code>setTimeout</code> печатает 4, 4, 4,
+                а с <code>let</code> — 1, 2, 3?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>var</code> — одна переменная на весь цикл, и к моменту срабатывания
+                    таймеров она равна 4. Цикл с <code>let</code> создаёт новую переменную
+                    на каждый проход, и каждый колбэк помнит свою.
+                </details>
+            </li>
+            <li>Что делает <code>GetIdentifierReference</code> из раздела 9.1.2 спецификации?
+                <details class="answer"><summary>Ответ</summary>
+                    Ищет имя: если запись — <code>null</code>, имя не найдено; если у записи
+                    есть привязка с этим именем — нашли; иначе повторяет поиск во внешней записи
+                    <code>[[OuterEnv]]</code>. Это и есть цепочка областей видимости.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Closures">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

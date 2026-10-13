@@ -4,6 +4,8 @@
 // Section 14: the "Report card" program is taken from the page and run, its output is compared with the result-box;
 // the numbers must be the same as in the result-box of day 12, and the word that left the line is named in the text;
 // the comment above `average` must describe what the code does (a line break after the arrow).
+// Section 11 (fixed 13.10.2026): the object with sayNormal and sayArrow runs as a page <script>; both results must be
+// the quoted values of their comments — the arrow gets the window, whose name is an empty string, not undefined.
 //   node tools/runs/essentials/day-13.cjs
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
@@ -49,6 +51,18 @@ const WORD = { 'ru/': 'оценок', 'en/': 'marks' };
     console.log(`section 4: ${m[1]} → ${message}, column ${err[1]} is "${name}"`);
     check(message === m[2], `the message on the page is the one Chrome gives: ${m[2]}`);
     check(s4.explain.includes(`<code>${name}</code>`) && !/не объявлена|not declared/.test(s4.explain), `the explanation blames ${name}: ${s4.explain.replace(/<[^>]+>/g, '').slice(-90)}`);
+
+    // section 11: the arrow method reads this.name of the window
+    const s11 = await p.evaluate(() => [...document.querySelectorAll('#this ~ pre.code')]
+      .map((x) => x.textContent).find((t) => t.includes('sayArrow') && t.includes('${this.name}')));
+    const said = (key) => s11.split('\n').find((l) => l.includes(key)).match(/\/\/ ("[^"]*")/)[1];
+    const probe11 = await b.newPage();
+    await probe11.goto('data:text/html,' + encodeURIComponent('<meta charset="utf-8"><script>\n' + s11
+      + '\nwindow.__r = [JSON.stringify(student.sayNormal()), JSON.stringify(student.sayArrow())];\n</script>'));
+    const got11 = await probe11.evaluate(() => window.__r);
+    await probe11.close();
+    check(got11[0] === said('sayNormal'), `section 11: sayNormal() = ${got11[0]}, comment ${said('sayNormal')}`);
+    check(got11[1] === said('sayArrow'), `section 11: sayArrow() = ${got11[1]}, comment ${said('sayArrow')}`);
 
     const r13 = await report('13', sub);
     const r12 = await report('12', sub);

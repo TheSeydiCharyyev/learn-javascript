@@ -3,24 +3,32 @@
 // (CSS ::before) on a translated page. Also prints the word count of each page.
 //
 //   NODE_PATH=C:/Users/seydi/goose/ui/node_modules node tools/check-pages.cjs
-//   NODE_PATH=... node tools/check-pages.cjs 3        only day 3
+//   NODE_PATH=... node tools/check-pages.cjs 3                 only day 3 of essentials
+//   NODE_PATH=... node tools/check-pages.cjs intermediate 3    only day 3 of course 2
+// The course folder is optional and defaults to essentials.
 // Playwright comes from the goose folder; the browser is the installed Chrome.
 const { chromium } = require('playwright');
 const path = require('node:path');
 const fs = require('node:fs');
 
 const ROOT = path.join(__dirname, '..');
-const only = process.argv.slice(2).map(Number);
-const days = fs.readdirSync(path.join(ROOT, 'essentials')).filter((d) => /^day-\d+$/.test(d))
+const COURSES = ['essentials', 'intermediate', 'advanced', 'web-apis'];
+const args = process.argv.slice(2);
+const wrong = args.filter((a) => !COURSES.includes(a) && !/^\d+$/.test(a));
+if (wrong.length) { console.log(`unknown argument: ${wrong.join(' ')} (a course folder: ${COURSES.join(', ')}, or day numbers)`); process.exit(1); }
+const COURSE = args.find((a) => COURSES.includes(a)) ?? 'essentials';
+const only = args.filter((a) => /^\d+$/.test(a)).map(Number);
+const days = (fs.existsSync(path.join(ROOT, COURSE)) ? fs.readdirSync(path.join(ROOT, COURSE)) : [])
+  .filter((d) => /^day-\d+$/.test(d))
   .filter((d) => !only.length || only.includes(Number(d.slice(4))));
 const PAGES = days.flatMap((d) => ['', 'en/']
-  .filter((sub) => fs.existsSync(path.join(ROOT, 'essentials', d, sub)))
+  .filter((sub) => fs.existsSync(path.join(ROOT, COURSE, d, sub)))
   .flatMap((sub) => ['lecture', 'student', 'tasks'].map((f) => `${d}/${sub}${f}.html`)));
 const SIZES = [[360, 780], [414, 800], [768, 1024], [1280, 900], [640, 360]];
-const URL = 'file:///' + path.join(ROOT, 'essentials').replace(/\\/g, '/') + '/';
+const URL = 'file:///' + path.join(ROOT, COURSE).replace(/\\/g, '/') + '/';
 
 (async () => {
-  if (!PAGES.length) { console.log('no day folders found'); process.exit(1); }
+  if (!PAGES.length) { console.log(`no day folders found in ${COURSE}/`); process.exit(1); }
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const problems = [];
   for (const [w, h] of SIZES) {

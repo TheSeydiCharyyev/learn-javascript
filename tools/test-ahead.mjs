@@ -14,8 +14,8 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ahead-'));
 const page = (body) => `<html><body><div class="container">${body}</div></body></html>`;
 const js = (code) => `<pre class="code js">${code}</pre>`;
 
-const write = (day, body) => {
-  const dir = path.join(root, 'essentials', `day-${String(day).padStart(2, '0')}`);
+const write = (course, day, body) => {
+  const dir = path.join(root, course, `day-${String(day).padStart(2, '0')}`);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'lecture.html'), page(body));
 };
@@ -23,10 +23,12 @@ const run = (day) => {
   const r = spawnSync('node', [path.join(TOOLS, 'check-ahead.mjs'), '--root', root, String(day)], { encoding: 'utf8' });
   return { out: r.stdout, code: r.status };
 };
-const only = (day) => {
-  fs.rmSync(path.join(root, 'essentials'), { recursive: true, force: true });
-  return (body) => { write(day, body); return run(day); };
+// the tree holds exactly one day of one course
+const only = (day, course = 'essentials') => {
+  for (const c of ['essentials', 'intermediate']) fs.rmSync(path.join(root, c), { recursive: true, force: true });
+  return (body) => { write(course, day, body); return run(day); };
 };
+const course2 = (day) => only(day, 'intermediate');
 
 try {
   // 1. a construct from a later day is found, and the day fails
@@ -102,6 +104,40 @@ try {
   // 16. --table prints the whole table
   const table = spawnSync('node', [path.join(TOOLS, 'check-ahead.mjs'), '--table'], { encoding: 'utf8' });
   check('--table печатает все строки', table.stdout.split('\n').length >= rows.length && table.status === 0);
+
+  // 17. course 2: what course 1 taught is known from day 1, the day numbers are those of course 2
+  r = course2(3)(js('const n = Math.round(4.6);\nconst city = user?.city;\nif (e instanceof TypeError) { }'));
+  check('курс 2: конструкции курса 1 разрешены с дня 1', r.code === 0, r.out.split('\n')[0]);
+  r = course2(5)(js('class User { }'));
+  check('курс 2: class на дне 5 пойман с днём 8', r.out.includes('день 8') && r.code === 1, r.out.split('\n')[1]);
+  r = course2(8)(js('class User { }'));
+  check('курс 2: class на дне 8 разрешён', r.code === 0, r.out.split('\n')[0]);
+  r = course2(10)(js('const key = Symbol("id");'));
+  check('курс 2: Symbol на дне 10 пойман', r.out.includes('день 11') && r.code === 1);
+  r = course2(11)(js('const key = Symbol("id");'));
+  check('курс 2: Symbol на дне 11 разрешён', r.code === 0, r.out.split('\n')[0]);
+
+  // 18. course 2: day2 wins over a course 1 day — Object.create was only an error sample in course 1
+  r = course2(6)(js('const dict = Object.create(null);'));
+  check('курс 2: Object.create на дне 6 пойман', r.out.includes('день 7') && r.code === 1);
+  r = only(12)(js('Object.create();'));
+  check('курс 1: Object.create на дне 12 разрешён', r.code === 0, r.out.split('\n')[0]);
+
+  // 19. course 2: course 3 is never allowed; the excusing comment names a day of course 2
+  r = course2(31)(js('const p = new Proxy({}, {});'));
+  check('курс 2: Proxy пойман как курс 3', r.out.includes('курс 3') && r.code === 1);
+  r = course2(5)(js('class User { }   // день 8'));
+  check('курс 2: пометка «// день 8» снимает вопрос', r.code === 0, r.out.split('\n')[0]);
+  r = course2(5)(js('class User { }   // день 6'));
+  check('курс 2: пометка на день раньше разбора не снимает', r.code === 1);
+
+  // 20. course 2 has no tour days: day 1 is checked like any other
+  r = course2(1)(js('class User { }'));
+  check('курс 2: день 1 не SKIP', !r.out.includes('SKIP') && r.code === 1);
+
+  // 21. every row of course 2 says on which day of course 2 it is taught
+  const noDay2 = src.split('\n').filter((l) => /^\s*\{ id: .*where: 'курс 2'/.test(l) && !/day2: \d+/.test(l));
+  check('таблица: у каждой строки курса 2 есть day2', noDay2.length === 0, noDay2.join(' | '));
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

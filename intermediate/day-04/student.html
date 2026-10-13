@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 4 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 4</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 4. Функция как объект: свойства и arguments</h1>
+    <p class="subtitle">Выжимка лекции: <code>name</code>, <code>length</code>, свои свойства функции,
+    <code>arguments</code>, конструктор <code>Function</code>, обёртки <code>once</code> и <code>memo</code>.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Функция</strong> — объект, который можно вызвать. У неё есть ссылка на окружение
+        (день 1), собственные свойства <code>name</code> и <code>length</code>, общие методы
+        <code>call</code>, <code>apply</code>, <code>bind</code>, <code>toString</code> — и можно
+        добавить свои свойства.
+    </div>
+
+    <h2>name и length</h2>
+
+    <table>
+        <thead><tr><th>Функция</th><th><code>name</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>function greet() {}</code></td><td><code>"greet"</code></td></tr>
+            <tr><td><code>const sum = () =&gt; 1</code></td><td><code>"sum"</code> — из переменной</td></tr>
+            <tr><td><code>{ show() {} }</code></td><td><code>"show"</code> — из ключа</td></tr>
+            <tr><td><code>greet.bind(null)</code></td><td><code>"bound greet"</code></td></tr>
+            <tr><td><code>new Function(...)</code></td><td><code>"anonymous"</code></td></tr>
+            <tr><td>в массиве, аргументом, из <code>return</code></td><td><code>""</code></td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">(function (a, b) {}).length;        // 2
+(function (a, b = 1, c) {}).length; // 1 — до первого умолчания
+(function (a, ...rest) {}).length;  // 1 — остаточный не считается
+(function ({ a, b }) {}).length;    // 1 — деструктуризация — один параметр</pre>
+
+    <div class="remember">
+        <code>name</code> и <code>length</code> — <strong>только для чтения</strong> (раздел 20.2.4):
+        обычный режим молчит, строгий бросает <code>TypeError</code>. В <code>Object.keys</code>
+        их не видно. <code>length</code> — сколько объявлено, <code>arguments.length</code> — сколько передали.
+    </div>
+
+    <h2>Свои свойства</h2>
+
+    <pre class="code js">function greet(student) {
+  greet.calls = greet.calls + 1;
+  return `Салам, ${student}!`;
+}
+greet.calls = 0;</pre>
+
+    <p>Удобно для отладки и пометок. Но свойство видно и меняется снаружи — данные, которые надо
+    защитить, держат в замыкании.</p>
+
+    <h2>arguments</h2>
+
+    <div class="key-point">
+        Похож на массив (номера и <code>length</code>), перебирается в <code>for...of</code>, свой
+        на каждый вызов. В массив: <code>[...arguments]</code>, <code>Array.from(arguments)</code>,
+        <code>[].slice.call(arguments)</code>. В новом коде — <code>...rest</code>.
+    </div>
+
+    <table>
+        <thead><tr><th></th><th>Обычный режим</th><th>Строгий режим</th></tr></thead>
+        <tbody>
+            <tr><td>связь с параметрами</td><td>есть, если параметры простые</td><td>нет</td></tr>
+            <tr><td><code>arguments.callee</code>, <code>f.caller</code></td><td>работают (устарели)</td><td><code>TypeError</code></td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">function outer() {
+  const inner = () =&gt; arguments.length;   // стрелочная берёт arguments у outer
+  return inner(1, 2, 3);
+}
+outer(9);   // 1</pre>
+
+    <h2>Function и toString</h2>
+
+    <div class="note-box">
+        <code>new Function("a", "b", "return a + b")</code> — функция из строк. Её окружение —
+        всегда глобальное (замыкания нет), строка становится кодом (опасно), часто запрещена
+        настройками сайта. <strong>Не пишем.</strong>
+        <br><code>return</code> на верхнем уровне скрипта — <code>SyntaxError: Illegal return statement</code>.
+        <br><code>toString()</code> — исходник целиком, с комментариями; у встроенных и привязанных —
+        <code>[native code]</code>. Для отладки — да, для логики — нет.
+    </div>
+
+    <h2>Обёртки</h2>
+
+    <pre class="code js">function once(fn) {
+  let done = false;
+  let result;
+  return function (...args) {          // обычная функция: нужен свой this
+    if (!done) {
+      done = true;
+      result = fn.apply(this, args);   // передать this и все аргументы
+    }
+    return result;
+  };
+}
+
+function memo(fn) {
+  const cache = {};                    // ключи — строки! Map — день 14
+  return function (key) {
+    if (!Object.hasOwn(cache, key)) {
+      cache[key] = fn.call(this, key);
+    }
+    return cache[key];
+  };
+}</pre>
+
+    <div class="remember">
+        Обёртка = замыкание для состояния + <strong>обычная</strong> <code>function</code> +
+        <code>fn.apply(this, args)</code>. Обёртка — другая функция: своё <code>name</code>
+        (обычно пустое) и свой <code>length</code>.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём итоговом проекте Essentials функцию, которую вызывают много раз
+                с одними и теми же данными. Оберните её в <code>memo</code> и посчитайте свойством
+                функции, сколько вызовов стало настоящими.</li>
+            <li>Запишите в таблицу <code>name</code> и <code>length</code> пяти функций своего проекта
+                и проверьте в консоли.</li>
+            <li>Прочитайте на MDN страницу
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments">arguments</a>
+                и выпишите, чем он отличается от массива, кроме методов.</li>
+            <li>Откройте раздел 20.2 спецификации и найдите в 20.2.3 два свойства, которых не было
+                в лекции. Запишите их названия и угадайте по ним, с какой темой будущих дней они связаны.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

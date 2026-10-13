@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 4 — Функция как объект: свойства и arguments</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+        h3 { color: #075985; }
+        .step-number { background: #0ea5e9; }
+        .toc a { color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 4</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 4 &bull; урок 1</span>
+        <h1>Функция как объект: свойства и arguments</h1>
+        <p>Курс 2, Intermediate. Модуль «Области видимости, замыкания и this» — четвёртый, последний день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>предсказывать <code>name</code> и <code>length</code> любой функции, в том числе привязанной
+                и созданной из строки;</li>
+            <li>заводить у функции свои свойства и понимать, чем это отличается от замыкания;</li>
+            <li>объяснять, как устроен <code>arguments</code>, чем он различается в двух режимах
+                и откуда его видят стрелочные функции;</li>
+            <li>понимать, почему конструктор <code>Function</code> и разбор <code>toString</code> —
+                плохие идеи;</li>
+            <li>писать обёртки <code>once</code> и <code>memo</code> на замыкании и <code>apply</code>.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#object">Функция — тоже объект</a></li>
+            <li><a href="#name">name: как функция получает имя</a></li>
+            <li><a href="#length">length: сколько параметров ждёт</a></li>
+            <li><a href="#readonly">Только для чтения</a></li>
+            <li><a href="#own">Свои свойства функции</a></li>
+            <li><a href="#arguments">arguments изнутри</a></li>
+            <li><a href="#modes">arguments в двух режимах</a></li>
+            <li><a href="#arrow">Стрелочные функции и arguments</a></li>
+            <li><a href="#constructor">Конструктор Function</a></li>
+            <li><a href="#tostring">toString: исходный текст</a></li>
+            <li><a href="#spec">Раздел 20.2 спецификации</a></li>
+            <li><a href="#once">Обёртка once</a></li>
+            <li><a href="#memo">Обёртка memo</a></li>
+            <li><a href="#cards">«Карточки»: память и одноразовый старт</a></li>
+            <li><a href="#module">Итоги модуля и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="object">1. Функция — тоже объект</h2>
+
+    <p>На дне 12 Essentials мы выяснили: функция — это значение. Её можно положить в переменную,
+    в массив, передать аргументом. Сегодня следующий шаг: функция — это <strong>объект</strong>.
+    Особый — его можно вызвать, — но во всём остальном такой же, как объекты дня 21:
+    у него есть свойства, их можно читать и даже добавлять свои.</p>
+
+    <pre class="code js">function greet(student) {
+  return `Салам, ${student}!`;
+}
+
+console.log(typeof greet);             // function — так typeof отмечает объекты, которые можно вызвать
+console.log(greet instanceof Object);  // true — но это объект
+console.log(greet.name, greet.length); // greet 1</pre>
+
+    <p>Три дня этого модуля мы трогали функцию с разных сторон: на дне 1 — её
+    <code>[[Environment]]</code>, ссылку на окружение; на дне 2 — методы <code>call</code>,
+    <code>apply</code> и <code>bind</code>; вчера — то, как режим меняет её поведение. Сегодня
+    соберём функцию целиком, как объект.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 250" role="img" aria-label="Функция-объект: её можно вызвать; у неё есть внутренний слот Environment, свойства name и length, свои свойства и методы, полученные от Function.prototype">
+            <rect x="200" y="14" width="220" height="176" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="310" y="38" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#92400e">функция greet</text>
+            <text x="216" y="64" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#92400e">можно вызвать: greet("Аман")</text>
+            <line x1="216" y1="76" x2="404" y2="76" stroke="#fcd34d" stroke-width="1"/>
+            <text x="216" y="96" font-family="Consolas, monospace" font-size="11.5" fill="#1d4ed8">[[Environment]]</text>
+            <text x="216" y="116" font-family="Consolas, monospace" font-size="11.5" fill="#334155">name = "greet"</text>
+            <text x="216" y="136" font-family="Consolas, monospace" font-size="11.5" fill="#334155">length = 1</text>
+            <text x="216" y="156" font-family="Consolas, monospace" font-size="11.5" fill="#166534">calls = 0</text>
+            <text x="216" y="176" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">и prototype — день 7</text>
+
+            <path d="M 198 92 L 150 92" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <rect x="14" y="70" width="134" height="44" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="81" y="88" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#1d4ed8">окружение, где</text>
+            <text x="81" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#1d4ed8">создана (день 1)</text>
+
+            <path d="M 198 152 L 150 152" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+            <rect x="14" y="132" width="134" height="40" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+            <text x="81" y="156" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#166534">своё свойство</text>
+
+            <path d="M 422 112 L 470 112" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <rect x="472" y="64" width="134" height="96" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="539" y="84" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#334155">общие методы</text>
+            <text x="488" y="104" font-family="Consolas, monospace" font-size="11" fill="#334155">call  apply</text>
+            <text x="488" y="122" font-family="Consolas, monospace" font-size="11" fill="#334155">bind  toString</text>
+            <text x="539" y="146" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">у всех функций</text>
+
+            <rect x="14" y="204" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="227" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Функция — объект, который можно вызвать: свойства, окружение, общие методы.</text>
+        </svg>
+        <figcaption>Всё, что модуль I1 узнал о функции, на одной схеме</figcaption>
+    </figure>
+
+    <p>Методы <code>call</code>, <code>apply</code>, <code>bind</code> и <code>toString</code> не лежат
+    в каждой функции отдельно: они общие и берутся из одного места, которое называется
+    <code>Function.prototype</code>. Как один объект «одалживает» свойства у другого — тема дня 7;
+    пока достаточно знать, что такое общее хранилище есть.</p>
+
+    <h2 id="name">2. name: как функция получает имя</h2>
+
+    <p>Свойство <code>name</code> — имя функции. У объявления всё просто: какое написали, такое
+    и будет. Интереснее у функций, которые пишут без имени: язык <strong>выводит</strong> имя из того
+    места, куда функцию положили.</p>
+
+    <pre class="code js">function greet() {}
+const sum = function () {};
+const add = () =&gt; 1;
+const named = function inner() {};
+const quiz = { show() {}, go: function () {} };
+
+console.log(greet.name, sum.name, add.name, named.name);   // greet sum add inner
+console.log(quiz.show.name, quiz.go.name);                 // show go
+console.log(greet.bind(null).name);                        // bound greet
+console.log(JSON.stringify([() =&gt; 1][0].name));           // "" — положили в массив, имени нет</pre>
+
+    <table>
+        <thead><tr><th>Как создана</th><th><code>name</code></th></tr></thead>
+        <tbody>
+            <tr><td>объявление <code>function greet() {}</code></td><td><code>"greet"</code></td></tr>
+            <tr><td>выражение или стрелка в переменной</td><td>имя переменной</td></tr>
+            <tr><td>выражение со своим именем <code>function inner() {}</code></td><td>своё имя, <code>"inner"</code></td></tr>
+            <tr><td>метод или функция в свойстве объекта</td><td>ключ свойства</td></tr>
+            <tr><td>результат <code>bind</code> (день 2)</td><td><code>"bound "</code> + имя исходной</td></tr>
+            <tr><td>конструктор <code>Function</code> (раздел 9)</td><td><code>"anonymous"</code></td></tr>
+            <tr><td>без всякого места: в массиве, аргументом</td><td>пустая строка</td></tr>
+        </tbody>
+    </table>
+
+    <p>Зачем это нужно? Имя видно в стеке вызовов из дня 11 и в консоли. Ошибка внутри функции
+    с именем <code>deck</code> читается сразу: в стеке стоит <code>at deck</code>. У безымянной
+    функции в стеке остаётся только адрес — файл и номер строки. Поэтому функции, которые передают
+    колбэком, полезно класть в переменную с понятным именем, а не писать прямо в вызове.</p>
+
+    <div class="pro-tip">
+        Имя выражения <code>function inner() {}</code> из четвёртой строки примера видно и
+        <strong>внутри</strong> самой функции — так она может вызвать себя, даже если её положили
+        в переменную с другим именем. Снаружи <code>inner</code> не существует. Это удобно для
+        рекурсии из дня 12 Essentials в функциях-выражениях.
+    </div>
+
+    <h2 id="length">3. length: сколько параметров ждёт</h2>
+
+    <p><code>length</code> — число параметров, которые функция объявила. На дне 12 Essentials это было
+    просто «число параметров». Точное правило: считаются параметры <strong>до первого</strong>
+    со значением по умолчанию или остаточного.</p>
+
+    <pre class="code js">const samples = [
+  function (a, b) {},
+  function (a, b = 1) {},
+  function (a = 1, b) {},
+  function (a, ...rest) {},
+  function (...rest) {},
+  function ({ a, b }) {},
+  function (a, b, c) {}.bind(null, 1),
+];
+
+console.log(samples.map((f) =&gt; f.length));   // (7) [2, 1, 0, 1, 0, 1, 2]</pre>
+
+    <table>
+        <thead><tr><th>Параметры</th><th><code>length</code></th><th>Почему</th></tr></thead>
+        <tbody>
+            <tr><td><code>(a, b)</code></td><td>2</td><td>оба обязательные</td></tr>
+            <tr><td><code>(a, b = 1)</code></td><td>1</td><td>счёт остановился на умолчании</td></tr>
+            <tr><td><code>(a = 1, b)</code></td><td>0</td><td>умолчание первое — до него ничего</td></tr>
+            <tr><td><code>(a, ...rest)</code></td><td>1</td><td>остаточный не считается</td></tr>
+            <tr><td><code>({ a, b })</code></td><td>1</td><td>деструктуризация — один параметр</td></tr>
+            <tr><td><code>bind(null, 1)</code> от трёх</td><td>2</td><td>один закреплён, осталось два (день 2)</td></tr>
+        </tbody>
+    </table>
+
+    <p>Не путайте два счёта: <code>length</code> функции — сколько параметров она
+    <strong>объявила</strong>, <code>arguments.length</code> внутри — сколько аргументов ей
+    <strong>передали</strong> в этот раз. Язык их не сравнивает (день 12 Essentials), сравнивать
+    можно самому.</p>
+
+    <p>Где <code>length</code> пригождается в настоящем коде: библиотеки иногда смотрят на него, чтобы
+    решить, как вызывать переданную функцию. Например, программа, запускающая проверки, может давать
+    второй аргумент только тем проверкам, которые его объявили:</p>
+
+    <pre class="code js">function run(check) {
+  if (check.length &gt; 1) {
+    return check("слово", "подробно");   // проверка просит второй аргумент
+  }
+  return check("слово");
+}
+
+console.log(run((word) =&gt; `проверено: ${word}`));                   // проверено: слово
+console.log(run((word, mode) =&gt; `проверено ${mode}: ${word}`));     // проверено подробно: слово</pre>
+
+    <h2 id="readonly">4. Только для чтения</h2>
+
+    <p>Попробуем переименовать функцию:</p>
+
+    <pre class="code js">function greet() {}
+greet.name = "hello";
+console.log(greet.name);   // greet — запись молча не сработала</pre>
+
+    <p>Узнаёте вчерашнюю тишину? <code>name</code> и <code>length</code> — свойства <strong>только
+    для чтения</strong>. В обычном режиме запись в них молча пропадает, а в строгом — честно падает:</p>
+
+    <pre class="code js">"use strict";
+function greet() {}
+greet.name = "hello";
+// TypeError: Cannot assign to read only property 'name' of function 'function greet() {}'</pre>
+
+    <p>Это строчка из таблицы вчерашнего раздела 3 — «запись в свойство только для чтения». Спецификация
+    описывает оба свойства в разделе 20.2.4 и задаёт им три признака: записывать нельзя, при переборе
+    не показываются, а удалить или переопределить — можно. Что такое эти признаки и как их увидеть
+    в коде, разберём завтра, на дне 5. А пока видно второе следствие: <code>Object.keys(greet)</code>
+    — пустой массив, хотя свойства у функции есть.</p>
+
+    <h2 id="own">5. Свои свойства функции</h2>
+
+    <p>Раз функция — объект, ей можно добавить своё свойство. Классический пример — счётчик вызовов:</p>
+
+    <pre class="code js">function greet(student) {
+  greet.calls = greet.calls + 1;
+  return `Салам, ${student}!`;
+}
+greet.calls = 0;
+
+greet("Аман");
+greet("Мерет");
+console.log(greet.calls);                // 2
+console.log(Object.keys(greet));         // ['calls'] — а name и length не видны</pre>
+
+    <p>Свойство живёт на самой функции, и функция обращается к нему по своему имени. Удобно для
+    мелочей: сколько раз вызвали, когда последний раз, с какой версией работает.</p>
+
+    <p>Но вспомните вчерашнюю таблицу «замыкание или <code>this</code>»: у свойства те же
+    недостатки, что у свойства объекта. Его видно и можно испортить снаружи —
+    <code>greet.calls = 100</code>. Счётчик в замыкании из дня 1 снаружи недоступен.</p>
+
+    <table>
+        <thead><tr><th></th><th>Свойство функции</th><th>Замыкание (день 1)</th></tr></thead>
+        <tbody>
+            <tr><td>видно снаружи</td><td>да: <code>greet.calls</code></td><td>нет</td></tr>
+            <tr><td>можно сбросить снаружи</td><td>да, любым кодом</td><td>только если фабрика дала функцию для этого</td></tr>
+            <tr><td>нужна фабрика</td><td>нет — функция одна</td><td>да — счётчик на каждый вызов фабрики</td></tr>
+            <tr><td>когда удобно</td><td>отладка, служебные пометки</td><td>данные, которые надо защитить</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="arguments">6. arguments изнутри</h2>
+
+    <p>На днях 13 и 14 Essentials мы встретили <code>arguments</code> и решили, что в новом коде его
+    заменяет <code>...rest</code>. Но в чужом коде вы встретите его много раз, и устроен он интереснее,
+    чем кажется. Соберём, что это за объект:</p>
+
+    <pre class="code js">function show() {
+  console.log(typeof arguments, Array.isArray(arguments));   // object false
+  console.log(arguments.length, arguments[0], arguments[5]); // 2 a undefined
+  for (const value of arguments) {
+    console.log("перебор:", value);                          // перебор: a, перебор: b
+  }
+}
+
+show("a", "b");</pre>
+
+    <ul>
+        <li><strong>Объект, похожий на массив.</strong> У него есть номера <code>0</code>,
+            <code>1</code>… и <code>length</code>, но нет методов массива — вспомните
+            <code>arguments.sort is not a function</code> из дня 14.</li>
+        <li><strong>Перебираемый.</strong> <code>for...of</code> по нему работает. Что делает
+            объект перебираемым, узнаем на дне 11.</li>
+        <li><strong>Свой на каждый вызов.</strong> Как и запись окружения, <code>arguments</code>
+            создаётся при каждом вызове заново и хранит то, что передали именно в этот раз.</li>
+    </ul>
+
+    <p>Превратить его в настоящий массив можно тремя способами — от нового к старому:</p>
+
+    <pre class="code js">function toArray() {
+  const a = [...arguments];               // spread, день 22
+  const b = Array.from(arguments);        // Array.from, день 19
+  const c = [].slice.call(arguments);     // заимствование, день 2
+  return [a, b, c];
+}
+
+console.log(toArray(5, 4));   // (3) [Array(2), Array(2), Array(2)]</pre>
+
+    <p>Третий способ вы видели на дне 14 в виде <code>Array.prototype.slice.call(arguments)</code> —
+    с пометкой «курс 2». Это то же заимствование метода, что на дне 2, только метод <code>slice</code>
+    берут не у пустого массива, а прямо из общего хранилища методов массивов — того самого
+    <code>.prototype</code>, который разберём на дне 7.</p>
+
+    <h2 id="modes">7. arguments в двух режимах</h2>
+
+    <p>Вчера, в разделе 6, мы увидели главное различие: в обычном режиме <code>arguments</code>
+    <strong>связан</strong> с параметрами — поменяли одно, поменялось другое. В строгом это просто копия.
+    Связь работает в обе стороны:</p>
+
+    <pre class="code js">function sloppy(a) {
+  arguments[0] = 99;
+  return a;
+}
+
+function strict(a) {
+  "use strict";
+  arguments[0] = 99;
+  return a;
+}
+
+console.log(sloppy(1), strict(1));   // 99 1</pre>
+
+    <p>И одна тонкость, которой вчера не было: связь пропадает и в обычном режиме, если у функции
+    <strong>сложные параметры</strong> — умолчания, <code>...rest</code> или деструктуризация. Та же
+    граница «простые параметры», что вчера запрещала директиву:</p>
+
+    <pre class="code js">function withDefault(a = 0) {
+  a = 5;
+  return arguments[0];
+}
+
+console.log(withDefault(1));   // 1 — параметр по умолчанию, связи нет</pre>
+
+    <h3>callee и caller</h3>
+
+    <p>У <code>arguments</code> в обычном режиме есть свойство <code>callee</code> — ссылка на саму
+    функцию. До появления функций-выражений с именем так делали рекурсию в анонимной функции.
+    А у самой функции есть свойство <code>caller</code> — кто её вызвал. Оба давно устарели:
+    они мешают движку оптимизировать код и позволяют одной функции добраться до чужой. В строгом
+    режиме оба запрещены:</p>
+
+    <pre class="code js">function f() {
+  "use strict";
+  return arguments.callee;
+}
+
+f();
+// TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them</pre>
+
+    <p>Длинное сообщение говорит ровно то, что запрещено: свойства <code>caller</code>,
+    <code>callee</code> и <code>arguments</code> строгой функции и её объекта <code>arguments</code>.
+    На MDN это страница «'caller', 'callee', and 'arguments' properties may not be accessed». В курсе 3,
+    в модуле о наследии языка, эти свойства разберём как историю. В своём коде их не пишут.</p>
+
+    <h2 id="arrow">8. Стрелочные функции и arguments</h2>
+
+    <p>На дне 13 Essentials было сказано: «<code>arguments</code> в стрелочной нет вообще».
+    Точнее — <strong>своего</strong> нет. Точно так же, как с <code>this</code> на дне 2, стрелочная
+    функция берёт <code>arguments</code> снаружи — у обычной функции, внутри которой написана:</p>
+
+    <pre class="code js">function outer() {
+  const inner = () =&gt; arguments.length;   // arguments функции outer
+  return inner(1, 2, 3);
+}
+
+console.log(outer(9));   // 1 — не 3: считаются аргументы outer</pre>
+
+    <p>Стрелочная получила три аргумента, а вернула 1 — длину <code>arguments</code> внешней функции,
+    которую вызвали с одним аргументом. На верхнем уровне скрипта внешней функции нет, и тогда —
+    <code>ReferenceError: arguments is not defined</code>, ровно как на дне 13.</p>
+
+    <div class="important">
+        У стрелочной функции нет своих <code>this</code> и <code>arguments</code>. Оба она находит
+        <strong>снаружи по тексту программы</strong> — тем же поиском, что переменные дня 1.
+        Поэтому стрелочная внутри метода видит <code>this</code> метода, а внутри функции —
+        её <code>arguments</code>.
+    </div>
+
+    <h2 id="constructor">9. Конструктор Function</h2>
+
+    <p>Функцию можно создать не только записью в коде, но и из строк — конструктором
+    <code>Function</code>. Последняя строка — тело, остальные — имена параметров:</p>
+
+    <pre class="code js">const plus = new Function("a", "b", "return a + b");
+
+console.log(plus(2, 3));           // 5
+console.log(plus.name);            // anonymous
+console.log(Function("return 7")());   // 7 — работает и без new</pre>
+
+    <p>Звучит удобно, но у такой функции три серьёзных недостатка.</p>
+
+    <p><strong>Первый — она не видит окружения.</strong> Функция, созданная конструктором
+    <code>Function</code>, всегда «живёт» на верхнем уровне: её <code>[[Environment]]</code> —
+    глобальная запись, а не то место, где её создали. Вспомните день 1 — здесь замыкание не работает:</p>
+
+    <pre class="code js">function make() {
+  const secret = 42;
+  const f = new Function("return typeof secret");
+  return f();
+}
+
+console.log(make());   // undefined — secret ей не видна</pre>
+
+    <p><strong>Второй — опасность.</strong> Строка становится кодом. Если в строку попадёт текст,
+    пришедший от пользователя или с сервера, его код выполнится со всеми правами страницы — та же беда,
+    что с <code>innerHTML</code> и чужими данными на дне 25 Essentials, только хуже. Многие сайты
+    запрещают конструктор <code>Function</code> настройками безопасности, и там он просто не работает.</p>
+
+    <p><strong>Третий — неудобство.</strong> Редактор не подсвечивает ошибки внутри строки, а движку
+    приходится разбирать её во время работы программы.</p>
+
+    <p>Вывод простой: <strong>конструктор <code>Function</code> в своём коде не нужен</strong>.
+    Знать его стоит, чтобы узнать в чужом и понимать, почему у функции бывает имя
+    <code>"anonymous"</code>. Его близкий родственник — <code>eval</code> из вчерашнего раздела 6.</p>
+
+    <h3>return вне функции</h3>
+
+    <p>Тело, переданное в <code>Function</code>, — тело функции, поэтому <code>return</code> в нём
+    законен. А вот на верхнем уровне скрипта <code>return</code> писать нельзя: возвращать неоткуда.</p>
+
+    <pre class="code js">return 5;
+// SyntaxError: Illegal return statement</pre>
+
+    <p>Ошибка синтаксическая — скрипт не запустится целиком. Чаще всего она появляется, когда при
+    правке стёрли строку с объявлением функции, а её тело осталось. На MDN — страница «return not in
+    function», в Chrome — <code>Illegal return statement</code>.</p>
+
+    <h2 id="tostring">10. toString: исходный текст</h2>
+
+    <p>Метод <code>toString</code> возвращает текст функции — ровно так, как он записан в исходнике,
+    с отступами и комментариями:</p>
+
+    <pre class="code js">function greet(student) {
+  // приветствие
+  return `Салам, ${student}!`;
+}
+
+console.log(greet.toString());
+console.log(Math.max.toString());          // function max() { [native code] }
+console.log(greet.bind(null).toString());  // function () { [native code] }</pre>
+
+    <p>Первая строка вывода — четыре строки исходника целиком, комментарий тоже. Встроенные функции
+    вроде <code>Math.max</code> написаны не на JavaScript, их текста нет, и на его месте стоит
+    <code>[native code]</code>. У привязанных функций исходника тоже нет: это обёртка, созданная
+    движком.</p>
+
+    <p>Спецификация разрешает окружению и вовсе скрывать текст функций: на это есть отдельная
+    операция <code>HostHasSourceTextAvailable</code> (раздел 20.2.5). Браузеры текст не прячут,
+    но рассчитывать на него в логике программы нельзя. И уж точно не стоит <strong>разбирать</strong> его,
+    чтобы, например, узнать имена параметров: после сжатия кода перед выкладкой имена станут
+    <code>a</code>, <code>b</code>, <code>c</code>. Для отладки — пожалуйста, для логики программы —
+    нет.</p>
+
+    <h2 id="spec">11. Раздел 20.2 спецификации</h2>
+
+    <p>В спецификации функциям-объектам посвящён раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-function-objects">20.2 Function Objects</a>.
+    Он устроен так же, как разделы всех встроенных объектов, и по нему удобно научиться читать
+    остальные. Пять подразделов:</p>
+
+    <table>
+        <thead><tr><th>Раздел</th><th>О чём</th><th>Что мы уже знаем</th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-function-constructor">20.2.1</a> The Function Constructor</td><td>конструктор <code>Function</code></td><td>раздел 9 сегодня</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-function-constructor">20.2.2</a> Properties of the Function Constructor</td><td>свойства самого конструктора: <code>Function.prototype</code></td><td>день 7</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-function-prototype-object">20.2.3</a> Properties of the Function Prototype Object</td><td>общие методы: <code>apply</code>, <code>bind</code>, <code>call</code>, <code>toString</code> и ещё два</td><td>день 2 и раздел 10 сегодня</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-function-instances">20.2.4</a> Function Instances</td><td>собственные свойства каждой функции: <code>length</code>, <code>name</code>, <code>prototype</code></td><td>разделы 2–4 сегодня</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-hosthassourcetextavailable">20.2.5</a> HostHasSourceTextAvailable</td><td>может ли окружение скрыть текст функции</td><td>раздел 10 сегодня</td></tr>
+        </tbody>
+    </table>
+
+    <p>Порядок «конструктор — свойства конструктора — свойства прототипа — свойства экземпляров»
+    повторяется у <code>Object</code>, <code>Array</code>, <code>Map</code> и всех остальных встроенных
+    объектов. Если нужен, скажем, <code>Map.prototype.get</code>, вы уже знаете, в каком подразделе
+    раздела о <code>Map</code> его искать.</p>
+
+    <p>Перескажем раздел 20.2.4 о свойствах <code>length</code> и <code>name</code>. Про
+    <code>length</code> там сказано, что это <em>обычное</em> число аргументов, которое ждёт функция,
+    и сразу оговорено: вызвать её можно и с другим числом, а что тогда будет — решает сама функция.
+    Это день 12 Essentials словами спецификации. Про <code>name</code> — что имя описательное и на работу
+    программы не влияет, а функции без «места» получают пустую строку. И у обоих — признаки
+    «нельзя записать, не видно при переборе, можно переопределить», которые мы увидели в разделе 4.</p>
+
+    <h2 id="once">12. Обёртка once</h2>
+
+    <p>Теперь применим всё вместе. <strong>Обёртка</strong> — функция, которая принимает функцию
+    и возвращает новую, с добавленным поведением. Вы уже писали обёртку: свой <code>bind</code>
+    в задании 8 дня 2. Сегодня две классические.</p>
+
+    <p>Первая — <code>once</code>: пропускает только первый вызов, а на остальные отвечает
+    результатом первого. Нужна там, где повтор вреден: второе нажатие «Отправить», вторая загрузка
+    данных.</p>
+
+    <pre class="code js">function once(fn) {
+  let done = false;
+  let result;
+  return function (...args) {
+    if (!done) {
+      done = true;
+      result = fn.apply(this, args);
+    }
+    return result;
+  };
+}
+
+const start = once((topic) =&gt; {
+  console.log(`старт: ${topic}`);
+  return topic;
+});
+
+console.log(start("еда"));   // старт: еда, затем еда
+console.log(start("дом"));   // еда — второй старт не состоялся</pre>
+
+    <p>В четырёх строках работают все три дня модуля:</p>
+
+    <ul>
+        <li><strong>замыкание (день 1):</strong> <code>done</code> и <code>result</code> живут в записи
+            окружения вызова <code>once</code> — у каждой обёрнутой функции свои;</li>
+        <li><strong><code>apply</code> (день 2):</strong> передаёт исходной функции и все аргументы
+            массивом, и тот <code>this</code>, с которым вызвали обёртку;</li>
+        <li><strong>обычная функция, а не стрелочная:</strong> обёртке нужен свой <code>this</code>,
+            чтобы передать его дальше. Со стрелочной обёрткой метод объекта потерял бы объект.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 200" role="img" aria-label="Вызов обёртки: обёртка проверяет своё состояние в замыкании и только при первом вызове передаёт аргументы и this исходной функции через apply">
+            <rect x="14" y="56" width="120" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="74" y="81" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1d4ed8">start("дом")</text>
+            <path d="M 136 76 L 186 76" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 194 76 L 184 72 L 184 80 Z" fill="#94a3b8"/>
+
+            <rect x="196" y="20" width="220" height="112" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="306" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#92400e">обёртка</text>
+            <text x="212" y="66" font-family="Consolas, monospace" font-size="11.5" fill="#92400e">замыкание:</text>
+            <text x="212" y="84" font-family="Consolas, monospace" font-size="11.5" fill="#92400e">done = true</text>
+            <text x="212" y="102" font-family="Consolas, monospace" font-size="11.5" fill="#92400e">result = "еда"</text>
+            <text x="212" y="122" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">уже вызывали — вернуть result</text>
+
+            <path d="M 418 76 L 468 76" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="5 4"/>
+            <rect x="470" y="56" width="136" height="40" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="538" y="81" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#64748b">fn.apply(this, …)</text>
+            <text x="538" y="114" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">только в первый раз</text>
+
+            <rect x="14" y="148" width="592" height="42" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="166" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Снаружи обёртка выглядит как исходная функция: те же аргументы, тот же this.</text>
+            <text x="310" y="183" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Внутри — решает, звать ли исходную, по своему состоянию в замыкании.</text>
+        </svg>
+        <figcaption>Обёртка стоит между вызовом и функцией и решает, пропускать ли вызов</figcaption>
+    </figure>
+
+    <h2 id="memo">13. Обёртка memo</h2>
+
+    <p>Вторая — <code>memo</code>, от «memoization», запоминание: если функцию уже вызывали с таким
+    аргументом, вернуть сохранённый ответ, не считая заново. Полезно для медленных расчётов,
+    которые зовут много раз с одними и теми же данными.</p>
+
+    <pre class="code js">function memo(fn) {
+  const cache = {};
+  return function (key) {
+    if (!Object.hasOwn(cache, key)) {
+      cache[key] = fn.call(this, key);
+    }
+    return cache[key];
+  };
+}
+
+function square(n) {
+  square.calls = square.calls + 1;   // своё свойство: сколько раз считали по-настоящему
+  return n * n;
+}
+square.calls = 0;
+
+const fastSquare = memo(square);
+console.log(fastSquare(4), fastSquare(4), fastSquare(5));   // 16 16 25
+console.log(square.calls);                                  // 2 — третий вызов взят из памяти
+console.log(JSON.stringify(fastSquare.name), square.name);  // "" square — у обёртки своё имя</pre>
+
+    <p>Память — обычный объект в замыкании: ключ — аргумент, значение — ответ.
+    <code>Object.hasOwn</code> из дня 21 Essentials отличает «ответа ещё нет» от «ответ есть
+    и равен <code>undefined</code>». Счётчик <code>square.calls</code> из раздела 5 доказывает, что
+    работает: три вызова, два настоящих подсчёта.</p>
+
+    <div class="mistake">
+        У такой памяти есть дыра. Ключи объекта — строки (день 21 Essentials), поэтому
+        <code>fastSquare(1)</code> и <code>fastSquare("1")</code> попадут в одну ячейку, и второй вызов
+        получит ответ первого. Для чисел это не страшно, для разных типов — ошибка. Настоящая
+        коллекция, где ключом может быть что угодно, — <code>Map</code>, день 14. Тогда и перепишем
+        <code>memo</code> правильно.
+    </div>
+
+    <p>Последняя строка примера показывает общий недостаток обёрток: обёртка — <strong>другая
+    функция</strong>, со своими <code>name</code> и <code>length</code>. Обёртка из <code>memo</code>
+    безымянная: функцию-выражение вернули из <code>return</code>, и имя взять неоткуда (таблица
+    раздела 2). А у обёртки из <code>once</code> из-за <code>...args</code> и <code>length</code>
+    равен нулю, сколько бы параметров ни было у исходной. Для программы это неважно, для отладки
+    и для кода, который смотрит на <code>length</code>, как <code>run</code> из раздела 3, — важно. Переименовать обёртку прямым
+    присваиванием нельзя — свойство только для чтения, — но его можно переопределить. Как —
+    завтра, на дне 5.</p>
+
+    <h3>Третья обёртка: debounce</h3>
+
+    <p>Функции, которые принимают или возвращают функции, называют <strong>функциями высшего
+    порядка</strong>. Вы уже знаете несколько: <code>map</code> и <code>filter</code> из дня 20
+    принимают колбэк, фабрики дня 1 возвращают функции, а <code>bind</code>, <code>once</code>
+    и <code>memo</code> делают и то и другое. Ещё одна классическая обёртка такого рода нужна
+    в каждом интерфейсе с поиском.</p>
+
+    <p><code>debounce</code> — «подождать, пока утихнет»: вызывает функцию только тогда, когда
+    вызовы прекратились на заданное время. Пользователь набирает в поиске «water» — искать на каждую
+    букву незачем, достаточно один раз, когда он остановился.</p>
+
+    <pre class="code js">function debounce(fn, ms) {
+  let timer;
+  return function (...args) {
+    clearTimeout(timer);                                  // прошлый вызов отменён
+    timer = setTimeout(() =&gt; fn.apply(this, args), ms);   // стрелочная: this обёртки
+  };
+}
+
+const search = debounce((text) =&gt; console.log(`ищем: ${text}`), 300);
+search("w");
+search("wa");
+search("wat");
+// через 300 мс — одна строка: ищем: wat</pre>
+
+    <p>Три вызова — один поиск, с последним текстом. Каждый новый вызов снимает таймер предыдущего
+    через <code>clearTimeout</code> из дня 30 Essentials и ставит свой. Здесь снова работает весь
+    модуль: <code>timer</code> живёт в замыкании; внутри <code>setTimeout</code> стоит
+    <strong>стрелочная</strong> функция, чтобы взять <code>this</code> обёртки, — ровно приём дня 2;
+    <code>apply</code> передаёт и <code>this</code>, и аргументы.</p>
+
+    <h2 id="cards">14. «Карточки»: память и одноразовый старт</h2>
+
+    <p>Применим обе обёртки к «Карточкам». Подсчёт слов по теме нужен счётчику на каждой отрисовке,
+    но слова не меняются — запомним ответы. А старт приложения, который на дне 35 мог случайно
+    запуститься дважды, сделаем одноразовым.</p>
+
+    <pre class="code js">const words = [
+  { id: 1, word: "book", topic: "школа" },
+  { id: 2, word: "teacher", topic: "школа" },
+  { id: 3, word: "lesson", topic: "школа" },
+  { id: 4, word: "bread", topic: "еда" },
+  { id: 5, word: "water", topic: "еда" },
+  { id: 6, word: "apple", topic: "еда" },
+  { id: 7, word: "house", topic: "дом" },
+  { id: 8, word: "window", topic: "дом" },
+];
+
+function once(fn) {
+  let done = false;
+  let result;
+  return function (...args) {
+    if (!done) {
+      done = true;
+      result = fn.apply(this, args);
+    }
+    return result;
+  };
+}
+
+function memo(fn) {
+  const cache = {};
+  return function (key) {
+    if (!Object.hasOwn(cache, key)) {
+      cache[key] = fn.call(this, key);
+    }
+    return cache[key];
+  };
+}
+
+function countTopic(topic) {
+  countTopic.calls = countTopic.calls + 1;
+  return words.filter((w) =&gt; w.topic === topic).length;
+}
+countTopic.calls = 0;
+
+const app = {
+  title: "Карточки",
+  start(topic) {
+    console.log(`${this.title}: старт, тема «${topic}»`);
+    return topic;
+  },
+};
+app.start = once(app.start);           // метод стал одноразовым, this сохранится
+
+const count = memo(countTopic);
+
+console.log(app.start("еда"));
+console.log(app.start("дом"));
+console.log(count("еда"), count("еда"), count("школа"), count("еда"));
+console.log(`подсчётов по-настоящему: ${countTopic.calls}`);</pre>
+
+    <div class="result-box">
+        Карточки: старт, тема «еда»<br>
+        еда<br>
+        еда<br>
+        3 3 3 3<br>
+        подсчётов по-настоящему: 2
+    </div>
+
+    <p>Разберём по строкам вывода.</p>
+
+    <p><strong>Первые три строки — <code>once</code>.</strong> Старт состоялся один раз, второй вызов
+    вернул первую тему. И главное — <code>this.title</code> нашёлся: вызов <code>app.start(...)</code>
+    дал обёртке <code>this</code>, равный <code>app</code>, а <code>apply</code> передал его исходному
+    методу. Будь обёртка стрелочной, в строке стояло бы <code>undefined: старт</code>.</p>
+
+    <p><strong>Четвёртая — <code>memo</code>.</strong> Четыре ответа, все верные: в темах «еда»
+    и «школа» по три слова.</p>
+
+    <p><strong>Пятая — доказательство.</strong> Четыре вызова <code>count</code>, а подсчётов два:
+    «еда» посчитана один раз, «школа» — один раз, остальные ответы взяты из памяти. Свойство функции
+    <code>countTopic.calls</code> пригодилось как раз для такой проверки.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Замените в <code>once</code> обычную функцию на стрелочную:
+        <code>return (...args) =&gt; { … }</code>. Что напечатает первая строка и почему — словами
+        дня 2 о стрелочных и <code>this</code>?
+        <br><br>
+        <strong>Второй.</strong> Добавьте в конец <code>console.log(count("дом"))</code> и снова
+        посмотрите на счётчик подсчётов. Сколько стало и почему?
+        <br><br>
+        <strong>Третий.</strong> Выведите <code>app.start.name</code> до и после строки
+        <code>app.start = once(app.start)</code>. Объясните разницу по таблице раздела 2.
+    </div>
+
+    <h2 id="module">15. Итоги модуля и что дальше</h2>
+
+    <p>Модуль «Области видимости, замыкания и this» закончен. Четыре дня — четыре стороны функции:</p>
+
+    <table>
+        <thead><tr><th>День</th><th>Главная мысль</th><th>В спецификации</th></tr></thead>
+        <tbody>
+            <tr><td>1</td><td>что видит функция, решает место в тексте; замыкание — функция с окружением</td><td>9.1 записи окружения</td></tr>
+            <tr><td>2</td><td><code>this</code> решает способ вызова; <code>call</code>, <code>apply</code>, <code>bind</code></td><td>9.1.1.3, 10.4.1</td></tr>
+            <tr><td>3</td><td>строгий режим делает тихие ошибки громкими; глобальный объект из двух частей</td><td>приложение C, 9.1.1.4</td></tr>
+            <tr><td>4</td><td>функция — объект со свойствами; <code>arguments</code>; обёртки</td><td>20.2</td></tr>
+        </tbody>
+    </table>
+
+    <p>Завтра начинается модуль «Объекты глубже». На дне 5 откроем то, что сегодня дважды
+    оставалось загадкой: почему <code>name</code> нельзя записать, но можно переопределить, и почему
+    <code>Object.keys</code> не видит его. Это <strong>дескрипторы свойств</strong> — у каждого
+    свойства любого объекта есть признаки «можно ли менять», «видно ли при переборе», «можно ли
+    удалить». А ещё — геттеры и сеттеры: свойства, за которыми стоит функция.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function">Function</a></td><td>функция как объект: свойства и методы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/name">Function: name</a></td><td>как выводится имя; bound, anonymous, пустое</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/length">Function: length</a></td><td>параметры до первого умолчания или остаточного</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments">arguments</a></td><td>объект аргументов, связь с параметрами, стрелочные</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments/length">arguments.length</a></td><td>сколько аргументов передали в этот раз</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-function-objects">ECMA-262, 20.2 Function Objects</a></td><td>устройство раздела встроенного объекта; 20.2.4 о length и name</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function">Function() constructor</a></td><td>функция из строк: не видит окружения, опасна</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/prototype">Function: prototype</a></td><td>свойство для конструкторов — день 7</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/toString">Function.prototype.toString()</a></td><td>исходный текст; <code>[native code]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments/Symbol.iterator">arguments[Symbol.iterator]()</a></td><td>почему <code>arguments</code> перебирается в <code>for...of</code> — день 11</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-function-constructor">ECMA-262, 20.2.1–20.2.5</a></td><td>подразделы: конструктор, прототип, экземпляры, текст функции</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_return">Ошибка: return вне функции</a></td><td><code>Illegal return statement</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Deprecated_caller_or_arguments_usage">Ошибка: caller, callee, arguments</a></td><td>запрещены в строгих функциях</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// функция — объект, который можно вызвать: typeof "function", instanceof Object — true
+
+// name: объявление — своё; в переменной — имя переменной; метод — ключ;
+//       bind — "bound имя"; Function(...) — "anonymous"; в массиве — ""
+// length: параметры до первого умолчания или ...rest; деструктуризация — один
+//         bind(null, 1) — на один меньше
+// name и length ТОЛЬКО ДЛЯ ЧТЕНИЯ: обычный режим — молча, строгий — TypeError
+
+// свои свойства: greet.calls = 0 — видно и меняется снаружи (замыкание — нет)
+
+// arguments: похож на массив (номера + length), перебирается, свой на каждый вызов
+// в массив: [...arguments], Array.from(arguments), [].slice.call(arguments)
+// связан с параметрами только в обычном режиме и только при ПРОСТЫХ параметрах
+// callee, caller — устарели; в строгом режиме — TypeError
+// стрелочная: своих this и arguments нет — берёт у внешней функции
+
+// new Function("a", "b", "return a + b") — не видит окружения, опасна: не пишем
+// return на верхнем уровне — SyntaxError: Illegal return statement
+// toString — исходник целиком; встроенные — [native code]; не разбирать!
+
+// обёртка: замыкание для состояния + обычная function + fn.apply(this, args)
+// once — только первый вызов; memo — кеш в объекте (ключи-строки! Map — день 14)</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чему равны <code>name</code> у <code>const sum = () =&gt; 1</code> и у
+                <code>sum.bind(null)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>"sum"</code> — имя выведено из переменной; <code>"bound sum"</code> —
+                    так <code>bind</code> называет новую функцию.
+                </details>
+            </li>
+            <li>Чему равен <code>length</code> у <code>function (a, b = 1, c) {}</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    1. Счёт идёт до первого параметра со значением по умолчанию; <code>c</code> после
+                    него не считается.
+                </details>
+            </li>
+            <li>Почему <code>greet.name = "hello"</code> не переименовывает функцию?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>name</code> — свойство только для чтения (раздел 20.2.4 спецификации). В обычном
+                    режиме запись молча пропадает, в строгом — <code>TypeError</code>.
+                </details>
+            </li>
+            <li>Стрелочная функция внутри обычной вызывает <code>arguments.length</code>. Чьи аргументы
+                она посчитает?
+                <details class="answer"><summary>Ответ</summary>
+                    Внешней обычной функции: своего <code>arguments</code> у стрелочной нет, и она берёт
+                    его снаружи, как и <code>this</code>.
+                </details>
+            </li>
+            <li>Почему обёртка <code>once</code> возвращает обычную функцию, а не стрелочную?
+                <details class="answer"><summary>Ответ</summary>
+                    Обёртке нужен свой <code>this</code> — тот, с которым её вызвали, — чтобы через
+                    <code>fn.apply(this, args)</code> передать его исходной функции. Стрелочная
+                    взяла бы <code>this</code> снаружи, и метод объекта потерял бы объект.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

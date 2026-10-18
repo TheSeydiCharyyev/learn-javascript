@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 7 — Прототипы: цепочка, Object.create, new и instanceof</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f97316; }
+        h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+        h3 { color: #9a3412; }
+        .step-number { background: #f97316; }
+        .toc a { color: #c2410c; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 7</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 7 &bull; урок 1</span>
+        <h1>Прототипы: цепочка, Object.create, new и instanceof</h1>
+        <p>Курс 2, Intermediate. Модуль «Прототипы и классы» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>объяснять, откуда объект берёт свойства, которых у него нет: цепочка прототипов и её
+                конец — <code>null</code>;</li>
+            <li>создавать объекты с нужным прототипом через <code>Object.create</code>, читать и проверять
+                прототип;</li>
+            <li>писать функцию-конструктор с методами в <code>prototype</code> и называть четыре шага
+                <code>new</code>;</li>
+            <li>понимать, что проверяет <code>instanceof</code>, и предсказывать его странные ответы;</li>
+            <li>делать словарь без унаследованных ключей через <code>Object.create(null)</code>.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#riddle">Загадка унаследованного</a></li>
+            <li><a href="#chain">Прототип и цепочка</a></li>
+            <li><a href="#create">Свой прототип: Object.create</a></li>
+            <li><a href="#lookup">Как ищется свойство</a></li>
+            <li><a href="#shadow">Запись: своё закрывает унаследованное</a></li>
+            <li><a href="#inspect">Проверить и сменить прототип</a></li>
+            <li><a href="#new">Функция-конструктор и new</a></li>
+            <li><a href="#prototype">Свойства prototype и constructor</a></li>
+            <li><a href="#forgot">Забытый new</a></li>
+            <li><a href="#instanceof">instanceof изнутри</a></li>
+            <li><a href="#builtins">Встроенные прототипы</a></li>
+            <li><a href="#dict">Object.create(null) как словарь</a></li>
+            <li><a href="#cards">«Карточки»: общие методы</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="riddle">1. Загадка унаследованного</h2>
+
+    <p>С дня 21 Essentials мы пользуемся тем, чего никогда не писали. У объекта
+    <code>{ name: "Аман" }</code> одно своё свойство, а метод <code>toString</code> у него есть.
+    На дне 5 мы назвали такие свойства унаследованными, на дне 6 увидели их список в разделе 20.1.3
+    спецификации — и каждый раз откладывали главный вопрос: откуда они берутся?</p>
+
+    <pre class="code js">const student = { name: "Аман" };
+
+console.log(Object.hasOwn(student, "toString"), "toString" in student);   // false true
+console.log(typeof student.toString);                                      // function</pre>
+
+    <p>Своего <code>toString</code> нет, а <code>in</code> его находит и вызвать его можно. Сегодня —
+    ответ. С него начинается модуль «Прототипы и классы»: четыре дня о том, как объекты делят методы
+    между собой. Сегодня механизм — прототипы, с завтрашнего дня — классы, построенные на нём.</p>
+
+    <h2 id="chain">2. Прототип и цепочка</h2>
+
+    <p>У каждого объекта есть скрытая ссылка на другой объект — его <strong>прототип</strong>
+    (от греческого «первообраз»). В спецификации это внутренний слот <code>[[Prototype]]</code> —
+    двойные скобки, как у <code>[[Environment]]</code> дня 1. Прочитать его можно функцией
+    <code>Object.getPrototypeOf</code>:</p>
+
+    <pre class="code js">const student = { name: "Аман" };
+const proto = Object.getPrototypeOf(student);
+
+console.log(proto === Object.prototype);         // true
+console.log(Object.hasOwn(proto, "toString"));   // true — вот где он живёт
+console.log(Object.getPrototypeOf(proto));       // null — дальше ничего</pre>
+
+    <p>Прототип объекта из литерала — <code>Object.prototype</code>, тот самый общий объект раздела
+    20.1.3. <code>toString</code> лежит в нём. У самого <code>Object.prototype</code> прототипа нет —
+    <code>null</code>. Так получается <strong>цепочка прототипов</strong>: объект → его прототип →
+    прототип прототипа → … → <code>null</code>. Свои цепочки есть у массивов и функций:</p>
+
+    <pre class="code js">const marks = [5, 4];
+function greet() {}
+
+console.log(Object.getPrototypeOf(marks) === Array.prototype);             // true
+console.log(Object.getPrototypeOf(Array.prototype) === Object.prototype);  // true
+console.log(Object.getPrototypeOf(greet) === Function.prototype);          // true
+console.log(Object.hasOwn(greet, "call"), Object.hasOwn(Function.prototype, "call"));   // false true</pre>
+
+    <p>Теперь сходится всё, что модуль I1 откладывал. <code>call</code>, <code>apply</code> и
+    <code>bind</code> дня 2 — не свои у каждой функции, а свойства <code>Function.prototype</code>:
+    то самое «общее хранилище» дня 4. Методы массивов — в <code>Array.prototype</code>. А в конце
+    любой цепочки — <code>Object.prototype</code> и <code>null</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 280" role="img" aria-label="Три цепочки прототипов: student ведёт прямо в Object.prototype; marks — в Array.prototype, затем в Object.prototype; greet — в Function.prototype, затем в Object.prototype; у Object.prototype прототип null">
+            <rect x="14" y="20" width="120" height="44" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="74" y="38" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">student</text>
+            <text x="74" y="55" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">name</text>
+
+            <rect x="14" y="104" width="120" height="44" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="74" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">marks</text>
+            <text x="74" y="139" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">0, 1, length</text>
+
+            <rect x="14" y="176" width="120" height="44" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="74" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">greet</text>
+            <text x="74" y="211" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">name, length</text>
+
+            <rect x="174" y="104" width="160" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="254" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#334155">Array.prototype</text>
+            <text x="254" y="139" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">map, filter, push…</text>
+
+            <rect x="174" y="176" width="160" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="254" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#334155">Function.prototype</text>
+            <text x="254" y="211" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">call, apply, bind</text>
+
+            <rect x="374" y="76" width="156" height="100" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+            <text x="452" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#92400e">Object.prototype</text>
+            <text x="452" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#92400e">toString</text>
+            <text x="452" y="140" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#92400e">hasOwnProperty</text>
+            <text x="452" y="158" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#92400e">valueOf…</text>
+
+            <rect x="556" y="106" width="50" height="40" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="581" y="131" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#475569">null</text>
+
+            <path d="M 136 42 L 420 42 L 420 72" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 420 76 L 416 66 L 424 66 Z" fill="#f97316"/>
+            <path d="M 136 126 L 168 126" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 172 126 L 162 122 L 162 130 Z" fill="#f97316"/>
+            <path d="M 136 198 L 168 198" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 172 198 L 162 194 L 162 202 Z" fill="#f97316"/>
+            <path d="M 336 126 L 368 126" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 372 126 L 362 122 L 362 130 Z" fill="#f97316"/>
+            <path d="M 336 198 L 452 198 L 452 182" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 452 178 L 448 188 L 456 188 Z" fill="#f97316"/>
+            <path d="M 532 126 L 550 126" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 554 126 L 544 122 L 544 130 Z" fill="#f97316"/>
+
+            <rect x="14" y="236" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="259" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Стрелка — [[Prototype]]. Поиск свойства идёт по стрелкам, пока не дойдёт до null.</text>
+        </svg>
+        <figcaption>Три цепочки сходятся в <code>Object.prototype</code></figcaption>
+    </figure>
+
+    <h2 id="create">3. Свой прототип: Object.create</h2>
+
+    <p>Прототип можно назначить самому. <code>Object.create(proto)</code> создаёт новый пустой объект,
+    прототипом которого будет <code>proto</code>:</p>
+
+    <pre class="code js">const studentMethods = {
+  greet() {
+    return `Салам, ${this.name}!`;
+  },
+  get initial() {
+    return this.name[0];
+  },
+};
+
+const aman = Object.create(studentMethods);
+aman.name = "Аман";
+const meret = Object.create(studentMethods);
+meret.name = "Мерет";
+
+console.log(aman.greet(), meret.greet(), aman.initial);   // Салам, Аман! Салам, Мерет! А
+console.log(aman.greet === meret.greet, Object.keys(aman));   // true ['name']</pre>
+
+    <p>У <code>aman</code> и <code>meret</code> по одному своему свойству — <code>name</code>. Метод
+    <code>greet</code> один на двоих: <code>aman.greet === meret.greet</code>. Это обещал день 2:
+    «методы можно сделать общими для многих объектов». Тысяча студентов — одна функция
+    <code>greet</code>, а не тысяча копий, как у фабрики дня 1.</p>
+
+    <p>Второй аргумент <code>Object.create</code> — дескрипторы свойств, как у <code>defineProperties</code>
+    дня 5, и с теми же умолчаниями <code>false</code>:</p>
+
+    <pre class="code js">const base = { kind: "студент" };
+const aman = Object.create(base, { name: { value: "Аман", enumerable: true } });
+
+console.log(aman.kind, Object.getOwnPropertyDescriptor(aman, "name"));
+// студент {value: 'Аман', writable: false, enumerable: true, configurable: false}</pre>
+
+    <p>Первый аргумент обязан быть объектом или <code>null</code>. Ошибку без аргумента вы видели
+    на дне 12 Essentials: <code>Object.create()</code> —
+    <code>TypeError: Object prototype may only be an Object or null: undefined</code>.</p>
+
+    <h2 id="lookup">4. Как ищется свойство</h2>
+
+    <p>Правило поиска короткое: сначала свои свойства объекта; не нашли — прототип, потом его
+    прототип, и так до <code>null</code>; дошли до <code>null</code> — <code>undefined</code>. Поэтому
+    <code>aman.missing</code> — <code>undefined</code>: поиск прошёл <code>aman</code>,
+    <code>studentMethods</code>, <code>Object.prototype</code> и упёрся в <code>null</code>.
+    Спецификация описывает этот шаг в разделе
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinaryget">10.1.8.1 OrdinaryGet</a>: «своего свойства
+    нет — взять прототип; прототип <code>null</code> — вернуть <code>undefined</code>; иначе спросить
+    прототип».</p>
+
+    <p>В этом шаге есть деталь, без которой прототипы были бы бесполезны. Спрашивая прототип, язык
+    передаёт ему и исходный объект — в спецификации он называется Receiver, «получатель». Геттер,
+    найденный в прототипе, вызывается с <code>this</code>, равным получателю. А метод мы вызываем
+    через точку у <code>aman</code>, и по правилу дня 2 <code>this</code> — тоже <code>aman</code>.
+    Поэтому <code>aman.initial</code> — «А»: геттер живёт в <code>studentMethods</code>, а читает имя
+    у <code>aman</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 232" role="img" aria-label="Поиск aman.initial: у aman своего initial нет, в прототипе studentMethods есть геттер initial, он вызывается с this, равным aman, и возвращает А. Поиск aman.missing проходит aman, studentMethods, Object.prototype и null и даёт undefined">
+            <rect x="14" y="20" width="170" height="86" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="99" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#9a3412">aman</text>
+            <text x="99" y="66" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">name: "Аман"</text>
+            <text x="99" y="90" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#991b1b">initial — своего нет</text>
+            <path d="M 186 63 L 212 63" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 220 63 L 210 59 L 210 67 Z" fill="#f97316"/>
+
+            <rect x="222" y="20" width="190" height="86" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="317" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#334155">studentMethods</text>
+            <text x="317" y="66" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">greet()</text>
+            <text x="317" y="90" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#166534">get initial() — нашли</text>
+            <path d="M 414 63 L 432 63" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 440 63 L 430 59 L 430 67 Z" fill="#f97316"/>
+
+            <rect x="442" y="20" width="164" height="86" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+            <text x="524" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#92400e">Object.prototype</text>
+            <text x="524" y="66" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#92400e">toString…</text>
+            <text x="524" y="90" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#92400e">→ null</text>
+
+            <text x="310" y="134" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">aman.initial: своего нет → в прототипе геттер → вызван с this = aman → «А»</text>
+            <text x="310" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">aman.missing: aman → studentMethods → Object.prototype → null → undefined</text>
+
+            <rect x="14" y="180" width="592" height="40" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="205" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Ищем по цепочке вверх, а this остаётся тем объектом, с которого начали.</text>
+        </svg>
+        <figcaption>Где найдено — в прототипе; с чем работает — с <code>aman</code></figcaption>
+    </figure>
+
+    <div class="important">
+        Где метод <strong>лежит</strong> и с каким <code>this</code> он <strong>работает</strong> — разные
+        вопросы. Лежит он в прототипе, один на всех. Работает с тем объектом, у которого его вызвали.
+        Это и делает общие методы возможными.
+    </div>
+
+    <p>У поиска есть цена: несуществующее свойство всегда проходит цепочку до самого конца. В обычной
+    программе это незаметно, но учебник MDN советует не строить слишком длинных цепочек — каждое звено
+    добавляет шаг к каждому неудачному поиску.</p>
+
+    <h2 id="shadow">5. Запись: своё закрывает унаследованное</h2>
+
+    <p>Чтение идёт по цепочке, а запись — нет. Присваивание создаёт или меняет <strong>своё</strong>
+    свойство объекта, прототип оно не трогает:</p>
+
+    <pre class="code js">const defaults = { topic: "все", count: 0 };
+const deck = Object.create(defaults);
+
+deck.topic = "еда";
+console.log(deck.topic, defaults.topic, Object.keys(deck));   // еда все ['topic']
+delete deck.topic;
+console.log(deck.topic);                                      // все — снова видно унаследованное
+for (const key in deck) {
+  console.log("for...in:", key);                              // topic, потом count
+}</pre>
+
+    <p>Своё свойство <code>topic</code> <strong>затенило</strong> унаследованное: поиск находит своё
+    первым и дальше не идёт. Удалили своё — снова видно свойство прототипа. А последние строки —
+    та самая причина, по которой день 21 Essentials не любил <code>for...in</code>: он перебирает и
+    унаследованные перечисляемые свойства. Своих у <code>deck</code> после <code>delete</code> нет,
+    а <code>for...in</code> нашёл два ключа прототипа. <code>Object.keys(deck)</code> дал бы пустой
+    массив.</p>
+
+    <p>Два исключения, оба из дня 5. Если в цепочке нашёлся <strong>сеттер</strong>, присваивание
+    вызовет его с <code>this</code> — исходным объектом, и своё свойство с этим именем не появится.
+    А если унаследованное свойство <strong>только для чтения</strong>, присваивание не сработает
+    вовсе — даже своё свойство не создастся:</p>
+
+    <pre class="code js">const base = Object.freeze({ level: 1 });
+const card = Object.create(base);
+
+card.level = 2;
+console.log(card.level, Object.keys(card));   // 1 [] — запись молча пропала</pre>
+
+    <p>В строгом режиме — знакомое <code>Cannot assign to read only property 'level'</code>, хотя
+    у самой <code>card</code> такого свойства нет. Правило записано в разделе
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinarysetwithowndescriptor">10.1.9.2</a>: свойство-данные
+    с <code>writable: false</code>, найденное в цепочке, запрещает запись. Своё свойство с тем же
+    именем всё же можно создать, но только через <code>defineProperty</code>. Программисты прозвали
+    это правило «ошибкой переопределения» (override mistake), но так записано в спецификации, и Chrome
+    ему следует.</p>
+
+    <h2 id="inspect">6. Проверить и сменить прототип</h2>
+
+    <pre class="code js">const base = { a: 1 };
+const middle = Object.create(base);
+const last = Object.create(middle);
+
+console.log(base.isPrototypeOf(last), last.isPrototypeOf(base));            // true false
+console.log(Object.getPrototypeOf(Object.getPrototypeOf(last)) === base);   // true</pre>
+
+    <p><code>isPrototypeOf</code> отвечает, есть ли объект где-то в цепочке другого, — не обязательно
+    первым звеном. <code>Object.getPrototypeOf</code> работает и с примитивами: сначала превращает
+    значение в объект, как <code>Object()</code> дня 6, поэтому <code>Object.getPrototypeOf("abc")</code> —
+    <code>String.prototype</code>. Сменить прототип готового объекта можно функцией
+    <code>Object.setPrototypeOf(obj, proto)</code>, но MDN предупреждает: это медленная операция.
+    Движки подстраивают работу с объектом под его цепочку, и смена её всё сбивает. Прототип задают при
+    создании и больше не трогают.</p>
+
+    <p>У смены прототипа есть и запреты — на MDN это две страницы «can't set prototype…». Первый —
+    цепочка не может замкнуться в круг, иначе поиск свойства шёл бы бесконечно:</p>
+
+    <pre class="code js">const a = {};
+const b = Object.create(a);
+Object.setPrototypeOf(a, b);
+// TypeError: Cyclic __proto__ value</pre>
+
+    <p>Алгоритм <a href="https://tc39.es/ecma262/2026/#sec-ordinarysetprototypeof">10.1.2.1
+    OrdinarySetPrototypeOf</a> перед сменой проходит новую цепочку и, встретив сам объект, отказывает.
+    Второй запрет — нерасширяемый объект (день 6): <code>TypeError: #&lt;Object&gt; is not extensible</code>.
+    А у <code>Object.prototype</code> прототип неизменяем всегда — <code>Immutable prototype object
+    'Object.prototype' cannot have their prototype set</code>: иначе одна строка поменяла бы поведение
+    всех объектов программы.</p>
+
+    <h3>__proto__</h3>
+
+    <p>В старом коде прототип читают и меняют через свойство <code>obj.__proto__</code>. Это аксессор
+    из <code>Object.prototype</code> (раздел 20.1.3.8), и у него в спецификации пометка «устаревшее,
+    необязательное». Подвох в том, что у объекта без <code>Object.prototype</code> в цепочке этого
+    аксессора нет. Пишите <code>Object.getPrototypeOf</code> и <code>Object.setPrototypeOf</code>.
+    Другое дело — <code>__proto__</code> <strong>в литерале</strong>: это стандартная запись, которая
+    задаёт прототип прямо при создании. Её повтор в одном литерале запрещён — ошибка дня 21 Essentials.</p>
+
+    <pre class="code js">const base = { kind: "студент" };
+const aman = { __proto__: base, name: "Аман" };
+
+console.log(aman.kind, Object.keys(aman), Object.getPrototypeOf(aman) === base);   // студент ['name'] true</pre>
+
+    <h2 id="new">7. Функция-конструктор и new</h2>
+
+    <p><code>Object.create</code> удобен, но свойства каждого объекта приходится добавлять вручную.
+    Много однотипных объектов создают <strong>функцией-конструктором</strong> и оператором
+    <code>new</code>. Так написано почти всё до появления классов в 2015 году, и так классы устроены
+    внутри:</p>
+
+    <pre class="code js">function Student(name, marks) {
+  this.name = name;
+  this.marks = marks;
+}
+
+Student.prototype.average = function () {
+  return this.marks.reduce((a, b) =&gt; a + b, 0) / this.marks.length;
+};
+
+const aman = new Student("Аман", [5, 4, 5]);
+const meret = new Student("Мерет", [4, 4]);
+
+console.log(aman.average(), meret.average());                     // 4.666666666666667 4
+console.log(aman.average === meret.average);                      // true
+console.log(Object.getPrototypeOf(aman) === Student.prototype);   // true
+console.log(aman);                                                // Student {name: 'Аман', marks: Array(3)}</pre>
+
+    <p>Имя конструктора пишут с большой буквы — договорённость, как у <code>Date</code> и
+    <code>Error</code>: «вызывать с <code>new</code>». Что делает <code>new Student(...)</code> —
+    четыре шага из раздела
+    <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects-construct-argumentslist-newtarget">10.2.2
+    [[Construct]]</a>:</p>
+
+    <ol>
+        <li>Создать новый пустой объект, прототипом которого станет <code>Student.prototype</code>.</li>
+        <li>Вызвать <code>Student</code> с <code>this</code>, равным этому объекту, — строка таблицы
+            дня 2 «<code>new F()</code> — новый объект».</li>
+        <li>Тело функции пишет в <code>this</code> свои свойства нового объекта.</li>
+        <li>Вернуть новый объект — если функция сама не вернула другой объект.</li>
+    </ol>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 270" role="img" aria-label="Четыре шага new Student: создать объект с прототипом Student.prototype, вызвать Student с this, тело пишет name и marks, вернуть объект. Итоговая цепочка: aman со своими name и marks, затем Student.prototype с average и constructor, затем Object.prototype и null">
+            <rect x="14" y="14" width="138" height="66" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="83" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">1. создать {}</text>
+            <text x="83" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">[[Prototype]] =</text>
+            <text x="83" y="68" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">Student.prototype</text>
+            <path d="M 154 47 L 166 47" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 172 47 L 164 43 L 164 51 Z" fill="#94a3b8"/>
+
+            <rect x="174" y="14" width="138" height="66" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="243" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">2. вызвать Student</text>
+            <text x="243" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">this = новый объект</text>
+            <path d="M 314 47 L 326 47" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 332 47 L 324 43 L 324 51 Z" fill="#94a3b8"/>
+
+            <rect x="334" y="14" width="138" height="66" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="403" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">3. тело функции</text>
+            <text x="403" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">this.name = …</text>
+            <text x="403" y="68" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">this.marks = …</text>
+            <path d="M 474 47 L 486 47" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 492 47 L 484 43 L 484 51 Z" fill="#94a3b8"/>
+
+            <rect x="494" y="14" width="112" height="66" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="550" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">4. вернуть</text>
+            <text x="550" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">новый объект</text>
+
+            <text x="310" y="110" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#64748b">результат — цепочка прототипов:</text>
+
+            <rect x="14" y="124" width="150" height="62" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="89" y="144" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">aman</text>
+            <text x="89" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">name, marks</text>
+            <text x="89" y="179" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">свои данные</text>
+            <path d="M 166 155 L 186 155" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 192 155 L 182 151 L 182 159 Z" fill="#f97316"/>
+
+            <rect x="194" y="124" width="170" height="62" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="279" y="144" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#334155">Student.prototype</text>
+            <text x="279" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">average, constructor</text>
+            <text x="279" y="179" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">общие методы</text>
+            <path d="M 366 155 L 386 155" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 392 155 L 382 151 L 382 159 Z" fill="#f97316"/>
+
+            <rect x="394" y="124" width="140" height="62" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+            <text x="464" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#92400e">Object.prototype</text>
+            <text x="464" y="170" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#92400e">toString…</text>
+            <path d="M 536 155 L 550 155" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 556 155 L 546 151 L 546 159 Z" fill="#f97316"/>
+            <text x="582" y="160" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#475569">null</text>
+
+            <rect x="14" y="204" width="592" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="226" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Данные — в каждом объекте свои, методы — одни на всех в Student.prototype.</text>
+            <text x="310" y="246" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">new связывает их: прототип нового объекта — свойство prototype конструктора.</text>
+        </svg>
+        <figcaption>Что делает <code>new Student("Аман", [5, 4, 5])</code></figcaption>
+    </figure>
+
+    <p>Консоль подписала объект <code>Student {…}</code> — по конструктору его прототипа. А шаг 4
+    с оговоркой: если конструктор вернул объект, <code>new</code> отдаст его вместо нового; примитив
+    в <code>return</code> игнорируется. Пользуются этим редко:</p>
+
+    <pre class="code js">function Maker() {
+  this.a = 1;
+  return { b: 2 };
+}
+
+console.log(new Maker());   // {b: 2} — вернула свой объект, новый пропал</pre>
+
+    <h3>Почему методы — в prototype</h3>
+
+    <p>Метод можно написать и прямо в конструкторе: <code>this.greet = function () {…}</code>. Работать
+    будет, но у каждого объекта окажется своя копия функции:</p>
+
+    <pre class="code js">function Teacher(name) {
+  this.name = name;
+  this.greet = function () {
+    return `Салам, ${this.name}!`;
+  };
+}
+
+const a = new Teacher("Мерет");
+const b = new Teacher("Сапар");
+console.log(a.greet === b.greet, Object.keys(a));   // false ['name', 'greet']</pre>
+
+    <p>У прототипа есть и второе преимущество: метод, добавленный в него <strong>позже</strong>, сразу
+    появляется у всех уже созданных объектов — поиск идёт по цепочке в момент вызова:</p>
+
+    <pre class="code js">function Student(name, marks) {
+  this.name = name;
+  this.marks = marks;
+}
+const aman = new Student("Аман", [5, 4, 5]);
+
+Student.prototype.best = function () {
+  return Math.max(...this.marks);
+};
+console.log(aman.best());   // 5 — метод добавлен после создания aman</pre>
+
+    <table>
+        <thead><tr><th></th><th>Фабрика с замыканием (день 1)</th><th>Метод в конструкторе</th><th>Метод в <code>prototype</code></th></tr></thead>
+        <tbody>
+            <tr><td>копий функции</td><td>на каждый объект</td><td>на каждый объект</td><td>одна на всех</td></tr>
+            <tr><td>видна в <code>Object.keys</code></td><td>да</td><td>да</td><td>нет</td></tr>
+            <tr><td>спрятанные данные</td><td>да, в замыкании</td><td>да, в замыкании</td><td>нет, только <code>this</code></td></tr>
+            <tr><td>добавить всем позже</td><td>нет</td><td>нет</td><td>да</td></tr>
+        </tbody>
+    </table>
+
+    <p>Спрятать данные и при этом держать методы в прототипе позволяют приватные поля классов — день 9.</p>
+
+    <h2 id="prototype">8. Свойства prototype и constructor</h2>
+
+    <p>Откуда у <code>Student</code> свойство <code>prototype</code>? Его получает каждая обычная
+    функция при создании — мы видели его на дне 5 в <code>Object.getOwnPropertyNames(greet)</code>.
+    Это обычный объект с одним свойством — <code>constructor</code>, ссылкой обратно на функцию:</p>
+
+    <pre class="code js">function Student(name) {
+  this.name = name;
+}
+
+console.log(Object.getOwnPropertyNames(Student.prototype), Student.prototype.constructor === Student);
+// ['constructor'] true
+const aman = new Student("Аман");
+console.log(aman.constructor === Student, [].constructor === Array);   // true true</pre>
+
+    <p><code>aman.constructor</code> — унаследованное свойство: поиск нашёл его в
+    <code>Student.prototype</code>. И не путайте два «прототипа». <code>Student.prototype</code> —
+    свойство функции: объект, который станет прототипом её экземпляров. А прототип самой функции
+    <code>Student</code> — <code>Function.prototype</code>. Учебник MDN подчёркивает то же различие:
+    <code>func.prototype</code> и <code>[[Prototype]]</code> — разные вещи.</p>
+
+    <p><code>constructor</code> — обычное свойство и может потеряться. Частая ошибка — заменить
+    <code>prototype</code> целиком:</p>
+
+    <pre class="code js">function Student(name) {
+  this.name = name;
+}
+Student.prototype = {
+  greet() {
+    return `Салам, ${this.name}!`;
+  },
+};
+
+const aman = new Student("Аман");
+console.log(aman.greet(), aman.constructor === Student, aman.constructor === Object);
+// Салам, Аман! false true</pre>
+
+    <p>У нового литерала нет своего <code>constructor</code>, и поиск нашёл его выше — в
+    <code>Object.prototype</code>. Методы работают, а <code>constructor</code> врёт. Поэтому методы
+    добавляют по одному, как в разделе 7, или возвращают <code>constructor</code> вручную.</p>
+
+    <h3>Кто не конструктор</h3>
+
+    <p>У стрелочных функций и методов (день 5) свойства <code>prototype</code> нет, и с
+    <code>new</code> их не вызвать. Это ошибка «is not a constructor» из дня 13 Essentials:</p>
+
+    <pre class="code js">const card = {
+  show() {},
+};
+new card.show();
+// TypeError: card.show is not a constructor</pre>
+
+    <p>Та же ошибка у <code>new Math()</code>: <code>Math</code> вообще не функция, а объект
+    с методами. И одна синтаксическая: <code>new</code> нельзя сочетать с <code>?.</code> —
+    <code>new Student?.("Аман")</code> даёт <code>SyntaxError: Invalid optional chain from new
+    expression</code>. MDN объясняет запрет: <code>new</code> обязан вернуть объект, а
+    <code>?.</code> может вернуть <code>undefined</code>, и результат был бы неясен.</p>
+
+    <h2 id="forgot">9. Забытый new</h2>
+
+    <pre class="code js">function Student(name) {
+  this.name = name;
+}
+
+const aman = Student("Аман");      // без new
+console.log(aman, window.name);    // undefined Аман
+window.name = "";                  // вернём имя окна (день 3)</pre>
+
+    <p>Без <code>new</code> это обычный вызов по имени, и в обычном скрипте <code>this</code> —
+    глобальный объект (день 2). Строка <code>this.name = name</code> записала имя в свойство окна —
+    то самое <code>name</code> дня 3 с его сеттером. Функция ничего не вернула, и <code>aman</code>
+    стал <code>undefined</code>. В строгом режиме ошибка видна сразу:</p>
+
+    <pre class="code js">"use strict";
+function Student(name) {
+  this.name = name;
+}
+Student("Аман");
+// TypeError: Cannot set properties of undefined (setting 'name')</pre>
+
+    <p>Это одна из причин, по которым конструкторы сменились классами: класс без <code>new</code>
+    не вызвать совсем (день 8).</p>
+
+    <h2 id="instanceof">10. instanceof изнутри</h2>
+
+    <p>На дне 11 Essentials <code>e instanceof RangeError</code> различал виды ошибок. Теперь видно,
+    что он проверяет: есть ли <code>RangeError.prototype</code> в цепочке прототипов <code>e</code>.
+    Алгоритм <a href="https://tc39.es/ecma262/2026/#sec-ordinaryhasinstance">7.3.21
+    OrdinaryHasInstance</a>: взять <code>prototype</code> правой части и идти по цепочке левой,
+    сравнивая звено за звеном; дошли до <code>null</code> — <code>false</code>.</p>
+
+    <pre class="code js">function Student(name) {
+  this.name = name;
+}
+const aman = new Student("Аман");
+
+console.log(aman instanceof Student, aman instanceof Object);                  // true true
+console.log("abc" instanceof String, Object.create(null) instanceof Object);   // false false
+Object.setPrototypeOf(aman, Array.prototype);
+console.log(aman instanceof Student, aman instanceof Array, Array.isArray(aman));   // false true false</pre>
+
+    <p>Из алгоритма следуют все странности. У примитива цепочки нет: <code>"abc" instanceof String</code>
+    — <code>false</code>. Объект без прототипа не наследует от <code>Object</code>. А после смены
+    прототипа <code>aman</code> «стал массивом» для <code>instanceof</code>, но не для
+    <code>Array.isArray</code>: та проверяет, как объект устроен, а не его цепочку. Поэтому массивы
+    проверяют <code>Array.isArray</code>, как учил день 19 Essentials. «Потомки» дня 11 Essentials тоже
+    объяснились: цепочка <code>RangeError</code> проходит через <code>Error.prototype</code>, и
+    <code>e instanceof Error</code> — <code>true</code>.</p>
+
+    <p>Тот же вопрос без конструктора задаёт <code>Student.prototype.isPrototypeOf(aman)</code>.
+    А справа от <code>instanceof</code> должна стоять функция с объектом в <code>prototype</code>.
+    Иначе — один из трёх текстов V8 со страницы MDN «invalid 'instanceof' operand»:</p>
+
+    <pre class="code js">console.log({} instanceof {});
+// TypeError: Right-hand side of 'instanceof' is not callable</pre>
+
+    <p>Число справа даёт <code>Right-hand side of 'instanceof' is not an object</code>, а функция с
+    примитивом в <code>prototype</code> — <code>Function has non-object prototype '5' in instanceof
+    check</code>. Полный алгоритм <code>instanceof</code>
+    (<a href="https://tc39.es/ecma262/2026/#sec-instanceofoperator">13.10.2</a>) начинается с вопроса,
+    не задал ли объект справа своё правило проверки особым методом-символом; символы — день 11.</p>
+
+    <h2 id="builtins">11. Встроенные прототипы</h2>
+
+    <p>Теперь можно вернуть два долга. На дне 14 Essentials и на дне 4 был
+    <code>Array.prototype.slice.call(arguments)</code> — метод <code>slice</code>, взятый прямо из
+    прототипа массивов и вызванный на чужом объекте (день 2). А приём дня 6 в обычном виде пишется так:</p>
+
+    <pre class="code js">console.log(Object.prototype.toString.call([5, 4]));                     // [object Array]
+console.log(Array.prototype.slice.call({ 0: "a", 1: "b", length: 2 }));   // ['a', 'b']
+console.log("abc".toUpperCase === String.prototype.toUpperCase);         // true</pre>
+
+    <p>Последняя строка отвечает на вопрос дня 5 Essentials. Там говорилось, что примитив
+    «на мгновение» заворачивается в объект-обёртку и одалживает у неё методы. Теперь видно, где они
+    лежат: прототип обёртки — <code>String.prototype</code>.</p>
+
+    <p>Встроенные прототипы можно менять — и это плохая идея:</p>
+
+    <pre class="code js">Array.prototype.last = function () {
+  return this[this.length - 1];
+};
+
+for (const i in [5, 4]) {
+  console.log("for...in:", i);   // 0, 1 и last
+}
+delete Array.prototype.last;     // уберём за собой</pre>
+
+    <div class="mistake">
+        Метод, добавленный в <code>Array.prototype</code>, появился у всех массивов программы — и в
+        переборе <code>for...in</code> тоже: присваивание создаёт перечисляемое свойство (день 5). Хуже
+        того, если в языке когда-нибудь появится свой метод с тем же именем, ваш код его подменит.
+        MDN советует встроенные прототипы не расширять никогда — кроме полифилов, то есть кода,
+        который добавляет новую возможность языка в старый браузер.
+    </div>
+
+    <h2 id="dict">12. Object.create(null) как словарь</h2>
+
+    <p>Объект-словарь — обычный приём Essentials: на дне 18 так считали броски кубика,
+    <code>counts[n] = (counts[n] || 0) + 1</code>. Но у <code>{}</code> есть прототип, а в нём —
+    <code>constructor</code>, <code>toString</code> и ещё десять свойств. Если ключом окажется одно
+    из этих слов, словарь сломается:</p>
+
+    <pre class="code js">const words = ["book", "constructor", "book"];
+
+const plain = {};
+for (const w of words) {
+  plain[w] = (plain[w] ?? 0) + 1;
+}
+console.log(plain.book, typeof plain.constructor);   // 2 string
+
+const dict = Object.create(null);
+for (const w of words) {
+  dict[w] = (dict[w] ?? 0) + 1;
+}
+console.log(dict.book, dict.constructor, "toString" in dict);   // 2 1 false</pre>
+
+    <p>В <code>plain</code> слово «constructor» нашло унаследованную функцию <code>Object</code>,
+    и <code>??</code> её не заменил: функция — не <code>null</code>. Функция плюс единица — строка
+    <code>"function Object() { [native code] }1"</code>. В <code>dict</code> прототипа нет, а значит,
+    нет и ключей «из ниоткуда». Цена — нет и полезного: <code>dict.hasOwnProperty</code> — не функция
+    (берите <code>Object.hasOwn</code>, день 5), а <code>String(dict)</code> и шаблон с ним падают:
+    <code>Cannot convert object to primitive value</code> — превращать нечем, <code>toString</code>
+    нет. Полноценный словарь с любыми ключами — <code>Map</code>, день 14.</p>
+
+    <p>До 2022 года, когда появился <code>Object.hasOwn</code>, библиотеки проверяли такие словари длинной
+    записью <code>Object.prototype.hasOwnProperty.call(dict, "book")</code>: метод берут прямо из
+    <code>Object.prototype</code> и вызывают на словаре, как <code>slice</code> в разделе 11. Встретите
+    её в чужом коде — теперь её можно прочитать.</p>
+
+    <h2 id="cards">13. «Карточки»: общие методы</h2>
+
+    <p>Соберём день в «Карточках». Каждая карточка — объект со своими данными, а методы
+    <code>flip</code> и <code>text</code> — один раз, в прототипе. Счёт по темам — в словаре без
+    прототипа, а загрузка из JSON показывает, что прототип в JSON не сохраняется.</p>
+
+    <pre class="code js">function Card(id, word, translation, topic) {
+  this.id = id;
+  this.word = word;
+  this.translation = translation;
+  this.topic = topic;
+  this.flipped = false;
+}
+
+Card.prototype.flip = function () {
+  this.flipped = !this.flipped;
+  return this.text();
+};
+Card.prototype.text = function () {
+  return this.flipped ? this.translation : this.word;
+};
+
+const data = [
+  [1, "book", "книга", "школа"],
+  [4, "bread", "хлеб", "еда"],
+  [5, "water", "вода", "еда"],
+  [7, "house", "дом", "дом"],
+];
+const cards = data.map(([id, word, translation, topic]) =&gt; new Card(id, word, translation, topic));
+
+console.log(cards[1].flip(), cards[1].flip(), cards[2].text());
+console.log(cards[0].flip === cards[3].flip, Object.keys(cards[0]).length);
+
+const byTopic = Object.create(null);
+for (const card of cards) {
+  byTopic[card.topic] = (byTopic[card.topic] ?? 0) + 1;
+}
+console.log(JSON.stringify(byTopic));
+
+const saved = JSON.parse(JSON.stringify(cards[1]));
+console.log(saved instanceof Card, typeof saved.flip);
+const restored = Object.assign(Object.create(Card.prototype), saved);
+console.log(restored instanceof Card, restored.flip());</pre>
+
+    <div class="result-box">
+        хлеб bread water<br>
+        true 5<br>
+        {"школа":1,"еда":2,"дом":1}<br>
+        false undefined<br>
+        true хлеб
+    </div>
+
+    <p><strong>Строка 1 — общие методы.</strong> <code>flip</code> перевернул карточку
+    <code>bread</code> туда и обратно, <code>text</code> показал слово третьей карточки. Каждый вызов
+    работал со «своей» карточкой: <code>this</code> — объект слева от точки.</p>
+
+    <p><strong>Строка 2 — сколько чего.</strong> Функция <code>flip</code> одна на все карточки,
+    своих свойств у карточки пять — только данные.</p>
+
+    <p><strong>Строка 3 — словарь.</strong> Темы стали ключами словаря без прототипа: тема вроде
+    «constructor» не сломала бы счёт.</p>
+
+    <p><strong>Строки 4 и 5 — загрузка.</strong> JSON хранит только свои перечисляемые свойства
+    (день 5), а прототип — нет: после <code>JSON.parse</code> карточка — простой объект без методов.
+    Так было со словами <code>words.json</code> на днях 33–36 Essentials. Вернуть методы — значит
+    вернуть прототип: <code>Object.create(Card.prototype)</code> даёт пустую «карточку», а
+    <code>Object.assign</code> копирует в неё данные. Восстановленная карточка снова умеет
+    переворачиваться.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Добавьте
+        <code>Card.prototype.toString = function () { return `карточка ${this.word}`; };</code>
+        и выведите <code>`${cards[0]}`</code>. Где шаблон находит <code>toString</code> теперь и где
+        находил раньше?
+        <br><br>
+        <strong>Второй.</strong> Замените <code>Object.create(null)</code> на <code>{}</code> и добавьте
+        в данные карточку с темой <code>"toString"</code>. Что стало со счётом и почему?
+        <br><br>
+        <strong>Третий.</strong> Создайте карточку без <code>new</code>:
+        <code>const lost = Card(9, "apple", "яблоко", "еда")</code>. Что в <code>lost</code> и куда
+        делись <code>word</code> и <code>flipped</code>? Проверьте <code>globalThis.word</code>.
+    </div>
+
+    <h2 id="next">14. Что дальше</h2>
+
+    <p>Прототип — ссылка объекта на объект, цепочка таких ссылок — путь поиска свойства, а
+    <code>new</code> связывает каждый новый объект с <code>prototype</code> конструктора. Это весь
+    механизм наследования в JavaScript.</p>
+
+    <p>Завтра — классы. Объявление <code>class Student</code> создаёт ту же функцию-конструктор
+    и тот же <code>Student.prototype</code>, что мы писали сегодня вручную, только короче и строже:
+    без <code>new</code> класс не вызвать, а методы в прототипе неперечисляемые и в
+    <code>for...in</code> не всплывут. Все сегодняшние проверки — <code>getPrototypeOf</code>,
+    <code>instanceof</code>, <code>constructor</code> — для классов ответят так же.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain">Guide: Inheritance and the prototype chain</a></td><td>прототип, цепочка, поиск свойства, конструкторы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getPrototypeOf">Object.getPrototypeOf()</a></td><td>прочитать <code>[[Prototype]]</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/create">Object.create()</a></td><td>новый объект с заданным прототипом; второй аргумент — дескрипторы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/setPrototypeOf">Object.setPrototypeOf()</a></td><td>сменить прототип; медленно; запреты</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isPrototypeOf">Object.prototype.isPrototypeOf()</a></td><td>есть ли объект в цепочке другого</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/new">new</a></td><td>четыре шага; возврат своего объекта</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/constructor">Object.prototype.constructor</a></td><td>ссылка из <code>prototype</code> на функцию; теряется при замене</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/instanceof">instanceof</a></td><td>есть ли <code>F.prototype</code> в цепочке</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/proto">Object.prototype.__proto__</a></td><td>устаревший аксессор; <code>__proto__</code> в литерале — стандарт</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Not_a_constructor">Ошибка: "x" is not a constructor</a></td><td><code>new</code> со стрелочной, методом, <code>Math</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_new_optional">Ошибка: new keyword cannot be used with an optional chain</a></td><td><code>Invalid optional chain from new expression</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cyclic_prototype">Ошибка: it would cause a prototype chain cycle</a></td><td><code>Cyclic __proto__ value</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_set_prototype">Ошибка: can't set prototype of this object</a></td><td>нерасширяемый объект, <code>Object.prototype</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/invalid_right_hand_side_instanceof_operand">Ошибка: invalid 'instanceof' operand</a></td><td>справа не функция или <code>prototype</code> не объект</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// у объекта есть [[Prototype]] — ссылка на другой объект; цепочка кончается null
+// {} → Object.prototype → null;  [] → Array.prototype → Object.prototype → null
+// function → Function.prototype (call, apply, bind) → Object.prototype → null
+
+// чтение: своё → прототип → его прототип → … → null → undefined
+// метод из прототипа работает с this того объекта, у которого его вызвали
+// запись: создаёт СВОЁ свойство (затеняет); исключения — сеттер в цепочке
+//   и свойство только для чтения в цепочке (запись молча пропадает)
+// for...in видит и унаследованные перечисляемые; Object.keys — только свои
+
+// Object.create(proto, дескрипторы) — объект с прототипом proto
+// Object.getPrototypeOf(obj); proto.isPrototypeOf(obj) — в цепочке ли
+// Object.setPrototypeOf — медленно; цикл и нерасширяемый объект — TypeError
+// obj.__proto__ — устарело; { __proto__: proto } в литерале — можно
+
+// function F(a) { this.a = a; }  F.prototype.method = function () {};
+// new F(1): 1) {} с [[Prototype]] = F.prototype  2) F с this = {}
+//           3) тело пишет свойства  4) вернуть объект (или объект из return)
+// методы — в F.prototype: одна копия на всех; добавленный позже есть и у старых объектов
+// F.prototype.constructor === F; заменили prototype целиком — constructor потерян
+// без new: this — окно (обычный режим) или undefined (строгий) — TypeError
+// стрелочные и методы не конструкторы; new с ?. — SyntaxError
+
+// x instanceof F — есть ли F.prototype в цепочке x; примитивы — false
+// Object.create(null) — словарь без унаследованных ключей (и без toString)
+// встроенные прототипы не расширять</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Где лежит <code>toString</code> объекта <code>{ name: "Аман" }</code> и как поиск его
+                находит?
+                <details class="answer"><summary>Ответ</summary>
+                    В <code>Object.prototype</code> — прототипе объекта из литерала. Своего свойства нет,
+                    поиск идёт в прототип и находит его там.
+                </details>
+            </li>
+            <li>Метод <code>average</code> лежит в <code>Student.prototype</code>. Почему
+                <code>aman.average()</code> считает оценки именно Амана?
+                <details class="answer"><summary>Ответ</summary>
+                    Метод вызван через точку у <code>aman</code>, и <code>this</code> внутри —
+                    <code>aman</code>. Где метод лежит, на <code>this</code> не влияет.
+                </details>
+            </li>
+            <li>Назовите четыре шага <code>new F()</code>.
+                <details class="answer"><summary>Ответ</summary>
+                    Создать объект с прототипом <code>F.prototype</code>; вызвать <code>F</code> с
+                    <code>this</code> — этим объектом; тело пишет свойства; вернуть объект, если
+                    <code>F</code> не вернула свой объект.
+                </details>
+            </li>
+            <li>Почему <code>"abc" instanceof String</code> — <code>false</code>, хотя у строки есть
+                методы <code>String.prototype</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>instanceof</code> слева ждёт объект с цепочкой прототипов, а <code>"abc"</code> —
+                    примитив. Методы ему одалживает временная обёртка, но в <code>instanceof</code> её нет.
+                </details>
+            </li>
+            <li>Зачем словарю <code>Object.create(null)</code> вместо <code>{}</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    У <code>{}</code> в прототипе есть <code>constructor</code>, <code>toString</code> и
+                    другие свойства — ключи с такими именами найдут их и сломают счёт. У словаря без
+                    прототипа унаследованных ключей нет.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

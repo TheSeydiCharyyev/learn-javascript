@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 7 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f97316; }
+        h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 7</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 7. Прототипы: цепочка, Object.create, new и instanceof</h1>
+    <p class="subtitle">Выжимка лекции: прототип и цепочка, поиск и запись свойств,
+    <code>Object.create</code>, функция-конструктор и <code>new</code>, <code>instanceof</code>,
+    словарь без прототипа.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Прототип</strong> — объект, на который ссылается скрытый слот <code>[[Prototype]]</code>
+        другого объекта. Цепочка прототипов кончается <code>null</code>. Чтение свойства идёт по цепочке:
+        своё → прототип → … → <code>null</code> → <code>undefined</code>.
+    </div>
+
+    <pre class="code js">const student = { name: "Аман" };
+Object.getPrototypeOf(student) === Object.prototype;   // true: там toString
+Object.getPrototypeOf(Object.prototype);               // null
+Object.getPrototypeOf([]) === Array.prototype;         // map, filter, push…
+Object.getPrototypeOf(() =&gt; 1) === Function.prototype; // call, apply, bind</pre>
+
+    <div class="remember">
+        Метод лежит в прототипе, один на всех, а работает с <code>this</code> того объекта, у которого
+        его вызвали. Запись создаёт <strong>своё</strong> свойство и затеняет унаследованное; исключения —
+        сеттер в цепочке и унаследованное свойство только для чтения (запись пропадает).
+        <code>for...in</code> перебирает и унаследованные перечисляемые, <code>Object.keys</code> — только свои.
+    </div>
+
+    <h2>Создать и проверить</h2>
+
+    <table>
+        <thead><tr><th>Запись</th><th>Что делает</th></tr></thead>
+        <tbody>
+            <tr><td><code>Object.create(proto)</code></td><td>новый объект с прототипом <code>proto</code>; второй аргумент — дескрипторы</td></tr>
+            <tr><td><code>{ __proto__: proto, … }</code></td><td>то же в литерале — стандарт; <code>obj.__proto__</code> — устарело</td></tr>
+            <tr><td><code>Object.getPrototypeOf(obj)</code></td><td>прочитать прототип</td></tr>
+            <tr><td><code>proto.isPrototypeOf(obj)</code></td><td>есть ли <code>proto</code> в цепочке <code>obj</code></td></tr>
+            <tr><td><code>Object.setPrototypeOf(obj, p)</code></td><td>сменить: медленно; цикл и нерасширяемый объект — <code>TypeError</code></td></tr>
+        </tbody>
+    </table>
+
+    <h2>Конструктор и new</h2>
+
+    <pre class="code js">function Student(name, marks) {   // с большой буквы: «вызывать с new»
+  this.name = name;
+  this.marks = marks;
+}
+Student.prototype.average = function () {
+  return this.marks.reduce((a, b) =&gt; a + b, 0) / this.marks.length;
+};
+
+const aman = new Student("Аман", [5, 4, 5]);
+aman.average();                                  // 4.666666666666667
+Student.prototype.constructor === Student;       // true</pre>
+
+    <p>Метод в конструкторе (<code>this.greet = function () {…}</code>) — своя копия у каждого объекта
+    и ключ в <code>Object.keys</code>. Метод в <code>prototype</code> — одна функция на всех, и метод,
+    добавленный позже, сразу есть у всех уже созданных объектов.</p>
+
+    <div class="key-point">
+        <code>new F()</code>: 1) объект с прототипом <code>F.prototype</code>; 2) вызов <code>F</code> с
+        <code>this</code> — этим объектом; 3) тело пишет свойства; 4) вернуть объект (или объект из
+        <code>return</code>). Без <code>new</code> <code>this</code> — окно или, в строгом режиме,
+        <code>undefined</code>. Стрелочные и методы — не конструкторы (<code>is not a constructor</code>),
+        <code>new F?.()</code> — <code>SyntaxError</code>. Заменили <code>prototype</code> целиком —
+        потеряли <code>constructor</code>.
+    </div>
+
+    <h2>instanceof и словарь</h2>
+
+    <div class="note-box">
+        <code>x instanceof F</code> — есть ли <code>F.prototype</code> в цепочке <code>x</code>.
+        Примитив — <code>false</code>, <code>Object.create(null) instanceof Object</code> — <code>false</code>,
+        после смены прототипа ответ меняется. Массив проверяют <code>Array.isArray</code>.
+        <br><code>Object.create(null)</code> — словарь без унаследованных ключей: слово
+        <code>"constructor"</code> не сломает счёт. Но у него нет и <code>toString</code>,
+        <code>hasOwnProperty</code> — пишем <code>Object.hasOwn</code>. Встроенные прототипы не расширяем.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Перепишите одну фабрику из своего итогового проекта Essentials на функцию-конструктор
+                с методами в <code>prototype</code>. Проверьте, что методы общие: <code>a.m === b.m</code>.</li>
+            <li>Для пяти значений своего проекта выпишите цепочку прототипов до <code>null</code> и
+                проверьте её через <code>Object.getPrototypeOf</code>.</li>
+            <li>Прочитайте на MDN учебник
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain">Inheritance and the prototype chain</a>,
+                раздел «Building longer inheritance chains», и нарисуйте цепочку из его примера.</li>
+            <li>Найдите в спецификации раздел 10.1.8.1 OrdinaryGet и перескажите его шаги своими
+                словами по-русски.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 5 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #a855f7; }
+        h2 { color: #7e22ce; background: #faf5ff; border-left-color: #a855f7; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 5</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 5. Свойства изнутри: дескрипторы, геттеры и сеттеры</h1>
+    <p class="subtitle">Выжимка лекции: дескриптор и три признака, <code>Object.defineProperty</code>,
+    кто что видит при переборе, геттеры и сеттеры, сокращённая запись методов.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Дескриптор</strong> — объект, который описывает свойство: значение (или геттер
+        и сеттер) и три признака — <code>writable</code>, <code>enumerable</code>,
+        <code>configurable</code>. Свойство из литерала или присваивания получает все три
+        <code>true</code>.
+    </div>
+
+    <pre class="code js">function greet() {}
+
+Object.getOwnPropertyDescriptor({ name: "Аман" }, "name");
+// {value: 'Аман', writable: true, enumerable: true, configurable: true}
+Object.getOwnPropertyDescriptor(greet, "name");
+// {value: 'greet', writable: false, enumerable: false, configurable: true}</pre>
+
+    <h2>Три признака</h2>
+
+    <table>
+        <thead><tr><th>Признак <code>false</code></th><th>Обычный режим</th><th>Строгий режим</th></tr></thead>
+        <tbody>
+            <tr><td><code>writable</code></td><td>запись молча не срабатывает</td><td><code>TypeError: Cannot assign to read only property</code></td></tr>
+            <tr><td><code>enumerable</code></td><td colspan="2">не видно в <code>Object.keys</code>, <code>for...in</code>, JSON, spread, <code>Object.assign</code></td></tr>
+            <tr><td><code>configurable</code></td><td><code>delete</code> даёт <code>false</code></td><td><code>delete</code> — <code>TypeError</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        <code>Object.defineProperty(obj, "x", дескриптор)</code>: для <strong>нового</strong> свойства
+        всё, что не указали, — <code>false</code>; для <strong>существующего</strong> меняет только
+        указанное. Если менять нельзя — <code>TypeError: Cannot redefine property</code> в любом режиме.
+        <code>name</code> функции: <code>writable: false</code>, но <code>configurable: true</code> —
+        присвоить нельзя, переопределить можно.
+    </div>
+
+    <h2>Кто что видит</h2>
+
+    <table>
+        <thead><tr><th>Инструмент</th><th>Что видит</th></tr></thead>
+        <tbody>
+            <tr><td><code>Object.keys</code>, JSON, spread, <code>assign</code></td><td>свои перечисляемые</td></tr>
+            <tr><td><code>Object.getOwnPropertyNames</code></td><td>все свои строковые, и неперечисляемые</td></tr>
+            <tr><td><code>obj.propertyIsEnumerable("x")</code></td><td>своё и перечисляемое?</td></tr>
+            <tr><td><code>Object.hasOwn</code></td><td>свои, любые</td></tr>
+            <tr><td><code>in</code>, <code>for...in</code></td><td>и унаследованные (день 7)</td></tr>
+        </tbody>
+    </table>
+
+    <h2>Геттеры и сеттеры</h2>
+
+    <pre class="code js">const student = {
+  get mark() {                   // чтение student.mark — без скобок
+    return this._mark;
+  },
+  set mark(value) {              // запись student.mark = 4 — проверка
+    if (Number.isInteger(value) &amp;&amp; value &gt;= 2 &amp;&amp; value &lt;= 5) {
+      this._mark = value;
+    }
+  },
+};
+Object.defineProperty(student, "_mark", { value: 5, writable: true });   // служебное, скрыто
+
+student.mark = 7;               // не принято
+JSON.stringify(student);        // '{"mark":5}'</pre>
+
+    <div class="key-point">
+        Геттер — без параметров (иначе <code>SyntaxError</code>), сеттер — ровно с одним. Свойство
+        только с геттером: запись молчит, в строгом режиме —
+        <code>Cannot set property … which has only a getter</code>. В сеттере <code>x</code> нельзя
+        писать <code>this.x</code> — бесконечная рекурсия, <code>RangeError</code>. Скрытое поле
+        не защищено: <code>student._mark = 100</code> сработает.
+    </div>
+
+    <p>Дескриптор аксессора: <code>{get: ƒ, set: ƒ, enumerable, configurable}</code> — без
+    <code>value</code> и <code>writable</code>. Смешать оба вида в одном дескрипторе нельзя.</p>
+
+    <h2>Методы, копии, hasOwnProperty</h2>
+
+    <div class="note-box">
+        <code>show() {}</code> — то же свойство, что <code>show: function () {}</code>, но у метода
+        нет <code>prototype</code> и с <code>new</code> его не вызвать (день 7). Имя может быть
+        вычисляемым: <code>[field]() {}</code>.
+        <br>Spread и <code>Object.assign</code> вызывают геттеры и кладут в копию значения;
+        <code>assign</code> к тому же вызывает сеттеры. Копия вместе с геттерами:
+        <code>Object.defineProperties({}, Object.getOwnPropertyDescriptors(obj))</code>.
+        <br><code>obj.hasOwnProperty("x")</code> — старый вариант; пишем <code>Object.hasOwn(obj, "x")</code>.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём итоговом проекте Essentials значение, которое вычисляют из других
+                данных. Сделайте его геттером и проверьте, что оно пересчитывается само.</li>
+            <li>Добавьте сеттер с проверкой к одному полю проекта, служебное поле спрячьте через
+                <code>defineProperty</code> и убедитесь, что JSON его не содержит.</li>
+            <li>Прочитайте на MDN учебник
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Enumerability_and_ownership_of_properties">Enumerability and ownership of properties</a>.
+                Найдите в его таблицах строку <code>Object.getOwnPropertySymbols</code> и запишите, чем
+                она отличается от строки <code>getOwnPropertyNames</code>.</li>
+            <li>Откройте в спецификации раздел 6.1.7.1 Property Attributes и перескажите своими словами
+                описания <code>[[Writable]]</code> и <code>[[Configurable]]</code>.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Enumerability_and_ownership_of_properties">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

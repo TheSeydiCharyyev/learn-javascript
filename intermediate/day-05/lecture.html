@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 5 — Свойства изнутри: дескрипторы, геттеры и сеттеры</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #a855f7; }
+        h2 { color: #7e22ce; background: #faf5ff; border-left-color: #a855f7; }
+        h3 { color: #6b21a8; }
+        .step-number { background: #a855f7; }
+        .toc a { color: #7e22ce; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 5</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 5 &bull; урок 1</span>
+        <h1>Свойства изнутри: дескрипторы, геттеры и сеттеры</h1>
+        <p>Курс 2, Intermediate. Модуль «Объекты глубже» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>читать дескриптор любого свойства и объяснять по нему, можно ли свойство записать,
+                увидеть при переборе и удалить;</li>
+            <li>создавать и менять свойства через <code>Object.defineProperty</code> и помнить, какие
+                признаки он ставит сам;</li>
+            <li>знать, что видят <code>Object.keys</code>, <code>for...in</code>, JSON, spread
+                и <code>Object.getOwnPropertyNames</code>;</li>
+            <li>писать геттеры и сеттеры: вычисляемое свойство, проверку значения, скрытое служебное поле;</li>
+            <li>понимать, чем сокращённая запись метода отличается от функции в свойстве.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#riddles">Две загадки дня 4</a></li>
+            <li><a href="#descriptor">Дескриптор свойства</a></li>
+            <li><a href="#writable">writable: можно ли записать</a></li>
+            <li><a href="#enumerable">enumerable: видно ли при переборе</a></li>
+            <li><a href="#configurable">configurable: можно ли удалить и переопределить</a></li>
+            <li><a href="#define">Object.defineProperty целиком</a></li>
+            <li><a href="#getter">Геттер: свойство, которое считается</a></li>
+            <li><a href="#setter">Сеттер: свойство, которое проверяет</a></li>
+            <li><a href="#kinds">Два вида свойств</a></li>
+            <li><a href="#hidden">Скрытое служебное поле</a></li>
+            <li><a href="#methods">Сокращённая запись методов</a></li>
+            <li><a href="#copy">Копия с геттерами и старый hasOwnProperty</a></li>
+            <li><a href="#spec">Раздел 20.1 спецификации</a></li>
+            <li><a href="#cards">«Карточки»: колода с геттерами и сеттером</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="riddles">1. Две загадки дня 4</h2>
+
+    <p>Вчера две вещи остались без ответа. Первая: <code>greet.name = "hello"</code> молча
+    не срабатывает, а <code>delete greet.name</code> — срабатывает (задание 5). Вторая: свойства
+    <code>name</code> и <code>length</code> у функции есть, а <code>Object.keys</code> их не видит.
+    Соберём обе загадки в одном опыте:</p>
+
+    <pre class="code js">function greet() {}
+greet.name = "hello";
+
+console.log(greet.name);                     // greet — запись не сработала
+console.log(Object.keys(greet));             // [] — перебор свойства не видит
+console.log(Object.hasOwn(greet, "name"));   // true — а оно есть, и своё</pre>
+
+    <p>Свойство одно, а ответы разные: прочитать можно, записать нельзя, перебор его не видит,
+    удалить можно. Значит, кроме значения, у свойства есть ещё признаки, и каждый инструмент
+    языка смотрит на свой. Эти признаки называются <strong>атрибутами</strong> свойства,
+    а объект, который их перечисляет, — <strong>дескриптором</strong> (от англ. descriptor —
+    «описатель»).</p>
+
+    <p>С этого дня начинается модуль «Объекты глубже». Объекты вы знаете с дня 21 Essentials —
+    снаружи: ключи, значения, перебор. Два дня модуля — взгляд изнутри: сегодня одно свойство,
+    завтра объект целиком.</p>
+
+    <h2 id="descriptor">2. Дескриптор свойства</h2>
+
+    <p>Посмотреть дескриптор можно функцией <code>Object.getOwnPropertyDescriptor(объект, "ключ")</code>.
+    Название длинное, но читается по словам: get own property descriptor — «получить дескриптор
+    своего свойства». Возвращает она обычный объект:</p>
+
+    <pre class="code js">function greet() {}
+const student = { name: "Аман", age: 17 };
+
+console.log(Object.getOwnPropertyDescriptor(student, "name"));
+// {value: 'Аман', writable: true, enumerable: true, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(greet, "name"));
+// {value: 'greet', writable: false, enumerable: false, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(student, "phone"));
+// undefined — своего такого свойства нет</pre>
+
+    <p>Четыре поля дескриптора — значение и три признака «да или нет»:</p>
+
+    <table>
+        <thead><tr><th>Поле</th><th>Что значит</th><th>Кто на него смотрит</th></tr></thead>
+        <tbody>
+            <tr><td><code>value</code></td><td>значение свойства</td><td>чтение <code>obj.x</code></td></tr>
+            <tr><td><code>writable</code></td><td>можно ли записать новое значение</td><td>присваивание <code>obj.x = …</code></td></tr>
+            <tr><td><code>enumerable</code></td><td>видно ли свойство при переборе</td><td><code>Object.keys</code>, <code>for...in</code>, JSON, spread</td></tr>
+            <tr><td><code>configurable</code></td><td>можно ли удалить свойство и менять его признаки</td><td><code>delete</code>, <code>Object.defineProperty</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Теперь обе загадки читаются прямо из дескриптора <code>greet.name</code>.
+    <code>writable: false</code> — поэтому запись не сработала. <code>enumerable: false</code> —
+    поэтому <code>Object.keys</code> его не видит. <code>configurable: true</code> — поэтому
+    сработал <code>delete</code> и поэтому имя можно переопределить (раздел 5). А у свойства
+    <code>student.name</code> из литерала все три признака — <code>true</code>: так устроены все
+    свойства, которые вы создавали в Essentials.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 270" role="img" aria-label="Свойство greet.name изнутри: дескриптор со значением и тремя признаками; writable false — запись не сработает, enumerable false — перебор не видит, configurable true — удалить и переопределить можно">
+            <rect x="14" y="96" width="116" height="40" rx="8" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+            <text x="72" y="121" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" fill="#6b21a8">greet.name</text>
+            <path d="M 132 116 L 152 116" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 160 116 L 150 112 L 150 120 Z" fill="#94a3b8"/>
+
+            <rect x="162" y="14" width="200" height="196" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="262" y="38" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#92400e">дескриптор</text>
+            <text x="180" y="76" font-family="Consolas, monospace" font-size="12" fill="#334155">value: "greet"</text>
+            <line x1="178" y1="94" x2="346" y2="94" stroke="#fcd34d" stroke-width="1"/>
+            <text x="180" y="116" font-family="Consolas, monospace" font-size="12" fill="#334155">writable: false</text>
+            <line x1="178" y1="134" x2="346" y2="134" stroke="#fcd34d" stroke-width="1"/>
+            <text x="180" y="156" font-family="Consolas, monospace" font-size="12" fill="#334155">enumerable: false</text>
+            <line x1="178" y1="174" x2="346" y2="174" stroke="#fcd34d" stroke-width="1"/>
+            <text x="180" y="196" font-family="Consolas, monospace" font-size="12" fill="#334155">configurable: true</text>
+
+            <path d="M 364 72 L 392 72" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <rect x="394" y="56" width="212" height="32" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="500" y="76" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">чтение отдаёт это значение</text>
+
+            <path d="M 364 112 L 392 112" fill="none" stroke="#ef4444" stroke-width="1.5"/>
+            <rect x="394" y="96" width="212" height="32" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="500" y="116" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#991b1b">запись = не сработает</text>
+
+            <path d="M 364 152 L 392 152" fill="none" stroke="#ef4444" stroke-width="1.5"/>
+            <rect x="394" y="136" width="212" height="32" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="500" y="156" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#991b1b">keys, for...in, JSON не видят</text>
+
+            <path d="M 364 192 L 392 192" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+            <rect x="394" y="176" width="212" height="32" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+            <text x="500" y="196" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#166534">delete и defineProperty — можно</text>
+
+            <rect x="14" y="226" width="592" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="248" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Свойство — значение и три признака. Каждый инструмент языка смотрит на свой.</text>
+        </svg>
+        <figcaption>Дескриптор <code>greet.name</code>: три признака объясняют обе загадки дня 4</figcaption>
+    </figure>
+
+    <p>Полезно посмотреть на дескрипторы знакомых свойств:</p>
+
+    <pre class="code js">console.log(Object.getOwnPropertyDescriptor(Math, "PI"));
+// {value: 3.141592653589793, writable: false, enumerable: false, configurable: false}
+console.log(Object.getOwnPropertyDescriptor([5, 4], "length"));
+// {value: 2, writable: true, enumerable: false, configurable: false}
+console.log(Object.getOwnPropertyDescriptor([5, 4], 0));
+// {value: 5, writable: true, enumerable: true, configurable: true}</pre>
+
+    <p><code>Math.PI</code> из дня 18 Essentials — настоящая константа: все признаки <code>false</code>.
+    <code>length</code> массива записать можно, а перебор его не видит: <code>Object.keys([5, 4])</code> —
+    это <code>['0', '1']</code>. Элементы массива — обычные свойства с ключами-номерами; номер
+    <code>0</code> стал ключом <code>"0"</code>, как на дне 21 Essentials.</p>
+
+    <h2 id="writable">3. writable: можно ли записать</h2>
+
+    <p>Свойство с нужными признаками создаёт <code>Object.defineProperty(объект, "ключ", дескриптор)</code>
+    — «определить свойство». Заведём у викторины номер, который нельзя менять:</p>
+
+    <pre class="code js">const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7 });
+
+quiz.id = 8;
+console.log(quiz.id);   // 7 — запись молча не сработала
+console.log(Object.getOwnPropertyDescriptor(quiz, "id"));
+// {value: 7, writable: false, enumerable: false, configurable: false}</pre>
+
+    <p>Мы указали только <code>value</code>, а три признака оказались <code>false</code>. Это главное
+    правило <code>defineProperty</code>, к нему вернёмся в разделе 6. А пока — та же тишина, что
+    у <code>greet.name</code>. В строгом режиме — ошибка из таблицы дня 3:</p>
+
+    <pre class="code js">"use strict";
+const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7 });
+quiz.id = 8;
+// TypeError: Cannot assign to read only property 'id' of object '#&lt;Object&gt;'</pre>
+
+    <p><code>#&lt;Object&gt;</code> — так V8 называет в сообщениях обычный объект. На дне 4 у функции
+    на этом месте стоял её исходный текст.</p>
+
+    <div class="important">
+        <code>const</code> и <code>writable: false</code> защищают разное. <code>const</code> из дня 4
+        Essentials запрещает положить в <strong>переменную</strong> другой объект, но не мешает
+        менять его свойства. <code>writable: false</code> защищает одно <strong>свойство</strong>,
+        а объект вокруг него можно менять как угодно.
+    </div>
+
+    <h2 id="enumerable">4. enumerable: видно ли при переборе</h2>
+
+    <p>Признак <code>enumerable</code> («перечисляемое») решает, покажется ли свойство при переборе.
+    Добавим студенту скрытый номер:</p>
+
+    <pre class="code js">const student = { name: "Аман" };
+Object.defineProperty(student, "id", { value: 17 });
+
+console.log(student.id);                           // 17 — читать можно
+console.log(Object.keys(student));                 // ['name']
+console.log(JSON.stringify(student));              // {"name":"Аман"}
+console.log({ ...student });                       // {name: 'Аман'}
+console.log(Object.getOwnPropertyNames(student));  // ['name', 'id']
+console.log(student.propertyIsEnumerable("id"));   // false</pre>
+
+    <p>Свойство никуда не делось: по имени его прочитать можно. Но <code>Object.keys</code>, JSON
+    и spread его пропускают. Видит его <code>Object.getOwnPropertyNames</code> — «имена своих
+    свойств»: все строковые ключи, перечисляемые и нет. А метод <code>propertyIsEnumerable</code>
+    отвечает на один вопрос: есть ли у объекта такое <strong>своё</strong> свойство и перечисляемое ли
+    оно.</p>
+
+    <p>Учебник MDN «Enumerability and ownership of properties» сводит всё в две таблицы. Вот их
+    суть: кто какие свойства видит. Унаследованные — те, что достались объекту от языка,
+    как <code>toString</code> на дне 21 Essentials; откуда они берутся — день 7.</p>
+
+    <table>
+        <thead><tr><th>Инструмент</th><th>своё, перечисляемое</th><th>своё, неперечисляемое</th><th>унаследованное</th></tr></thead>
+        <tbody>
+            <tr><td><code>Object.keys</code>, <code>values</code>, <code>entries</code></td><td>да</td><td>нет</td><td>нет</td></tr>
+            <tr><td>JSON, spread <code>{...obj}</code>, <code>Object.assign</code></td><td>да</td><td>нет</td><td>нет</td></tr>
+            <tr><td><code>for...in</code></td><td>да</td><td>нет</td><td>да, если перечисляемое</td></tr>
+            <tr><td><code>Object.getOwnPropertyNames</code></td><td>да</td><td>да</td><td>нет</td></tr>
+            <tr><td><code>propertyIsEnumerable</code></td><td>да</td><td>нет</td><td>нет</td></tr>
+            <tr><td><code>Object.hasOwn</code></td><td>да</td><td>да</td><td>нет</td></tr>
+            <tr><td>оператор <code>in</code></td><td>да</td><td>да</td><td>да</td></tr>
+        </tbody>
+    </table>
+
+    <p>Таблица объясняет совет дня 21 Essentials брать <code>Object.keys</code>, а не
+    <code>for...in</code>: они расходятся в последнем столбце. И вчерашний пустой
+    <code>Object.keys(greet)</code>: свои свойства функции <code>length</code>, <code>name</code>
+    и <code>prototype</code> — неперечисляемые:</p>
+
+    <pre class="code js">function greet() {}
+greet.calls = 0;
+
+console.log(Object.keys(greet));                  // ['calls']
+console.log(Object.getOwnPropertyNames(greet));   // ['length', 'name', 'prototype', 'calls']</pre>
+
+    <p>Свойство <code>prototype</code> — тема дня 7. Встроенные объекты почти все свои свойства прячут
+    так же: у <code>Math</code> их больше сорока, а <code>Object.keys(Math)</code> — пустой массив.
+    Иначе перебор любого объекта утонул бы в служебном.</p>
+
+    <h2 id="configurable">5. configurable: можно ли удалить и переопределить</h2>
+
+    <p>Последний признак — <code>configurable</code> («настраиваемое»). Если он <code>false</code>,
+    свойство нельзя удалить и нельзя поменять его признаки. Обычный режим опять молчит, только
+    <code>delete</code> отвечает <code>false</code> — а на дне 21 Essentials он отвечал <code>true</code>
+    даже для несуществующего свойства:</p>
+
+    <pre class="code js">console.log(delete Math.PI, Math.PI);   // false 3.141592653589793</pre>
+
+    <p>В строгом режиме — вторая обещанная днём 3 ошибка, «удаление неудаляемого свойства»:</p>
+
+    <pre class="code js">"use strict";
+delete Math.PI;
+// TypeError: Cannot delete property 'PI' of #&lt;Object&gt;</pre>
+
+    <p>Отсюда и разница между <code>var</code> и простым свойством окна (день 3): <code>var</code>
+    верхнего уровня создаёт свойство глобального объекта с <code>configurable: false</code>.</p>
+
+    <pre class="code js">var level = 1;
+globalThis.other = 2;
+
+console.log(delete globalThis.level, delete globalThis.other);   // false true</pre>
+
+    <p>А вот попытка переопределить неконфигурируемое свойство через <code>defineProperty</code>
+    падает <strong>в любом режиме</strong>. Молча не сработать <code>defineProperty</code> не умеет:
+    либо сделал, либо бросил ошибку.</p>
+
+    <pre class="code js">const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7 });
+Object.defineProperty(quiz, "id", { value: 8 });
+// TypeError: Cannot redefine property: id</pre>
+
+    <p>На MDN это страница «can't redefine non-configurable property». Два исключения из запрета,
+    оба — про <code>writable</code>. Пока он <code>true</code>, значение можно менять и через
+    <code>defineProperty</code>. И сам <code>writable</code> можно перевести из <code>true</code>
+    в <code>false</code> — но не обратно:</p>
+
+    <pre class="code js">const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7, writable: true });
+Object.defineProperty(quiz, "id", { value: 9 });         // можно: writable ещё true
+Object.defineProperty(quiz, "id", { writable: false });  // можно: true → false
+console.log(quiz.id);                                    // 9
+Object.defineProperty(quiz, "id", { writable: true });
+// TypeError: Cannot redefine property: id</pre>
+
+    <p>Так устроен <code>length</code> массива из раздела 2: неконфигурируемый, но
+    записываемый.</p>
+
+    <h3>Разгадка: как переименовать функцию</h3>
+
+    <p>Теперь ответ на вторую половину вчерашней загадки. У <code>name</code> функции
+    <code>writable: false</code>, но <code>configurable: true</code>. Присвоить нельзя, а
+    переопределить — можно. Вчера обещали так переименовать обёртку <code>memo</code>:</p>
+
+    <pre class="code js">function memo(fn) {
+  const cache = {};
+  const wrapper = function (key) {
+    if (!Object.hasOwn(cache, key)) {
+      cache[key] = fn.call(this, key);
+    }
+    return cache[key];
+  };
+  Object.defineProperty(wrapper, "name", { value: `memo ${fn.name}` });
+  return wrapper;
+}
+
+function square(n) {
+  return n * n;
+}
+
+const fastSquare = memo(square);
+console.log(fastSquare.name, fastSquare(4));   // memo square 16</pre>
+
+    <p>Теперь ошибка внутри обёртки покажет в стеке вызовов <code>at memo square</code>. Признаки <code>writable</code>
+    и <code>enumerable</code> мы не указали — и они остались прежними, <code>false</code>: при
+    <strong>изменении</strong> существующего свойства <code>defineProperty</code> трогает только
+    указанное. Так же можно поправить <code>length</code> обёртки — это задание 7.</p>
+
+    <h2 id="define">6. Object.defineProperty целиком</h2>
+
+    <p>Соберём правила <code>defineProperty</code> в одном месте:</p>
+
+    <ol>
+        <li><strong>Новое свойство:</strong> чего нет в дескрипторе, то <code>false</code>, а
+            <code>value</code> — <code>undefined</code>. Пустой дескриптор <code>{}</code> создаёт
+            невидимое свойство со значением <code>undefined</code>, которое нельзя ни записать,
+            ни удалить.</li>
+        <li><strong>Существующее свойство:</strong> меняется только то, что указали, остальное
+            остаётся как было.</li>
+        <li><strong>Результат</strong> — тот же объект, который передали первым аргументом.</li>
+        <li><strong>Не молчит:</strong> если изменение запрещено, бросает <code>TypeError</code>
+            в любом режиме.</li>
+    </ol>
+
+    <p>Первые два правила на одном объекте:</p>
+
+    <pre class="code js">const quiz = { position: 0 };
+Object.defineProperty(quiz, "position", { value: 5 });   // было — правило 2
+Object.defineProperty(quiz, "total", { value: 8 });      // не было — правило 1
+
+console.log(Object.getOwnPropertyDescriptor(quiz, "position"));
+// {value: 5, writable: true, enumerable: true, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(quiz, "total"));
+// {value: 8, writable: false, enumerable: false, configurable: false}</pre>
+
+    <div class="mistake">
+        Частая ошибка — считать <code>Object.defineProperty(obj, "x", { value: 1 })</code> тем же,
+        что <code>obj.x = 1</code>. Для нового свойства это не так: присваивание даёт все три признака
+        <code>true</code>, а <code>defineProperty</code> — все три <code>false</code>. Свойство выйдет
+        невидимым, неизменяемым и неудаляемым, и заметно это станет не сразу. Нужно обычное свойство —
+        пишите признаки явно: <code>{ value: 1, writable: true, enumerable: true, configurable: true }</code>.
+    </div>
+
+    <h3>Несколько свойств сразу</h3>
+
+    <p><code>Object.defineProperties(объект, { ключ: дескриптор, … })</code> делает то же для
+    нескольких свойств: ключи второго аргумента — имена свойств, значения — их дескрипторы.
+    Обратная функция — <code>Object.getOwnPropertyDescriptors(объект)</code>: дескрипторы всех
+    своих свойств одним объектом.</p>
+
+    <pre class="code js">const deck = {};
+Object.defineProperties(deck, {
+  title: { value: "Карточки", enumerable: true },
+  version: { value: 2 },
+});
+
+console.log(Object.keys(deck), deck.version);          // ['title'] 2
+console.log(Object.getOwnPropertyDescriptors(deck));   // {title: {…}, version: {…}}</pre>
+
+    <p>Вторую строку раскройте в консоли треугольником: под каждым ключом — его дескриптор.</p>
+
+    <h3>Дескриптор — не объект</h3>
+
+    <p>Третий аргумент <code>defineProperty</code> обязан быть объектом. Число или <code>null</code>
+    на его месте — ошибка. MDN называет её «"x" is not a non-null object», а Chrome пишет по-своему:</p>
+
+    <pre class="code js">Object.defineProperty({}, "x", 5);
+// TypeError: Property description must be an object: 5</pre>
+
+    <p>Та же ошибка бывает в <code>defineProperties</code>, если значение одного из ключей — не
+    объект: <code>{ title: "Карточки" }</code> вместо <code>{ title: { value: "Карточки" } }</code>.
+    А если не объект — первый аргумент, сообщение другое:
+    <code>Object.defineProperty called on non-object</code>.</p>
+
+    <h2 id="getter">7. Геттер: свойство, которое считается</h2>
+
+    <p>До сих пор за свойством стояло значение. Но бывают значения, которые не хранят, а
+    <strong>вычисляют</strong>: средний балл зависит от оценок, процент выученного — от числа слов.
+    Хранить их отдельно опасно: поменяли оценки — забыли обновить средний. В Essentials для этого
+    писали функцию. Есть запись удобнее — <strong>геттер</strong> (от англ. get — «получить»):</p>
+
+    <pre class="code js">const student = {
+  name: "Аман",
+  marks: [5, 4, 5],
+  get average() {
+    const sum = this.marks.reduce((a, b) =&gt; a + b, 0);
+    return sum / this.marks.length;
+  },
+};
+
+console.log(student.average);   // 4.666666666666667
+student.marks.push(3);
+console.log(student.average);   // 4.25 — посчитано заново</pre>
+
+    <p>Снаружи <code>average</code> выглядит как обычное свойство и читается без скобок. Но при
+    каждом чтении язык вызывает функцию и отдаёт её результат. Внутри работает <code>this</code>
+    дня 2: геттер вызывается у объекта, через который его прочитали, и <code>this</code> — этот
+    объект.</p>
+
+    <p>Запись геттера: слово <code>get</code>, имя, пустые скобки, тело с <code>return</code>.
+    Параметров у геттера быть не может — при чтении свойства передать нечего:</p>
+
+    <pre class="code js">const student = {
+  get average(round) {
+    return 5;
+  },
+};
+// SyntaxError: Getter must not have any formal parameters.</pre>
+
+    <p>Ошибка синтаксическая: скрипт не запустится целиком. На MDN это страница «getter functions
+    must have no arguments».</p>
+
+    <h3>Только геттер — запись некуда</h3>
+
+    <p>Что будет, если в <code>average</code> что-то записать? Сеттера нет, записывать некуда, и
+    снова две реакции — обещанные таблицей дня 3 «свойства без сеттера»:</p>
+
+    <pre class="code js">"use strict";
+const student = {
+  marks: [5, 4],
+  get average() {
+    return (this.marks[0] + this.marks[1]) / 2;
+  },
+};
+student.average = 5;
+// TypeError: Cannot set property average of #&lt;Object&gt; which has only a getter</pre>
+
+    <p>Без первой строки запись молча пропадёт, и <code>student.average</code> останется
+    <code>4.5</code>. MDN называет эту ошибку «setting getter-only property» и отмечает: бывает она
+    только в строгом режиме.</p>
+
+    <h2 id="setter">8. Сеттер: свойство, которое проверяет</h2>
+
+    <p>Пара геттеру — <strong>сеттер</strong> (от англ. set — «установить»): функция, которую язык
+    вызывает при записи в свойство. Записанное значение приходит ей единственным аргументом.
+    Главное применение — проверка. Оценка должна быть целым числом от 2 до 5:</p>
+
+    <pre class="code js">const student = {
+  _mark: 5,
+  get mark() {
+    return this._mark;
+  },
+  set mark(value) {
+    if (!Number.isInteger(value) || value &lt; 2 || value &gt; 5) {
+      console.log(`оценка ${value} не принята`);
+      return;
+    }
+    this._mark = value;
+  },
+};
+
+student.mark = 4;
+student.mark = 7;
+student.mark = "5";
+console.log(student.mark);   // 4</pre>
+
+    <div class="result-box">
+        оценка 7 не принята<br>
+        оценка 5 не принята<br>
+        4
+    </div>
+
+    <p>Сеттер принял 4 и отбросил 7 и строку <code>"5"</code>: <code>Number.isInteger</code> из дня 17
+    Essentials строку числом не считает. Само значение хранится в обычном свойстве
+    <code>_mark</code>, а <code>mark</code> — только вход и выход: геттер читает, сеттер проверяет
+    и пишет. Подчёркивание в начале имени — договорённость программистов: «служебное, снаружи не
+    трогать». Язык его никак не защищает, об этом — раздел 10.</p>
+
+    <p>У сеттера ровно один параметр. Без параметра или с двумя — синтаксическая ошибка:</p>
+
+    <pre class="code js">const student = {
+  set mark() {},
+};
+// SyntaxError: Setter must have exactly one formal parameter.</pre>
+
+    <p>С <code>...rest</code> текст другой: <code>Setter function argument must not be a rest parameter</code>.
+    На MDN оба случая — страница «setter functions must have one argument». Значение по умолчанию
+    и деструктуризация в параметре сеттера разрешены. Свойство только с сеттером, без геттера,
+    тоже бывает, но прочитать его нельзя: чтение даёт <code>undefined</code>.</p>
+
+    <p>И одна ловушка, в которую попадает каждый:</p>
+
+    <pre class="code js">const student = {
+  set name(value) {
+    this.name = value;   // запись в name снова вызывает этот же сеттер
+  },
+};
+
+student.name = "Аман";
+// RangeError: Maximum call stack size exceeded</pre>
+
+    <div class="mistake">
+        <code>this.name = value</code> внутри сеттера <code>name</code> — это снова запись в
+        <code>name</code>, то есть снова вызов сеттера, и так без конца — бесконечная рекурсия дня 12
+        Essentials с той же ошибкой. Поэтому значение и хранят в свойстве с другим именем:
+        <code>_mark</code> для <code>mark</code>.
+    </div>
+
+    <h2 id="kinds">9. Два вида свойств</h2>
+
+    <p>Теперь видно, что свойства бывают двух видов. Спецификация называет их
+    <strong>свойство-данные</strong> (data property) и <strong>свойство-аксессор</strong>
+    (accessor property, от англ. access — «доступ»). Дескрипторы у них разные:</p>
+
+    <pre class="code js">const student = {
+  _mark: 5,
+  get mark() {
+    return this._mark;
+  },
+};
+
+console.log(Object.getOwnPropertyDescriptor(student, "_mark"));
+// {value: 5, writable: true, enumerable: true, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(student, "mark"));
+// {get: ƒ, set: undefined, enumerable: true, configurable: true}</pre>
+
+    <p>У аксессора нет <code>value</code> и <code>writable</code> — вместо них <code>get</code>
+    и <code>set</code>: функции или <code>undefined</code>. Буквой <code>ƒ</code> консоль Chrome
+    коротко показывает функцию. <code>enumerable</code> и <code>configurable</code> есть у обоих видов.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 280" role="img" aria-label="Два вида свойств. Свойство-данные: value, writable, enumerable, configurable; чтение отдаёт value, запись меняет value, если writable. Свойство-аксессор: get, set, enumerable, configurable; чтение вызывает get, запись вызывает set">
+            <rect x="14" y="14" width="286" height="196" rx="12" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+            <text x="157" y="38" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#334155">свойство-данные</text>
+            <text x="157" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#64748b">_mark: 5</text>
+            <line x1="30" y1="72" x2="284" y2="72" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="30" y="94" font-family="Consolas, monospace" font-size="12" fill="#334155">value: 5</text>
+            <text x="30" y="112" font-family="Consolas, monospace" font-size="12" fill="#334155">writable: true</text>
+            <text x="30" y="130" font-family="Consolas, monospace" font-size="12" fill="#7e22ce">enumerable: true</text>
+            <text x="30" y="148" font-family="Consolas, monospace" font-size="12" fill="#7e22ce">configurable: true</text>
+            <line x1="30" y1="160" x2="284" y2="160" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="30" y="180" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">чтение → отдать value</text>
+            <text x="30" y="198" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">запись → новое value, если writable</text>
+
+            <rect x="320" y="14" width="286" height="196" rx="12" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+            <text x="463" y="38" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#6b21a8">свойство-аксессор</text>
+            <text x="463" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#64748b">get mark() / set mark(v)</text>
+            <line x1="336" y1="72" x2="590" y2="72" stroke="#d8b4fe" stroke-width="1"/>
+            <text x="336" y="94" font-family="Consolas, monospace" font-size="12" fill="#334155">get: ƒ</text>
+            <text x="336" y="112" font-family="Consolas, monospace" font-size="12" fill="#334155">set: ƒ</text>
+            <text x="336" y="130" font-family="Consolas, monospace" font-size="12" fill="#7e22ce">enumerable: true</text>
+            <text x="336" y="148" font-family="Consolas, monospace" font-size="12" fill="#7e22ce">configurable: true</text>
+            <line x1="336" y1="160" x2="590" y2="160" stroke="#d8b4fe" stroke-width="1"/>
+            <text x="336" y="180" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#6b21a8">чтение → вызвать get()</text>
+            <text x="336" y="198" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#6b21a8">запись → вызвать set(значение)</text>
+
+            <rect x="14" y="226" width="592" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="244" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Общие признаки — enumerable и configurable (лиловые строки).</text>
+            <text x="310" y="261" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">value и writable вместе с get и set в одном дескрипторе не бывают.</text>
+        </svg>
+        <figcaption>Снаружи оба вида читаются и пишутся одинаково, а внутри устроены по-разному</figcaption>
+    </figure>
+
+    <h3>Аксессор через defineProperty</h3>
+
+    <p>Аксессор можно создать и через <code>defineProperty</code>: вместо <code>value</code> указать
+    <code>get</code>, <code>set</code> или оба.</p>
+
+    <pre class="code js">const quiz = { words: ["bread", "water", "apple"] };
+Object.defineProperty(quiz, "total", {
+  get() {
+    return this.words.length;
+  },
+});
+
+console.log(quiz.total, Object.keys(quiz));   // 3 ['words']</pre>
+
+    <p>Правило 1 раздела 6 действует и здесь: <code>enumerable</code> не указан — значит
+    <code>false</code>, и <code>total</code> в <code>Object.keys</code> не попал. Смешать два вида
+    в одном дескрипторе нельзя:</p>
+
+    <pre class="code js">Object.defineProperty({}, "total", {
+  value: 3,
+  get() {
+    return 3;
+  },
+});
+// TypeError: Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #&lt;Object&gt;</pre>
+
+    <p>И <code>get</code>, и <code>set</code> должны быть функциями: <code>{ get: 5 }</code> даст
+    <code>TypeError: Getter must be a function: 5</code>.</p>
+
+    <h3>Разгадка дня 3: имя окна</h3>
+
+    <p>Помните, на дне 3 <code>var name = 5</code> на верхнем уровне давало строку
+    <code>"5"</code>? Мы сказали тогда, что свойство <code>name</code> у окна особое: «всё, что в него
+    кладут, оно хранит строкой». Теперь видно, в чём особенность:</p>
+
+    <pre class="code js">const d = Object.getOwnPropertyDescriptor(window, "name");
+console.log(typeof d.get, typeof d.set);   // function function</pre>
+
+    <p><code>name</code> окна — аксессор. Браузер написал для него сеттер, который превращает
+    значение в строку и сохраняет её как имя окна. <code>var name = 5</code> записало в свойство
+    глобального объекта — то есть вызвало этот сеттер. Аксессоров среди свойств страницы много:
+    <code>textContent</code> и <code>innerHTML</code> из дня 25 Essentials — тоже аксессоры. Запись
+    в них вызывает функцию браузера, поэтому присваивание сразу меняет страницу.</p>
+
+    <h2 id="hidden">10. Скрытое служебное поле</h2>
+
+    <p>У студента из раздела 8 есть недостаток: служебное <code>_mark</code> видно везде.</p>
+
+    <pre class="code js">const student = {
+  _mark: 5,
+  get mark() {
+    return this._mark;
+  },
+};
+
+console.log(Object.keys(student));      // ['_mark', 'mark']
+console.log(JSON.stringify(student));   // {"_mark":5,"mark":5}</pre>
+
+    <p>Оценка попала в JSON дважды. Геттер из литерала — перечисляемый, и <code>JSON.stringify</code>
+    прочитал его как обычное свойство: вызвал и записал результат. Служебное поле спрячем через
+    <code>enumerable: false</code>:</p>
+
+    <pre class="code js">const student = {
+  get mark() {
+    return this._mark;
+  },
+  set mark(value) {
+    if (Number.isInteger(value) &amp;&amp; value &gt;= 2 &amp;&amp; value &lt;= 5) {
+      this._mark = value;
+    }
+  },
+};
+Object.defineProperty(student, "_mark", { value: 5, writable: true });
+
+student.mark = 3;
+console.log(student.mark, Object.keys(student));   // 3 ['mark']
+console.log(JSON.stringify(student));              // {"mark":3}</pre>
+
+    <p>Разберём дескриптор <code>_mark</code>. <code>writable: true</code> — иначе сеттер не смог бы
+    записать новое значение. <code>enumerable</code> и <code>configurable</code> не указаны, значит,
+    <code>false</code>. Снаружи объект выглядит так, будто у него одно свойство — <code>mark</code>.</p>
+
+    <div class="important">
+        Скрытое — не значит защищённое. <code>student._mark = 100</code> сработает: поле записываемое,
+        а сеттер при такой записи не вызывается. <code>enumerable: false</code> прячет поле от
+        перебора и JSON, а не от записи. Настоящую защиту дают замыкание из дня 1 и приватные поля
+        классов — день 9.
+    </div>
+
+    <h2 id="methods">11. Сокращённая запись методов</h2>
+
+    <p>С первого дня курса мы пишем методы так: <code>show() {}</code> — без слова
+    <code>function</code> и двоеточия. Essentials называл это короткой записью метода (дни 13 и 21).
+    MDN называет её <strong>определением метода</strong> (method definition), и геттер с сеттером —
+    её родственники: та же форма с приставкой <code>get</code> или <code>set</code>. Чем метод
+    отличается от функции в свойстве?</p>
+
+    <pre class="code js">const quiz = {
+  show() {
+    return "show";
+  },
+  go: function () {
+    return "go";
+  },
+};
+
+console.log(Object.getOwnPropertyDescriptor(quiz, "show"));
+// {value: ƒ, writable: true, enumerable: true, configurable: true}
+console.log(quiz.show.name, quiz.go.name);   // show go
+console.log(Object.hasOwn(quiz.show, "prototype"), Object.hasOwn(quiz.go, "prototype"));
+// false true</pre>
+
+    <p>Свойство одинаковое: свойство-данные, все признаки <code>true</code>, значение — функция.
+    Имя тоже выводится одинаково, из ключа (таблица дня 4). Отличие — в самой функции: у метода
+    нет свойства <code>prototype</code>, и с <code>new</code> его не вызвать —
+    <code>new quiz.show()</code> бросит <code>TypeError: quiz.show is not a constructor</code>.
+    Что такое <code>new</code> и <code>prototype</code>, разберём на дне 7. Ещё одно отличие —
+    внутри метода работает слово <code>super</code>, это день 10.</p>
+
+    <p>Имя метода записывается так же, как ключ литерала: можно в кавычках, а можно —
+    <strong>вычисляемое</strong>, в квадратных скобках: ключом станет значение выражения. Перед
+    именем могут стоять <code>get</code>, <code>set</code>, <code>async</code> (день 31 Essentials)
+    и звёздочка генератора (день 12).</p>
+
+    <pre class="code js">const field = "score";
+const results = {
+  get [field]() {
+    return 10;
+  },
+  [field + "Max"]() {
+    return 20;
+  },
+  async load() {
+    return "загружено";
+  },
+};
+
+console.log(results.score, results.scoreMax(), results.scoreMax.name);   // 10 20 scoreMax</pre>
+
+    <p>И строчка в таблицу имён дня 4: у функции-геттера имя с приставкой. Возьмите геттер из
+    дескриптора: <code>Object.getOwnPropertyDescriptor(results, "score").get.name</code> — это
+    <code>"get score"</code>, у сеттера было бы <code>"set score"</code>.</p>
+
+    <h2 id="copy">12. Копия с геттерами и старый hasOwnProperty</h2>
+
+    <p>Spread и <code>Object.assign</code> <strong>читают</strong> каждое перечисляемое свойство,
+    то есть вызывают геттеры, и в копию кладут результат. Живой геттер превращается
+    в застывшее число:</p>
+
+    <pre class="code js">const student = {
+  marks: [5, 4],
+  get average() {
+    return (this.marks[0] + this.marks[1]) / 2;
+  },
+};
+
+const flat = { ...student };
+const full = Object.defineProperties({}, Object.getOwnPropertyDescriptors(student));
+
+flat.marks = [3, 3];
+full.marks = [3, 3];
+console.log(flat.average, full.average);   // 4.5 3</pre>
+
+    <p><code>flat.average</code> застыл на 4.5: в копии это уже свойство-данные. <code>full</code>
+    скопирован дескрипторами: <code>getOwnPropertyDescriptors</code> взял описания всех свойств,
+    <code>defineProperties</code> создал по ним такие же, и геттер остался геттером. Так же
+    копируются и неперечисляемые свойства, которые spread пропускает. Обе копии при этом
+    поверхностные, как на дне 22 Essentials: не замени мы <code>marks</code>, массив был бы общим
+    у оригинала и обеих копий.</p>
+
+    <h3>hasOwnProperty</h3>
+
+    <p>В старом коде вместо <code>Object.hasOwn</code> из дня 21 Essentials встречается метод
+    <code>obj.hasOwnProperty("ключ")</code>. Отвечает он на тот же вопрос — своё ли свойство, — но
+    вызывается у самого объекта, и в этом его слабость:</p>
+
+    <pre class="code js">const box = { hasOwnProperty: 1, name: "коробка" };
+
+console.log(Object.hasOwn(box, "name"));   // true
+console.log(box.hasOwnProperty("name"));
+// TypeError: box.hasOwnProperty is not a function</pre>
+
+    <p>Своё свойство с тем же именем закрыло метод. Бывают и объекты, у которых этого метода нет
+    вовсе (день 7). <code>Object.hasOwn</code> появился в 2022 году как раз на замену: он работает
+    с любым объектом. В своём коде пишите его.</p>
+
+    <h2 id="spec">13. Раздел 20.1 спецификации</h2>
+
+    <p>Объектам в спецификации посвящён раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-object-objects">20.1 Object Objects</a>, устроенный по
+    образцу дня 4: 20.1.1 — конструктор, 20.1.2 — свойства конструктора, 20.1.3 и 20.1.4 — свойства
+    прототипа и экземпляров, они завтра.</p>
+
+    <p>Подраздел <a href="https://tc39.es/ecma262/2026/#sec-object-constructor">20.1.1 The Object
+    Constructor</a> короткий: <code>Object</code> — значение одноимённого глобального свойства;
+    с <code>new</code> он создаёт новый обычный объект, без <code>new</code> — преобразует значение
+    в объект (завтра); его можно указать после <code>extends</code> (день 10).</p>
+
+    <p>Подраздел <a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-object-constructor">20.1.2
+    Properties of the Object Constructor</a> — главный сегодня: 23 функции вида
+    <code>Object.что-то</code> и свойство <code>Object.prototype</code>, 24 пункта по алфавиту.
+    Разложим их по курсу:</p>
+
+    <table>
+        <thead><tr><th>Когда</th><th>Что из 20.1.2</th></tr></thead>
+        <tbody>
+            <tr><td>Essentials, день 21</td><td><code>assign</code>, <code>entries</code>, <code>fromEntries</code>, <code>groupBy</code>, <code>hasOwn</code>, <code>keys</code>, <code>values</code></td></tr>
+            <tr><td>сегодня</td><td><code>defineProperties</code>, <code>defineProperty</code>, <code>getOwnPropertyDescriptor</code>, <code>getOwnPropertyDescriptors</code>, <code>getOwnPropertyNames</code></td></tr>
+            <tr><td>день 6</td><td><code>freeze</code>, <code>isFrozen</code>, <code>seal</code>, <code>isSealed</code>, <code>preventExtensions</code>, <code>isExtensible</code>, <code>is</code></td></tr>
+            <tr><td>день 7</td><td><code>create</code>, <code>getPrototypeOf</code>, <code>setPrototypeOf</code> и свойство <code>prototype</code></td></tr>
+            <tr><td>день 11</td><td><code>getOwnPropertySymbols</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Откройте пункт <a href="https://tc39.es/ecma262/2026/#sec-object.defineproperty">20.1.2.4
+    Object.defineProperty</a>. В алгоритме пять шагов, и каждый объясняет ошибку дня:</p>
+
+    <ol>
+        <li>Первый аргумент не объект — <code>TypeError</code>: <code>called on non-object</code>.</li>
+        <li>Ключ превращается в строку (или символ, день 11) — поэтому <code>0</code> и <code>"0"</code>
+            в разделе 2 — один ключ.</li>
+        <li>Третий аргумент превращается в дескриптор операцией
+            <a href="https://tc39.es/ecma262/2026/#sec-topropertydescriptor">ToPropertyDescriptor</a>
+            (6.2.6.5). Она бросает три ошибки: не объект — «Property description must be an object»;
+            <code>get</code> или <code>set</code> не функция — «Getter must be a function»;
+            аксессор вперемешку с <code>value</code> или <code>writable</code> — «Invalid property
+            descriptor».</li>
+        <li>Свойство определяется операцией DefinePropertyOrThrow — «определить или бросить»: отсюда
+            «Cannot redefine property» и правило 4 раздела 6.</li>
+        <li>Возвращается тот же объект — правило 3.</li>
+    </ol>
+
+    <p>Сами признаки описаны в разделе
+    <a href="https://tc39.es/ecma262/2026/#sec-property-attributes">6.1.7.1 Property Attributes</a>:
+    таблица шести атрибутов — <code>[[Value]]</code>, <code>[[Writable]]</code>, <code>[[Get]]</code>,
+    <code>[[Set]]</code>, <code>[[Enumerable]]</code>, <code>[[Configurable]]</code> — с видом свойства
+    и значением по умолчанию, <code>undefined</code> или <code>false</code>. Отсюда правило 1.
+    Двойные скобки — как у <code>[[Environment]]</code> дня 1: так спецификация пишет внутренние
+    вещи. Дескриптор из <code>getOwnPropertyDescriptor</code> — их отражение: те же имена, без скобок
+    и с маленькой буквы.</p>
+
+    <h2 id="cards">14. «Карточки»: колода с геттерами и сеттером</h2>
+
+    <p>Соберём день в «Карточках»: колода сама считает карточки и процент, проверяет тему
+    и сохраняется в JSON без лишнего. Слова — те же восемь.</p>
+
+    <pre class="code js">const words = [
+  { id: 1, word: "book", topic: "школа" },
+  { id: 2, word: "teacher", topic: "школа" },
+  { id: 3, word: "lesson", topic: "школа" },
+  { id: 4, word: "bread", topic: "еда" },
+  { id: 5, word: "water", topic: "еда" },
+  { id: 6, word: "apple", topic: "еда" },
+  { id: 7, word: "house", topic: "дом" },
+  { id: 8, word: "window", topic: "дом" },
+];
+const topics = ["все", "школа", "еда", "дом"];
+
+const deck = {
+  learned: [1, 2],
+  get topic() {
+    return this._topic;
+  },
+  set topic(value) {
+    if (!topics.includes(value)) {
+      console.log(`темы «${value}» нет, осталась «${this._topic}»`);
+      return;
+    }
+    this._topic = value;
+  },
+  get cards() {
+    return words
+      .filter((w) =&gt; !this.learned.includes(w.id))
+      .filter((w) =&gt; this._topic === "все" || w.topic === this._topic);
+  },
+  get percent() {
+    return Math.round((this.learned.length / words.length) * 100);
+  },
+};
+Object.defineProperty(deck, "_topic", { value: "все", writable: true });   // служебное
+
+console.log(deck.cards.map((w) =&gt; w.word));
+deck.topic = "еда";
+deck.topic = "спорт";
+deck.learned.push(4);
+console.log(`${deck.topic}: ${deck.cards.length} карточки, выучено ${deck.percent}%`);
+console.log(JSON.stringify(deck));
+
+for (const key of ["cards", "percent"]) {
+  Object.defineProperty(deck, key, { enumerable: false });
+}
+const saved = JSON.stringify(deck);
+console.log(saved);
+
+Object.assign(deck, JSON.parse('{"learned":[5],"topic":"спорт"}'));
+console.log(deck.learned, deck.topic);</pre>
+
+    <div class="result-box">
+        (6) ['lesson', 'bread', 'water', 'apple', 'house', 'window']<br>
+        темы «спорт» нет, осталась «еда»<br>
+        еда: 2 карточки, выучено 38%<br>
+        {"learned":[1,2,4],"topic":"еда","cards":[{"id":5,"word":"water","topic":"еда"},{"id":6,"word":"apple","topic":"еда"}],"percent":38}<br>
+        {"learned":[1,2,4],"topic":"еда"}<br>
+        темы «спорт» нет, осталась «еда»<br>
+        (1) [5] еда
+    </div>
+
+    <p><strong>Строки 1–3 — геттеры и сеттер.</strong> Переменной «текущие карточки» в программе нет:
+    список считается при каждом чтении. Сеттер пропустил «еду» и не пустил «спорт» — такой темы нет.
+    После смены темы и нового выученного слова <code>cards</code> и <code>percent</code> пересчитались
+    сами: в «еде» осталось два слова, выучено 3 из 8 — 37,5%, после округления 38.</p>
+
+    <p><strong>Строка 4 — проблема.</strong> Геттеры литерала перечисляемые, и <code>JSON.stringify</code>
+    вызвал <code>cards</code> и <code>percent</code>. Для сохранения в <code>localStorage</code> (день 31
+    Essentials) это лишнее: вычисляемое посчитается заново. <code>topic</code> — состояние колоды, его
+    сохранить нужно; <code>_topic</code> скрыт.</p>
+
+    <p><strong>Строка 5 — исправление.</strong> Цикл поменял у двух геттеров только
+    <code>enumerable</code> (правило 2 раздела 6). В JSON — ровно то, что нужно сохранить.</p>
+
+    <p><strong>Строки 6–7 — загрузка.</strong> <code>Object.assign</code> <strong>записывает</strong>
+    свойства присваиванием и потому вызывает сеттер: <code>learned</code> загрузился, а тема «спорт»
+    не прошла. Проверка в сеттере защищает и от чужих данных.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 250" role="img" aria-label="Колода deck: learned и topic перечисляемые и попадают в JSON; cards, percent и служебное _topic скрыты; при загрузке Object.assign вызывает сеттер topic">
+            <rect x="14" y="14" width="330" height="176" rx="12" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+            <text x="179" y="38" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#6b21a8">deck</text>
+            <text x="30" y="66" font-family="Consolas, monospace" font-size="12" fill="#334155">learned</text>
+            <text x="130" y="66" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">данные</text>
+            <text x="246" y="66" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#166534">в JSON</text>
+            <text x="30" y="90" font-family="Consolas, monospace" font-size="12" fill="#334155">topic</text>
+            <text x="130" y="90" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">get и set</text>
+            <text x="246" y="90" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#166534">в JSON</text>
+            <line x1="30" y1="102" x2="328" y2="102" stroke="#d8b4fe" stroke-width="1"/>
+            <text x="30" y="122" font-family="Consolas, monospace" font-size="12" fill="#64748b">cards</text>
+            <text x="130" y="122" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">get</text>
+            <text x="246" y="122" font-family="Segoe UI, sans-serif" font-size="11" fill="#94a3b8">скрыто</text>
+            <text x="30" y="146" font-family="Consolas, monospace" font-size="12" fill="#64748b">percent</text>
+            <text x="130" y="146" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">get</text>
+            <text x="246" y="146" font-family="Segoe UI, sans-serif" font-size="11" fill="#94a3b8">скрыто</text>
+            <text x="30" y="170" font-family="Consolas, monospace" font-size="12" fill="#64748b">_topic</text>
+            <text x="130" y="170" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">данные</text>
+            <text x="246" y="170" font-family="Segoe UI, sans-serif" font-size="11" fill="#94a3b8">скрыто</text>
+
+            <path d="M 346 78 L 368 78" fill="none" stroke="#22c55e" stroke-width="2"/>
+            <path d="M 376 78 L 366 74 L 366 82 Z" fill="#22c55e"/>
+            <rect x="378" y="50" width="228" height="56" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+            <text x="392" y="73" font-family="Consolas, monospace" font-size="11.5" fill="#166534">{"learned":[1,2,4],</text>
+            <text x="392" y="92" font-family="Consolas, monospace" font-size="11.5" fill="#166534"> "topic":"еда"}</text>
+
+            <rect x="378" y="122" width="228" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="492" y="145" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">загрузка: Object.assign</text>
+            <text x="492" y="164" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">вызывает сеттер topic</text>
+
+            <rect x="14" y="204" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="227" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Перечисляемое — то, что сохраняем. Вычисляемое и служебное спрятаны.</text>
+        </svg>
+        <figcaption>Признак <code>enumerable</code> решает, что колода отдаёт в JSON</figcaption>
+    </figure>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите <code>writable: true</code> из дескриптора <code>_topic</code>.
+        Что изменилось в выводе и почему нет ни одной ошибки? Добавьте первой строкой
+        <code>"use strict"</code> — какая ошибка появится и при какой строке программы?
+        <br><br>
+        <strong>Второй.</strong> Выведите <code>Object.keys(deck)</code> до цикла и после него.
+        Какого ключа нет ни разу и почему?
+        <br><br>
+        <strong>Третий.</strong> Замените строку с <code>Object.assign</code> на
+        <code>const loaded = { ...deck, ...JSON.parse('{"learned":[5],"topic":"спорт"}') }</code>
+        и выведите <code>loaded.topic</code> и <code>loaded.cards</code>. Почему сеттер не помешал
+        и куда делись карточки?
+    </div>
+
+    <h2 id="next">15. Что дальше</h2>
+
+    <p>Сегодня мы смотрели на объект по одному свойству. Завтра — объект целиком. <code>Object.freeze</code>
+    из дня 4 Essentials окажется не магией, а теми же признаками: он ставит каждому свойству
+    <code>writable: false</code> и <code>configurable: false</code> и запрещает добавлять новые.</p>
+
+    <pre class="code js">const settings = Object.freeze({ theme: "светлая" });
+console.log(Object.getOwnPropertyDescriptor(settings, "theme"));
+// {value: 'светлая', writable: false, enumerable: true, configurable: false}</pre>
+
+    <p>На дне 6 — <code>freeze</code>, <code>seal</code> и <code>preventExtensions</code>, проверки
+    «заморожен ли объект», <code>Object.is</code> и его отличия от <code>===</code>, и короткие
+    присваивания <code>&amp;&amp;=</code>, <code>||=</code>, <code>??=</code>.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Enumerability_and_ownership_of_properties">Guide: Enumerability and ownership of properties</a></td><td>кто какие свойства видит: перебор, JSON, spread, <code>in</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertyDescriptor">Object.getOwnPropertyDescriptor()</a></td><td>дескриптор своего свойства</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty">Object.defineProperty()</a></td><td>создать или изменить свойство с признаками; по умолчанию <code>false</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertyNames">Object.getOwnPropertyNames()</a></td><td>все свои строковые ключи, и неперечисляемые</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/propertyIsEnumerable">Object.prototype.propertyIsEnumerable()</a></td><td>своё ли свойство и перечисляемое ли</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get">get</a></td><td>геттер: вычисляемое свойство, без параметров</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set">set</a></td><td>сеттер: ровно один параметр, проверка значения</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Method_definitions">Method definitions</a></td><td>сокращённая запись метода; нет <code>prototype</code>, не для <code>new</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-object-constructor">ECMA-262, 20.1.2 Properties of the Object Constructor</a></td><td>24 пункта <code>Object.*</code>; шаги <code>defineProperty</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperties">Object.defineProperties()</a></td><td>несколько свойств одним вызовом</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertyDescriptors">Object.getOwnPropertyDescriptors()</a></td><td>все дескрипторы; копия вместе с геттерами</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/hasOwnProperty">Object.prototype.hasOwnProperty()</a></td><td>старый вариант <code>Object.hasOwn</code>; ломается</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-object-objects">ECMA-262, 20.1 Object Objects</a></td><td>как устроен раздел об объектах</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-object-constructor">ECMA-262, 20.1.1 The Object Constructor</a></td><td>конструктор <code>Object</code>: с <code>new</code> и без</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_redefine_property">Ошибка: can't redefine non-configurable property</a></td><td><code>Cannot redefine property: x</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/No_non-null_object">Ошибка: "x" is not a non-null object</a></td><td><code>Property description must be an object</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Getter_no_arguments">Ошибка: getter functions must have no arguments</a></td><td><code>Getter must not have any formal parameters.</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Setter_one_argument">Ошибка: setter functions must have one argument</a></td><td><code>Setter must have exactly one formal parameter.</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Getter_only">Ошибка: setting getter-only property</a></td><td>запись в свойство без сеттера; только строгий режим</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// дескриптор: Object.getOwnPropertyDescriptor(obj, "x")
+//   данные:   {value, writable, enumerable, configurable}
+//   аксессор: {get, set, enumerable, configurable}
+// writable     — можно ли записать: нет — обычный режим молчит, строгий — TypeError
+// enumerable   — видно ли в keys, for...in, JSON, spread, assign
+// configurable — можно ли delete и defineProperty:
+//                нет — delete даёт false (строгий — TypeError), defineProperty — TypeError всегда
+
+// литерал и присваивание — все признаки true
+// defineProperty для НОВОГО свойства: чего не указали — false
+// defineProperty для СУЩЕСТВУЮЩЕГО: меняет только указанное; возвращает тот же объект
+
+// getOwnPropertyNames — все свои строковые ключи, и неперечисляемые
+// obj.propertyIsEnumerable("x") — своё и перечисляемое
+// Object.hasOwn(obj, "x") — вместо obj.hasOwnProperty("x")
+
+// get x() { return … }  — без параметров, читается без скобок
+// set x(value) { … }    — ровно один параметр; проверка значения
+// только геттер: запись молчит, в строгом — TypeError
+// в сеттере x не писать this.x — RangeError; хранить в _x
+// скрыть служебное: Object.defineProperty(obj, "_x", { value: 0, writable: true })
+
+// spread и assign вызывают геттеры и кладут значения; assign вызывает и сеттеры
+// копия с геттерами: Object.defineProperties({}, Object.getOwnPropertyDescriptors(obj))
+// метод show() {} — как show: function () {}, но без prototype и не для new (день 7)</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>greet.name = "hello"</code> не работает, а
+                <code>Object.defineProperty(greet, "name", { value: "hello" })</code> — работает?
+                <details class="answer"><summary>Ответ</summary>
+                    У <code>name</code> функции <code>writable: false</code> — присваивание запрещено,
+                    но <code>configurable: true</code> — переопределять признаки и значение можно.
+                </details>
+            </li>
+            <li>Какие признаки получит свойство после <code>Object.defineProperty(obj, "x", { value: 1 })</code>,
+                если его не было? А если до этого было <code>obj.x = 0</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Нового свойства — все три <code>false</code>. Существующего — прежние
+                    <code>true</code>: <code>defineProperty</code> поменяет только значение.
+                </details>
+            </li>
+            <li>Что дадут <code>Object.keys([5, 4])</code> и <code>Object.getOwnPropertyNames([5, 4])</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>['0', '1']</code> и <code>['0', '1', 'length']</code>: <code>length</code>
+                    массива — своё, но неперечисляемое свойство.
+                </details>
+            </li>
+            <li>Почему в сеттере <code>name</code> нельзя писать <code>this.name = value</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Это снова запись в <code>name</code>, то есть снова вызов того же сеттера —
+                    бесконечная рекурсия и <code>RangeError: Maximum call stack size exceeded</code>.
+                    Значение хранят в свойстве с другим именем, например <code>_name</code>.
+                </details>
+            </li>
+            <li>Чем копия <code>{ ...obj }</code> отличается от копии через
+                <code>getOwnPropertyDescriptors</code>, если у <code>obj</code> есть геттер?
+                <details class="answer"><summary>Ответ</summary>
+                    Spread вызывает геттер и кладёт в копию его результат — застывшее значение.
+                    Копия дескрипторами переносит сам геттер, и он считает заново при каждом чтении.
+                    Ещё она переносит неперечисляемые свойства, которые spread пропускает.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Enumerability_and_ownership_of_properties">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

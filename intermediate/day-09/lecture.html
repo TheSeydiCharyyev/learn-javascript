@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 9 — Приватные элементы и static</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f97316; }
+        h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+        h3 { color: #9a3412; }
+        .step-number { background: #f97316; }
+        .toc a { color: #c2410c; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 9</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 9 &bull; урок 1</span>
+        <h1>Приватные элементы и static</h1>
+        <p>Курс 2, Intermediate. Модуль «Прототипы и классы» — третий день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>прятать данные объекта в приватных полях <code>#</code> и объяснять, чем они отличаются от
+                <code>_mark</code> и от замыкания;</li>
+            <li>писать приватные методы и аксессоры и проверять «объект ли это моего класса» через
+                <code>#x in obj</code>;</li>
+            <li>объявлять статические поля и методы — то, что принадлежит классу, а не объекту;</li>
+            <li>использовать статический блок инициализации;</li>
+            <li>читать раздел 9.2 спецификации: как язык находит приватное имя.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#promise">#mark вместо _mark</a></li>
+            <li><a href="#field">Приватное поле</a></li>
+            <li><a href="#rules">Чего с приватным полем нельзя</a></li>
+            <li><a href="#methods">Приватные методы и аксессоры</a></li>
+            <li><a href="#brand">Чужой объект и проверка #x in obj</a></li>
+            <li><a href="#same-class">Приватность — по классу, а не по объекту</a></li>
+            <li><a href="#spec">Раздел 9.2 спецификации</a></li>
+            <li><a href="#compare">Замыкание, _поле или #поле; что прятать</a></li>
+            <li><a href="#static">static: свойства самого класса</a></li>
+            <li><a href="#factory">Счётчик и фабричный метод</a></li>
+            <li><a href="#block">Статический блок</a></li>
+            <li><a href="#errors">Ошибки дня одной таблицей</a></li>
+            <li><a href="#cards">«Карточки»: закрытая карточка</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="promise">1. #mark вместо _mark</h2>
+
+    <p>Вчера сеттер класса проверял оценку, но хранил её в <code>_mark</code> — поле, которое видно
+    в <code>Object.keys</code> и которое можно испортить снаружи. Подчёркивание было лишь договорённостью
+    (день 5). Сегодня — настоящая защита: <strong>приватное поле</strong>, имя которого начинается
+    с <code>#</code>.</p>
+
+    <pre class="code js">class Student {
+  #mark;
+
+  constructor(name, mark) {
+    this.name = name;
+    this.mark = mark;
+  }
+
+  get mark() {
+    return this.#mark;
+  }
+
+  set mark(value) {
+    if (!Number.isInteger(value) || value &lt; 2 || value &gt; 5) {
+      throw new RangeError(`оценка ${value} не принята`);
+    }
+    this.#mark = value;
+  }
+}
+
+const aman = new Student("Аман", 5);
+aman.mark = 4;
+console.log(aman.mark, Object.keys(aman), JSON.stringify(aman));   // 4 ['name'] {"name":"Аман"}</pre>
+
+    <p>Служебного поля больше не видно ни в <code>Object.keys</code>, ни в JSON. Изменить оценку можно
+    только через сеттер — с проверкой. А обратиться к <code>#mark</code> снаружи класса нельзя вовсе:
+    строка <code>aman.#mark = 100</code> в файле даёт синтаксическую ошибку, и скрипт не запустится
+    целиком:</p>
+
+    <pre class="code js">class Student {
+  #mark = 5;
+}
+
+const aman = new Student();
+aman.#mark = 100;
+// SyntaxError: Private field '#mark' must be declared in an enclosing class</pre>
+
+    <div class="important">
+        Проверяйте приватность <strong>в файле</strong> (<code>app.js</code> с Live Server), а не в консоли.
+        Консоль Chrome разрешает обращаться к приватным полям снаружи класса — MDN называет это
+        поблажкой DevTools для отладки. Там <code>aman.#mark</code> покажет значение, а та же строка
+        в скрипте — <code>SyntaxError</code>. Поэтому же <code>console.log(aman)</code> в консоли
+        показывает <code>Student {#mark: 4, name: 'Аман'}</code>: видно отладчику, но не программе.
+    </div>
+
+    <h2 id="field">2. Приватное поле</h2>
+
+    <p>Правила записи короткие. Приватное поле <strong>объявляют</strong> в теле класса —
+    <code>#balance = 0;</code> или просто <code>#mark;</code> — и обращаются к нему только внутри тела
+    класса, через точку: <code>this.#balance</code>. Решётка — часть имени, а не оператор.</p>
+
+    <pre class="code js">class Account {
+  #balance = 0;
+
+  constructor(owner) {
+    this.owner = owner;
+  }
+
+  deposit(sum) {
+    this.#balance = this.#balance + sum;
+    return this.#balance;
+  }
+
+  get balance() {
+    return this.#balance;
+  }
+}
+
+const account = new Account("Аман");
+account.deposit(100);
+console.log(account.balance, Object.getOwnPropertyNames(account));   // 100 ['owner']
+account.balance = 5;                                                 // сеттера нет — молча
+account["#balance"] = 999;                                           // это другое, обычное свойство
+console.log(account.balance, Object.keys(account));                  // 100 ['owner', '#balance']</pre>
+
+    <p>Две последние строки — частые попытки «достать» поле снаружи. Запись в <code>balance</code>
+    пропала: у публичного геттера нет сеттера (день 5). А <code>account["#balance"]</code> создал
+    обычное свойство со строковым ключом <code>"#balance"</code> — к приватному полю оно отношения
+    не имеет. Квадратные скобки с приватными полями не работают вовсе: приватное имя — не строка.</p>
+
+    <p>Приватное поле не видит ни один инструмент дня 5: ни <code>Object.keys</code>, ни
+    <code>getOwnPropertyNames</code>, ни <code>for...in</code>, ни JSON, ни spread. Оно вообще не
+    свойство — раздел 7 покажет, где оно хранится.</p>
+
+    <p>Пара «приватное поле плюс публичный геттер без сеттера» — обычный способ сделать свойство
+    <strong>только для чтения снаружи</strong>: класс меняет <code>#balance</code> своими методами, а
+    остальной код может лишь читать <code>balance</code>. В обычном скрипте запись молча пропала;
+    в строгом — ошибка дня 5, только теперь в ней стоит имя класса:</p>
+
+    <pre class="code js">"use strict";
+class Account {
+  #balance = 100;
+
+  get balance() {
+    return this.#balance;
+  }
+}
+
+const account = new Account();
+account.balance = 5;
+// TypeError: Cannot set property balance of #&lt;Account&gt; which has only a getter</pre>
+
+    <p>Вместо <code>#&lt;Object&gt;</code> дня 5 Chrome пишет <code>#&lt;Account&gt;</code> — по
+    конструктору прототипа, как в подписи консоли дня 7.</p>
+
+    <h2 id="rules">3. Чего с приватным полем нельзя</h2>
+
+    <p>Все запреты проверяются ещё до запуска: решётка видна в тексте программы, и движок знает, где
+    приватное имя законно. Нарушение — <code>SyntaxError</code>, скрипт не запустится целиком.</p>
+
+    <table>
+        <thead><tr><th>Что</th><th>Текст Chrome</th></tr></thead>
+        <tbody>
+            <tr><td>обратиться снаружи класса</td><td><code>Private field '#mark' must be declared in an enclosing class</code></td></tr>
+            <tr><td>обратиться внутри, но не объявив</td><td><code>Private field '#total' must be declared in an enclosing class</code></td></tr>
+            <tr><td><code>delete this.#balance</code></td><td><code>Private fields can not be deleted</code></td></tr>
+            <tr><td>объявить дважды</td><td><code>Identifier '#x' has already been declared</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Первые две строки — одна страница MDN, «reference to undeclared private field or method #x»:
+    для движка нет разницы, снаружи вы или внутри — имя не объявлено в окружающем классе. Ещё одна
+    страница MDN, «Unexpected '#' used outside of class body», описывает ту же ошибку текстом Firefox.
+    Chrome на месте забытых кавычек — <code>document.querySelector(#app)</code> вместо
+    <code>"#app"</code> из дня 24 Essentials — тоже скажет «Private field '#app' must be declared…»:
+    он принял <code>#app</code> за приватное имя.</p>
+
+    <p>Удалить приватное поле нельзя, поэтому у объекта класса есть все его приватные поля, всегда.
+    Зато и защита дня 6 на них не действует: <code>Object.freeze</code> замораживает свойства,
+    а приватное поле — не свойство.</p>
+
+    <pre class="code js">class Counter {
+  #value = 1;
+
+  increment() {
+    this.#value = this.#value + 1;
+    return this.#value;
+  }
+}
+
+const counter = Object.freeze(new Counter());
+console.log(Object.isFrozen(counter), counter.increment(), counter.increment());   // true 2 3</pre>
+
+    <h2 id="methods">4. Приватные методы и аксессоры</h2>
+
+    <p>Решётку можно поставить почти перед любым элементом класса: перед методом, геттером, сеттером,
+    статическим полем. Приватный метод — вспомогательная функция, которую не нужно показывать снаружи.
+    Вынесем проверку оценки в отдельный метод:</p>
+
+    <pre class="code js">class Student {
+  #marks = [];
+
+  #check(mark) {
+    if (!Number.isInteger(mark) || mark &lt; 2 || mark &gt; 5) {
+      throw new RangeError(`оценка ${mark} не принята`);
+    }
+  }
+
+  add(mark) {
+    this.#check(mark);
+    this.#marks.push(mark);
+    return this;
+  }
+
+  get average() {
+    return this.#marks.reduce((a, b) =&gt; a + b, 0) / this.#marks.length;
+  }
+}
+
+const meret = new Student().add(4).add(5);
+console.log(meret.average, typeof meret.check);   // 4.5 undefined</pre>
+
+    <p>Приватный метод нельзя заменить: <code>this.#check = …</code> даёт
+    <code>TypeError: Private method '#check' is not writable</code>. Приватные геттер и сеттер
+    объявляются так же, как публичные, с решёткой: <code>get #value()</code>, <code>set #value(v)</code>.
+    С ними две ошибки дня 5 возвращаются в новом виде — чтение без геттера и запись без сеттера:</p>
+
+    <pre class="code js">class Temp {
+  set #value(v) {
+    this.saved = v;
+  }
+
+  read() {
+    return this.#value;
+  }
+}
+
+new Temp().read();
+// TypeError: '#value' was defined without a getter</pre>
+
+    <p>В обратном случае — <code>'#value' was defined without a setter</code>. Обе ошибки — в любом
+    режиме, но причина не в строгом теле класса: у публичного свойства без сеттера дня 5 в обычном
+    режиме запись молча пропадала, а у приватных элементов «тихого» поведения нет вовсе — операции
+    спецификации из раздела 7 бросают ошибку всегда. И одно правило пары: геттер и сеттер одного приватного имени
+    должны быть оба статическими или оба обычными. Иначе Chrome скажет, что имя
+    <code>'#value'</code> уже объявлено.</p>
+
+    <h2 id="brand">5. Чужой объект и проверка #x in obj</h2>
+
+    <p>Приватное поле обычного свойства не ищет по цепочке прототипов (день 7) и не отвечает
+    <code>undefined</code>, если его нет. У объекта без этого поля чтение и запись бросают ошибку:</p>
+
+    <pre class="code js">class Account {
+  #balance = 0;
+
+  static read(obj) {
+    return obj.#balance;
+  }
+}
+
+console.log(Account.read(new Account()));   // 0
+Account.read({});
+// TypeError: Cannot read private member #balance from an object whose class did not declare it</pre>
+
+    <p>Слово <code>static</code> перед методом — тема раздела 9; пока достаточно, что такой метод
+    вызывают как <code>Account.read(...)</code>. MDN называет ошибку «can't access/set private field or
+    method: object is not the right class», для записи Chrome пишет <code>Cannot write private
+    member…</code>.</p>
+
+    <p>Чтобы спросить, а не упасть, есть оператор <code>#balance in obj</code>: он отвечает, есть ли
+    у объекта это приватное поле. Это надёжнее <code>instanceof</code> дня 7, который смотрит только на
+    цепочку прототипов, а цепочку можно подделать:</p>
+
+    <pre class="code js">class Account {
+  #balance = 0;
+
+  static isAccount(obj) {
+    return #balance in obj;
+  }
+}
+
+const fake = Object.create(Account.prototype);
+console.log(fake instanceof Account, Account.isAccount(fake));   // true false
+console.log(Account.isAccount(new Account()), Account.isAccount({}));   // true false</pre>
+
+    <p><code>fake</code> выдаёт себя за счёт по цепочке, но конструктор <code>Account</code> его не
+    создавал, и приватного поля у него нет. Проверку <code>#x in obj</code> называют проверкой
+    «клейма» (brand check): приватные поля ставит только конструктор класса, и раз поле есть, объект
+    создан этим классом. Справа от <code>in</code> должен быть объект: <code>#balance in 5</code> —
+    <code>TypeError: Cannot use 'in' operator to search for '#balance' in 5</code>.</p>
+
+    <h2 id="same-class">6. Приватность — по классу, а не по объекту</h2>
+
+    <p>Внутри тела класса можно читать приватные поля <strong>любого</strong> объекта этого класса,
+    а не только <code>this</code>:</p>
+
+    <pre class="code js">class Account {
+  #balance = 0;
+
+  constructor(sum) {
+    this.#balance = sum;
+  }
+
+  transfer(other, sum) {
+    this.#balance = this.#balance - sum;
+    other.#balance = other.#balance + sum;
+  }
+
+  get balance() {
+    return this.#balance;
+  }
+}
+
+const a = new Account(100);
+const b = new Account(0);
+a.transfer(b, 30);
+console.log(a.balance, b.balance);   // 70 30</pre>
+
+    <p>Перевод денег меняет приватное поле чужого счёта. Секрет охраняет не объект от объекта,
+    а <strong>класс</strong> от остального кода. Замыкание дня 1 так не умеет: данные одного вызова
+    фабрики другому недоступны совсем. А метод <code>equals</code> дня 8 теперь может сравнивать
+    и приватные данные — предварительно проверив клеймо:</p>
+
+    <pre class="code js">class Card {
+  #word;
+
+  constructor(word) {
+    this.#word = word;
+  }
+
+  equals(other) {
+    return #word in other &amp;&amp; other.#word === this.#word;
+  }
+}
+
+console.log(new Card("book").equals(new Card("book")), new Card("book").equals({ word: "book" }));
+// true false</pre>
+
+    <p>Порядок проверок важен. <code>&amp;&amp;</code> не вычисляет правую часть, если левая ложна
+    (день 7 Essentials), поэтому до <code>other.#word</code> дело доходит, только когда клеймо есть.
+    Без первой проверки сравнение с простым объектом упало бы с ошибкой раздела 5, а не вернуло
+    <code>false</code>.</p>
+
+    <h2 id="spec">7. Раздел 9.2 спецификации</h2>
+
+    <p>На дне 1 мы читали раздел 9.1 о записях окружения — по ним язык ищет переменные. Рядом,
+    в разделе <a href="https://tc39.es/ecma262/2026/#sec-privateenvironment-records">9.2 PrivateEnvironment
+    Records</a>, — то же для приватных имён. Перескажем его.</p>
+
+    <p>Запись приватного окружения создаётся <strong>при каждой оценке</strong> объявления или выражения
+    класса и хранит приватные имена, которые этот класс объявил. У неё два поля
+    (таблица 18 спецификации):</p>
+
+    <ul>
+        <li><code>[[OuterPrivateEnvironment]]</code> — запись класса, внутри которого написан этот класс,
+            или <code>null</code>;</li>
+        <li><code>[[Names]]</code> — список приватных имён этого класса.</li>
+    </ul>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-privateenvironment-record-operations">9.2.1</a>
+    описывает две операции. NewPrivateEnvironment создаёт запись с пустым списком имён.
+    ResolvePrivateIdentifier ищет имя: сначала в своём списке, не нашла — во внешней записи. Это поиск
+    дня 1 по <code>[[OuterEnv]]</code>, только для решёток. Поэтому класс, написанный внутри другого
+    класса, видит приватные поля внешнего:</p>
+
+    <pre class="code js">class Deck {
+  #cards = ["book", "water"];
+
+  makeViewer() {
+    return new (class Viewer {
+      show(deck) {
+        return deck.#cards.join(", ");
+      }
+    })();
+  }
+}
+
+const deck = new Deck();
+console.log(deck.makeViewer().show(deck));   // book, water</pre>
+
+    <p>Второе важное слово раздела 6.2.12 о приватных именах — <strong>глобально уникальное</strong>:
+    каждое приватное имя отличается от любого другого, даже если пишется так же. Отсюда следствие для
+    фабрики классов дня 8: два класса из <code>makeCounter</code> — две оценки класса, две записи
+    и два разных <code>#count</code>. Объект первого не пройдёт проверку <code>#count in obj</code>
+    второго.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Где хранятся приватные поля: у объекта есть свойства и отдельный список PrivateElements; Object.keys, JSON и цепочка прототипов видят только свойства. Имя #cards в классе Viewer ищется в записи приватного окружения Viewer, затем во внешней записи Deck">
+            <rect x="14" y="20" width="280" height="160" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="154" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#9a3412">объект account</text>
+            <rect x="30" y="56" width="248" height="46" rx="8" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
+            <text x="44" y="75" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">свойства</text>
+            <text x="44" y="93" font-family="Consolas, monospace" font-size="11" fill="#334155">owner: "Аман"</text>
+            <rect x="30" y="112" width="248" height="61" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="44" y="131" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#475569">[[PrivateElements]]</text>
+            <text x="44" y="151" font-family="Consolas, monospace" font-size="11" fill="#475569">#balance: 100</text>
+            <text x="44" y="164" font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b">не свойства: keys, JSON, цепочка не видят</text>
+
+            <rect x="324" y="20" width="282" height="60" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="465" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#334155">PrivateEnvironment Deck</text>
+            <text x="465" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">[[Names]]: #cards</text>
+
+            <rect x="324" y="120" width="282" height="60" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="465" y="142" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#334155">PrivateEnvironment Viewer</text>
+            <text x="465" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">[[Names]]: пусто</text>
+            <path d="M 465 118 L 465 88" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 465 82 L 461 92 L 469 92 Z" fill="#f97316"/>
+            <text x="456" y="106" text-anchor="end" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">[[OuterPrivateEnvironment]]</text>
+
+            <text x="465" y="204" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">#cards во Viewer: своего нет → во внешней Deck</text>
+
+            <rect x="14" y="218" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="241" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Приватное поле хранится отдельно от свойств, а имя ищется по классам, вложенным в текст.</text>
+        </svg>
+        <figcaption>Слева — где лежит значение; справа — как находится имя</figcaption>
+    </figure>
+
+    <p>И последнее — где лежит само значение. Приватные элементы хранятся в отдельном внутреннем
+    списке объекта <code>[[PrivateElements]]</code>. Операция PrivateElementFind (7.3.26) ищет в этом
+    списке и только в нём: по цепочке прототипов она не ходит. Операции PrivateGet и PrivateSet
+    (7.3.30–31) бросают <code>TypeError</code>, если записи нет, если пишут в метод или читают без
+    геттера, — это ровно ошибки разделов 4 и 5. Учебник MDN советует думать о приватных полях как о
+    «внешних пометках», которые класс прикрепляет к каждому своему объекту.</p>
+
+    <h2 id="compare">8. Замыкание, _поле или #поле</h2>
+
+    <table>
+        <thead><tr><th></th><th>Замыкание (день 1)</th><th><code>_mark</code> (день 5)</th><th><code>#mark</code></th></tr></thead>
+        <tbody>
+            <tr><td>спрятано от кода снаружи</td><td>да</td><td>нет, договорённость</td><td>да, проверяет язык</td></tr>
+            <tr><td>методы в прототипе, общие</td><td>нет, свои у каждого</td><td>да</td><td>да</td></tr>
+            <tr><td>доступ к данным другого объекта</td><td>нет</td><td>да, любому коду</td><td>да, внутри класса</td></tr>
+            <tr><td>видно в <code>Object.keys</code> и JSON</td><td>нет</td><td>да</td><td>нет</td></tr>
+            <tr><td>видно в консоли DevTools</td><td>в разделе замыкания</td><td>да</td><td>да, для отладки</td></tr>
+        </tbody>
+    </table>
+
+    <p>Приватное поле соединило лучшее из обоих миров дня 7: данные спрятаны, как в замыкании, а
+    методы общие, как в прототипе.</p>
+
+    <h3>Что прятать</h3>
+
+    <p>Спрятать данные и пускать к ним только через методы называют <strong>инкапсуляцией</strong>.
+    Публичные методы и свойства класса — его «лицо»: на них опирается остальной код, и менять их
+    дорого. Приватное — «кухня»: её можно переделать в любой день, и никто снаружи не заметит.
+    Практическое правило из трёх пунктов:</p>
+
+    <ul>
+        <li><strong>Прятать</strong> данные с правилами: баланс, который нельзя увести в минус, оценку от 2
+            до 5, состояние «перевёрнута». Если такое поле открыто, правило обходится одной строкой.</li>
+        <li><strong>Прятать</strong> вспомогательные методы: проверки, пересчёты, форматирование. Их имена
+            и параметры — дело самого класса.</li>
+        <li><strong>Открывать</strong> то, ради чего класс существует: действия (<code>deposit</code>,
+            <code>flip</code>) и чтение через геттеры.</li>
+    </ul>
+
+    <p>Начинайте с приватного и открывайте по необходимости: открыть закрытое легко, а закрыть
+    открытое, когда на него уже опирается чужой код, — трудно.</p>
+
+    <h2 id="static">9. static: свойства самого класса</h2>
+
+    <p>Вторая тема дня. Иногда свойство нужно не каждому объекту, а классу один раз: счётчик созданных
+    карточек, список допустимых тем, функция, которая создаёт объекты. Такие элементы помечают словом
+    <code>static</code> — тем самым, которое на дне 3 было зарезервировано на будущее:</p>
+
+    <pre class="code js">class Card {
+  static topics = ["все", "школа", "еда", "дом"];
+
+  static isTopic(topic) {
+    return Card.topics.includes(topic);
+  }
+
+  constructor(word) {
+    this.word = word;
+  }
+}
+
+const card = new Card("book");
+console.log(Card.topics.length, Card.isTopic("еда"));   // 4 true
+console.log(card.topics, typeof card.isTopic);          // undefined undefined
+console.log(Object.keys(Card));                         // ['topics']</pre>
+
+    <p>Статические элементы лежат на самой функции-классе, а не в <code>Card.prototype</code>, поэтому
+    объекты их не видят: цепочка <code>card</code> → <code>Card.prototype</code> →
+    <code>Object.prototype</code> через функцию <code>Card</code> не проходит. Обращаются к ним через
+    имя класса. Как и обычные, статические поля перечисляемые, а статические методы — нет.</p>
+
+    <p>Статические поля создаются один раз, при объявлении класса, сверху вниз, и в начальном значении
+    <code>this</code> — сам класс. Поэтому следующее поле может опираться на предыдущее:</p>
+
+    <pre class="code js">class Lesson {
+  static minutes = 45;
+  static seconds = this.minutes * 60;
+  static label = `${Lesson.minutes} мин`;
+}
+
+console.log(Lesson.seconds, Lesson.label);   // 2700 45 мин</pre>
+
+    <p>Обычное поле дня 8 вычислялось при каждом <code>new</code> с <code>this</code> — новым объектом;
+    статическое — один раз, с <code>this</code> — классом. Имя класса в значении статического поля
+    тоже уже доступно: к этому моменту класс создан, в отличие от вычисляемых имён дня 8.</p>
+
+    <p>Вы пользуетесь статическими методами с первых дней Essentials. <code>Object.keys</code>,
+    <code>Array.isArray</code>, <code>Number.isInteger</code> — функции, которые лежат на конструкторе,
+    а не на объектах. Раздел 20.1.2 спецификации, который мы читали на дне 5, называется
+    «Properties of the Object Constructor» — это и есть статические элементы <code>Object</code>.
+    Поэтому <code>({}).keys</code> — <code>undefined</code>: у объекта такого метода нет.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 238" role="img" aria-label="Где что лежит: статические элементы на функции Card, методы в Card.prototype, поля и приватные поля в каждом объекте; объект видит прототип, но не статические элементы">
+            <rect x="14" y="20" width="186" height="140" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="107" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1d4ed8">функция Card</text>
+            <text x="107" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">static — один раз на класс</text>
+            <text x="30" y="88" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">topics</text>
+            <text x="30" y="108" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">isTopic()</text>
+            <text x="30" y="128" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">#created</text>
+            <text x="30" y="148" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">prototype →</text>
+
+            <rect x="234" y="20" width="166" height="140" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="317" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#334155">Card.prototype</text>
+            <text x="317" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">методы — общие</text>
+            <text x="250" y="88" font-family="Consolas, monospace" font-size="11" fill="#334155">constructor</text>
+            <text x="250" y="108" font-family="Consolas, monospace" font-size="11" fill="#334155">flip()</text>
+            <text x="250" y="128" font-family="Consolas, monospace" font-size="11" fill="#334155">get flipped</text>
+
+            <rect x="434" y="20" width="172" height="140" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="520" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">объект card</text>
+            <text x="520" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">своё у каждого</text>
+            <text x="450" y="88" font-family="Consolas, monospace" font-size="11" fill="#9a3412">word, topic</text>
+            <text x="450" y="108" font-family="Consolas, monospace" font-size="11" fill="#475569">#flipped</text>
+
+            <path d="M 202 148 L 228 148" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <path d="M 232 148 L 224 144 L 224 152 Z" fill="#94a3b8"/>
+            <path d="M 432 124 L 408 124" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 402 124 L 412 120 L 412 128 Z" fill="#f97316"/>
+            <text x="450" y="146" font-family="Segoe UI, sans-serif" font-size="10" fill="#9a3412">← [[Prototype]]</text>
+
+            <text x="310" y="186" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">card.flip() — найдено в прототипе; card.isTopic — undefined: функцию Card цепочка не проходит</text>
+
+            <rect x="14" y="200" width="592" height="32" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="221" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">static — на классе, методы — в прототипе, поля — в каждом объекте.</text>
+        </svg>
+        <figcaption>Три места, где живут элементы класса</figcaption>
+    </figure>
+
+    <h2 id="factory">10. Счётчик и фабричный метод</h2>
+
+    <p>Статические поля бывают и приватными. Счётчик созданных объектов — классическая практика дня:
+    увеличивает его только конструктор, а читать снаружи можно через статический геттер.</p>
+
+    <pre class="code js">class Card {
+  static #created = 0;
+
+  constructor(word) {
+    this.word = word;
+    Card.#created++;
+  }
+
+  static get created() {
+    return Card.#created;
+  }
+
+  static fromWords(words) {
+    return words.map((w) =&gt; new Card(w));
+  }
+}
+
+const cards = Card.fromWords(["book", "water", "bread"]);
+console.log(cards.length, Card.created);   // 3 3
+Card.created = 100;                        // сеттера нет — молча
+console.log(Card.created);                 // 3</pre>
+
+    <p><code>fromWords</code> — <strong>статический фабричный метод</strong>: ещё один способ создать
+    объекты, кроме <code>new</code>. Его зовут как <code>Card.fromWords(...)</code>, и он может
+    готовить данные перед созданием, создавать много объектов сразу или восстанавливать объект из JSON —
+    это вчерашнее обещание <code>Card.fromJSON</code>, оно выполнено в разделе 13.</p>
+
+    <p>Внутри статического метода <code>this</code> — сам класс (вызов через точку, день 2). Отсюда
+    ловушка дня 2 в новом месте: статический метод, отделённый от класса, теряет <code>this</code>:</p>
+
+    <pre class="code js">class Box {
+  static #secret = 42;
+
+  static reveal() {
+    return this.#secret;
+  }
+}
+
+const reveal = Box.reveal;
+console.log(Box.reveal());   // 42
+reveal();
+// TypeError: Cannot read properties of undefined (reading '#secret')</pre>
+
+    <p>Поэтому в статических методах часто пишут имя класса — <code>Box.#secret</code>, а не
+    <code>this.#secret</code>: такой метод работает и отделённым.</p>
+
+    <p>Статические методы тоже бывают приватными: <code>static #normalize(word)</code> — помощник
+    фабрики, которого снаружи не видно (<code>Card.normalize</code> — <code>undefined</code>, а
+    <code>Card.#normalize</code> вне класса — <code>SyntaxError</code>). Почему не обычная переменная или
+    функция рядом с классом? Можно и так, но статический элемент лежит <strong>в</strong> классе: его
+    найдут через имя класса, он не займёт имя в глобальной области (день 3), а приватный статический
+    к тому же закрыт от остального кода.</p>
+
+    <h2 id="block">11. Статический блок</h2>
+
+    <p>Иногда класс нужно подготовить кодом: построить таблицу, проверить данные, поймать ошибку.
+    Для этого есть <strong>статический блок инициализации</strong> — <code>static { … }</code>. Он
+    выполняется один раз, при объявлении класса, вместе со статическими полями, сверху вниз:</p>
+
+    <pre class="code js">class Topics {
+  static { console.log("блок 1"); }
+  static list = (console.log("поле"), ["все", "школа", "еда", "дом"]);
+  static #byName = Object.create(null);
+
+  static {
+    for (const topic of Topics.list) {
+      Topics.#byName[topic] = true;
+    }
+    console.log("блок 2, тем:", Topics.list.length, this === Topics);
+  }
+
+  static has(topic) {
+    return Topics.#byName[topic] === true;
+  }
+}
+
+console.log(Topics.has("еда"), Topics.has("спорт"));
+// блок 1
+// поле
+// блок 2, тем: 4 true
+// true false</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 220" role="img" aria-label="Когда что выполняется: при объявлении класса, один раз, — статические поля и статические блоки сверху вниз; при каждом new — поля и приватные поля объекта, потом тело constructor">
+            <rect x="14" y="20" width="284" height="140" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="156" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">объявление класса — один раз</text>
+            <text x="32" y="72" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">static { … }</text>
+            <text x="32" y="94" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">static list = […]</text>
+            <text x="32" y="116" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">static #byName = …</text>
+            <text x="32" y="138" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">сверху вниз, this — класс</text>
+
+            <rect x="322" y="20" width="284" height="140" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="464" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#9a3412">каждый new — каждый раз</text>
+            <text x="340" y="72" font-family="Consolas, monospace" font-size="11" fill="#9a3412">#flipped = false</text>
+            <text x="340" y="94" font-family="Consolas, monospace" font-size="11" fill="#9a3412">word = …</text>
+            <text x="340" y="116" font-family="Consolas, monospace" font-size="11" fill="#9a3412">constructor(…) { … }</text>
+            <text x="340" y="138" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">поля, потом тело; this — новый объект</text>
+
+            <rect x="14" y="176" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="199" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">static — подготовка класса; всё остальное — подготовка каждого объекта.</text>
+        </svg>
+        <figcaption>Две очереди: при объявлении класса и при каждом <code>new</code></figcaption>
+    </figure>
+
+    <p>Блок видит приватные статические поля, внутри него <code>this</code> — класс. Это обычный блок
+    кода: в нём работают циклы, <code>try...catch</code>, свои переменные. Даже <code>var</code> внутри
+    блока остаётся внутри. Нельзя только <code>arguments</code> — та самая ошибка дня 8, в тексте которой
+    и упоминается «static initialization block». Словарь без прототипа дня 7 пригодился и здесь.</p>
+
+    <h2 id="errors">12. Ошибки дня одной таблицей</h2>
+
+    <p>У приватных элементов на MDN семь страниц ошибок. Пять вы видели в разделах выше, две
+    встретятся позже:</p>
+
+    <table>
+        <thead><tr><th>Страница MDN</th><th>Текст Chrome</th><th>Когда</th></tr></thead>
+        <tbody>
+            <tr><td>reference to undeclared private field or method</td><td><code>Private field '#x' must be declared in an enclosing class</code></td><td>имя не объявлено или обращение снаружи</td></tr>
+            <tr><td>Unexpected '#' used outside of class body</td><td>то же, или <code>Invalid or unexpected token</code></td><td>решётка вне класса</td></tr>
+            <tr><td>private fields can't be deleted</td><td><code>Private fields can not be deleted</code></td><td><code>delete this.#x</code></td></tr>
+            <tr><td>getting private setter-only property</td><td><code>'#x' was defined without a getter</code></td><td>чтение без приватного геттера</td></tr>
+            <tr><td>getter and setter … both static or non-static</td><td><code>Identifier '#x' has already been declared</code></td><td>пара из статического и обычного</td></tr>
+            <tr><td>object is not the right class</td><td><code>Cannot read private member #x from an object whose class did not declare it</code></td><td>чужой объект</td></tr>
+            <tr><td>Initializing an object twice</td><td><code>Cannot initialize #x twice on the same object</code></td><td>трюк с наследованием, день 10</td></tr>
+        </tbody>
+    </table>
+
+    <p>Последняя ошибка случается, когда конструктор родительского класса возвращает уже готовый объект
+    и класс пытается второй раз поставить на него свои приватные поля. Это редкий трюк, и для него нужно
+    наследование — <code>extends</code> завтра.</p>
+
+    <h2 id="cards">13. «Карточки»: закрытая карточка</h2>
+
+    <p>Соберём день в «Карточках». Состояние «перевёрнута» спрятано в <code>#flipped</code>, темы
+    проверяются по таблице, которую строит статический блок, класс считает созданные карточки, а
+    <code>fromJSON</code> восстанавливает карточку вместе с приватным полем.</p>
+
+    <pre class="code js">class Card {
+  static #created = 0;
+  static #topics = Object.create(null);
+
+  static {
+    for (const topic of ["все", "школа", "еда", "дом"]) {
+      Card.#topics[topic] = true;
+    }
+  }
+
+  #flipped = false;
+
+  constructor(id, word, translation, topic) {
+    if (!Card.#topics[topic]) {
+      throw new RangeError(`темы «${topic}» нет`);
+    }
+    this.id = id;
+    this.word = word;
+    this.translation = translation;
+    this.topic = topic;
+    Card.#created++;
+  }
+
+  static get created() {
+    return Card.#created;
+  }
+
+  static fromJSON(text) {
+    const data = JSON.parse(text);
+    const card = new Card(data.id, data.word, data.translation, data.topic);
+    card.#flipped = data.flipped;
+    return card;
+  }
+
+  static isCard(value) {
+    return #flipped in value;
+  }
+
+  get flipped() {
+    return this.#flipped;
+  }
+
+  flip() {
+    this.#flipped = !this.#flipped;
+    return this.#flipped ? this.translation : this.word;
+  }
+
+  toData() {
+    return { id: this.id, word: this.word, translation: this.translation, topic: this.topic, flipped: this.#flipped };
+  }
+}
+
+const bread = new Card(4, "bread", "хлеб", "еда");
+console.log(bread.flip(), Object.keys(bread), JSON.stringify(bread));
+
+const text = JSON.stringify(bread.toData());
+const copy = Card.fromJSON(text);
+console.log(copy.flipped, copy.flip(), Card.created);
+
+try {
+  new Card(9, "ball", "мяч", "спорт");
+} catch (error) {
+  console.log(`${error.name}: ${error.message}`);
+}
+console.log(Card.isCard(copy), Card.isCard(JSON.parse(text)), Card.created);
+bread.flipped = false;
+console.log(bread.flipped);</pre>
+
+    <div class="result-box">
+        хлеб (4) ['id', 'word', 'translation', 'topic'] {"id":4,"word":"bread","translation":"хлеб","topic":"еда"}<br>
+        true bread 2<br>
+        RangeError: темы «спорт» нет<br>
+        true false 2<br>
+        true
+    </div>
+
+    <p><strong>Строка 1.</strong> Карточка перевернулась, а <code>#flipped</code> не видно ни в
+    <code>Object.keys</code>, ни в JSON. Поэтому сохранять её простым <code>JSON.stringify(bread)</code>
+    нельзя — состояние потеряется. Отсюда метод <code>toData</code>: класс сам решает, что выдать наружу.</p>
+
+    <p><strong>Строка 2.</strong> <code>fromJSON</code> создал карточку через <code>new</code> и записал
+    ей приватное поле: статический метод — внутри тела класса, и <code>card.#flipped</code> ему доступен
+    (раздел 6). Копия перевёрнута, как оригинал; созданных карточек — две.</p>
+
+    <p><strong>Строки 3–4.</strong> Тема «спорт» не прошла проверку конструктора, и карточка не появилась:
+    ошибка случилась раньше <code>Card.#created++</code>, поэтому счёт остался 2. Простой объект из
+    <code>JSON.parse</code> проверку клейма не прошёл — он не создан классом.</p>
+
+    <p><strong>Строка 5.</strong> Снаружи поменять <code>flipped</code> нельзя: у геттера нет сеттера.
+    Перевернуть карточку можно только её методом <code>flip</code>.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Перенесите строку <code>Card.#created++</code> в начало конструктора, до
+        проверки темы. Что покажет последний <code>Card.created</code> и почему это неправильный счёт?
+        <br><br>
+        <strong>Второй.</strong> Допишите в конец <strong>файла</strong> <code>console.log(bread.#flipped)</code>.
+        Что случится со всем скриптом? Затем наберите ту же строку в консоли после запуска — что она
+        покажет и почему ответы разные?
+        <br><br>
+        <strong>Третий.</strong> Отделите фабрику: <code>const load = Card.fromJSON;</code> и вызовите
+        <code>load(text)</code>. Сработает ли? Сравните с <code>reveal</code> из раздела 10 и найдите,
+        какое слово в <code>fromJSON</code> это решило.
+    </div>
+
+    <h2 id="next">14. Что дальше</h2>
+
+    <p>Класс теперь умеет всё, что умели замыкание и прототип вместе: прятать данные, делить методы
+    и хранить общее для всех объектов. Остался последний шаг модуля — <strong>наследование</strong>.
+    Завтра — <code>extends</code> и <code>super</code>: класс, построенный на другом классе, вызов
+    родительского конструктора и метода. Под ними — цепочка прототипов дня 7 из трёх звеньев, только
+    записанная одним словом. И там же приватные поля покажут ещё одну сторону: наследник их не видит.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_elements">Private elements</a></td><td>приватные поля, методы, аксессоры; <code>#x in obj</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/static">static</a></td><td>статические поля и методы; <code>this</code> — класс</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Static_initialization_blocks">Static initialization blocks</a></td><td><code>static { }</code>: один раз при объявлении</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privateenvironment-records">ECMA-262, 9.2 PrivateEnvironment Records</a></td><td>как ищется приватное имя; поля записи</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privateenvironment-record-operations">ECMA-262, 9.2.1 PrivateEnvironment Record Operations</a></td><td>NewPrivateEnvironment, ResolvePrivateIdentifier</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Undeclared_private_field_or_method">Ошибка: reference to undeclared private field or method</a></td><td><code>Private field '#x' must be declared in an enclosing class</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Hash_outside_class">Ошибка: Unexpected '#' used outside of class body</a></td><td>решётка вне класса; в Chrome — другие тексты</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_delete_private_fields">Ошибка: private fields can't be deleted</a></td><td><code>Private fields can not be deleted</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Private_setter_only">Ошибка: getting private setter-only property</a></td><td><code>'#x' was defined without a getter</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Either_be_both_static_or_non-static">Ошибка: getter and setter … static or non-static</a></td><td><code>Identifier '#x' has already been declared</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Get_set_missing_private">Ошибка: object is not the right class</a></td><td><code>Cannot read private member #x from an object…</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Private_double_initialization">Ошибка: Initializing an object twice</a></td><td><code>Cannot initialize #x twice on the same object</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// class Account {
+//   #balance = 0;                    // приватное поле: объявить в теле, доступ this.#balance
+//   #check(sum) { … }                // приватный метод: не заменить ('is not writable')
+//   get #value() { … }               // приватные геттер и сеттер — пара одного вида
+//   static count = 0;                // статическое поле: Account.count, у объектов нет
+//   static #created = 0;             // приватное статическое
+//   static create() { … }            // статический метод, this — класс (если вызван через точку)
+//   static { … }                     // статический блок: один раз при объявлении
+//   static isAccount(obj) { return #balance in obj; }   // проверка клейма
+// }
+
+// снаружи класса obj.#x — SyntaxError (в консоли DevTools — можно: поблажка отладки)
+// #x не видят keys, getOwnPropertyNames, for...in, JSON, spread; delete нельзя; freeze не действует
+// obj["#x"] — обычное свойство со строковым ключом, к #x отношения не имеет
+// чужой объект: Cannot read private member #x from an object whose class did not declare it
+// внутри класса доступ к #x ЛЮБОГО объекта этого класса (приватность по классу)
+// приватные имена уникальны на каждую оценку класса; вложенный класс видит #имена внешнего
+// в статических методах надёжнее имя класса, чем this</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чем <code>#mark</code> лучше <code>_mark</code> из дня 5?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>_mark</code> — обычное свойство: видно в <code>Object.keys</code> и JSON, его можно
+                    записать снаружи. <code>#mark</code> недоступен вне класса — это проверяет сам язык, —
+                    и не виден ни одному инструменту перебора.
+                </details>
+            </li>
+            <li>Почему <code>account["#balance"] = 999</code> не меняет приватное поле?
+                <details class="answer"><summary>Ответ</summary>
+                    Приватное имя — не строка. Квадратные скобки создают обычное свойство со строковым
+                    ключом <code>"#balance"</code>, никак не связанное с <code>#balance</code>.
+                </details>
+            </li>
+            <li>Чем <code>#balance in obj</code> надёжнее <code>obj instanceof Account</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>instanceof</code> смотрит на цепочку прототипов, а её можно подделать через
+                    <code>Object.create(Account.prototype)</code>. Приватное поле ставит только конструктор
+                    класса, поэтому его наличие значит, что объект создан этим классом.
+                </details>
+            </li>
+            <li>Почему <code>card.isTopic</code> — <code>undefined</code>, если <code>isTopic</code> —
+                статический метод <code>Card</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Статические элементы лежат на функции <code>Card</code>, а цепочка объекта идёт через
+                    <code>Card.prototype</code> и <code>Object.prototype</code> — саму функцию она не проходит.
+                </details>
+            </li>
+            <li>Когда выполняется статический блок и сколько раз?
+                <details class="answer"><summary>Ответ</summary>
+                    Один раз — при объявлении класса, вместе со статическими полями, в порядке записи.
+                    Создание объектов его не запускает.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_elements">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 6 — Защита объектов, Object.is и логическое присваивание</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #a855f7; }
+        h2 { color: #7e22ce; background: #faf5ff; border-left-color: #a855f7; }
+        h3 { color: #6b21a8; }
+        .step-number { background: #a855f7; }
+        .toc a { color: #7e22ce; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 6</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 6 &bull; урок 1</span>
+        <h1>Защита объектов, Object.is и логическое присваивание</h1>
+        <p>Курс 2, Intermediate. Модуль «Объекты глубже» — второй, последний день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>выбирать из трёх уровней защиты объекта — <code>preventExtensions</code>, <code>seal</code>,
+                <code>freeze</code> — и проверять их функциями <code>isExtensible</code>, <code>isSealed</code>,
+                <code>isFrozen</code>;</li>
+            <li>объяснять, почему заморозка неглубокая, и писать глубокую заморозку рекурсией;</li>
+            <li>знать четыре способа сравнить значения и где каждый работает внутри языка;</li>
+            <li>писать значения по умолчанию и правки на месте через <code>??=</code>, <code>||=</code>,
+                <code>&amp;&amp;=</code>;</li>
+            <li>понимать, откуда у любого объекта <code>toString</code> и <code>valueOf</code> и что делает
+                <code>Object()</code>.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#typo">Опечатка, которую не поймал день 3</a></li>
+            <li><a href="#levels">Три уровня защиты</a></li>
+            <li><a href="#prevent">preventExtensions: без новых свойств</a></li>
+            <li><a href="#seal">seal: состав зафиксирован</a></li>
+            <li><a href="#freeze">freeze: только чтение</a></li>
+            <li><a href="#arrays">Массивы под защитой</a></li>
+            <li><a href="#integrity">Как это устроено в спецификации</a></li>
+            <li><a href="#deep">Заморозка неглубокая</a></li>
+            <li><a href="#equality">Четыре сравнения</a></li>
+            <li><a href="#zero">NaN и -0 на практике</a></li>
+            <li><a href="#logical">Логическое присваивание</a></li>
+            <li><a href="#defaults">Умолчания и правки на месте</a></li>
+            <li><a href="#object">Что есть у каждого объекта</a></li>
+            <li><a href="#cards">«Карточки»: замороженные умолчания</a></li>
+            <li><a href="#module">Итоги модуля и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="typo">1. Опечатка, которую не поймал день 3</h2>
+
+    <p>На дне 3 мы признали: строгий режим ловит опечатку в имени переменной, но не в имени
+    свойства. <code>quiz.positon = 1</code> просто добавляет объекту новое свойство. Тогда же
+    обещали способ это исправить. Вот он:</p>
+
+    <pre class="code js">"use strict";
+
+const quiz = Object.seal({ position: 0 });
+quiz.position = 3;   // своё свойство менять можно
+quiz.positon = 1;
+// TypeError: Cannot add property positon, object is not extensible</pre>
+
+    <p><code>Object.seal</code> («запечатать») зафиксировал состав объекта: свойства, которые были,
+    остаются и меняются, а новых не будет. В строгом режиме попытка добавить — ошибка с именем
+    виноватого свойства. Без строгого режима запись молча пропадёт: та же пара «тишина или ошибка»,
+    что весь модуль I1 и вчерашний день.</p>
+
+    <p>Вчера мы защищали одно свойство его признаками. Сегодня — объект целиком. А во второй
+    половине дня — как язык сравнивает значения, когда <code>===</code> мало, и три коротких
+    оператора присваивания.</p>
+
+    <h2 id="levels">2. Три уровня защиты</h2>
+
+    <p>Кроме признаков свойств, у каждого объекта есть признак самого объекта — <strong>расширяемый</strong>
+    ли он, можно ли добавлять ему свойства. Три функции включают защиту по нарастающей:</p>
+
+    <table>
+        <thead><tr><th>Функция</th><th>добавлять</th><th>удалять</th><th>записывать</th><th>Проверка</th></tr></thead>
+        <tbody>
+            <tr><td><code>Object.preventExtensions</code></td><td>нет</td><td>да</td><td>да</td><td><code>Object.isExtensible</code> → <code>false</code></td></tr>
+            <tr><td><code>Object.seal</code></td><td>нет</td><td>нет</td><td>да</td><td><code>Object.isSealed</code> → <code>true</code></td></tr>
+            <tr><td><code>Object.freeze</code></td><td>нет</td><td>нет</td><td>нет</td><td><code>Object.isFrozen</code> → <code>true</code></td></tr>
+        </tbody>
+    </table>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Три уровня защиты: preventExtensions запрещает новые свойства; seal добавляет configurable false — нельзя удалять; freeze добавляет writable false — нельзя записывать">
+            <rect x="14" y="80" width="186" height="124" rx="10" fill="#faf5ff" stroke="#c084fc" stroke-width="2"/>
+            <text x="107" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#6b21a8">preventExtensions</text>
+            <text x="28" y="128" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">добавлять — нельзя</text>
+            <text x="28" y="148" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">удалять — можно</text>
+            <text x="28" y="168" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">записывать — можно</text>
+            <text x="107" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">isExtensible → false</text>
+
+            <rect x="217" y="50" width="186" height="154" rx="10" fill="#f3e8ff" stroke="#a855f7" stroke-width="2"/>
+            <text x="310" y="72" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#6b21a8">seal</text>
+            <text x="231" y="98" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">добавлять — нельзя</text>
+            <text x="231" y="118" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">удалять — нельзя</text>
+            <text x="231" y="138" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">записывать — можно</text>
+            <text x="310" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#6b21a8">+ configurable: false</text>
+            <text x="310" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">isSealed → true</text>
+
+            <rect x="420" y="20" width="186" height="184" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+            <text x="513" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#5b21b6">freeze</text>
+            <text x="434" y="68" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">добавлять — нельзя</text>
+            <text x="434" y="88" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">удалять — нельзя</text>
+            <text x="434" y="108" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">записывать — нельзя</text>
+            <text x="513" y="134" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#6b21a8">+ configurable: false</text>
+            <text x="513" y="152" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#5b21b6">+ writable: false</text>
+            <text x="513" y="194" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#64748b">isFrozen → true</text>
+
+            <rect x="14" y="218" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="241" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Каждая ступень включает предыдущую и добавляет один признак всем свойствам.</text>
+        </svg>
+        <figcaption>Защита по нарастающей: от «без новых свойств» до «только чтение»</figcaption>
+    </figure>
+
+    <p>Все три функции возвращают тот же объект, поэтому их удобно писать прямо вокруг литерала, как
+    в разделе 1. И все три <strong>необратимы</strong>: функции «разморозить» в языке нет. Нужен
+    изменяемый вариант — делают копию: spread кладёт свойства в новый, обычный объект.</p>
+
+    <h2 id="prevent">3. preventExtensions: без новых свойств</h2>
+
+    <pre class="code js">const card = Object.preventExtensions({ word: "book", topic: "школа" });
+
+card.level = 2;          // новое — молча пропало
+card.word = "lesson";    // старое — меняется
+delete card.topic;       // и удаляется
+console.log(card, Object.isExtensible(card));   // {word: 'lesson'} false</pre>
+
+    <p>В строгом режиме вместо тишины — ошибка. MDN называет её «can't define property "x": "obj" is
+    not extensible», а у Chrome два текста — для присваивания и для <code>defineProperty</code>:</p>
+
+    <pre class="code js">"use strict";
+const card = Object.preventExtensions({ word: "book" });
+card.level = 2;
+// TypeError: Cannot add property level, object is not extensible</pre>
+
+    <p><code>Object.defineProperty(card, "level", { value: 2 })</code> на том же объекте бросит
+    <code>TypeError: Cannot define property level, object is not extensible</code> — и в обычном режиме
+    тоже: <code>defineProperty</code> не молчит (день 5, правило 4).</p>
+
+    <h2 id="seal">4. seal: состав зафиксирован</h2>
+
+    <p><code>Object.seal</code> делает то же, что <code>preventExtensions</code>, и ещё ставит каждому
+    свойству <code>configurable: false</code>. Удалять свойства и менять их признаки больше нельзя,
+    а записывать — можно:</p>
+
+    <pre class="code js">const student = Object.seal({ name: "Аман", mark: 5 });
+
+student.mark = 4;        // записывать можно
+delete student.name;     // удалить нельзя: молча false
+console.log(student, Object.isSealed(student));   // {name: 'Аман', mark: 4} true
+console.log(Object.getOwnPropertyDescriptor(student, "mark"));
+// {value: 4, writable: true, enumerable: true, configurable: false}</pre>
+
+    <p>Дескриптор показывает, что именно сделал <code>seal</code>: <code>configurable: false</code>.
+    В строгом режиме <code>delete student.name</code> — <code>TypeError: Cannot delete property 'name'
+    of #&lt;Object&gt;</code>, знакомая со вчерашнего дня ошибка.</p>
+
+    <p>Запечатанный объект — хорошая форма для настроек и записей с известным набором полей: опечатка
+    в имени не создаст лишнего поля, а значения остаются живыми.</p>
+
+    <h2 id="freeze">5. freeze: только чтение</h2>
+
+    <p><code>Object.freeze</code> из дня 4 Essentials — третья ступень: всё, что делает <code>seal</code>,
+    плюс <code>writable: false</code> у каждого свойства-данных. Его дескриптор мы видели вчера
+    в разделе 15. Сегодня — деталь, о которой легко забыть, — свойства-аксессоры:</p>
+
+    <pre class="code js">let saved = "светлая";
+const settings = Object.freeze({
+  get theme() {
+    return saved;
+  },
+  set theme(value) {
+    saved = value;
+  },
+});
+
+settings.theme = "тёмная";
+console.log(settings.theme, Object.isFrozen(settings));   // тёмная true</pre>
+
+    <p>Объект заморожен, а значение поменялось. <code>writable</code> бывает только у свойств-данных,
+    у аксессора <code>freeze</code> ставит лишь <code>configurable: false</code>, и геттер с сеттером
+    продолжают работать. Данные лежат снаружи, в замыкании, и заморозка до них не дотягивается.
+    «Заморожен» значит «свойства объекта не меняются», а не «значения никогда не меняются».</p>
+
+    <h2 id="arrays">6. Массивы под защитой</h2>
+
+    <p>Массив — тоже объект, элементы — его свойства с ключами-номерами (день 5), и защита работает
+    так же. Но есть отличие, которое легко пропустить: методы массива падают <strong>в любом
+    режиме</strong>.</p>
+
+    <pre class="code js">const topics = Object.freeze(["школа", "еда", "дом"]);
+
+topics[0] = "спорт";                              // присваивание — молча
+console.log(topics);                              // ['школа', 'еда', 'дом']
+console.log(topics.map((t) =&gt; t.toUpperCase()));  // новый массив — можно
+topics.push("спорт");
+// TypeError: Cannot add property 3, object is not extensible</pre>
+
+    <p>Присваивание в обычном режиме молчит, а <code>push</code> бросает ошибку и без
+    <code>"use strict"</code>. В алгоритмах методов массива спецификация пишет каждое значение
+    операцией <code>Set</code> с флагом «при неудаче бросить ошибку» — так что методы ведут себя
+    строго всегда. Методы, которые возвращают новый массив, — <code>map</code>, <code>filter</code>,
+    <code>toSorted</code> из дня 20 Essentials, — работают.</p>
+
+    <p>С запечатанным массивом интереснее: элементы менять можно, а длину — нет. <code>pop</code>
+    должен удалить последний элемент, а тот неудаляемый:</p>
+
+    <pre class="code js">const marks = Object.seal([5, 4, 3]);
+
+marks[0] = 2;
+console.log(marks);   // [2, 4, 3]
+marks.pop();
+// TypeError: Cannot delete property '2' of [object Array]</pre>
+
+    <p>MDN называет эту ошибку «can't delete non-configurable array element». Её можно получить
+    и без <code>pop</code>: <code>marks.length = 1</code> пытается удалить элементы с конца. В обычном
+    режиме длина молча останется 3, в строгом — <code>TypeError</code> с тем же концом:
+    <code>Failed to set the 'length' property on 'Array': Cannot delete property '2' of [object Array]</code>.</p>
+
+    <h2 id="integrity">7. Как это устроено в спецификации</h2>
+
+    <p>Всё, что делают <code>seal</code> и <code>freeze</code>, вы умеете со вчерашнего дня. В спецификации
+    обе функции вызывают одну операцию —
+    <a href="https://tc39.es/ecma262/2026/#sec-setintegritylevel">SetIntegrityLevel</a> (7.3.15),
+    «установить уровень целостности», с уровнем <code>sealed</code> или <code>frozen</code>. Её шаги:</p>
+
+    <ol>
+        <li>Запретить расширение — то же, что делает <code>preventExtensions</code>.</li>
+        <li>Взять список своих ключей.</li>
+        <li>Для <code>sealed</code> — каждому свойству <code>DefinePropertyOrThrow</code> с дескриптором
+            <code>{ configurable: false }</code>.</li>
+        <li>Для <code>frozen</code> — то же, а свойствам-данным ещё и <code>writable: false</code>.
+            Аксессорам — только <code>configurable: false</code>: вот откуда живой сеттер раздела 5.</li>
+    </ol>
+
+    <p>DefinePropertyOrThrow — та же операция, что в шаге 4 <code>defineProperty</code> вчера. Значит,
+    <code>seal</code> можно написать самому: <code>preventExtensions</code> и цикл
+    <code>defineProperty</code> по <code>getOwnPropertyNames</code> (задание 5).</p>
+
+    <p>Проверки устроены зеркально — операция
+    <a href="https://tc39.es/ecma262/2026/#sec-testintegritylevel">TestIntegrityLevel</a> (7.3.16):
+    объект расширяемый — сразу «нет», иначе проверить признаки каждого свойства. Отсюда два
+    неожиданных ответа:</p>
+
+    <pre class="code js">console.log(Object.isFrozen(Object.preventExtensions({})));   // true — проверять нечего
+console.log(Object.isFrozen(5), Object.freeze(5));            // true 5</pre>
+
+    <p>Пустой нерасширяемый объект считается и запечатанным, и замороженным: свойств нет, нарушать
+    нечего. Примитивы и так неизменяемы (день 5 Essentials) — для них <code>isFrozen</code> отвечает
+    <code>true</code>, а <code>freeze</code> просто возвращает значение. И наоборот: если у объекта
+    каждое свойство только для чтения и неконфигурируемое, но сам он расширяемый, — он не заморожен:
+    в него можно добавить новое.</p>
+
+    <h2 id="deep">8. Заморозка неглубокая</h2>
+
+    <pre class="code js">const settings = Object.freeze({
+  theme: "светлая",
+  topics: ["школа", "еда"],
+});
+
+settings.topics.push("дом");
+console.log(settings.topics, Object.isFrozen(settings.topics));   // ['школа', 'еда', 'дом'] false</pre>
+
+    <p><code>freeze</code> заморозил свойство <code>topics</code>: в нём всегда будет тот же массив.
+    Но сам массив — отдельный объект, и его никто не замораживал. Как с <code>const</code> на дне 4
+    Essentials: защищена ссылка, а не то, на что она указывает. Чтобы заморозить всё дерево, нужна
+    рекурсия из дня 12 Essentials:</p>
+
+    <pre class="code js">function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (typeof value === "object" &amp;&amp; value !== null &amp;&amp; !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  }
+  return obj;
+}
+
+const settings = deepFreeze({ theme: "светлая", topics: ["школа", "еда"] });
+console.log(Object.isFrozen(settings.topics));   // true</pre>
+
+    <p>Три детали. <code>value !== null</code> нужно из-за ошибки языка: <code>typeof null</code> —
+    <code>"object"</code> (день 5 Essentials). Проверка <code>!Object.isFrozen(value)</code> спасает от
+    зацикливания: если объект где-то ссылается сам на себя, второй раз мы в него не пойдём — он уже
+    заморожен (задание 8). А <code>Object.values</code> видит только перечисляемые свойства (день 5);
+    для настроек этого хватает.</p>
+
+    <p>Что и когда защищать? Постоянные данные программы — умолчания, списки тем, таблицы оценок —
+    замораживают, чтобы никакая функция не испортила их по ошибке. Объекты с известным набором полей
+    запечатывают, чтобы ловить опечатки. Данные, которые программа меняет, не трогают. И помните: без
+    строгого режима защита молчит — нарушение не сломает программу, но и не покажет себя. Поэтому
+    защиту включают вместе со строгим режимом.</p>
+
+    <h2 id="equality">9. Четыре сравнения</h2>
+
+    <p>Вторая тема дня. Essentials приучил нас к правилу «только <code>===</code>». Но способов
+    сравнить значения в языке четыре, и два из них работают внутри знакомых методов. Учебник MDN
+    «Equality comparisons and sameness» называет их по операциям спецификации:</p>
+
+    <table>
+        <thead><tr><th>Операция</th><th>Где работает</th><th>Приводит типы</th><th><code>NaN</code> и <code>NaN</code></th><th><code>0</code> и <code>-0</code></th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-islooselyequal">IsLooselyEqual</a></td><td><code>==</code></td><td>да</td><td>не равны</td><td>равны</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isstrictlyequal">IsStrictlyEqual</a></td><td><code>===</code>, <code>indexOf</code>, <code>switch</code></td><td>нет</td><td>не равны</td><td>равны</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-samevaluezero">SameValueZero</a></td><td><code>includes</code>, коллекции дней 14–15</td><td>нет</td><td>равны</td><td>равны</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-samevalue">SameValue</a></td><td><code>Object.is</code>, <code>defineProperty</code></td><td>нет</td><td>равны</td><td>не равны</td></tr>
+        </tbody>
+    </table>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 250" role="img" aria-label="Три других сравнения отличаются от строгого === одним правилом: == приводит типы, SameValueZero считает NaN равным NaN, SameValue ещё и различает 0 и -0">
+            <rect x="230" y="96" width="160" height="56" rx="10" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+            <text x="310" y="120" text-anchor="middle" font-family="Consolas, monospace" font-size="15" font-weight="700" fill="#6b21a8">===</text>
+            <text x="310" y="140" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#6b21a8">IsStrictlyEqual</text>
+
+            <path d="M 228 124 L 160 124" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <rect x="14" y="92" width="144" height="64" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="86" y="116" text-anchor="middle" font-family="Consolas, monospace" font-size="14" font-weight="700" fill="#991b1b">==</text>
+            <text x="86" y="136" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#991b1b">+ приводит типы</text>
+            <text x="86" y="150" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">старый код</text>
+
+            <path d="M 392 112 L 450 66" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <rect x="452" y="20" width="154" height="64" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+            <text x="529" y="42" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#166534">SameValueZero</text>
+            <text x="529" y="60" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#166534">+ NaN равен NaN</text>
+            <text x="529" y="76" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">includes, коллекции</text>
+
+            <path d="M 392 136 L 450 182" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <rect x="452" y="160" width="154" height="64" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="529" y="182" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#1d4ed8">SameValue</text>
+            <text x="529" y="198" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#1d4ed8">+ NaN равен NaN, 0 ≠ -0</text>
+            <text x="529" y="214" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">Object.is, defineProperty</text>
+
+            <text x="310" y="196" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">объекты — у всех четырёх по ссылке:</text>
+            <text x="310" y="214" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">тот ли это объект, а не то же ли в нём</text>
+        </svg>
+        <figcaption>Каждое из трёх сравнений отличается от <code>===</code> одним правилом</figcaption>
+    </figure>
+
+    <pre class="code js">console.log(NaN === NaN, Object.is(NaN, NaN));        // false true
+console.log(0 === -0, Object.is(0, -0));              // true false
+console.log(Object.is("1", 1), Object.is({}, {}));    // false false</pre>
+
+    <p>С объектами все четыре одинаковы: сравнивают, тот же ли это объект, а не одинаково ли
+    содержимое (день 7 Essentials). Сравнение содержимого называют <strong>глубоким равенством</strong>;
+    встроенного нет, как и глубокой заморозки, — его пишут рекурсией.</p>
+
+    <h3>Как работает ==</h3>
+
+    <p>На дне 7 Essentials таблица <code>==</code> выглядела набором случайностей: «правил приведения
+    больше десяти, и запомнить их никто не может». В спецификации это один короткий алгоритм —
+    <a href="https://tc39.es/ecma262/2026/#sec-islooselyequal">IsLooselyEqual</a> (7.2.13). Его шаги:</p>
+
+    <ol>
+        <li>Типы одинаковые — дальше как <code>===</code>.</li>
+        <li><code>null</code> и <code>undefined</code> равны друг другу — и больше ничему.</li>
+        <li>Число и строка — строка превращается в число.</li>
+        <li><code>true</code> или <code>false</code> с любой стороны превращается в число 1 или 0.</li>
+        <li>Объект и примитив — объект превращается в примитив (раздел 13).</li>
+        <li>BigInt со строкой или числом сравнивается как число; всё остальное — <code>false</code>.</li>
+    </ol>
+
+    <p>После каждого превращения алгоритм начинается заново. Разберём строки таблицы дня 7:</p>
+
+    <pre class="code js">console.log([] == false, [1] == 1, null == 0);   // true true false</pre>
+
+    <p><code>[] == false</code> — три превращения подряд. Шаг 4: <code>false</code> становится
+    <code>0</code>. Шаг 5: массив становится примитивом — пустой строкой, как <code>String([])</code>.
+    Шаг 3: <code>""</code> становится <code>0</code>. Остаётся <code>0 === 0</code>. А
+    <code>null == 0</code> — <code>false</code> по шагу 2: <code>null</code> ни во что не превращается
+    и равен только <code>undefined</code>. «Отдельное правило» дня 7 Essentials — это шаг 2. Правило
+    курса прежнее, пишем <code>===</code>, но читать <code>==</code> в чужом коде теперь можно по шагам,
+    а не наугад.</p>
+
+    <div class="pro-tip">
+        Между шагами 2 и 3 в спецификации есть пункт только для браузеров. Старый объект
+        <code>document.all</code> притворяется пустым: <code>document.all == null</code> — <code>true</code>,
+        <code>typeof document.all</code> — <code>"undefined"</code>, а в условии он ложный. Старые
+        сайты проверяли <code>if (document.all)</code>, чтобы узнать Internet Explorer, и браузеры
+        сохранили объект, но сделали проверку ложной — чтобы такие сайты не сломались.
+    </div>
+
+    <h2 id="zero">10. NaN и -0 на практике</h2>
+
+    <p>Теперь разгадана загадка дня 19 Essentials: <code>includes</code> находит <code>NaN</code>,
+    а <code>indexOf</code> — нет. <code>includes</code> сравнивает через SameValueZero,
+    <code>indexOf</code> — через <code>===</code>. А нули оба считают равными:</p>
+
+    <pre class="code js">const nums = [1, NaN, -0];
+
+console.log(nums.includes(NaN), nums.indexOf(NaN));   // true -1
+console.log(nums.includes(0), nums.indexOf(0));       // true 2</pre>
+
+    <p>Откуда вообще берётся <code>-0</code>? Не только из записи <code>-0</code> (день 5 Essentials).
+    Его дают обычные вычисления:</p>
+
+    <pre class="code js">console.log(Math.round(-0.4), 0 * -5, -0 + 0);            // -0 -0 0
+console.log(1 / Math.round(-0.4));                        // -Infinity
+console.log(`${Math.round(-0.4)}`, JSON.stringify(-0));   // 0 0</pre>
+
+    <p>Минус ноль почти незаметен: <code>===</code> считает его нулём, строка и JSON теряют минус.
+    Выдают его деление (<code>1 / -0</code> — <code>-Infinity</code>), консоль и <code>Object.is</code>.
+    Температура, округлённая до <code>-0</code>, в консоли покажется «-0», а на странице — «0».</p>
+
+    <p>И связь со вчерашним днём. Исключение «то же значение можно переопределить даже у
+    неконфигурируемого свойства» проверяет «то же» через SameValue:</p>
+
+    <pre class="code js">const o = {};
+Object.defineProperty(o, "x", { value: NaN });
+Object.defineProperty(o, "x", { value: NaN });   // то же значение: можно
+Object.defineProperty(o, "x", { value: -0 });
+// TypeError: Cannot redefine property: x</pre>
+
+    <div class="important">
+        Когда писать <code>Object.is</code>? Почти никогда. Учебник MDN советует <code>===</code>,
+        а для <code>NaN</code> — <code>Number.isNaN</code> из дня 5 Essentials. <code>Object.is</code>
+        нужен, когда важно отличить <code>-0</code> от <code>0</code> или когда вы повторяете
+        поведение <code>defineProperty</code>.
+    </div>
+
+    <h2 id="logical">11. Логическое присваивание</h2>
+
+    <p>Третья тема дня — три оператора, которые соединяют <code>||</code>, <code>&amp;&amp;</code>
+    и <code>??</code> из дня 7 Essentials с присваиванием:</p>
+
+    <table>
+        <thead><tr><th>Запись</th><th>Значит</th><th>Присваивает, когда <code>a</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>a ||= b</code></td><td><code>a || (a = b)</code></td><td>ложное</td></tr>
+            <tr><td><code>a &amp;&amp;= b</code></td><td><code>a &amp;&amp; (a = b)</code></td><td>истинное</td></tr>
+            <tr><td><code>a ??= b</code></td><td><code>a ?? (a = b)</code></td><td><code>null</code> или <code>undefined</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Обратите внимание на расшифровку: <code>a || (a = b)</code>, а не <code>a = a || b</code>.
+    Присваивания может <strong>не быть вовсе</strong>. Если <code>a</code> уже истинное,
+    <code>a ||= b</code> его только прочитает: правая часть не вычисляется, записи нет. Это видно
+    на сеттере дня 5:</p>
+
+    <pre class="code js">const log = [];
+const quiz = {
+  _total: 5,
+  get total() {
+    log.push("чтение");
+    return this._total;
+  },
+  set total(value) {
+    log.push(`запись ${value}`);
+    this._total = value;
+  },
+};
+
+quiz.total ||= 10;
+console.log(log.join(", "));   // чтение
+quiz.total = quiz.total || 10;
+console.log(log.join(", "));   // чтение, чтение, запись 5</pre>
+
+    <p>Длинная запись <code>quiz.total = quiz.total || 10</code> записала то же значение 5 заново —
+    сеттер вызвался зря. А с замороженным объектом лишняя запись — это уже ошибка:</p>
+
+    <pre class="code js">"use strict";
+const settings = Object.freeze({ theme: "тёмная", timer: 0 });
+
+settings.theme ||= "светлая";   // записи нет — ошибки нет
+settings.timer ??= 10;          // 0 — не null: записи нет
+settings.timer ||= 10;
+// TypeError: Cannot assign to read only property 'timer' of object '#&lt;Object&gt;'</pre>
+
+    <p>Первые две строки прошли: присваивать было нечего. Третья упала: <code>0</code> ложное,
+    и <code>||=</code> попытался записать <code>10</code> в замороженный объект.</p>
+
+    <p>В спецификации это видно по шагам раздела
+    <a href="https://tc39.es/ecma262/2026/#sec-assignment-operators-runtime-semantics-evaluation">13.15.2</a>.
+    Для <code>??=</code>: вычислить, куда писать; прочитать значение; если оно не <code>null</code> и не
+    <code>undefined</code> — вернуть его и закончить; иначе вычислить правую часть и записать. «Закончить»
+    стоит раньше вычисления правой части, поэтому без записи нет ни сеттера, ни ошибки, ни даже вызова
+    функции справа.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 230" role="img" aria-label="Как работает a ??= b: прочитать a; если a null или undefined — вычислить b и записать; иначе ничего: правая часть не вычисляется, записи нет">
+            <rect x="14" y="20" width="150" height="44" rx="8" fill="#faf5ff" stroke="#a855f7" stroke-width="2"/>
+            <text x="89" y="47" text-anchor="middle" font-family="Consolas, monospace" font-size="13" fill="#6b21a8">a ??= b</text>
+            <path d="M 166 42 L 196 42" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 204 42 L 194 38 L 194 46 Z" fill="#94a3b8"/>
+
+            <rect x="206" y="20" width="208" height="44" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="310" y="40" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#92400e">прочитать a:</text>
+            <text x="310" y="56" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#92400e">null или undefined?</text>
+
+            <path d="M 280 66 L 170 110" fill="none" stroke="#22c55e" stroke-width="2"/>
+            <text x="204" y="84" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#166534">да</text>
+            <rect x="14" y="112" width="282" height="56" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+            <text x="155" y="135" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#166534">вычислить b и записать в a</text>
+            <text x="155" y="155" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#64748b">сеттер вызовется, заморозка — ошибка</text>
+
+            <path d="M 340 66 L 450 110" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <text x="420" y="84" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#475569">нет</text>
+            <rect x="324" y="112" width="282" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="465" y="135" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">ничего: b не вычисляется,</text>
+            <text x="465" y="155" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">записи нет, результат — a</text>
+
+            <rect x="14" y="182" width="592" height="38" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="206" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">У ||= вопрос «a ложное?», у &amp;&amp;= — «a истинное?». Остальное так же.</text>
+        </svg>
+        <figcaption>Логическое присваивание записывает, только если ответ «да»</figcaption>
+    </figure>
+
+    <p>И строчка в таблицу имён дня 4: если справа безымянная функция, а слева имя переменной,
+    функция получает это имя. После <code>handler ||= function () {}</code>
+    <code>handler.name</code> — <code>"handler"</code>, как при обычном присваивании.</p>
+
+    <h2 id="defaults">12. Умолчания и правки на месте</h2>
+
+    <p>Главное применение — значения по умолчанию. Правило выбора то же, что на дне 7 Essentials
+    между <code>||</code> и <code>??</code>: «ноль и пустая строка — это данные?»</p>
+
+    <pre class="code js">const options = { timer: 0, title: "", level: null };
+
+options.timer ??= 10;            // 0 — данные: остался 0
+options.title ||= "Карточки";    // пустой заголовок не годится: заменили
+options.level ??= 1;             // null — заменили
+options.theme ??= "светлая";     // свойства не было — создали
+console.log(options);
+// {timer: 0, title: 'Карточки', level: 1, theme: 'светлая'}</pre>
+
+    <p><code>&amp;&amp;=</code> — для правки на месте: поменять значение, только если оно есть.</p>
+
+    <pre class="code js">const student = { name: "  Аман ", group: "" };
+
+student.name &amp;&amp;= student.name.trim();     // имя есть — обрезали
+student.group &amp;&amp;= student.group.trim();   // пусто — не трогаем
+console.log(student);   // {name: 'Аман', group: ''}</pre>
+
+    <h3>memo в одну строку</h3>
+
+    <p>То, что правая часть вычисляется лениво, делает <code>??=</code> удобным для памяти-кеша. Обёртка
+    <code>memo</code> дня 4 сжимается до одной строки:</p>
+
+    <pre class="code js">function memo(fn) {
+  const cache = {};
+  return function (key) {
+    return (cache[key] ??= fn.call(this, key));
+  };
+}
+
+let calls = 0;
+const square = memo((n) =&gt; {
+  calls = calls + 1;
+  return n * n;
+});
+console.log(square(4), square(4), calls);   // 16 16 1</pre>
+
+    <p>Ответ уже в памяти — <code>fn</code> не вызывается вовсе. Но у сокращения есть цена. На дне 4 мы
+    проверяли <code>Object.hasOwn(cache, key)</code>, а здесь проверка другая: «значение не
+    <code>null</code> и не <code>undefined</code>». Если функция вернула <code>undefined</code>, память
+    его не заметит, и функция будет вызываться каждый раз. Для чисел годится, для функций без
+    <code>return</code> — нет.</p>
+
+    <h3>Скобки обязательны</h3>
+
+    <p>Две ошибки дня вы встречали в Essentials, а сегодня у них появились страницы MDN.
+    <code>??</code> нельзя смешивать с <code>||</code> и <code>&amp;&amp;</code> без скобок (день 7
+    Essentials); Chrome называет второй из знаков:</p>
+
+    <pre class="code js">const level = null ?? 1 || 2;
+// SyntaxError: Unexpected token '||'</pre>
+
+    <p>В обратном порядке, <code>null || 1 ?? 2</code>, — <code>Unexpected token '??'</code>. Скобки
+    говорят, что считать первым: <code>(null ?? 1) || 2</code> или <code>null ?? (1 || 2)</code>.
+    MDN: «cannot use ?? unparenthesized within || and &amp;&amp; expressions». Вторая — унарный
+    оператор слева от <code>**</code> (день 6 Essentials): <code>-2 ** 2</code> — это
+    <code>(-2) ** 2</code> или <code>-(2 ** 2)</code>? Язык не угадывает. То же с <code>typeof</code>,
+    <code>!</code> и другими унарными: <code>typeof 2 ** 2</code> — та же <code>SyntaxError: Unary
+    operator used immediately before exponentiation expression</code>. MDN: «unparenthesized unary
+    expression can't appear on the left-hand side of '**'». Логическому присваиванию <code>??</code>
+    справа не мешает: <code>a ||= b ?? c</code> — правая часть отдельное выражение.</p>
+
+    <h2 id="object">13. Что есть у каждого объекта</h2>
+
+    <p>Откуда у объекта <code>{ x: 1 }</code> метод <code>toString</code>, если мы его не писали? Он
+    унаследован (день 7) от общего объекта, который спецификация описывает в разделе
+    <a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-object-prototype-object">20.1.3
+    Properties of the Object Prototype Object</a>. Этот раздел — список того, что есть у любого
+    обычного объекта: <code>hasOwnProperty</code> и <code>propertyIsEnumerable</code> (день 5),
+    <code>constructor</code>, <code>isPrototypeOf</code> и <code>__proto__</code> (день 7), а ещё
+    <code>toString</code>, <code>valueOf</code> и <code>toLocaleString</code>. Раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-properties-of-object-instances">20.1.4 Properties of
+    Object Instances</a> — одна фраза: у экземпляров нет особых свойств, кроме унаследованных.</p>
+
+    <p><code>toString</code> объясняет надпись <code>[object Object]</code>, которую Essentials
+    показывал не раз: так объект превращается в строку, если не сказать иначе.</p>
+
+    <pre class="code js">const card = { word: "book" };
+console.log(`${card}`, String([1, 2]));   // [object Object] 1,2
+
+const toStr = card.toString;              // одалживаем метод, как на дне 2
+console.log(toStr.call([1, 2]), toStr.call(null), toStr.call(() =&gt; 1));
+// [object Array] [object Null] [object Function]</pre>
+
+    <p>У массивов свой <code>toString</code> — он склеивает элементы через запятую. А общий
+    <code>toString</code> объектов, вызванный через <code>call</code>, называет вид значения:
+    <code>[object Array]</code>, <code>[object Null]</code>, <code>[object Function]</code>. До
+    <code>Array.isArray</code> так проверяли, массив ли перед вами, и в старом коде приём встречается
+    до сих пор.</p>
+
+    <p>Свой <code>toString</code> у объекта заменяет общий — шаблонная строка вызовет его:</p>
+
+    <pre class="code js">const card = {
+  word: "book",
+  toString() {
+    return `карточка ${this.word}`;
+  },
+};
+
+console.log(`${card}`, card.toLocaleString());   // карточка book карточка book
+console.log(card.valueOf() === card);            // true</pre>
+
+    <p><code>toLocaleString</code> по спецификации просто вызывает <code>toString</code>; свой, с учётом
+    языка, есть у чисел, дат и массивов — это день 25. <code>valueOf</code> у обычного объекта
+    возвращает сам объект, а у обёрток примитивов из дня 5 Essentials — примитив.</p>
+
+    <h3>Object()</h3>
+
+    <p>Последнее обещание вчерашнего дня — сам <code>Object</code>, вызванный как функция
+    (20.1.1.1). Он превращает значение в объект: примитив — в обёртку, как <code>new Number</code>
+    дня 5 Essentials; <code>null</code> и <code>undefined</code> — в новый пустой объект; объект
+    возвращает как есть.</p>
+
+    <pre class="code js">const card = { word: "book" };
+
+console.log(typeof Object(5), Object(5) + 1);       // object 6
+console.log(Object(null), Object(card) === card);   // {} true</pre>
+
+    <p>Писать <code>Object(5)</code> незачем: обёртки не нужны, а пустой объект проще написать
+    <code>{}</code>. Но запись <code>Object(x) === x</code> встречается как проверка «x — объект».</p>
+
+    <h3>Объект → примитив</h3>
+
+    <p>Шаг 5 алгоритма <code>==</code> и вся арифметика превращают объект в примитив операцией
+    <a href="https://tc39.es/ecma262/2026/#sec-toprimitive">ToPrimitive</a> (7.1.1). Для обычного объекта
+    она пробует два метода по очереди: когда нужна строка (шаблон, <code>String</code>) — сначала
+    <code>toString</code>, потом <code>valueOf</code>; в остальных случаях — наоборот. Побеждает первый,
+    кто вернул примитив:</p>
+
+    <pre class="code js">const card = {
+  word: "book",
+  valueOf() {
+    return 42;
+  },
+  toString() {
+    return "карточка";
+  },
+};
+
+console.log(card + 1, card * 2, `${card}`, card == 42);   // 43 84 карточка true</pre>
+
+    <p>У обычного объекта <code>valueOf</code> возвращает сам объект — не примитив, — и дело доходит
+    до <code>toString</code>. Поэтому массив <code>[1]</code> в <code>[1] == 1</code> становится строкой
+    <code>"1"</code>, а объект в шаблоне — <code>[object Object]</code>. Свой <code>valueOf</code> есть
+    у <code>Date</code> из дня 17 Essentials: он возвращает то же число, что <code>getTime</code>,
+    поэтому даты можно вычитать и без <code>getTime</code>.</p>
+
+    <h2 id="cards">14. «Карточки»: замороженные умолчания</h2>
+
+    <p>Соберём день в «Карточках». Настройки приходят из <code>localStorage</code> строкой JSON,
+    и в них может чего-то не хватать. Умолчания заморожены целиком, недостающее подставляет
+    <code>??=</code>, а готовые настройки запечатаны от опечаток.</p>
+
+    <pre class="code js">"use strict";
+
+function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (typeof value === "object" &amp;&amp; value !== null &amp;&amp; !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  }
+  return obj;
+}
+
+const DEFAULTS = deepFreeze({
+  theme: "светлая",
+  timer: 10,
+  topics: ["все", "школа", "еда", "дом"],
+});
+
+function loadSettings(json) {
+  const settings = JSON.parse(json);
+  settings.theme ??= DEFAULTS.theme;
+  settings.timer ??= DEFAULTS.timer;
+  settings.topic ??= DEFAULTS.topics[0];
+  return Object.seal(settings);
+}
+
+const settings = loadSettings('{"timer":0,"topic":null}');
+console.log(settings);
+
+settings.theme = "тёмная";
+try {
+  settings.thme = "светлая";
+} catch (error) {
+  console.log(`настройки: ${error.message}`);
+}
+try {
+  DEFAULTS.topics.push("спорт");
+} catch (error) {
+  console.log(`умолчания: ${error.message}`);
+}
+console.log(settings.theme, Object.isSealed(settings), Object.isFrozen(DEFAULTS.topics));</pre>
+
+    <div class="result-box">
+        {timer: 0, topic: 'все', theme: 'светлая'}<br>
+        настройки: Cannot add property thme, object is not extensible<br>
+        умолчания: Cannot add property 4, object is not extensible<br>
+        тёмная true true
+    </div>
+
+    <p><strong>Строка 1 — умолчания.</strong> В сохранённых настройках был <code>timer: 0</code>
+    («без таймера») и <code>topic: null</code>. <code>??=</code> оставил ноль — это данные, заменил
+    <code>null</code> на «все» и добавил недостающую тему оформления.</p>
+
+    <p><strong>Строка 2 — печать.</strong> Своё поле <code>theme</code> поменялось, а опечатка
+    <code>thme</code> в строгом режиме остановлена с именем виноватого свойства.</p>
+
+    <p><strong>Строка 3 — глубокая заморозка.</strong> Вложенный массив тем тоже заморожен, и
+    никакая часть программы не испортит умолчания для следующих загрузок. С обычным
+    <code>freeze</code> <code>push</code> прошёл бы молча.</p>
+
+    <p><strong>Строка 4 — проверки.</strong> Тема поменялась, настройки запечатаны, массив тем
+    заморожен.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Замените <code>??=</code> в строке с <code>timer</code> на
+        <code>||=</code>. Каким стал таймер и почему для «без таймера» это ошибка?
+        <br><br>
+        <strong>Второй.</strong> Замените <code>deepFreeze</code> при создании <code>DEFAULTS</code>
+        на <code>Object.freeze</code>. Какая строка вывода пропала, а какая изменилась?
+        <br><br>
+        <strong>Третий.</strong> Уберите <code>"use strict"</code>. Какая ошибка исчезла, какая осталась
+        и почему — по разделу 6?
+    </div>
+
+    <h2 id="module">15. Итоги модуля и что дальше</h2>
+
+    <p>Модуль «Объекты глубже» закончен. Два дня — два взгляда на объект изнутри:</p>
+
+    <table>
+        <thead><tr><th>День</th><th>Главная мысль</th><th>В спецификации</th></tr></thead>
+        <tbody>
+            <tr><td>5</td><td>у каждого свойства дескриптор: значение или геттер и сеттер плюс три признака</td><td>20.1.2, 6.1.7.1</td></tr>
+            <tr><td>6</td><td>у объекта — расширяемость; три уровня защиты; четыре сравнения; <code>??=</code> и соседи</td><td>7.3.15, 7.2.9–7.2.14, 20.1.3</td></tr>
+        </tbody>
+    </table>
+
+    <p>Дважды за эти дни мы говорили «унаследованное» и откладывали ответ: откуда у объекта
+    <code>toString</code>, <code>hasOwnProperty</code> и <code>propertyIsEnumerable</code>, если мы их
+    не писали? Это следующий модуль, «Прототипы и классы». День 7 — цепочка прототипов,
+    <code>Object.create</code>, <code>new</code> и <code>instanceof</code>.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/preventExtensions">Object.preventExtensions()</a></td><td>запрет новых свойств</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible">Object.isExtensible()</a></td><td>можно ли добавлять свойства</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/seal">Object.seal()</a></td><td>+ <code>configurable: false</code> у всех свойств</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed">Object.isSealed()</a></td><td>запечатан ли объект</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/freeze">Object.freeze()</a></td><td>+ <code>writable: false</code>; неглубокая; аксессоры живы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen">Object.isFrozen()</a></td><td>заморожен ли объект; пустой нерасширяемый — да</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness">Guide: Equality comparisons and sameness</a></td><td>четыре сравнения: <code>==</code>, <code>===</code>, SameValueZero, SameValue</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/is">Object.is()</a></td><td>SameValue: <code>NaN</code> равен себе, <code>0</code> ≠ <code>-0</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_OR_assignment">Logical OR assignment (||=)</a></td><td>записать, если значение ложное</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_AND_assignment">Logical AND assignment (&amp;&amp;=)</a></td><td>записать, если значение истинное</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing_assignment">Nullish coalescing assignment (??=)</a></td><td>записать, если <code>null</code> или <code>undefined</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/Object">Object() constructor</a></td><td>значение → объект; обёртка, пустой объект или тот же</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/toString">Object.prototype.toString()</a></td><td><code>[object Object]</code>, <code>[object Array]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/toLocaleString">Object.prototype.toLocaleString()</a></td><td>у обычного объекта вызывает <code>toString</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/valueOf">Object.prototype.valueOf()</a></td><td>у обычного объекта — он сам</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-object-prototype-object">ECMA-262, 20.1.3 Properties of the Object Prototype Object</a></td><td>что есть у любого обычного объекта</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-object-instances">ECMA-262, 20.1.4 Properties of Object Instances</a></td><td>своих особых свойств нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_define_property_object_not_extensible">Ошибка: can't define property "x": "obj" is not extensible</a></td><td><code>Cannot add property x, object is not extensible</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Non_configurable_array_element">Ошибка: can't delete non-configurable array element</a></td><td><code>Cannot delete property '2' of [object Array]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_use_nullish_coalescing_unparenthesized">Ошибка: cannot use ?? unparenthesized within || and &amp;&amp;</a></td><td><code>Unexpected token '||'</code> или <code>'??'</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Unparenthesized_unary_expr_lhs_exponentiation">Ошибка: unparenthesized unary expression … '**'</a></td><td><code>Unary operator used immediately before exponentiation expression</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// три уровня, все необратимы и возвращают тот же объект:
+// Object.preventExtensions(obj) — нет новых свойств           Object.isExtensible → false
+// Object.seal(obj)   — + configurable: false: нет удаления     Object.isSealed → true
+// Object.freeze(obj) — + writable: false: нет записи           Object.isFrozen → true
+// нарушение: обычный режим — молча; строгий — TypeError;
+//   defineProperty и методы массива (push, pop, sort) — TypeError всегда
+// freeze неглубокий: вложенные объекты — deepFreeze рекурсией (с проверкой isFrozen)
+// аксессоры замороженного объекта работают: freeze не трогает get и set
+// isFrozen({} после preventExtensions) → true; isFrozen(5) → true
+
+// ==  — приводит типы; NaN != NaN, 0 == -0                (старый код)
+// === — IsStrictlyEqual: NaN !== NaN, 0 === -0            (наш код, indexOf, switch)
+// SameValueZero: NaN равен NaN, 0 равен -0                (includes, Map, Set)
+// Object.is — SameValue: NaN равен NaN, 0 ≠ -0            (defineProperty)
+// объекты все четыре сравнивают по ссылке
+// == по шагам: тот же тип → ===; null == undefined (и только); строка → число;
+//    true/false → 1/0; объект → примитив; после превращения — сначала
+
+// a ||= b  — a || (a = b): записать, если a ложное
+// a &amp;&amp;= b  — a &amp;&amp; (a = b): записать, если a истинное
+// a ??= b  — a ?? (a = b): записать, если a null или undefined
+// записи может не быть: сеттер не вызовется, заморозка не помешает, правая часть не вычислится
+// cache[key] ??= fn(key) — память в одну строку, но undefined она не запоминает
+// ?? вместе с || и &amp;&amp; — только в скобках; -2 ** 2 — только в скобках
+
+// {}.toString → "[object Object]"; через call — вид: [object Array], [object Null]
+// valueOf обычного объекта — он сам; toLocaleString → toString
+// Object(5) — обёртка; Object(null) — {}; Object(obj) === obj
+// объект → примитив (ToPrimitive): valueOf, потом toString; для шаблона и String — наоборот</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чем <code>seal</code> отличается от <code>freeze</code> по признакам свойств?
+                <details class="answer"><summary>Ответ</summary>
+                    Оба запрещают расширение и ставят всем свойствам <code>configurable: false</code>.
+                    <code>freeze</code> ещё ставит свойствам-данным <code>writable: false</code>:
+                    в запечатанный объект записывать можно, в замороженный — нет.
+                </details>
+            </li>
+            <li>Объект заморожен, а <code>settings.theme = "тёмная"</code> поменял значение. Как такое
+                возможно?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>theme</code> — аксессор. <code>freeze</code> ставит аксессорам только
+                    <code>configurable: false</code>, и сеттер продолжает работать, записывая
+                    данные туда, где они хранятся, например в замыкание.
+                </details>
+            </li>
+            <li>Почему <code>[NaN].includes(NaN)</code> — <code>true</code>, а
+                <code>[NaN].indexOf(NaN)</code> — <code>-1</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>includes</code> сравнивает через SameValueZero, где <code>NaN</code> равен
+                    <code>NaN</code>, а <code>indexOf</code> — через <code>===</code>, где не равен.
+                </details>
+            </li>
+            <li>Чем <code>obj.x ||= 5</code> отличается от <code>obj.x = obj.x || 5</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Если <code>obj.x</code> истинное, <code>||=</code> ничего не записывает: сеттер не
+                    вызовется, на замороженном объекте ошибки не будет. Длинная запись записывает всегда.
+                </details>
+            </li>
+            <li>В настройках <code>timer: 0</code> значит «без таймера». Что писать для умолчания:
+                <code>timer ||= 10</code> или <code>timer ??= 10</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>??=</code>: он заменяет только <code>null</code> и <code>undefined</code>.
+                    <code>||=</code> заменил бы и ноль, и «без таймера» превратилось бы в 10 секунд.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

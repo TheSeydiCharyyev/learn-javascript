@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 6 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #a855f7; }
+        h2 { color: #7e22ce; background: #faf5ff; border-left-color: #a855f7; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 6</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 6. Защита объектов, Object.is и логическое присваивание</h1>
+    <p class="subtitle">Выжимка лекции: три уровня защиты, глубокая заморозка, четыре сравнения,
+    <code>||=</code>, <code>&amp;&amp;=</code>, <code>??=</code>, общие методы объектов.</p>
+
+    <h2>Три уровня защиты</h2>
+
+    <table>
+        <thead><tr><th>Функция</th><th>добавлять</th><th>удалять</th><th>записывать</th><th>Проверка</th></tr></thead>
+        <tbody>
+            <tr><td><code>preventExtensions</code></td><td>нет</td><td>да</td><td>да</td><td><code>isExtensible</code> → <code>false</code></td></tr>
+            <tr><td><code>seal</code></td><td>нет</td><td>нет</td><td>да</td><td><code>isSealed</code> → <code>true</code></td></tr>
+            <tr><td><code>freeze</code></td><td>нет</td><td>нет</td><td>нет</td><td><code>isFrozen</code> → <code>true</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="definition">
+        <code>seal</code> = запрет расширения + <code>configurable: false</code> всем свойствам;
+        <code>freeze</code> = то же + <code>writable: false</code> свойствам-данным. В спецификации
+        обе — операция SetIntegrityLevel (7.3.15). Все три функции необратимы и возвращают тот же объект.
+    </div>
+
+    <div class="remember">
+        Нарушение защиты: обычный режим молчит, строгий бросает <code>TypeError</code>
+        (<code>Cannot add property x, object is not extensible</code>). <code>defineProperty</code>
+        и методы массива (<code>push</code>, <code>pop</code>, <code>sort</code>) бросают ошибку
+        <strong>в любом режиме</strong>. Аксессоры замороженного объекта продолжают работать.
+    </div>
+
+    <pre class="code js">function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (typeof value === "object" &amp;&amp; value !== null &amp;&amp; !Object.isFrozen(value)) {
+      deepFreeze(value);   // freeze неглубокий: вложенное — рекурсией
+    }
+  }
+  return obj;
+}</pre>
+
+    <h2>Четыре сравнения</h2>
+
+    <table>
+        <thead><tr><th>Сравнение</th><th>Где</th><th><code>NaN</code>, <code>NaN</code></th><th><code>0</code>, <code>-0</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>==</code></td><td>старый код; приводит типы</td><td>не равны</td><td>равны</td></tr>
+            <tr><td><code>===</code></td><td>наш код, <code>indexOf</code>, <code>switch</code></td><td>не равны</td><td>равны</td></tr>
+            <tr><td>SameValueZero</td><td><code>includes</code>, <code>Map</code>, <code>Set</code></td><td>равны</td><td>равны</td></tr>
+            <tr><td><code>Object.is</code> (SameValue)</td><td><code>defineProperty</code></td><td>равны</td><td>не равны</td></tr>
+        </tbody>
+    </table>
+
+    <div class="key-point">
+        Объекты все четыре сравнивают по ссылке. <code>-0</code> дают <code>Math.round(-0.4)</code>
+        и <code>0 * -5</code>; строка и JSON теряют минус. <code>Object.is</code> нужен редко:
+        для <code>NaN</code> есть <code>Number.isNaN</code>.
+    </div>
+
+    <p><code>==</code> по шагам (IsLooselyEqual, 7.2.13): одинаковый тип — как <code>===</code>;
+    <code>null</code> равен только <code>undefined</code>; строка рядом с числом становится числом;
+    <code>true</code> и <code>false</code> — числами 1 и 0; объект — примитивом. После каждого
+    превращения — с начала. <code>[] == false</code>: <code>false</code> → <code>0</code>,
+    <code>[]</code> → <code>""</code> → <code>0</code>, итог <code>true</code>.</p>
+
+    <h2>Логическое присваивание</h2>
+
+    <pre class="code js">const options = { timer: 0, title: "", name: "  Аман " };
+
+options.timer ??= 10;                  // a ?? (a = b): 0 остался
+options.title ||= "Карточки";          // a || (a = b): "" заменили
+options.name &amp;&amp;= options.name.trim();   // a &amp;&amp; (a = b): обрезали</pre>
+
+    <div class="remember">
+        Записи может не быть вовсе: правая часть не вычисляется, сеттер не вызывается, заморозка не
+        мешает. <code>??</code> с <code>||</code> и <code>&amp;&amp;</code> — только в скобках
+        (<code>Unexpected token</code>); унарный минус слева от <code>**</code> — тоже.
+        <br>Память в одну строку: <code>return (cache[key] ??= fn.call(this, key));</code> — но ответ
+        <code>undefined</code> она не запоминает, тогда нужен <code>Object.hasOwn</code>, как на дне 4.
+    </div>
+
+    <h2>У каждого объекта</h2>
+
+    <div class="note-box">
+        <code>toString</code> → <code>"[object Object]"</code>; одолженный через <code>call</code>
+        называет вид: <code>[object Array]</code>, <code>[object Null]</code>. <code>valueOf</code>
+        обычного объекта — он сам; <code>toLocaleString</code> вызывает <code>toString</code>.
+        <code>Object(5)</code> — обёртка, <code>Object(null)</code> — <code>{}</code>,
+        <code>Object(obj) === obj</code>. Объект в примитив: сначала <code>valueOf</code>, потом
+        <code>toString</code>; в шаблоне и <code>String</code> — наоборот. Откуда это всё берётся — день 7.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём итоговом проекте Essentials объект с настройками или постоянными
+                данными. Заморозьте его глубоко и проверьте, что программа работает, а случайная
+                запись в строгом режиме даёт ошибку.</li>
+            <li>Замените в проекте проверки вида <code>if (x === undefined) x = …</code> на
+                <code>??=</code> и запишите, где <code>||=</code> был бы ошибкой.</li>
+            <li>Прочитайте на MDN учебник
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness">Equality comparisons and sameness</a>
+                и выпишите из его большой таблицы три строки, в которых <code>==</code> и
+                <code>===</code> расходятся.</li>
+            <li>Откройте в спецификации раздел 20.1.3 и выпишите все свойства общего объекта. Отметьте,
+                какие вы уже знаете и на каком дне они были.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

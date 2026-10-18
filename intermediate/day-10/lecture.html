@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 10 — Наследование: extends и super</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f97316; }
+        h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+        h3 { color: #9a3412; }
+        .step-number { background: #f97316; }
+        .toc a { color: #c2410c; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 10</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 10 &bull; урок 1</span>
+        <h1>Наследование: extends и super</h1>
+        <p>Курс 2, Intermediate. Модуль «Прототипы и классы» — четвёртый, последний день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>строить класс на другом классе через <code>extends</code> и видеть под ним две цепочки
+                прототипов;</li>
+            <li>писать конструктор наследника с <code>super(...)</code> и знать порядок создания объекта;</li>
+            <li>переопределять методы и вызывать версию родителя через <code>super.method()</code>;</li>
+            <li>использовать <code>new.target</code>: ловить забытый <code>new</code> и запрещать создавать общий
+                класс;</li>
+            <li>наследовать от <code>Array</code> и решать, когда наследование уступает композиции.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#chain">Цепочка дня 7 — одним словом</a></li>
+            <li><a href="#extends">Что связывает extends</a></li>
+            <li><a href="#super-call">Конструктор наследника и super()</a></li>
+            <li><a href="#order">Порядок создания объекта</a></li>
+            <li><a href="#override">Переопределение и super.method()</a></li>
+            <li><a href="#home">Откуда super знает родителя</a></li>
+            <li><a href="#static">Статические элементы по наследству</a></li>
+            <li><a href="#private">Приватное и наследник</a></li>
+            <li><a href="#new-target">new.target</a></li>
+            <li><a href="#errors">Пять ошибок super</a></li>
+            <li><a href="#array">Наследник Array</a></li>
+            <li><a href="#composition">Наследование или композиция</a></li>
+            <li><a href="#spec">super в спецификации</a></li>
+            <li><a href="#cards">«Карточки»: семейство карточек</a></li>
+            <li><a href="#module">Итоги модуля и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="chain">1. Цепочка дня 7 — одним словом</h2>
+
+    <p>В задании 8 дня 7 мы вручную строили цепочку из трёх звеньев: базовая карточка, карточка
+    с примером и сама карточка. Метод <code>text</code> второго звена звал текст первого длинной записью
+    <code>cardBase.text.call(this)</code>, а <code>this.text()</code> уводил в бесконечную рекурсию.
+    Тот же замысел на классах:</p>
+
+    <pre class="code js">class Card {
+  constructor(word, translation) {
+    this.word = word;
+    this.translation = translation;
+    this.flipped = false;
+  }
+
+  flip() {
+    this.flipped = !this.flipped;
+    return this.text();
+  }
+
+  text() {
+    return this.flipped ? this.translation : this.word;
+  }
+}
+
+class ExampleCard extends Card {
+  constructor(word, translation, example) {
+    super(word, translation);
+    this.example = example;
+  }
+
+  text() {
+    return `${super.text()} (${this.example})`;
+  }
+}
+
+const card = new ExampleCard("book", "книга", "I read a book");
+console.log(card.text(), "|", card.flip());   // book (I read a book) | книга (I read a book)
+console.log(Object.keys(card));               // ['word', 'translation', 'flipped', 'example']</pre>
+
+    <p>Три новых слова делают всю работу. <code>extends Card</code> — «строится на <code>Card</code>»:
+    <code>ExampleCard</code> получает всё, что умеет <code>Card</code>. <code>super(word, translation)</code>
+    в конструкторе — вызов конструктора родителя. <code>super.text()</code> в методе — вызов метода
+    родителя, без <code>call</code> и без рекурсии. Класс, от которого наследуют, называют
+    <strong>родительским</strong> (базовым), а новый — <strong>наследником</strong> (производным).</p>
+
+    <h2 id="extends">2. Что связывает extends</h2>
+
+    <p>Учебник MDN говорит, что <code>extends</code> ставит прототип сразу двум объектам — и наследнику,
+    и его <code>prototype</code>. Проверим вчерашними инструментами:</p>
+
+    <pre class="code js">class Card {}
+class ExampleCard extends Card {}
+
+const card = new ExampleCard();
+console.log(Object.getPrototypeOf(ExampleCard.prototype) === Card.prototype);   // true
+console.log(Object.getPrototypeOf(ExampleCard) === Card);                       // true
+console.log(card instanceof ExampleCard, card instanceof Card);                 // true true</pre>
+
+    <p>Первая строка — цепочка объектов: <code>card</code> → <code>ExampleCard.prototype</code> →
+    <code>Card.prototype</code> → <code>Object.prototype</code> → <code>null</code>. Это и есть
+    наследование методов: чего нет у наследника, поиск дня 7 найдёт у родителя. Вторая строка — цепочка
+    самих классов: прототип функции <code>ExampleCard</code> — функция <code>Card</code>. По ней
+    наследуются статические элементы (раздел 7). Без <code>extends</code> прототип класса —
+    <code>Function.prototype</code>, как у любой функции.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 270" role="img" aria-label="Две цепочки после extends. Объекты: card, ExampleCard.prototype, Card.prototype, Object.prototype. Классы: ExampleCard, Card, Function.prototype">
+            <text x="14" y="26" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#9a3412">цепочка объектов — методы</text>
+            <rect x="14" y="36" width="118" height="44" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="73" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#9a3412">card</text>
+            <text x="73" y="71" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#64748b">word, example</text>
+            <path d="M 134 58 L 150 58" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 156 58 L 146 54 L 146 62 Z" fill="#f97316"/>
+            <rect x="158" y="36" width="164" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="240" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#334155">ExampleCard.prototype</text>
+            <text x="240" y="71" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#64748b">text</text>
+            <path d="M 324 58 L 340 58" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 346 58 L 336 54 L 336 62 Z" fill="#f97316"/>
+            <rect x="348" y="36" width="124" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="410" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#334155">Card.prototype</text>
+            <text x="410" y="71" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#64748b">flip, text</text>
+            <path d="M 474 58 L 490 58" fill="none" stroke="#f97316" stroke-width="2"/>
+            <path d="M 496 58 L 486 54 L 486 62 Z" fill="#f97316"/>
+            <rect x="498" y="36" width="108" height="44" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+            <text x="552" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#92400e">Object.</text>
+            <text x="552" y="70" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#92400e">prototype</text>
+
+            <text x="14" y="150" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#1d4ed8">цепочка классов —</text>
+            <text x="14" y="166" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#1d4ed8">статические</text>
+            <rect x="158" y="132" width="164" height="44" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="240" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#1d4ed8">ExampleCard</text>
+            <text x="240" y="167" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">функция-класс</text>
+            <path d="M 324 154 L 340 154" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 346 154 L 336 150 L 336 158 Z" fill="#3b82f6"/>
+            <rect x="348" y="132" width="124" height="44" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="410" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#1d4ed8">Card</text>
+            <text x="410" y="167" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">static create…</text>
+            <path d="M 474 154 L 490 154" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 496 154 L 486 150 L 486 158 Z" fill="#3b82f6"/>
+            <rect x="498" y="132" width="108" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="552" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">Function.</text>
+            <text x="552" y="166" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">prototype</text>
+
+            <path d="M 240 130 L 240 84" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <text x="250" y="110" font-family="Consolas, monospace" font-size="10.5" fill="#64748b">.prototype</text>
+            <path d="M 410 130 L 410 84" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <text x="420" y="110" font-family="Consolas, monospace" font-size="10.5" fill="#64748b">.prototype</text>
+
+            <rect x="14" y="196" width="592" height="64" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="219" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">extends Card ставит две стрелки: ExampleCard.prototype → Card.prototype</text>
+            <text x="310" y="238" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">и ExampleCard → Card. Первая даёт методы, вторая — статические элементы.</text>
+            <text x="310" y="254" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">пунктир — свойство prototype функции-класса (день 7)</text>
+        </svg>
+        <figcaption>Одно слово <code>extends</code> — две цепочки</figcaption>
+    </figure>
+
+    <p>Наследованием вы пользуетесь с дня 11 Essentials, где <code>instanceof</code> находил «потомков»
+    вида ошибки. Встроенные виды ошибок устроены ровно так:</p>
+
+    <pre class="code js">console.log(Object.getPrototypeOf(RangeError) === Error, new RangeError("x") instanceof Error);
+// true true
+console.log(Object.hasOwn(RangeError.prototype, "name"), new RangeError("x").name, Error.prototype.name);
+// true RangeError Error</pre>
+
+    <p><code>RangeError</code> — наследник <code>Error</code> по обеим цепочкам. Своё свойство
+    <code>name</code> в <code>RangeError.prototype</code> затеняет родительское <code>"Error"</code> —
+    поэтому в <code>catch</code> видно <code>RangeError</code>. Свои классы ошибок вида
+    <code>class ValidationError extends Error</code> — тема дня 26.</p>
+
+    <p>Справа от <code>extends</code> может стоять любое выражение, которое даёт конструктор: класс,
+    функция-конструктор дня 7, даже <code>class extends class {} {}</code>. Не подходит то, что нельзя
+    вызвать с <code>new</code>: <code>class Child extends 5 {}</code> —
+    <code>TypeError: Class extends value 5 is not a constructor or null</code>, со стрелочной функцией
+    текст тот же.</p>
+
+    <p>Раз появились семьи классов, у вопроса «какого класса объект» стало два ответа:</p>
+
+    <pre class="code js">class Card {}
+class ExampleCard extends Card {}
+
+const card = new ExampleCard();
+console.log(card instanceof Card, card.constructor === Card, card.constructor.name);   // true false ExampleCard</pre>
+
+    <p><code>instanceof Card</code> — «из семьи <code>Card</code>», <code>true</code> и для наследников.
+    <code>constructor === Card</code> — «ровно <code>Card</code>»: свойство <code>constructor</code>
+    нашлось раньше, в <code>ExampleCard.prototype</code>. Почти всегда нужна первая проверка: код,
+    который работает с карточками, должен принимать и наследников, иначе каждый новый вид карточки
+    придётся вписывать в проверку.</p>
+
+    <h2 id="super-call">3. Конструктор наследника и super()</h2>
+
+    <p>Главное правило наследника: в его конструкторе нужно вызвать <code>super(...)</code>, и вызвать
+    <strong>до</strong> первого обращения к <code>this</code>. Нарушение — ошибка:</p>
+
+    <pre class="code js">class Base {
+  constructor(name) {
+    this.name = name;
+  }
+}
+
+class Child extends Base {
+  constructor(name) {
+    this.mark = 5;
+    super(name);
+  }
+}
+
+new Child("Аман");
+// ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor</pre>
+
+    <p>Текст называет оба случая: обратились к <code>this</code> или вышли из конструктора, так и не
+    вызвав <code>super</code>. Причина в том, что объект наследника <strong>создаёт родитель</strong>.
+    До <code>super()</code> объекта ещё нет, и <code>this</code> не к чему привязать. MDN называет ошибку
+    «must call super constructor before using 'this' in derived class constructor». Второй вызов
+    <code>super()</code> — тоже ошибка: <code>ReferenceError: Super constructor may only be called
+    once</code>, объект уже создан.</p>
+
+    <p>Если наследнику свой конструктор не нужен, его можно не писать. Язык подставит такой:
+    <code>constructor(...args) { super(...args); }</code> — все аргументы уходят родителю:</p>
+
+    <pre class="code js">class Base {
+  constructor(a, b) {
+    this.sum = a + b;
+  }
+}
+
+class Child extends Base {}
+
+console.log(new Child(2, 3).sum, Child.length);   // 5 0</pre>
+
+    <p><code>Child.length</code> — 0: подставленный конструктор объявлен с остаточным параметром, а он
+    в <code>length</code> не считается (день 4).</p>
+
+    <h2 id="order">4. Порядок создания объекта</h2>
+
+    <p>На дне 8 порядок был «поля, потом тело конструктора». С наследованием он двухэтажный.
+    Посмотрим по выводу:</p>
+
+    <pre class="code js">class Base {
+  base = (console.log("поле родителя"), 1);
+
+  constructor() {
+    console.log("тело родителя, класс:", this.constructor.name);
+  }
+}
+
+class Child extends Base {
+  child = (console.log("поле наследника"), 2);
+
+  constructor() {
+    console.log("начало конструктора наследника");
+    super();
+    console.log("после super:", this.base, this.child);
+  }
+}
+
+new Child();
+// начало конструктора наследника
+// поле родителя
+// тело родителя, класс: Child
+// поле наследника
+// после super: 1 2</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Порядок new Child: начало конструктора наследника без this; super вызывает родителя; родитель создаёт объект с прототипом Child.prototype, создаёт свои поля, выполняет своё тело; затем поля наследника и остаток конструктора наследника">
+            <rect x="14" y="20" width="110" height="88" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="69" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">1. Child</text>
+            <text x="69" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9a3412">начало тела,</text>
+            <text x="69" y="78" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">this ещё нет</text>
+            <text x="69" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9a3412">super()</text>
+            <path d="M 126 64 L 136 64" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 142 64 L 134 60 L 134 68 Z" fill="#94a3b8"/>
+
+            <rect x="144" y="20" width="110" height="88" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="199" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#1d4ed8">2. Base</text>
+            <text x="199" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">создаёт объект:</text>
+            <text x="199" y="78" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">Child.prototype</text>
+            <path d="M 256 64 L 266 64" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 272 64 L 264 60 L 264 68 Z" fill="#94a3b8"/>
+
+            <rect x="274" y="20" width="110" height="88" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="329" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#1d4ed8">3. Base</text>
+            <text x="329" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">поля родителя,</text>
+            <text x="329" y="78" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">тело родителя</text>
+            <path d="M 386 64 L 396 64" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 402 64 L 394 60 L 394 68 Z" fill="#94a3b8"/>
+
+            <rect x="404" y="20" width="98" height="88" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="453" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">4. Child</text>
+            <text x="453" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9a3412">this готов,</text>
+            <text x="453" y="78" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9a3412">поля наследника</text>
+            <path d="M 504 64 L 514 64" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 520 64 L 512 60 L 512 68 Z" fill="#94a3b8"/>
+
+            <rect x="522" y="20" width="84" height="88" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="564" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">5. Child</text>
+            <text x="564" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9a3412">остаток</text>
+            <text x="564" y="78" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9a3412">тела</text>
+
+            <text x="310" y="136" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">this до super() — ReferenceError; поля наследника ещё не созданы, пока работает родитель</text>
+
+            <rect x="14" y="152" width="592" height="54" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="174" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Объект создаёт родитель, но с прототипом наследника.</text>
+            <text x="310" y="194" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Сначала этаж родителя целиком, потом этаж наследника.</text>
+        </svg>
+        <figcaption>Что происходит при <code>new Child()</code></figcaption>
+    </figure>
+
+    <p>Три вывода. Конструктор наследника начинается раньше всех, но до <code>super()</code> он может
+    только считать аргументы. Объект создаёт родитель — и в нём <code>this.constructor.name</code> уже
+    <code>"Child"</code>: прототип объекта сразу берётся у наследника. А поля наследника появляются
+    только после возврата из <code>super()</code>. Отсюда ловушка: метод, переопределённый наследником
+    и вызванный из конструктора родителя, ещё не увидит полей наследника.</p>
+
+    <h2 id="override">5. Переопределение и super.method()</h2>
+
+    <p>Метод наследника с тем же именем, что у родителя, <strong>переопределяет</strong> его: поиск
+    по цепочке (день 7) находит метод в <code>ExampleCard.prototype</code> раньше, чем в
+    <code>Card.prototype</code>. Это затенение дня 7, только для методов. Часто наследнику нужно не
+    заменить, а дополнить поведение родителя, — для этого <code>super.method()</code>:</p>
+
+    <pre class="code js">class Base {
+  hello() {
+    return "привет от Base";
+  }
+}
+
+class Child extends Base {
+  hello() {
+    return `${super.hello()}, и от Child`;
+  }
+}
+
+console.log(new Child().hello(), new Base().hello());   // привет от Base, и от Child привет от Base</pre>
+
+    <p><code>super.hello()</code> ищет <code>hello</code> начиная с прототипа родителя, а
+    <code>this</code> внутри оставляет прежним — объект наследника. Поэтому родительский метод работает
+    с данными наследника, как <code>cardBase.text.call(this)</code> дня 7, только короче и без риска
+    по ошибке позвать самого себя.</p>
+
+    <h3>Полиморфизм</h3>
+
+    <p>Ради чего всё это? Код, который работает с карточками, может вообще не знать, какие они:</p>
+
+    <pre class="code js">class Card {
+  constructor(word) {
+    this.word = word;
+  }
+
+  text() {
+    return this.word;
+  }
+}
+
+class ExampleCard extends Card {
+  constructor(word, example) {
+    super(word);
+    this.example = example;
+  }
+
+  text() {
+    return `${super.text()} — ${this.example}`;
+  }
+}
+
+class ImageCard extends Card {
+  text() {
+    return `[картинка] ${super.text()}`;
+  }
+}
+
+const cards = [new Card("bread"), new ExampleCard("book", "I read a book"), new ImageCard("house")];
+for (const card of cards) {
+  console.log(card.text());
+}
+// bread
+// book — I read a book
+// [картинка] house</pre>
+
+    <p>Один и тот же вызов <code>card.text()</code> — три разных поведения: каждая карточка отвечает
+    по-своему. Это называют <strong>полиморфизмом</strong> («много форм»). Цикл не проверяет вид карточки
+    через <code>if</code> и <code>instanceof</code>, и новый вид — скажем, <code>AudioCard</code> — не
+    потребует менять ни цикл, ни остальной код, где карточки показывают. Без классов пришлось бы писать
+    в каждом таком месте цепочку <code>if</code> по полю <code>kind</code> и дописывать её с каждым новым
+    видом.</p>
+
+    <h2 id="home">6. Откуда super знает родителя</h2>
+
+    <p><code>super</code> — не переменная и не <code>this</code>. Учебник MDN подчёркивает: куда смотрит
+    <code>super</code>, решает класс или литерал, где метод <strong>написан</strong>, а не объект, у которого
+    его вызвали. Метод запоминает своё место во внутреннем слоте <code>[[HomeObject]]</code> — у
+    <code>Child.prototype.hello</code> это <code>Child.prototype</code>, — и <code>super</code> ищет в его
+    прототипе. Поэтому <code>super</code> не меняется, даже если метод переставить в другой объект:</p>
+
+    <pre class="code js">const base = {
+  greet() {
+    return "салам";
+  },
+};
+
+const child = {
+  __proto__: base,
+  greet() {
+    return `${super.greet()}, Аман`;
+  },
+};
+
+const other = { greet: child.greet, __proto__: { greet() { return "другой"; } } };
+console.log(child.greet(), "|", other.greet());   // салам, Аман | салам, Аман</pre>
+
+    <p>Пример заодно показывает, что <code>super</code> работает и в методах обычного литерала (день 5),
+    если у литерала есть прототип. А <code>this</code> и <code>super</code> устроены противоположно:
+    <code>this</code> решает способ вызова (день 2), <code>super</code> — место в тексте, как переменные
+    дня 1. И ещё одна мелочь из MDN: запись <code>super.x = 5</code> пишет не в прототип родителя,
+    а в <code>this</code>.</p>
+
+    <h2 id="static">7. Статические элементы по наследству</h2>
+
+    <p>Вторая цепочка схемы раздела 2 — у классов. По ней наследуются статические методы и поля, и внутри
+    статического метода <code>this</code> — тот класс, у которого метод вызвали. Отсюда сильный приём —
+    фабрика, которая создаёт объект «своего» класса:</p>
+
+    <pre class="code js">class Base {
+  static make() {
+    return new this();
+  }
+
+  static describe() {
+    return `класс ${this.name}`;
+  }
+}
+
+class Child extends Base {
+  static describe() {
+    return `${super.describe()}, наследник`;
+  }
+}
+
+console.log(Child.make() instanceof Child, Child.describe(), Object.hasOwn(Child, "make"));
+// true класс Child, наследник false</pre>
+
+    <p><code>make</code> лежит только в <code>Base</code>, но <code>Child.make()</code> нашёл его по цепочке
+    классов, и <code>new this()</code> создал <code>Child</code>. Это и был ответ на вопрос задания 6
+    дня 9 о <code>new this(...)</code>: такая фабрика работает и для наследников. В статических методах
+    тоже есть <code>super</code> — он смотрит в класс-родитель.</p>
+
+    <p>Со статическими полями осторожнее. Поле <code>static count = 0</code> у родителя одно; наследник
+    его видит по цепочке, но первое же присваивание <code>this.count = …</code> внутри
+    <code>Child.add()</code> создаст <strong>своё</strong> поле у <code>Child</code> — затенение дня 7.
+    После этого у родителя и наследника два разных счётчика.</p>
+
+    <h2 id="private">8. Приватное и наследник</h2>
+
+    <p>Вчера обещали: наследник приватных полей родителя не видит. <code>#</code>-имя объявлено в теле
+    <code>Base</code>, а тело <code>Child</code> — другой класс, и обращение к нему — синтаксическая
+    ошибка дня 9:</p>
+
+    <pre class="code js">class Base {
+  #secret = 42;
+
+  reveal() {
+    return this.#secret;
+  }
+}
+
+class Child extends Base {
+  peek() {
+    return this.#secret;
+  }
+}
+// SyntaxError: Private field '#secret' must be declared in an enclosing class</pre>
+
+    <p>Но приватное поле у объекта наследника <strong>есть</strong>: его поставил конструктор родителя
+    на шаге 3 раздела 4. Поэтому методы родителя с ним работают: без метода <code>peek</code>
+    <code>new Child().reveal()</code> вернёт 42, а <code>#secret in obj</code> в статическом методе
+    <code>Base</code> ответит <code>true</code>. Приватное — для кода родителя; наследник пользуется им
+    только через публичные методы родителя. Промежуточного уровня «видно наследникам, но не всем»,
+    как <code>protected</code> в Java, в JavaScript нет — его иногда изображают подчёркиванием
+    <code>_x</code> дня 5, то есть договорённостью.</p>
+
+    <p>Отсюда ловушка для приватных <strong>статических</strong> полей. Счётчик дня 9 через
+    <code>this.#created++</code> сломается у наследника:</p>
+
+    <pre class="code js">class Base {
+  static #created = 0;
+
+  static create() {
+    this.#created++;
+    return new this();
+  }
+}
+
+class Child extends Base {}
+
+Base.create();
+Child.create();
+// TypeError: Cannot read private member #created from an object whose class did not declare it</pre>
+
+    <p>В <code>Child.create()</code> <code>this</code> — <code>Child</code>, а приватное статическое поле
+    есть только у самого <code>Base</code>: статическое поле наследнику не копируется, а приватные
+    не ищутся по цепочке (день 9). Лечение — имя класса: <code>Base.#created++</code>. Вот и ещё
+    одна причина вчерашнего совета писать в статических методах имя класса.</p>
+
+    <h2 id="new-target">9. new.target</h2>
+
+    <p>Внутри функции или конструктора <code>new.target</code> отвечает, вызвали ли её с
+    <code>new</code>, и если да — какой конструктор. Без <code>new</code> — <code>undefined</code>.
+    Это лечит забытый <code>new</code> у функции-конструктора дня 7:</p>
+
+    <pre class="code js">function Student(name) {
+  if (new.target === undefined) {
+    throw new TypeError("вызовите Student через new");
+  }
+  this.name = name;
+}
+
+console.log(new Student("Аман").name);   // Аман
+Student("Аман");
+// TypeError: вызовите Student через new</pre>
+
+    <p>В классах <code>new.target</code> пригодится по-другому. Конструктор класса без <code>new</code>
+    и так не вызвать (день 8), зато в конструкторе родителя <code>new.target</code> — это класс, который
+    создают на самом деле, то есть наследник. Так делают <strong>общий класс</strong> (его ещё называют
+    абстрактным), объекты которого создавать нельзя — только объекты наследников:</p>
+
+    <pre class="code js">class Shape {
+  constructor() {
+    if (new.target === Shape) {
+      throw new TypeError("Shape — общий класс, создавайте его наследников");
+    }
+    console.log("создаётся", new.target.name);
+  }
+}
+
+class Circle extends Shape {}
+
+new Circle();   // создаётся Circle
+new Shape();
+// TypeError: Shape — общий класс, создавайте его наследников</pre>
+
+    <p>Стрелочная функция своего <code>new.target</code> не имеет и берёт его снаружи, как
+    <code>this</code> и <code>arguments</code> (дни 2 и 4). А вне функций его нет вовсе:
+    <code>console.log(new.target)</code> на верхнем уровне скрипта —
+    <code>SyntaxError: new.target expression is not allowed here</code>.</p>
+
+    <h2 id="errors">10. Пять ошибок super</h2>
+
+    <p>Три ошибки вы видели в разделах 3 и 9. Вот все пять страниц MDN дня:</p>
+
+    <table>
+        <thead><tr><th>Страница MDN</th><th>Текст Chrome</th><th>Когда</th></tr></thead>
+        <tbody>
+            <tr><td>must call super constructor before using 'this'</td><td><code>Must call super constructor in derived class before accessing 'this' or returning from derived constructor</code></td><td><code>this</code> до <code>super()</code> или <code>super()</code> не вызван</td></tr>
+            <tr><td>super() called twice</td><td><code>Super constructor may only be called once</code></td><td>второй <code>super()</code></td></tr>
+            <tr><td>derived class constructor returned invalid value</td><td><code>Derived constructors may only return object or undefined</code></td><td><code>return 1</code> у наследника</td></tr>
+            <tr><td>super() is only valid in derived class constructors</td><td><code>'super' keyword unexpected here</code></td><td><code>super()</code> без <code>extends</code> или в методе</td></tr>
+            <tr><td>use of super property/member accesses only valid within methods</td><td><code>'super' keyword unexpected here</code></td><td><code>super.x</code> в обычной функции</td></tr>
+        </tbody>
+    </table>
+
+    <p>Две последние строки у Chrome одним текстом: <code>super</code> оказался там, где его некому
+    связать с родителем. Третья строка отличается от дня 7: родительский класс и функция-конструктор
+    могут вернуть число — его просто проигнорируют, — а наследник обязан вернуть объект или ничего.</p>
+
+    <pre class="code js">class Base {}
+
+class Child extends Base {
+  constructor() {
+    super();
+    return 1;
+  }
+}
+
+new Child();
+// TypeError: Derived constructors may only return object or undefined</pre>
+
+    <h2 id="array">11. Наследник Array</h2>
+
+    <p>Наследовать можно и от встроенных классов. Сделаем массив слов со своими методами:</p>
+
+    <pre class="code js">class Words extends Array {
+  get last() {
+    return this[this.length - 1];
+  }
+
+  longest() {
+    return this.reduce((a, b) =&gt; (b.length &gt; a.length ? b : a));
+  }
+}
+
+const words = Words.from(["book", "water", "bread"]);
+const short = words.filter((w) =&gt; w.length &lt; 6);
+
+console.log(words.last, words.longest(), words.length, Array.isArray(words));   // bread water 3 true
+console.log(short instanceof Words, short.last, JSON.stringify(words));
+// true bread ["book","water","bread"]</pre>
+
+    <p>Всё, что умеет массив, на месте: <code>length</code>, <code>filter</code>, JSON,
+    <code>Array.isArray</code>. Статический <code>Words.from</code>, унаследованный от <code>Array</code>,
+    создал <code>Words</code> — тот же <code>new this</code> раздела 7. И <code>filter</code> вернул
+    не простой массив, а <code>Words</code>: встроенные методы, которые создают новый массив,
+    спрашивают класс у самого объекта. Как именно — механизм <code>Symbol.species</code>, дни 14–15.
+    В консоли такой массив подписан <code>Words(3) ['book', 'water', 'bread']</code>.</p>
+
+    <p>Справочник MDN предупреждает: комитет, который развивает язык, теперь считает механизм наследования
+    встроенных классов переусложнённым, и новые методы его не поддерживают. Это видно на месте:</p>
+
+    <pre class="code js">class Words extends Array {}
+const words = Words.from(["book", "water", "bread"]);
+
+console.log(words.filter(Boolean) instanceof Words, words.slice(1) instanceof Words);   // true true
+console.log(words.toSorted() instanceof Words);                                         // false</pre>
+
+    <p>Старые <code>filter</code> и <code>slice</code> вернули <code>Words</code>, а <code>toSorted</code>
+    из дня 20 Essentials, появившийся в 2023 году, — обычный массив, и методов <code>Words</code> у него
+    уже нет. Наследник встроенного класса работает, но за его поведением приходится следить.</p>
+
+    <p>Ещё одна ловушка досталась от самого <code>Array</code>: <code>new Words(3)</code> создаёт не
+    массив из одного числа 3, а пустой массив длины 3 — так конструктор <code>Array</code> понимает
+    единственный числовой аргумент. Поэтому наследников массива создают через <code>from</code>
+    и <code>of</code>: <code>Words.of(3)</code> — массив <code>[3]</code>.</p>
+
+    <h2 id="composition">12. Наследование или композиция</h2>
+
+    <p>Справочник MDN заканчивает страницу <code>extends</code> разделом «Avoiding inheritance» —
+    «как обойтись без наследования». Наследование — очень тесная связь: наследник получает
+    <strong>всё</strong> поведение родителя, нужное и ненужное. <code>Words</code> из раздела 11 умеет
+    <code>push</code>, <code>splice</code>, <code>sort</code> — и любой код может испортить колоду ими.
+    Сделать «массив только для чтения» наследованием трудно: каждый лишний метод придётся
+    переопределять, а функция, которая ждёт обычный массив, получит массив, который ведёт себя иначе.</p>
+
+    <p>Учебник предлагает <strong>композицию</strong>: класс не <em>является</em> массивом, а
+    <em>содержит</em> его — в приватном поле — и открывает только нужное:</p>
+
+    <pre class="code js">class ReadOnlyWords {
+  #items;
+
+  constructor(items) {
+    this.#items = [...items];
+  }
+
+  get length() {
+    return this.#items.length;
+  }
+
+  at(i) {
+    return this.#items.at(i);
+  }
+}
+
+const list = new ReadOnlyWords(["book", "water"]);
+console.log(list.length, list.at(-1), typeof list.push);   // 2 water undefined</pre>
+
+    <p>Правило выбора короткое. Наследование — когда наследник действительно <strong>является</strong>
+    родителем и может заменить его везде: карточка с примером — это карточка. Композиция — когда объект
+    лишь <strong>использует</strong> другой: колода использует массив, но массивом с <code>splice</code>
+    быть не обязана. В сомнении MDN советует композицию. Курсор колоды из задания 9 дня 9 был
+    именно ею.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 196" role="img" aria-label="Наследование: ExampleCard является Card и получает всё её поведение. Композиция: ReadOnlyWords использует массив в приватном поле и открывает только length и at">
+            <rect x="14" y="20" width="284" height="120" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="156" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#9a3412">наследование — «является»</text>
+            <text x="156" y="72" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#9a3412">ExampleCard extends Card</text>
+            <text x="156" y="96" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">получает ВСЁ поведение Card</text>
+            <text x="156" y="118" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">может заменить Card везде</text>
+
+            <rect x="322" y="20" width="284" height="120" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="464" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">композиция — «использует»</text>
+            <text x="464" y="72" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#1d4ed8">ReadOnlyWords { #items }</text>
+            <text x="464" y="96" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">массив внутри, в приватном поле</text>
+            <text x="464" y="118" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">наружу — только length и at</text>
+
+            <rect x="14" y="154" width="592" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="176" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Не уверены, что «является», — берите композицию.</text>
+        </svg>
+        <figcaption>Два способа взять чужое поведение</figcaption>
+    </figure>
+
+    <h3>Примесь</h3>
+
+    <p>Наследовать в JavaScript можно только от одного класса. Если одно и то же поведение нужно
+    классам из разных семейств, справочник MDN показывает приём <strong>примесь</strong> (mix-in):
+    функцию, которая принимает класс и возвращает его наследника. Справа от <code>extends</code> — любое
+    выражение (раздел 2), а класс — значение (день 8):</p>
+
+    <pre class="code js">const Flippable = (Base) =&gt; class extends Base {
+  #flipped = false;
+
+  flip() {
+    this.#flipped = !this.#flipped;
+    return this.#flipped;
+  }
+};
+
+class Word {
+  constructor(text) {
+    this.text = text;
+  }
+}
+
+class FlipWord extends Flippable(Word) {}
+
+const word = new FlipWord("book");
+console.log(word.flip(), word.text, word instanceof Word);   // true book true</pre>
+
+    <p><code>Flippable(Word)</code> создал безымянный класс между <code>FlipWord</code> и
+    <code>Word</code>, и умение переворачиваться можно так же вставить в любое другое семейство.
+    Пользуются примесями осторожно: каждая — лишнее звено в цепочке.</p>
+
+    <h2 id="spec">13. super в спецификации</h2>
+
+    <p>Вызов <code>super(...)</code> описан в разделе
+    <a href="https://tc39.es/ecma262/2026/#sec-super-keyword-runtime-semantics-evaluation">13.3.7.1</a>.
+    Перескажем его шаги — каждый объясняет что-то из сегодняшнего:</p>
+
+    <ol>
+        <li>Узнать <code>new.target</code> — класс, который создают на самом деле (раздел 9).</li>
+        <li>Найти родителя операцией
+            <a href="https://tc39.es/ecma262/2026/#sec-getsuperconstructor">GetSuperConstructor</a>
+            (13.3.7.2): это <strong>прототип самой функции-наследника</strong> — вторая стрелка схемы
+            раздела 2. Её и ставит <code>extends</code>.</li>
+        <li>Если родитель не конструктор — <code>TypeError</code>: так падает <code>extends null</code>
+            при создании объекта.</li>
+        <li>Вызвать конструктор родителя, передав ему <code>new.target</code>: родитель создаёт объект
+            с прототипом наследника (шаг 2 схемы раздела 4).</li>
+        <li>Привязать <code>this</code> операцией
+            <a href="https://tc39.es/ecma262/2026/#sec-bindthisvalue">BindThisValue</a> (9.1.1.3.1). Если
+            <code>this</code> уже привязан — <code>ReferenceError</code>: это «Super constructor may only
+            be called once».</li>
+        <li>Создать поля наследника — InitializeInstanceElements. Поэтому они появляются после
+            <code>super()</code>.</li>
+    </ol>
+
+    <p>Шаг 5 продолжает день 2. Там мы видели запись окружения функции (9.1.1.3) и её
+    <code>HasThisBinding</code>. У этой записи есть поле <code>[[ThisBindingStatus]]</code> с тремя
+    значениями: «нет своего <code>this</code>» — у стрелочных, «привязан» и «ещё не привязан». Обычная
+    функция при вызове сразу получает привязанный <code>this</code>, а конструктор наследника стартует
+    «ещё не привязанным» и остаётся таким до <code>super()</code>. Чтение <code>this</code> в таком
+    состоянии —
+    <a href="https://tc39.es/ecma262/2026/#sec-function-environment-records-getthisbinding">GetThisBinding</a>
+    (9.1.1.3.3) — бросает <code>ReferenceError</code>: это и есть ошибка «Must call super constructor»
+    раздела 3.</p>
+
+    <h2 id="cards">14. «Карточки»: семейство карточек</h2>
+
+    <p>Соберём модуль в «Карточках». <code>Card</code> — общий класс с приватным состоянием и фабрикой;
+    <code>WordCard</code> и <code>ExampleCard</code> — его наследники; колода <code>Deck</code> — наследник
+    <code>Array</code> со своими методами.</p>
+
+    <pre class="code js">class Card {
+  #flipped = false;
+
+  constructor(word, translation) {
+    if (new.target === Card) {
+      throw new TypeError("Card — общий класс: создайте WordCard или ExampleCard");
+    }
+    this.word = word;
+    this.translation = translation;
+  }
+
+  static create(...args) {
+    return new this(...args);
+  }
+
+  get flipped() {
+    return this.#flipped;
+  }
+
+  flip() {
+    this.#flipped = !this.#flipped;
+    return this.text();
+  }
+
+  text() {
+    return this.#flipped ? this.translation : this.word;
+  }
+}
+
+class WordCard extends Card {}
+
+class ExampleCard extends Card {
+  constructor(word, translation, example) {
+    super(word, translation);
+    this.example = example;
+  }
+
+  text() {
+    return `${super.text()} — ${this.example}`;
+  }
+}
+
+class Deck extends Array {
+  byKind(Kind) {
+    return this.filter((card) =&gt; card instanceof Kind);
+  }
+
+  flipAll() {
+    return this.map((card) =&gt; card.flip());
+  }
+}
+
+const deck = Deck.of(
+  WordCard.create("bread", "хлеб"),
+  ExampleCard.create("book", "книга", "I read a book"),
+  new WordCard("water", "вода"),
+);
+
+console.log(deck.length, deck.byKind(ExampleCard).length, deck.byKind(Card).length);
+console.log(deck.flipAll());
+console.log(deck.flipAll() instanceof Deck, deck[1].flipped);
+try {
+  Card.create("house", "дом");
+} catch (error) {
+  console.log(`${error.name}: ${error.message}`);
+}</pre>
+
+    <div class="result-box">
+        3 1 3<br>
+        Deck(3) ['хлеб', 'книга — I read a book', 'вода']<br>
+        true false<br>
+        TypeError: Card — общий класс: создайте WordCard или ExampleCard
+    </div>
+
+    <p><strong>Строка 1 — instanceof по цепочке.</strong> В колоде три карточки, одна из них —
+    <code>ExampleCard</code>, и все три — <code>Card</code>: <code>Card.prototype</code> есть в цепочке
+    каждой.</p>
+
+    <p><strong>Строка 2 — переопределение.</strong> <code>map</code> вызвал у каждой карточки один и тот же
+    унаследованный <code>flip</code>, а тот — <code>this.text()</code>. Для <code>ExampleCard</code> поиск
+    нашёл её собственный <code>text</code>, который через <code>super.text()</code> взял перевод у
+    <code>Card</code> и добавил пример. Результат <code>map</code> — снова <code>Deck</code>.</p>
+
+    <p><strong>Строка 3 — приватное у наследника.</strong> Второй <code>flipAll</code> перевернул карточки
+    обратно. <code>#flipped</code> объявлен в <code>Card</code>, и код <code>ExampleCard</code> не может
+    к нему обратиться, но поле у карточки есть, и унаследованные <code>flip</code> и <code>flipped</code>
+    с ним работают.</p>
+
+    <p><strong>Строка 4 — общий класс.</strong> <code>Card.create</code> унаследован всеми и создаёт объект
+    «своего» класса. Вызванный у самого <code>Card</code>, он упёрся в проверку <code>new.target</code>.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> В конструкторе <code>ExampleCard</code> поставьте <code>this.example = example;</code>
+        перед <code>super(...)</code>. Какая ошибка и в какой момент — при объявлении класса или при создании
+        карточки?
+        <br><br>
+        <strong>Второй.</strong> Замените <code>super.text()</code> на <code>this.text()</code>. Что случится и
+        почему — по разделу 5?
+        <br><br>
+        <strong>Третий.</strong> Добавьте в <code>ExampleCard</code> метод <code>peek() { return this.#flipped; }</code>.
+        Что произойдёт со всем скриптом? Как узнать, перевёрнута ли карточка, не трогая <code>#flipped</code>?
+    </div>
+
+    <h2 id="module">15. Итоги модуля и что дальше</h2>
+
+    <p>Модуль «Прототипы и классы» закончен. Четыре дня — от механизма к записи:</p>
+
+    <table>
+        <thead><tr><th>День</th><th>Главная мысль</th><th>В спецификации</th></tr></thead>
+        <tbody>
+            <tr><td>7</td><td>прототип и цепочка; <code>new</code> в четыре шага; <code>instanceof</code></td><td>10.1.8.1, 10.2.2, 7.3.21</td></tr>
+            <tr><td>8</td><td>класс — запись функции-конструктора; поля; строгий режим</td><td>15.7, 10.2.1, 7.3.32</td></tr>
+            <tr><td>9</td><td>приватные элементы и <code>static</code></td><td>9.2</td></tr>
+            <tr><td>10</td><td><code>extends</code>, <code>super</code>, <code>new.target</code>; композиция</td><td>13.3.7, 9.1.1.3</td></tr>
+        </tbody>
+    </table>
+
+    <p>Следующий модуль — «Итераторы и генераторы». Мы много раз писали <code>for...of</code> по массивам,
+    строкам и <code>arguments</code>, а на днях 4 и 7 обещали объяснить, почему одни объекты так перебираются,
+    а другие нет. Ответ — <strong>символы</strong> и протокол итерации, день 11. Колода
+    <code>ReadOnlyWords</code> из раздела 12 тогда научится работать в <code>for...of</code>, не становясь
+    массивом.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/extends">extends</a></td><td>две цепочки; наследник встроенного; как обойтись без наследования</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/super">super</a></td><td><code>super()</code> и <code>super.method()</code>; <code>[[HomeObject]]</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/new.target">new.target</a></td><td>вызвали ли с <code>new</code> и какой класс</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Super_not_called">Ошибка: must call super constructor before using 'this'</a></td><td><code>this</code> до <code>super()</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Super_called_twice">Ошибка: super() called twice</a></td><td><code>Super constructor may only be called once</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_derived_return">Ошибка: derived class constructor returned invalid value</a></td><td>наследник вернул не объект</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_super_call">Ошибка: super() is only valid in derived class constructors</a></td><td><code>'super' keyword unexpected here</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_super_prop">Ошибка: use of super property accesses only valid within methods</a></td><td><code>super.x</code> вне метода</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// class Child extends Base {
+//   child = 2;                       // поля наследника — ПОСЛЕ super()
+//   constructor(a, b, c) {
+//     super(a, b);                   // обязательно, до первого this; один раз
+//     this.c = c;
+//   }
+//   method() {
+//     return super.method() + 1;     // версия родителя, this — тот же
+//   }
+//   static make() { return new this(); }   // this — класс, у которого вызвали
+// }
+
+// extends: Child.prototype → Base.prototype (методы) и Child → Base (static)
+// без своего конструктора: constructor(...args) { super(...args); }
+// порядок new Child: начало Child → Base создаёт объект (прототип Child.prototype)
+//   → поля и тело Base → поля Child → остаток Child
+// super привязан к месту, где метод написан ([[HomeObject]]), а не к объекту вызова
+// наследник не видит #поля родителя, но они у объекта есть; static #x — пишите Base.#x
+// new.target: undefined без new; в конструкторе родителя — класс наследника
+// наследник Array: from/of/filter/map дают наследника; new Words(3) — пустой массив длины 3
+// «является» — наследование; «использует» — композиция (поле с объектом)
+// полиморфизм: один вызов obj.text() — у каждого класса свой ответ, без if по виду
+// примесь: const Flippable = (Base) =&gt; class extends Base { … } — родитель у класса один</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Какие две связи ставит <code>class Child extends Base</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Прототип <code>Child.prototype</code> — <code>Base.prototype</code> (методы для объектов)
+                    и прототип функции <code>Child</code> — <code>Base</code> (статические элементы).
+                </details>
+            </li>
+            <li>Почему в конструкторе наследника нельзя трогать <code>this</code> до <code>super()</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Объект наследника создаёт конструктор родителя. До <code>super()</code> объекта нет,
+                    <code>this</code> «ещё не привязан», и чтение даёт <code>ReferenceError</code>.
+                </details>
+            </li>
+            <li>Чем <code>super.text()</code> лучше <code>this.text()</code> в переопределённом методе
+                <code>text</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>this.text()</code> найдёт тот же метод наследника и вызовет его снова —
+                    бесконечная рекурсия. <code>super.text()</code> ищет начиная с прототипа родителя
+                    и оставляет прежний <code>this</code>.
+                </details>
+            </li>
+            <li>Как запретить создавать объекты общего класса, но разрешить его наследникам?
+                <details class="answer"><summary>Ответ</summary>
+                    В конструкторе проверить <code>new.target === Общий</code> и бросить ошибку. При
+                    создании наследника <code>new.target</code> — наследник, и проверка пропускает.
+                </details>
+            </li>
+            <li>Когда выбрать композицию вместо наследования?
+                <details class="answer"><summary>Ответ</summary>
+                    Когда объект лишь использует другой, а не является им, и не должен получать всё его
+                    поведение: колода хранит массив в приватном поле и открывает только нужные методы.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/extends">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

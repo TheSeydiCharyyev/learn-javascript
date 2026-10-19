@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 12 — Генераторы: function* и yield</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #14b8a6; }
+        h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+        h3 { color: #115e59; }
+        .step-number { background: #14b8a6; }
+        .toc a { color: #0f766e; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 12</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 12 &bull; урок 1</span>
+        <h1>Генераторы: function* и yield</h1>
+        <p>Курс 2, Intermediate. Модуль «Итераторы и генераторы» — второй день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>писать генераторные функции во всех четырёх записях и объяснять, что делает
+                <code>yield</code>;</li>
+            <li>заменять итератор, написанный руками, генератором и знать, когда генератор одноразовый;</li>
+            <li>передавать значения внутрь генератора через <code>next(value)</code>;</li>
+            <li>закрывать генератор методами <code>return()</code> и <code>throw()</code> и прибираться
+                в <code>finally</code>;</li>
+            <li>собирать последовательности из других через <code>yield*</code>, в том числе обходить
+                дерево.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#promise">Диапазон в три строки</a></li>
+            <li><a href="#pause">Функция, которая останавливается</a></li>
+            <li><a href="#forms">Четыре записи</a></li>
+            <li><a href="#return">yield и return</a></li>
+            <li><a href="#once">Генератор — одноразовый проход</a></li>
+            <li><a href="#infinite">Бесконечные последовательности</a></li>
+            <li><a href="#next-value">Разговор через next(value)</a></li>
+            <li><a href="#finally">return() и finally</a></li>
+            <li><a href="#throw">throw()</a></li>
+            <li><a href="#delegate">yield* и обход дерева</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#chain">Откуда у генератора методы</a></li>
+            <li><a href="#spec">Раздел 27.5 спецификации</a></li>
+            <li><a href="#cards">«Карточки»: викторина</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="promise">1. Диапазон в три строки</h2>
+
+    <p>Вчера диапазон <code>range</code> занял полтора десятка строк: счётчик в замыкании, метод
+    <code>next</code>, объекты <code>{ value, done }</code>. Мы обещали, что завтра хватит трёх. Вот они:</p>
+
+    <pre class="code js">const range = {
+  from: 1,
+  to: 4,
+  *[Symbol.iterator]() {
+    for (let n = this.from; n &lt;= this.to; n++) {
+      yield n;
+    }
+  },
+};
+
+console.log([...range], Math.max(...range));   // [1, 2, 3, 4] 4
+const [first, ...others] = range;
+console.log(first, others);                     // 1 [2, 3, 4]</pre>
+
+    <p>Звёздочка перед именем метода делает его <strong>генератором</strong>, а слово <code>yield</code>
+    («выдать») отдаёт очередное значение. Ни <code>next</code>, ни <code>{ value, done }</code>, ни
+    <code>return this</code> писать не нужно — протокол итерации дня 11 язык выполняет сам. Обычный
+    цикл <code>for</code> стал источником значений для <code>for...of</code>, spread и деструктуризации.
+    Как это возможно — сегодняшний день.</p>
+
+    <h2 id="pause">2. Функция, которая останавливается</h2>
+
+    <p>Обычная функция, начав, работает до конца. <strong>Генераторная функция</strong> (объявляется
+    <code>function*</code>) умеет вставать на паузу и продолжать с того же места. Проследим по выводу:</p>
+
+    <pre class="code js">function* lessonDay() {
+  console.log("начало дня");
+  yield "лекция";
+  console.log("перемена");
+  yield "практика";
+  console.log("конец дня");
+}
+
+const day = lessonDay();
+console.log("генератор создан");
+console.log(day.next());
+console.log(day.next());
+console.log(day.next());
+console.log(day.next());</pre>
+
+    <div class="result-box">
+        генератор создан<br>
+        начало дня<br>
+        {value: 'лекция', done: false}<br>
+        перемена<br>
+        {value: 'практика', done: false}<br>
+        конец дня<br>
+        {value: undefined, done: true}<br>
+        {value: undefined, done: true}
+    </div>
+
+    <p>Четыре наблюдения. Вызов <code>lessonDay()</code> <strong>не выполнил ни строчки тела</strong> —
+    «генератор создан» напечатан первым. Он вернул объект-<strong>генератор</strong>, итератор из дня 11:
+    у него есть <code>next()</code>. Каждый <code>next()</code> выполняет тело до ближайшего
+    <code>yield</code> и возвращает <code>{ value: выданное, done: false }</code>. Когда тело кончилось,
+    приходит <code>done: true</code> — и дальше всегда только он.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Генератор работает кусками. Вызов lessonDay создаёт генератор, тело не начато. Первый next выполняет начало дня до yield лекция, второй — перемену до yield практика, третий — конец дня до конца функции. Между вызовами генератор стоит на паузе">
+            <text x="14" y="18" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#1d4ed8">вызывающий код</text>
+            <rect x="14" y="26" width="138" height="38" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="83" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#1d4ed8">lessonDay()</text>
+            <rect x="166" y="26" width="138" height="38" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="235" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#1d4ed8">day.next()</text>
+            <rect x="318" y="26" width="138" height="38" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="387" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#1d4ed8">day.next()</text>
+            <rect x="470" y="26" width="136" height="38" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="538" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#1d4ed8">day.next()</text>
+
+            <path d="M 215 66 L 215 116" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 215 122 L 211 114 L 219 114 Z" fill="#3b82f6"/>
+            <path d="M 255 122 L 255 72" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 255 66 L 251 74 L 259 74 Z" fill="#14b8a6"/>
+            <text x="261" y="98" font-family="Consolas, monospace" font-size="10" fill="#0f766e">'лекция'</text>
+            <path d="M 367 66 L 367 116" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 367 122 L 363 114 L 371 114 Z" fill="#3b82f6"/>
+            <path d="M 407 122 L 407 72" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 407 66 L 403 74 L 411 74 Z" fill="#14b8a6"/>
+            <text x="413" y="98" font-family="Consolas, monospace" font-size="10" fill="#0f766e">'практика'</text>
+            <path d="M 518 66 L 518 116" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 518 122 L 514 114 L 522 114 Z" fill="#3b82f6"/>
+            <path d="M 558 122 L 558 72" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 558 66 L 554 74 L 562 74 Z" fill="#14b8a6"/>
+            <text x="552" y="98" text-anchor="end" font-family="Consolas, monospace" font-size="10" fill="#0f766e">done</text>
+
+            <text x="14" y="140" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#0f766e">генератор</text>
+            <rect x="14" y="148" width="138" height="54" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <text x="83" y="172" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">тело не начато</text>
+            <text x="83" y="189" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">(пауза в начале)</text>
+            <rect x="166" y="124" width="138" height="78" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="235" y="160" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#115e59">начало дня</text>
+            <text x="235" y="178" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#115e59">yield "лекция"</text>
+            <rect x="318" y="124" width="138" height="78" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="387" y="160" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#115e59">перемена</text>
+            <text x="387" y="178" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#115e59">yield "практика"</text>
+            <rect x="470" y="124" width="136" height="78" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="538" y="160" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">конец дня</text>
+            <text x="538" y="178" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">конец функции</text>
+
+            <rect x="14" y="214" width="592" height="40" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="239" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Тело выполняется кусками — от yield до yield; между next() генератор на паузе.</text>
+        </svg>
+        <figcaption>Кто и когда работает: вызывающий код и генератор по очереди</figcaption>
+    </figure>
+
+    <p>Четвёртое — пауза сохраняет всё: где остановились и значения переменных. Каждый вызов генераторной
+    функции даёт новый, независимый генератор:</p>
+
+    <pre class="code js">function* counter() {
+  let n = 0;
+  while (true) {
+    yield ++n;
+  }
+}
+
+const a = counter();
+const b = counter();
+console.log(a.next().value, a.next().value, b.next().value, a.next().value);   // 1 2 1 3</pre>
+
+    <p>У <code>a</code> и <code>b</code> свои <code>n</code>, как у двух вызовов <code>makeProgress</code>
+    дня 1. Объявление <code>function*</code> поднимается, как обычное <code>function</code> (день 12
+    Essentials), а с <code>new</code> генераторную функцию не вызвать: <code>new counter()</code> —
+    <code>TypeError: counter is not a constructor</code>.</p>
+
+    <h2 id="forms">3. Четыре записи</h2>
+
+    <p>Генератор записывают так же, как обычную функцию, — только со звёздочкой:</p>
+
+    <pre class="code js">function* declared() { yield 1; }                 // объявление
+const expressed = function* () { yield 2; };     // выражение
+const quiz = { *questions() { yield 3; } };      // метод литерала
+class Box { *items() { yield 4; } }              // метод класса
+
+console.log([...declared(), ...expressed(), ...quiz.questions(), ...new Box().items()]);   // [1, 2, 3, 4]
+console.log(expressed.name, quiz.questions.name, typeof declared);   // expressed questions function</pre>
+
+    <p>Звёздочка в методе — та самая «звёздочка генератора» из сокращённой записи методов дня 5; с вычисляемым
+    именем получается <code>*[Symbol.iterator]()</code> раздела 1. Пробелы вокруг звёздочки не важны:
+    <code>function* f</code> и <code>function *f</code> — одно и то же. А стрелочного генератора нет:
+    <code>const g = *() =&gt; {}</code> — <code>SyntaxError: Unexpected token '*'</code>.</p>
+
+    <p>Раз генератор — не стрелка, у него свои <code>this</code> и <code>arguments</code>, и подчиняются
+    они правилам дней 2 и 4:</p>
+
+    <pre class="code js">const lesson = {
+  topic: "еда",
+  *cards() {
+    yield this.topic;
+    yield arguments.length;
+  },
+};
+
+console.log([...lesson.cards(1, 2, 3)]);   // ['еда', 3]
+const loose = lesson.cards;
+console.log(loose().next().value);         // undefined</pre>
+
+    <p>Вызванный как метод, генератор видит объект в <code>this</code>; оторванный от объекта — теряет его,
+    как метод дня 2: <code>this</code> стал окном, у которого нет <code>topic</code>.</p>
+
+    <h2 id="return">4. yield и return</h2>
+
+    <p><code>yield</code> выдаёт значение и встаёт на паузу. <code>return</code> в генераторе тоже можно
+    написать — он заканчивает генератор, и его значение приходит вместе с <code>done: true</code>:</p>
+
+    <pre class="code js">function* answers() {
+  yield "да";
+  yield "нет";
+  return "конец";
+}
+
+const it = answers();
+console.log(it.next(), it.next());   // {value: 'да', done: false} {value: 'нет', done: false}
+console.log(it.next(), it.next());   // {value: 'конец', done: true} {value: undefined, done: true}
+console.log([...answers()]);          // ['да', 'нет']</pre>
+
+    <p>Spread «конец» не увидел — как и <code>for...of</code> с деструктуризацией: значение при
+    <code>done: true</code> они отбрасывают (таблица 84, день 11). Поэтому то, что должен перебрать
+    <code>for...of</code>, выдают через <code>yield</code>, а <code>return</code> оставляют для итога,
+    который читают вручную, — как в примере учебника MDN, где диапазон в конце сообщает, сколько чисел выдал:</p>
+
+    <pre class="code js">function* makeRange(start, end, step = 1) {
+  let count = 0;
+  for (let i = start; i &lt; end; i += step) {
+    count++;
+    yield i;
+  }
+  return count;
+}
+
+const iter = makeRange(1, 10, 2);
+let result = iter.next();
+while (!result.done) {
+  console.log(result.value);
+  result = iter.next();
+}
+console.log("всего чисел:", result.value);</pre>
+
+    <div class="result-box">
+        1<br>
+        3<br>
+        5<br>
+        7<br>
+        9<br>
+        всего чисел: 5
+    </div>
+
+    <p>Цикл — тот же <code>while</code>, которым вчера мы записали <code>for...of</code>, только последний
+    результат не выброшен: в нём итог. <code>yield</code> без значения выдаёт <code>undefined</code>.</p>
+
+    <p>И важное ограничение: <code>yield</code> работает только в самой генераторной функции, не во
+    вложенных. <code>yield</code> внутри колбэка <code>forEach</code> — синтаксическая ошибка: для обычной
+    функции это не команда, а просто имя (вспомните день 3: вне строгого режима <code>yield</code> —
+    допустимое имя переменной). Тексты ошибок — в разделе 11.</p>
+
+    <h2 id="once">5. Генератор — одноразовый проход</h2>
+
+    <p>Генератор — перебираемый итератор из раздела 9 дня 11: его <code>[Symbol.iterator]()</code>
+    возвращает его самого. Но есть отличие от итератора массива:</p>
+
+    <pre class="code js">function* letters() {
+  yield "a";
+  yield "b";
+  yield "c";
+}
+
+const gen = letters();
+console.log(gen[Symbol.iterator]() === gen);   // true
+for (const letter of gen) {
+  console.log("первый проход:", letter);
+  break;
+}
+console.log([...gen], [...letters()]);          // [] ['a', 'b', 'c']</pre>
+
+    <div class="result-box">
+        true<br>
+        первый проход: a<br>
+        (0) [] (3) ['a', 'b', 'c']
+    </div>
+
+    <p>Вчера итератор массива после <code>break</code> продолжал с того же места. Генератор — нет: у него
+    есть метод <code>return()</code> (раздел 8), <code>break</code> его вызвал, и генератор закончился.
+    Отсюда правило. Генераторная функция — фабрика проходов: каждый вызов даёт свежий генератор. Сам
+    генератор — один проход. Объект, который должен перебираться много раз, как <code>range</code>,
+    хранит генератор в методе <code>*[Symbol.iterator]()</code>: каждый <code>for...of</code> вызывает
+    его заново.</p>
+
+    <h2 id="infinite">6. Бесконечные последовательности</h2>
+
+    <p>Генератор считает значения, только когда их просят. Поэтому <code>while (true)</code> внутри него
+    не вешает страницу: после каждого <code>yield</code> он ждёт. Так записывают бесконечные
+    последовательности — числа Фибоначчи из учебника MDN:</p>
+
+    <pre class="code js">function* fibonacci() {
+  let [current, after] = [0, 1];
+  while (true) {
+    yield current;
+    [current, after] = [after, current + after];
+  }
+}
+
+const first = [];
+for (const n of fibonacci()) {
+  if (first.length === 10) {
+    break;
+  }
+  first.push(n);
+}
+console.log(first);   // [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]</pre>
+
+    <p>Берёт ровно столько, сколько нужно, вызывающий код — <code>break</code> на десятом числе.
+    Бесконечный счётчик <code>idMaker</code> из задания 8 дня 11 генератором записывается так же коротко,
+    как <code>counter</code> раздела 2. Ловушка обратная: <code>[...fibonacci()]</code> никогда не закончится — spread хочет все
+    значения, а их нет конца. Метод <code>take(10)</code>, который берёт первые N без цикла, — день 13.</p>
+
+    <h3>Лениво — значит по частям</h3>
+
+    <p>Ленивость полезна и для конечных данных. Пример со страницы MDN о <code>next()</code> — разбить список
+    на страницы: генератор режет следующую порцию, только когда её попросили. Возьмём восемь слов
+    «Карточек»:</p>
+
+    <pre class="code js">function* pages(list, size) {
+  for (let start = 0; start &lt; list.length; start += size) {
+    yield list.slice(start, start + size);
+  }
+}
+
+const words = ["book", "teacher", "lesson", "bread", "water", "apple", "house", "window"];
+const pager = pages(words, 3);
+console.log(pager.next().value);   // ['book', 'teacher', 'lesson']
+console.log(pager.next().value);   // ['bread', 'water', 'apple']
+console.log(pager.next().value);   // ['house', 'window']
+console.log(pager.next().done);    // true</pre>
+
+    <p>Кнопка «Дальше» на странице просто вызывала бы <code>pager.next()</code>: генератор помнит, где
+    остановился, и номер страницы хранить не нужно.</p>
+
+    <h2 id="next-value">7. Разговор через next(value)</h2>
+
+    <p>До сих пор значения шли из генератора наружу. Но <code>yield</code> — выражение, и у него есть
+    результат: это аргумент <strong>следующего</strong> <code>next()</code>. Генератор может задавать
+    вопросы и получать ответы:</p>
+
+    <pre class="code js">function* quiz() {
+  const first = yield "2 + 2?";
+  const second = yield "3 · 3?";
+  return `ответы: ${first}, ${second}`;
+}
+
+const q = quiz();
+console.log(q.next("потеряется"));   // {value: '2 + 2?', done: false}
+console.log(q.next(4));              // {value: '3 · 3?', done: false}
+console.log(q.next(9));              // {value: 'ответы: 4, 9', done: true}</pre>
+
+    <p>MDN подчёркивает несимметричность <code>next</code>: он <strong>отправляет</strong> значение
+    в тот <code>yield</code>, на котором генератор стоит, а <strong>получает</strong> значение следующего
+    <code>yield</code>. Первый <code>next()</code> запускает тело с начала — никакой <code>yield</code>
+    ещё не ждёт ответа, поэтому его аргумент «потеряется» молча. <code>for...of</code> и spread аргументов
+    не передают (примечание 1 раздела 27.1.1), так что разговором управляют только вручную.</p>
+
+    <p>Пауза может случиться даже посреди выражения — генератор остановится на первом <code>yield</code>,
+    а сложение закончит, когда получит оба ответа:</p>
+
+    <pre class="code js">function* sum() {
+  return (yield "первое число?") + (yield "второе число?");
+}
+
+const s = sum();
+console.log(s.next().value, s.next(2).value, s.next(3));   // первое число? второе число? {value: 5, done: true}</pre>
+
+    <h2 id="finally">8. return() и finally</h2>
+
+    <p>У генератора есть необязательный метод итератора <code>return()</code> из раздела 12 дня 11 — и
+    писать его не надо. Он действует так, будто на месте паузы выполнился <code>return</code>. А если
+    <code>yield</code> стоит внутри <code>try...finally</code> (день 11 Essentials), блок
+    <code>finally</code> выполнится — это место для уборки:</p>
+
+    <pre class="code js">function* lines() {
+  try {
+    yield "строка 1";
+    yield "строка 2";
+    yield "строка 3";
+  } finally {
+    console.log("finally: файл закрыт");
+  }
+}
+
+for (const line of lines()) {
+  console.log(line);
+  break;
+}
+const g = lines();
+g.next();
+console.log(g.return("рано"), g.next());
+console.log(lines().return("до старта"));</pre>
+
+    <div class="result-box">
+        строка 1<br>
+        finally: файл закрыт<br>
+        finally: файл закрыт<br>
+        {value: 'рано', done: true} {value: undefined, done: true}<br>
+        {value: 'до старта', done: true}
+    </div>
+
+    <p><code>break</code> позвал <code>return()</code>, тот выполнил <code>finally</code>. Ручной
+    <code>g.return("рано")</code> — то же, и его аргумент стал <code>value</code> результата. А генератор,
+    который ни разу не запускали, на <code>return()</code> просто закрывается: тело не начато, до
+    <code>try</code> не дошли, и <code>finally</code> молчит. Так генераторы выполняют обещание
+    дня 11 «итератор может прибраться», почти без кода. Тонкость из MDN: если в самом
+    <code>finally</code> есть <code>yield</code>, <code>return()</code> вернёт его значение с
+    <code>done: false</code> — уборка может выдать ещё что-то.</p>
+
+    <h2 id="throw">9. throw()</h2>
+
+    <p>Обещанный вчера метод <code>throw()</code> — пара <code>return()</code>: он действует так, будто на
+    месте паузы выполнился <code>throw</code>. Генератор может ошибку поймать и продолжить:</p>
+
+    <pre class="code js">function* safe() {
+  while (true) {
+    try {
+      yield 42;
+    } catch (error) {
+      console.log("поймано внутри:", error.message);
+    }
+  }
+}
+
+const g = safe();
+console.log(g.next().value);                     // 42
+console.log(g.throw(new Error("сбой")).value);   // поймано внутри: сбой, затем 42</pre>
+
+    <p>Не поймал — ошибка вылетает из вызова <code>throw()</code> к вызывающему коду, и генератор
+    закончен:</p>
+
+    <pre class="code js">function* plain() {
+  yield 1;
+  yield 2;
+}
+
+const p = plain();
+p.next();
+try {
+  p.throw(new Error("сбой"));
+} catch (error) {
+  console.log("снаружи:", error.message);
+}
+console.log(p.next());   // {value: undefined, done: true}</pre>
+
+    <p>Ошибка, брошенная в самом теле, ведёт себя так же: её выбросит <code>next()</code>, а генератор
+    закроется. Встроенные потребители <code>throw()</code> не вызывают никогда — это инструмент для
+    ручного управления.</p>
+
+    <h2 id="delegate">10. yield* и обход дерева</h2>
+
+    <p><code>yield*</code> (со звёздочкой) выдаёт по очереди все значения другого перебираемого объекта —
+    генератора, массива, строки. Это <strong>делегирование</strong>: пока внутренний не кончился, внешний
+    генератор просто передаёт его значения. Результат самого выражения <code>yield*</code> — то, что
+    внутренний генератор вернул через <code>return</code>:</p>
+
+    <pre class="code js">function* inner() {
+  yield 2;
+  yield 3;
+  return "inner готов";
+}
+
+function* outer() {
+  yield 1;
+  const result = yield* inner();
+  console.log("yield* вернул:", result);
+  yield* [4, 5];
+  yield* "аб";
+}
+
+console.log([...outer()]);
+// yield* вернул: inner готов
+// [1, 2, 3, 4, 5, 'а', 'б']</pre>
+
+    <p>Главное применение — рекурсия. Дерево разделов курса обходится генератором, который выдаёт свой узел
+    и через <code>yield*</code> поручает детей самому себе:</p>
+
+    <pre class="code js">const course = {
+  title: "JavaScript",
+  children: [
+    { title: "Essentials", children: [{ title: "Переменные" }, { title: "Функции" }] },
+    { title: "Intermediate", children: [{ title: "Замыкания" }, { title: "Генераторы" }] },
+  ],
+};
+
+function* walk(node, depth = 0) {
+  yield "· ".repeat(depth) + node.title;
+  for (const child of node.children ?? []) {
+    yield* walk(child, depth + 1);
+  }
+}
+
+for (const line of walk(course)) {
+  console.log(line);
+}</pre>
+
+    <div class="result-box">
+        JavaScript<br>
+        · Essentials<br>
+        · · Переменные<br>
+        · · Функции<br>
+        · Intermediate<br>
+        · · Замыкания<br>
+        · · Генераторы
+    </div>
+
+    <p>Точки показывают глубину узла. Без генератора пришлось бы собирать массив и передавать
+    его в каждый рекурсивный вызов; здесь каждый уровень просто выдаёт своё, а <code>yield*</code> склеивает
+    уровни в одну последовательность.</p>
+
+    <p><code>yield*</code> пробрасывает внутрь и <code>return()</code> с <code>throw()</code>: закрыли внешний
+    генератор — закроется и внутренний, причём изнутри наружу:</p>
+
+    <pre class="code js">function* innerPart() {
+  try {
+    yield "внутренний 1";
+    yield "внутренний 2";
+  } finally {
+    console.log("закрыт внутренний");
+  }
+}
+
+function* outerPart() {
+  try {
+    yield* innerPart();
+  } finally {
+    console.log("закрыт внешний");
+  }
+}
+
+for (const part of outerPart()) {
+  console.log(part);
+  break;
+}
+// внутренний 1
+// закрыт внутренний
+// закрыт внешний</pre>
+
+    <p>Справа от <code>yield*</code> должно стоять перебираемое: <code>yield* 5</code> —
+    <code>TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))</code>.</p>
+
+    <h2 id="errors">11. Ошибки дня</h2>
+
+    <p>У генераторов две свои страницы ошибок на MDN. Первая — генератор позвал сам себя, пока работает:</p>
+
+    <pre class="code js">let it;
+function* getNumbers(times) {
+  if (times &lt;= 0) {
+    it.throw(new Error("times must be greater than 0"));
+  }
+  for (let i = 0; i &lt; times; i++) {
+    yield i;
+  }
+}
+
+it = getNumbers(0);
+it.next();
+// TypeError: Generator is already running</pre>
+
+    <p>Пока выполняется тело, генератор в состоянии «выполняется», и любой его метод бросает
+    <code>TypeError</code>. Изнутри пишут обычный <code>throw new Error(…)</code> — MDN так и исправляет
+    пример. Вторая — <code>yield</code> в параметре по умолчанию:</p>
+
+    <pre class="code js">function* gen(a = yield 1) {}
+// SyntaxError: Yield expression not allowed in formal parameter</pre>
+
+    <p>Параметры вычисляются при вызове функции (раздел 13), когда вставать на паузу ещё некуда. MDN
+    предлагает вынести умолчание в тело через <code>??=</code> дня 6: <code>a ??= yield 1;</code>.
+    Остальные ошибки дня — одной таблицей:</p>
+
+    <table>
+        <thead><tr><th>Код</th><th>Текст Chrome</th></tr></thead>
+        <tbody>
+            <tr><td><code>new counter()</code></td><td><code>counter is not a constructor</code></td></tr>
+            <tr><td><code>const g = *() =&gt; {}</code></td><td><code>Unexpected token '*'</code></td></tr>
+            <tr><td><code>yield x</code> в колбэке внутри генератора</td><td><code>Unexpected identifier 'x'</code></td></tr>
+            <tr><td><code>yield 1</code> во вложенной обычной функции</td><td><code>Unexpected number</code></td></tr>
+            <tr><td><code>const yield = 5</code> в генераторе</td><td><code>Unexpected identifier 'yield'</code></td></tr>
+            <tr><td><code>yield* 5</code></td><td><code>number 5 is not iterable (cannot read property Symbol(Symbol.iterator))</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Третья и четвёртая строки сбивают с толку: Chrome ругает не <code>yield</code>, а то, что за ним.
+    Во вложенной функции <code>yield</code> — обычное имя, и <code>yield x</code> для разбора — два имени
+    подряд без оператора.</p>
+
+    <h2 id="chain">12. Откуда у генератора методы</h2>
+
+    <p><code>next</code>, <code>return</code> и <code>throw</code> не лежат в самом генераторе — их даёт цепочка
+    прототипов дня 7:</p>
+
+    <pre class="code js">function* genFunc() {
+  yield 1;
+}
+
+const gen = genFunc();
+const proto = Object.getPrototypeOf;
+const generatorProto = proto(proto(gen));
+
+console.log(proto(gen) === genFunc.prototype, Object.getOwnPropertyNames(genFunc.prototype));   // true []
+console.log(Object.getOwnPropertyNames(generatorProto), generatorProto[Symbol.toStringTag]);
+// ['constructor', 'next', 'return', 'throw'] Generator
+console.log(gen instanceof genFunc, String(gen));   // true [object Generator]</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Две цепочки. Генератор gen наследует от genFunc.prototype, тот от Generator.prototype с методами next, return, throw, тот от Iterator.prototype, тот от Object.prototype. Функция genFunc наследует от GeneratorFunction.prototype, тот от Function.prototype">
+            <text x="14" y="22" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#115e59">цепочка генератора — методы</text>
+            <rect x="14" y="32" width="96" height="48" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="62" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#115e59">gen</text>
+            <text x="62" y="70" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b">своя пауза</text>
+            <path d="M 112 56 L 124 56" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 130 56 L 122 52 L 122 60 Z" fill="#14b8a6"/>
+            <rect x="132" y="32" width="112" height="48" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="188" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">genFunc.</text>
+            <text x="188" y="68" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">prototype</text>
+            <path d="M 246 56 L 258 56" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 264 56 L 256 52 L 256 60 Z" fill="#14b8a6"/>
+            <rect x="266" y="32" width="112" height="48" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="322" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">Generator.</text>
+            <text x="322" y="63" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">prototype</text>
+            <text x="322" y="75" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" fill="#64748b">next return throw</text>
+            <path d="M 380 56 L 392 56" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 398 56 L 390 52 L 390 60 Z" fill="#14b8a6"/>
+            <rect x="400" y="32" width="102" height="48" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="451" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">Iterator.</text>
+            <text x="451" y="63" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">prototype</text>
+            <text x="451" y="75" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9.5" fill="#64748b">день 13</text>
+            <path d="M 504 56 L 516 56" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 522 56 L 514 52 L 514 60 Z" fill="#14b8a6"/>
+            <rect x="524" y="32" width="82" height="48" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+            <text x="565" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#92400e">Object.</text>
+            <text x="565" y="68" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#92400e">prototype</text>
+
+            <text x="14" y="146" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#1d4ed8">цепочка функции</text>
+            <rect x="132" y="128" width="112" height="48" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="188" y="150" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#1d4ed8">genFunc</text>
+            <text x="188" y="167" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b">function*</text>
+            <path d="M 246 152 L 258 152" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 264 152 L 256 148 L 256 156 Z" fill="#3b82f6"/>
+            <rect x="266" y="128" width="112" height="48" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="322" y="148" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" font-weight="700" fill="#1d4ed8">GeneratorFunction.</text>
+            <text x="322" y="163" text-anchor="middle" font-family="Consolas, monospace" font-size="9.5" font-weight="700" fill="#1d4ed8">prototype</text>
+            <path d="M 380 152 L 392 152" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 398 152 L 390 148 L 390 156 Z" fill="#3b82f6"/>
+            <rect x="400" y="128" width="102" height="48" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="451" y="148" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">Function.</text>
+            <text x="451" y="163" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#334155">prototype</text>
+
+            <path d="M 188 126 L 188 84" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <text x="196" y="108" font-family="Consolas, monospace" font-size="10" fill="#64748b">.prototype</text>
+            <path d="M 322 126 L 322 84" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <text x="330" y="108" font-family="Consolas, monospace" font-size="10" fill="#64748b">.prototype</text>
+
+            <rect x="14" y="196" width="592" height="58" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="219" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">next, return и throw — в общем Generator.prototype, [Symbol.iterator] — в Iterator.prototype.</text>
+            <text x="310" y="239" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">пунктир — свойство prototype; ссылки с gen обратно на genFunc нет, есть только instanceof</text>
+        </svg>
+        <figcaption>Цепочки генератора и генераторной функции</figcaption>
+    </figure>
+
+    <p>Каждая генераторная функция получает свой пустой объект <code>prototype</code> — он становится прототипом
+    её генераторов, поэтому <code>instanceof</code> работает. Дальше — общий для всех
+    <code>Generator.prototype</code> с тремя методами, потом <code>Iterator.prototype</code> дня 11 с
+    <code>[Symbol.iterator]() { return this; }</code>. MDN отмечает, что «<code>Generator.prototype</code>» —
+    условное имя: глобального <code>Generator</code> нет, и точнее этот объект называть
+    <code>GeneratorFunction.prototype.prototype</code>. У <code>genFunc.prototype</code> нет даже своего
+    <code>constructor</code> (примечание к 27.3.4.3), а унаследованный <code>gen.constructor</code> — объект
+    <code>GeneratorFunction.prototype</code>, не функция.</p>
+
+    <p>Сама генераторная функция — объект <strong>GeneratorFunction</strong>, наследника
+    <code>Function</code>. Глобальной переменной для него тоже нет; достают через конструктор любой
+    генераторной функции:</p>
+
+    <pre class="code js">const GeneratorFunction = function* () {}.constructor;
+const twice = new GeneratorFunction("a", "yield a * 2; yield a * 3;");
+
+function* letters() {}
+
+console.log([...twice(10)], twice.name, typeof globalThis.GeneratorFunction);   // [20, 30] anonymous undefined
+console.log(letters instanceof GeneratorFunction, letters instanceof Function);   // true true</pre>
+
+    <p>Как конструктор <code>Function</code> дня 4, он собирает функцию из строк — и так же опасен: код из
+    строки не видит окружения, а строка с чужими данными — дыра. В консоли генератор подписан
+    именем своей функции и показывает внутренний слот: <code>genFunc {[[GeneratorState]]: 'suspended'}</code>.
+    Этот слот — главное в спецификации.</p>
+
+    <h2 id="spec">13. Раздел 27.5 спецификации</h2>
+
+    <p>Прочитаем <a href="https://tc39.es/ecma262/2026/#sec-generator-objects">27.5 Generator Objects</a>.
+    Первые две фразы: генератор создаётся вызовом генераторной функции и соответствует интерфейсам
+    итератора и перебираемого объекта (27.1.1 вчерашнего дня); наследует он от <code>prototype</code>
+    своей функции, а через него — от <code>%GeneratorPrototype%</code>. Раздел 27.5.1 описывает этот
+    объект, и методы в нём короткие: <code>next(value)</code> — это операция GeneratorResume, а
+    <code>return(value)</code> и <code>throw(exception)</code> — GeneratorResumeAbrupt с «завершением
+    через return» и «завершением через throw».</p>
+
+    <p>Таблица 89 (27.5.2) перечисляет внутренние слоты генератора. <code>[[GeneratorContext]]</code> —
+    контекст выполнения: место, где тело остановилось, со всеми его переменными; так пауза «помнит всё»
+    из раздела 2. <code>[[GeneratorState]]</code> — одно из четырёх состояний: <em>suspended-start</em>
+    (создан, тело не начато), <em>executing</em> (выполняется), <em>suspended-yield</em> (стоит на
+    <code>yield</code>), <em>completed</em> (закончен). DevTools называет их по-своему —
+    <code>suspended</code>, <code>running</code>, <code>closed</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 252" role="img" aria-label="Четыре состояния генератора: suspended-start, executing, suspended-yield, completed. next переводит из паузы в executing, yield — в suspended-yield, конец тела, return или ошибка — в completed. return и throw до старта сразу дают completed. Метод, вызванный в executing, — TypeError">
+            <rect x="14" y="30" width="150" height="56" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="89" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#334155">suspended-start</text>
+            <text x="89" y="74" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b">тело не начато</text>
+            <path d="M 166 58 L 228 58" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 236 58 L 226 53 L 226 63 Z" fill="#3b82f6"/>
+            <text x="200" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">next()</text>
+
+            <rect x="238" y="30" width="144" height="56" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="310" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1d4ed8">executing</text>
+            <text x="310" y="74" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#991b1b">next() здесь — TypeError</text>
+            <path d="M 384 48 L 446 48" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 454 48 L 444 43 L 444 53 Z" fill="#14b8a6"/>
+            <text x="418" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0f766e">yield</text>
+            <path d="M 454 70 L 392 70" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 384 70 L 394 65 L 394 75 Z" fill="#3b82f6"/>
+            <text x="420" y="102" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9.5" fill="#1d4ed8">next / return / throw</text>
+
+            <rect x="456" y="30" width="150" height="56" rx="10" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="531" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#115e59">suspended-yield</text>
+            <text x="531" y="74" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#115e59">пауза на yield</text>
+
+            <path d="M 310 88 L 310 138" fill="none" stroke="#ef4444" stroke-width="2"/>
+            <path d="M 310 146 L 305 136 L 315 136 Z" fill="#ef4444"/>
+            <text x="318" y="118" font-family="Segoe UI, sans-serif" font-size="10" fill="#991b1b">конец тела, return, ошибка</text>
+            <path d="M 89 88 L 89 172 L 228 172" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M 236 172 L 226 167 L 226 177 Z" fill="#ef4444"/>
+            <text x="98" y="122" font-family="Segoe UI, sans-serif" font-size="10" fill="#991b1b">return() / throw()</text>
+            <text x="98" y="136" font-family="Segoe UI, sans-serif" font-size="10" fill="#991b1b">до старта</text>
+
+            <rect x="238" y="148" width="144" height="48" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="310" y="168" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#991b1b">completed</text>
+            <text x="310" y="186" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#991b1b">навсегда: done: true</text>
+
+            <rect x="14" y="208" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="231" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">DevTools: suspended (оба ожидания), running, closed.</text>
+        </svg>
+        <figcaption>Состояния <code>[[GeneratorState]]</code> и переходы между ними</figcaption>
+    </figure>
+
+    <p>Операции раздела <a href="https://tc39.es/ecma262/2026/#sec-generator-abstract-operations">27.5.3</a>
+    объясняют всё, что мы видели сегодня:</p>
+
+    <ol>
+        <li><strong>GeneratorValidate</strong> (27.5.3.2): если состояние <em>executing</em> —
+            <code>TypeError</code>. Это «Generator is already running» раздела 11.</li>
+        <li><strong>GeneratorResume</strong> (27.5.3.3): закончен — сразу <code>{value: undefined, done: true}</code>
+            (отсюда бесконечные <code>done: true</code>); иначе — состояние <em>executing</em> и продолжение
+            тела, причём аргумент <code>next</code> становится результатом остановившегося <code>yield</code>.</li>
+        <li><strong>GeneratorYield</strong> (27.5.3.6): состояние <em>suspended-yield</em>, контекст
+            генератора снимается со стека, и вызывающий код получает <code>{value, done: false}</code>.</li>
+        <li><strong>GeneratorResumeAbrupt</strong> (27.5.3.4): в <em>suspended-start</em> генератор
+            сразу становится <em>completed</em>, тело не трогают. Поэтому <code>return()</code> до старта
+            не выполнил <code>finally</code>, а <code>throw()</code> до старта поймать невозможно.</li>
+        <li><strong>GeneratorStart</strong> (27.5.3.1): когда тело кончилось — <em>completed</em> навсегда
+            («контекст больше никогда не возобновляется»), результат — <code>{value, done: true}</code>
+            со значением <code>return</code>.</li>
+    </ol>
+
+    <p>А что происходит при самом вызове генераторной функции, говорит раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluategeneratorbody">15.5.2
+    EvaluateGeneratorBody</a>: подготовить параметры, создать объект с прототипом из
+    <code>genFunc.prototype</code>, поставить <em>suspended-start</em> и вернуть его. Параметры — значит,
+    умолчания вычисляются сразу, до первого <code>next()</code>:</p>
+
+    <pre class="code js">function* greet(name = (console.log("параметр вычислен"), "Аман")) {
+  console.log("тело началось");
+  yield `салам, ${name}`;
+}
+
+const it = greet();
+console.log("генератор создан");
+console.log(it.next().value);
+// параметр вычислен
+// генератор создан
+// тело началось
+// салам, Аман</pre>
+
+    <p>Сама генераторная функция описана в разделе
+    <a href="https://tc39.es/ecma262/2026/#sec-generatorfunction-objects">27.3 GeneratorFunction Objects</a>:
+    конструктор <code>%GeneratorFunction%</code>, его свойства, прототип со ссылкой на
+    <code>%GeneratorPrototype%</code> и свойства <code>length</code>, <code>name</code>,
+    <code>prototype</code> каждой генераторной функции — всё то, что мы видели в разделе 12.</p>
+
+    <h2 id="cards">14. «Карточки»: викторина</h2>
+
+    <p>Перепишем колоду дня 11 генераторами и добавим викторину. Итератор колоды — генератор-метод: три строки
+    вместо прежнего <code>next</code> с <code>while</code>. Викторина <code>quiz()</code> — разговор через
+    <code>next(answer)</code>: выдаёт вопрос, получает ответ, верный — помечает карточку выученной. Итог —
+    через <code>return</code>, а <code>finally</code> сообщает, что сессия окончена, как бы она ни кончилась.</p>
+
+    <pre class="code js">const LEARNED = Symbol("learned");
+
+class Deck {
+  #cards;
+
+  constructor(cards) {
+    this.#cards = cards.map((card) =&gt; ({ ...card }));
+  }
+
+  learn(word) {
+    this.#cards.find((c) =&gt; c.word === word)[LEARNED] = true;
+  }
+
+  *[Symbol.iterator]() {
+    for (const card of this.#cards) {
+      if (!card[LEARNED]) yield card;                   // выученные пропускаем
+    }
+  }
+
+  *quiz() {
+    let right = 0;
+    try {
+      for (const card of this) {
+        const answer = yield `${card.word} — ?`;         // вопрос наружу, ответ внутрь
+        if (answer === card.translation) {
+          right++;
+          this.learn(card.word);
+        }
+      }
+    } finally {
+      console.log(`сессия окончена: верно ${right}`);
+    }
+    return right;
+  }
+}
+
+const deck = new Deck([
+  { word: "book", translation: "книга" },
+  { word: "teacher", translation: "учитель" },
+  { word: "bread", translation: "хлеб" },
+  { word: "water", translation: "вода" },
+  { word: "house", translation: "дом" },
+]);
+deck.learn("teacher");
+console.log([...deck].map((card) =&gt; card.word));
+
+const session = deck.quiz();
+console.log(session.next().value);
+console.log(session.next("книга").value);
+console.log(session.next("вода").value);
+console.log(session.next("вода").value);
+console.log(session.next("дом"));
+console.log([...deck].map((card) =&gt; card.word));
+
+const again = deck.quiz();
+console.log(again.next().value);
+console.log(again.return(0));</pre>
+
+    <div class="result-box">
+        (4) ['book', 'bread', 'water', 'house']<br>
+        book — ?<br>
+        bread — ?<br>
+        water — ?<br>
+        house — ?<br>
+        сессия окончена: верно 3<br>
+        {value: 3, done: true}<br>
+        (1) ['bread']<br>
+        bread — ?<br>
+        сессия окончена: верно 0<br>
+        {value: 0, done: true}
+    </div>
+
+    <p><strong>Строка 1 — генератор-итератор.</strong> Spread вызвал <code>*[Symbol.iterator]()</code>,
+    и <code>teacher</code> пропущен. Каждый spread получает новый генератор, поэтому колода перебирается
+    сколько угодно раз.</p>
+
+    <p><strong>Строки 2–7 — разговор.</strong> Первый <code>next()</code> запустил викторину до первого
+    вопроса. Дальше каждый <code>next(ответ)</code> отдал ответ на прежний вопрос и получил новый:
+    «книга» — верно, «вода» на <code>bread</code> — нет, «вода» и «дом» — верно. Вопросы кончились,
+    <code>finally</code> напечатал итог, <code>return right</code> пришёл с <code>done: true</code>.</p>
+
+    <p><strong>Строка 8 — побочный эффект.</strong> Верные ответы пометили карточки, и в колоде осталось
+    одно невыученное слово.</p>
+
+    <p><strong>Строки 9–11 — ранний выход.</strong> Вторую сессию закрыли после первого вопроса через
+    <code>return(0)</code>: <code>finally</code> всё равно сработал, а результатом стал аргумент
+    <code>return()</code>.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите <code>try</code> и <code>finally</code>, оставив тело цикла. Какие
+        строки пропадут из вывода — и чем это опасно, если бы викторина держала открытый ресурс?
+        <br><br>
+        <strong>Второй.</strong> Передайте ответ уже в первый вызов: <code>session.next("книга")</code>. Изменится
+        ли счёт? Почему — по разделу 7?
+        <br><br>
+        <strong>Третий.</strong> Создайте две викторины одной колоды и вызывайте их <code>next</code> по очереди.
+        Мешают ли они друг другу? Что общего у них, а что у каждой своё?
+    </div>
+
+    <h2 id="next">15. Что дальше</h2>
+
+    <p>Генераторы закрыли модуль наполовину: любой перебор теперь пишется функцией со звёздочкой. Но
+    чтобы взять первые десять чисел Фибоначчи, мы всё ещё пишем цикл с <code>break</code>. Завтра,
+    на дне 13, — методы <code>Iterator</code>, которые есть у каждого генератора: <code>take</code>,
+    <code>map</code>, <code>filter</code>, <code>reduce</code> прямо на последовательности, лениво, без
+    промежуточных массивов. А асинхронные генераторы <code>async function*</code> ждут нас на дне 29.</p>
+
+    <p>Историческая справка со страницы MDN о <code>function*</code>: когда-то генераторами писали
+    асинхронный код — генератор вставал на паузу, пока данные грузятся, а внешний код будил его через
+    <code>next(данные)</code>. Сегодня это делают проще — <code>async</code>/<code>await</code> из дня 31
+    Essentials, и как они устроены внутри, разберём на дне 28. Генераторам осталась их основная работа —
+    последовательности.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators">Iterators and generators</a></td><td>учебник: итератор руками и генератором; <code>next(x)</code>; Фибоначчи</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*">function*</a></td><td>объявление генераторной функции; пауза и продолжение</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/function*">function* expression</a></td><td>генератор-выражение</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/yield">yield</a></td><td>выдать значение; результат — аргумент <code>next</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/yield*">yield*</a></td><td>делегирование другому перебираемому; результат — его <code>return</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator">Generator</a></td><td>объект-генератор; цепочка прототипов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator/next">Generator.prototype.next()</a></td><td>шаг генератора; отправить значение внутрь</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator/return">Generator.prototype.return()</a></td><td>закрыть генератор; <code>finally</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator/throw">Generator.prototype.throw()</a></td><td>бросить ошибку на месте паузы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-generator-objects">ECMA-262, 27.5 Generator Objects</a></td><td>четыре состояния; методы через GeneratorResume</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction">GeneratorFunction</a></td><td>тип генераторной функции, не глобальный</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction/GeneratorFunction">GeneratorFunction() constructor</a></td><td>генератор из строк — как <code>Function</code>, опасно</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction/prototype">GeneratorFunction.prototype.prototype</a></td><td>общий прототип генераторов; свой <code>prototype</code> у каждой функции</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Already_executing_generator">Ошибка: already executing generator</a></td><td><code>Generator is already running</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/await_yield_in_parameter">Ошибка: await/yield expression can't be used in parameter</a></td><td><code>Yield expression not allowed in formal parameter</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-generatorfunction-objects">ECMA-262, 27.3 GeneratorFunction Objects</a></td><td>как устроен раздел о генераторных функциях</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-generatorfunction-constructor">ECMA-262, 27.3.1–27.3.4</a></td><td>конструктор, его свойства, прототип, экземпляры</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-generator-prototype">ECMA-262, 27.5.1–27.5.3</a></td><td><code>%GeneratorPrototype%</code>, слоты генератора, операции</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// function* gen() { … }   const g = function* () {};   { *method() {} }   *[Symbol.iterator]() {}
+// стрелочного генератора нет; new gen() — TypeError
+// gen() — тело НЕ выполняется, возвращается генератор (итератор + перебираемый)
+// next()          — выполнить до ближайшего yield: { value, done: false }
+// yield x         — выдать x и встать на паузу; результат yield — аргумент следующего next()
+// return x        — конец: { value: x, done: true }; for...of и spread x не видят
+// первый next(x)  — x теряется: ни один yield ещё не ждёт
+// генератор одноразовый: break зовёт return() и закрывает его
+// много раз перебирать — объект с *[Symbol.iterator]() { … }
+// g.return(x)     — return на месте паузы; finally выполнится (если тело начато)
+// g.throw(err)    — throw на месте паузы; можно поймать try...catch внутри
+// yield* iterable — выдать всё из другого; результат — его return; рекурсия по дереву
+// while (true) { yield … } — бесконечно, но лениво; [...бесконечный] — зависнет
+// [[GeneratorState]]: suspended-start, executing, suspended-yield, completed</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Что выполнится при вызове <code>const g = gen();</code>, если в начале тела генератора стоит
+                <code>console.log</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Ничего из тела: вызов только создаёт генератор в состоянии «не начат». Тело пойдёт с первым
+                    <code>g.next()</code>. Вычислятся только параметры по умолчанию.
+                </details>
+            </li>
+            <li>Почему <code>[...answers()]</code> не содержит значения из <code>return "конец"</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Оно приходит вместе с <code>done: true</code>, а spread, <code>for...of</code> и деструктуризация
+                    такое значение отбрасывают. Перебираемое выдают через <code>yield</code>.
+                </details>
+            </li>
+            <li>Куда попадает аргумент <code>next(5)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Он становится результатом того <code>yield</code>, на котором генератор стоит. Аргумент первого
+                    <code>next</code> теряется — ни один <code>yield</code> ещё не ждёт.
+                </details>
+            </li>
+            <li>Почему генератор после <code>break</code> не продолжить, а итератор массива — можно?
+                <details class="answer"><summary>Ответ</summary>
+                    У генератора есть <code>return()</code>, и <code>break</code> его вызывает — генератор
+                    закрывается. У итератора массива <code>return</code> нет.
+                </details>
+            </li>
+            <li>Как обойти дерево любой глубины генератором?
+                <details class="answer"><summary>Ответ</summary>
+                    Выдать свой узел через <code>yield</code>, а для каждого ребёнка вызвать себя же через
+                    <code>yield* walk(child)</code>: значения всех уровней сольются в одну последовательность.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 12 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #14b8a6; }
+        h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 12</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 12. Генераторы: function* и yield</h1>
+    <p class="subtitle">Выжимка лекции: генераторная функция и пауза, <code>yield</code> и <code>return</code>,
+    одноразовость, <code>next(value)</code>, <code>return()</code>, <code>throw()</code>, <code>yield*</code>,
+    четыре состояния генератора.</p>
+
+    <h2>Главное</h2>
+
+    <pre class="code js">function* lessonDay() {                 // генераторная функция
+  const mood = yield "лекция";          // выдать и встать на паузу
+  yield `практика, настроение: ${mood}`;
+  return "конец";                       // итог — вместе с done: true
+}
+
+const day = lessonDay();                // тело ещё НЕ выполнялось
+day.next();                             // {value: 'лекция', done: false}
+day.next("бодрое");                     // {value: 'практика, настроение: бодрое', done: false}
+day.next();                             // {value: 'конец', done: true}
+
+const range = {
+  from: 1,
+  to: 3,
+  *[Symbol.iterator]() {                // перебираемый много раз
+    for (let n = this.from; n &lt;= this.to; n++) yield n;
+  },
+};
+const all = [...range];                 // [1, 2, 3]</pre>
+
+    <div class="definition">
+        Вызов генераторной функции возвращает <strong>генератор</strong> — перебираемый итератор. Каждый
+        <code>next()</code> выполняет тело до ближайшего <code>yield</code>. Аргумент <code>next(x)</code>
+        становится результатом остановившегося <code>yield</code>; аргумент первого <code>next</code> теряется.
+        Значение <code>return</code> <code>for...of</code> и spread не видят.
+    </div>
+
+    <p><strong>Записи:</strong> <code>function* f() {}</code>, <code>const f = function* () {}</code>,
+    <code>{ *m() {} }</code>, <code>class { *m() {} }</code>; стрелочного генератора нет, <code>new f()</code> —
+    <code>TypeError</code>. Свои <code>this</code> и <code>arguments</code>, как у обычной функции.
+    Параметры по умолчанию вычисляются при вызове, тело — на первом <code>next()</code>.</p>
+
+    <h2>Один проход</h2>
+
+    <div class="remember">
+        Генератор одноразовый: <code>break</code> вызывает его <code>return()</code> и закрывает его.
+        Генераторная функция — фабрика проходов. Объект, который перебирают много раз, хранит генератор
+        в методе <code>*[Symbol.iterator]()</code>. <code>while (true)</code> внутри генератора безопасен —
+        значения считаются по требованию; <code>[...бесконечный]</code> — зависание.
+    </div>
+
+    <p><strong>Ленивость</strong> полезна и для конечных данных: генератор <code>pages(list, size)</code>
+    отрезает следующую страницу списка только на очередном <code>next()</code> и сам помнит, где остановился.
+    Итог через <code>return</code> читают вручную: цикл <code>while (!result.done)</code>, после него —
+    <code>result.value</code>.</p>
+
+    <h2>return(), throw(), yield*</h2>
+
+    <table>
+        <thead><tr><th>Вызов</th><th>Что делает</th></tr></thead>
+        <tbody>
+            <tr><td><code>g.return(x)</code></td><td><code>return x</code> на месте паузы; <code>finally</code> выполняется, если тело начато</td></tr>
+            <tr><td><code>g.throw(err)</code></td><td><code>throw err</code> на месте паузы; можно поймать внутри</td></tr>
+            <tr><td><code>yield* iterable</code></td><td>выдать всё из другого; результат — его <code>return</code>; закрыли внешний — закроется и внутренний</td></tr>
+        </tbody>
+    </table>
+
+    <div class="key-point">
+        Состояния <code>[[GeneratorState]]</code>: <em>suspended-start</em> → <em>executing</em> ↔
+        <em>suspended-yield</em> → <em>completed</em>. Метод, вызванный во время <em>executing</em>, —
+        <code>Generator is already running</code>. <code>yield</code> в параметре —
+        <code>Yield expression not allowed in formal parameter</code>.
+    </div>
+
+    <div class="note-box">
+        Рекурсия по дереву: <code>function* walk(node) { yield node; for (const c of node.children ?? []) yield* walk(c); }</code>.
+        Методы генератора — в общем <code>Generator.prototype</code>; генераторная функция — объект
+        <code>GeneratorFunction</code>, он не глобальный.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём проекте цикл, который собирает массив, чтобы потом его перебрать, и замените
+                его генератором.</li>
+            <li>Сделайте объект-коллекцию проекта перебираемым через <code>*[Symbol.iterator]()</code>
+                и сравните с итератором дня 11.</li>
+            <li>Прочитайте на MDN раздел «Advanced generators» учебника
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators">Iterators and generators</a>
+                и повторите пример Фибоначчи со сбросом через <code>next(true)</code>.</li>
+            <li>Найдите в спецификации таблицу 89 раздела 27.5.2 и для каждого состояния запишите, какой
+                вызов из него выводит.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

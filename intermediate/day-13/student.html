@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 13 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #14b8a6; }
+        h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 13</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 13. Iterator и его методы</h1>
+    <p class="subtitle">Выжимка лекции: где живут методы итераторов, ленивость, помощники и потребители,
+    бесконечные последовательности, <code>Iterator.from</code>, наследники <code>Iterator</code>,
+    <code>concat</code> и <code>zip</code>.</p>
+
+    <h2>Главное</h2>
+
+    <pre class="code js">function* naturals() {
+  let n = 1;
+  while (true) yield n++;
+}
+
+const squares = naturals()                 // бесконечный источник
+  .filter((n) =&gt; n % 2 === 1)              // помощник: лениво
+  .map((n) =&gt; n * n)                       // помощник: лениво
+  .take(4)                                 // помощник: не больше 4, потом закрыть источник
+  .toArray();                              // потребитель: вся работа здесь
+// [1, 9, 25, 49]
+
+const sum = [5, 3, 4].values().reduce((a, b) =&gt; a + b, 0);   // 12 — у массива сначала values()</pre>
+
+    <div class="definition">
+        Методы лежат в <code>Iterator.prototype</code> — их получают генераторы и все встроенные итераторы,
+        но не массивы. <strong>Помощники</strong> (<code>map</code>, <code>filter</code>, <code>take</code>,
+        <code>drop</code>, <code>flatMap</code>) возвращают новый итератор и ничего не считают до
+        <code>next()</code>. <strong>Потребители</strong> (<code>toArray</code>, <code>reduce</code>,
+        <code>forEach</code>, <code>join</code>, <code>some</code>, <code>every</code>, <code>find</code>,
+        <code>includes</code>) перебирают сразу и возвращают результат.
+    </div>
+
+    <p><strong>Ленивость:</strong> массив работает этажами — <code>map</code> по всем значениям, потом
+    <code>filter</code> по всем; итератор — конвейером, одно значение через все звенья. Нет промежуточных
+    массивов, лишнее не считается, можно работать с бесконечным. <code>toArray()</code> — последним.</p>
+
+    <p><strong>Массив или итератор?</strong> Данные уже в массиве, их немного, нужны номера и несколько
+    проходов — методы массива. Данных много или они бесконечны, нужен кусок или первое подходящее, источник —
+    генератор — методы итератора. <code>flatMap</code> итератора разворачивает любые итераторы (массив —
+    только массивы), но строку из колбэка не примет.</p>
+
+    <h2>Бесконечный источник</h2>
+
+    <table>
+        <thead><tr><th>Безопасно</th><th>Нужен <code>take</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>map</code>, <code>filter</code>, <code>drop</code>, <code>take</code>, <code>flatMap</code>;
+                <code>find</code>/<code>some</code>/<code>includes</code>, если ответ есть</td>
+                <td><code>toArray</code>, <code>reduce</code>, <code>forEach</code>, <code>join</code>;
+                <code>every</code>, если все подходят</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Помощник и источник — одна последовательность: «размножить» итератор нельзя. <code>take(n)</code>,
+        отдав n, закрывает источник (<code>finally</code> генератора выполнится); <code>some</code>,
+        <code>every</code>, <code>find</code>, <code>includes</code> закрывают итератор, найдя ответ.
+        Порядок звеньев важен: <code>drop(2).take(5)</code> ≠ <code>take(5).drop(2)</code>.
+    </div>
+
+    <h2>Правильный итератор</h2>
+
+    <div class="key-point">
+        <code>Iterator.from(x)</code> оборачивает итератор, у которого есть только <code>next</code>, и даёт ему
+        методы; правильный возвращает как есть; строку перебирает по знакам, число — <code>TypeError</code>.
+        <code>class X extends Iterator { next() { … } }</code> — свой правильный итератор;
+        <code>new Iterator()</code> — <code>Abstract class Iterator not directly constructable</code>.
+    </div>
+
+    <div class="note-box">
+        <code>Iterator.concat(a, b)</code> — значения подряд; <code>Iterator.zip([a, b])</code> — пары, по
+        умолчанию до самого короткого; <code>zipKeyed({ k: a })</code> — объекты. По спецификации помощник —
+        генератор с меткой «Iterator Helper» (раздел 27.1.2): Yield, пауза, закрытие.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём проекте цепочку методов массива и перепишите её на итераторе. Где ленивость
+                помогла, а где массив удобнее?</li>
+            <li>Возьмите генератор из своего проекта и получите его первые N значений через <code>take</code>
+                вместо цикла с <code>break</code>.</li>
+            <li>Прочитайте на MDN раздел «Proper iterators» страницы
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator">Iterator</a>
+                и объясните своими словами, чем правильный итератор отличается от итератора по протоколу.</li>
+            <li>Найдите в спецификации алгоритм <code>Iterator.prototype.filter</code> (27.1.3.3.4) и отметьте
+                в нём шаги, общие с <code>map</code>.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

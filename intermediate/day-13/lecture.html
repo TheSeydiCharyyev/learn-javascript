@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 13 — Iterator и его методы</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #14b8a6; }
+        h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+        h3 { color: #115e59; }
+        .step-number { background: #14b8a6; }
+        .toc a { color: #0f766e; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 13</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 13 &bull; урок 1</span>
+        <h1>Iterator и его методы</h1>
+        <p>Курс 2, Intermediate. Модуль «Итераторы и генераторы» — третий, последний день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>пользоваться методами итераторов: <code>map</code>, <code>filter</code>, <code>take</code>,
+                <code>drop</code>, <code>flatMap</code>, <code>reduce</code>, <code>toArray</code> и соседями;</li>
+            <li>объяснять ленивость: чем цепочка на итераторе отличается от цепочки на массиве;</li>
+            <li>брать первые N значений бесконечного генератора и знать, какие методы на нём зависнут;</li>
+            <li>превращать любой итератор в «правильный» через <code>Iterator.from</code> и наследовать от
+                <code>Iterator</code>;</li>
+            <li>читать раздел 27.1.3 спецификации и видеть в методах-помощниках генераторы.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#take">Вместо break — take</a></li>
+            <li><a href="#where">Где живут методы</a></li>
+            <li><a href="#lazy">Ленивость</a></li>
+            <li><a href="#transform">Методы, которые дают итератор</a></li>
+            <li><a href="#consume">Методы, которые дают результат</a></li>
+            <li><a href="#infinite">Бесконечные последовательности</a></li>
+            <li><a href="#source">Помощник и его источник</a></li>
+            <li><a href="#from">Iterator.from и правильные итераторы</a></li>
+            <li><a href="#extends">Свой класс от Iterator</a></li>
+            <li><a href="#more">concat, zip и остальные</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Раздел 27.1.3 спецификации</a></li>
+            <li><a href="#cards">«Карточки»: ленивая колода</a></li>
+            <li><a href="#module">Итоги модуля и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="take">1. Вместо break — take</h2>
+
+    <p>Вчера, чтобы взять первые десять чисел Фибоначчи, мы писали цикл: пустой массив, <code>for...of</code>,
+    проверка длины, <code>break</code>. Обещали, что сегодня хватит одной строки:</p>
+
+    <pre class="code js">function* fibonacci() {
+  let [current, after] = [0, 1];
+  while (true) {
+    yield current;
+    [current, after] = [after, current + after];
+  }
+}
+
+console.log(fibonacci().take(10).toArray());    // [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+console.log(fibonacci().find((n) =&gt; n &gt; 100));  // 144</pre>
+
+    <p><code>take(10)</code> — «взять десять», <code>toArray()</code> — собрать в массив,
+    <code>find</code> — найти первое подходящее. Это методы <strong>итераторов</strong>: они есть у генератора
+    и у любого встроенного итератора. На дне 11 мы заметили, что у итератора массива есть <code>map</code>, и
+    отложили разговор. Сегодня он.</p>
+
+    <h2 id="where">2. Где живут методы</h2>
+
+    <p>На схемах дней 11 и 12 в цепочке каждого итератора стоял <code>Iterator.prototype</code>. Вот что в нём:</p>
+
+    <pre class="code js">const marks = [5, 3, 4];
+const proto = Object.getPrototypeOf;
+
+console.log(proto(proto(marks.values())) === Iterator.prototype);   // true
+console.log(typeof marks.values().map, typeof marks.take);          // function undefined
+console.log(marks.values().map((m) =&gt; m * 10).toArray());           // [50, 30, 40]</pre>
+
+    <p><code>Iterator</code> — глобальный класс, общий родитель всех встроенных итераторов: массива, строки,
+    генератора, а с дней 14–15 — <code>Map</code> и <code>Set</code>. Его <code>prototype</code> даёт
+    <code>[Symbol.iterator]() { return this; }</code> из дня 11 и методы-помощники. Многие похожи на методы
+    массива из дней 19–20 Essentials:</p>
+
+    <table>
+        <thead><tr><th>Итератор</th><th>Массив</th><th>Что делает</th></tr></thead>
+        <tbody>
+            <tr><td><code>map</code>, <code>filter</code>, <code>flatMap</code></td><td>то же</td><td>преобразовать, отобрать, развернуть</td></tr>
+            <tr><td><code>reduce</code>, <code>forEach</code></td><td>то же</td><td>свести к одному значению, обойти</td></tr>
+            <tr><td><code>some</code>, <code>every</code>, <code>find</code>, <code>includes</code></td><td>то же</td><td>проверить и найти</td></tr>
+            <tr><td><code>join</code></td><td>то же</td><td>склеить в строку</td></tr>
+            <tr><td><code>drop</code> + <code>take</code></td><td><code>slice</code></td><td>отрезать кусок</td></tr>
+            <tr><td><code>toArray</code></td><td>—</td><td>собрать итератор в массив</td></tr>
+        </tbody>
+    </table>
+
+    <p>Вторая строка кода показывает важное: это методы <strong>итераторов</strong>, а не перебираемых
+    объектов. У массива <code>take</code> нет; сначала из него берут итератор — <code>values()</code>. MDN
+    объясняет почему: перебираемый объект — любой объект с <code>[Symbol.iterator]</code> (день 11), общего
+    прототипа у них нет, и класть методы некуда. У итераторов общий прототип есть.</p>
+
+    <h2 id="lazy">3. Ленивость</h2>
+
+    <p>Если методы похожи, зачем вторые? Посмотрим, <strong>в каком порядке</strong> выполняется одна и та же
+    цепочка:</p>
+
+    <pre class="code js">const marks = [5, 2, 4];
+const tenfold = (m) =&gt; (console.log("map", m), m * 10);
+const good = (m) =&gt; (console.log("filter", m), m &gt;= 40);
+
+console.log("--- массив");
+console.log(marks.map(tenfold).filter(good));
+console.log("--- итератор");
+const chain = marks.values().map(tenfold).filter(good);
+console.log("цепочка готова");
+console.log(chain.next().value);
+console.log(chain.next().value);</pre>
+
+    <div class="result-box">
+        --- массив<br>
+        map 5<br>
+        map 2<br>
+        map 4<br>
+        filter 50<br>
+        filter 20<br>
+        filter 40<br>
+        (2) [50, 40]<br>
+        --- итератор<br>
+        цепочка готова<br>
+        map 5<br>
+        filter 50<br>
+        50<br>
+        map 2<br>
+        filter 20<br>
+        map 4<br>
+        filter 40<br>
+        40
+    </div>
+
+    <p>Массив работает <strong>этажами</strong>: <code>map</code> проходит все оценки и строит промежуточный
+    массив, потом <code>filter</code> проходит его и строит ещё один. Итератор работает
+    <strong>конвейером</strong>: пока <code>next()</code> не позвали, не выполнилось ничего — «цепочка готова»
+    напечатана до первого <code>map</code>. Каждый <code>next()</code> протаскивает одно значение через все
+    звенья, пока не получится ответ. Это и называют <strong>ленивостью</strong>: значение считается, только
+    когда его просят, — тот же принцип, что у генератора вчера.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 238" role="img" aria-label="Массив: map проходит все значения и строит промежуточный массив, затем filter проходит его и строит результат. Итератор: каждое значение по запросу next проходит map и filter сразу, промежуточных массивов нет">
+            <text x="14" y="22" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">массив — этажами</text>
+            <rect x="14" y="32" width="104" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="66" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">[5, 2, 4]</text>
+            <path d="M 120 52 L 150 52" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 156 52 L 148 48 L 148 56 Z" fill="#3b82f6"/>
+            <text x="138" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">map</text>
+            <rect x="158" y="32" width="124" height="40" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+            <text x="220" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#92400e">[50, 20, 40]</text>
+            <text x="220" y="65" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9.5" fill="#92400e">промежуточный массив</text>
+            <path d="M 284 52 L 320 52" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 326 52 L 318 48 L 318 56 Z" fill="#3b82f6"/>
+            <text x="305" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">filter</text>
+            <rect x="328" y="32" width="104" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="380" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">[50, 40]</text>
+            <text x="448" y="50" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">все значения —</text>
+            <text x="448" y="65" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">сразу, на каждом этаже</text>
+
+            <text x="14" y="104" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#0f766e">итератор — конвейером</text>
+            <rect x="14" y="114" width="104" height="40" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+            <text x="66" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#115e59">values()</text>
+            <path d="M 120 134 L 150 134" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 156 134 L 148 130 L 148 138 Z" fill="#14b8a6"/>
+            <text x="138" y="126" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0f766e">5</text>
+            <rect x="158" y="114" width="80" height="40" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+            <text x="198" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#115e59">map</text>
+            <path d="M 240 134 L 270 134" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 276 134 L 268 130 L 268 138 Z" fill="#14b8a6"/>
+            <text x="258" y="126" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0f766e">50</text>
+            <rect x="278" y="114" width="80" height="40" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+            <text x="318" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#115e59">filter</text>
+            <path d="M 360 134 L 390 134" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 396 134 L 388 130 L 388 138 Z" fill="#14b8a6"/>
+            <text x="378" y="126" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#0f766e">50</text>
+            <rect x="398" y="114" width="80" height="40" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="438" y="138" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">next()</text>
+            <text x="494" y="132" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">одно значение —</text>
+            <text x="494" y="147" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">через все звенья</text>
+            <path d="M 438 158 C 438 176, 66 176, 66 160" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <text x="252" y="186" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b">следующий next() — следующее значение</text>
+
+            <rect x="14" y="198" width="592" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="220" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Массив считает всё и сразу; итератор — по одному значению и только по запросу.</text>
+        </svg>
+        <figcaption>Одна цепочка: этажами и конвейером</figcaption>
+    </figure>
+
+    <p>Ленивость даёт три выгоды. Нет промежуточных массивов — меньше памяти. Не считается лишнее: если
+    нужен только первый ответ, остальные значения не трогаются. И можно работать с бесконечными
+    последовательностями, которые массивом не представить вовсе.</p>
+
+    <p>Значит ли это, что методы массива больше не нужны? Нет. Если данные уже лежат в массиве, их немного
+    и нужны номера, <code>length</code> или несколько проходов — массив проще и привычнее. Итератор выигрывает,
+    когда данных много или они бесконечны, когда нужен только кусок или первый подходящий, когда источник —
+    генератор. Правило из MDN: превращать итератор в массив только ради <code>reduce</code> или
+    <code>filter</code> не нужно — у итератора они свои.</p>
+
+    <h2 id="transform">4. Методы, которые дают итератор</h2>
+
+    <p>Пять методов ничего не считают сами, а возвращают новый итератор — <strong>помощник</strong> (iterator
+    helper). У помощника те же методы, поэтому их можно сцеплять: <code>map</code>, <code>filter</code>,
+    <code>take</code>, <code>drop</code>, <code>flatMap</code>.</p>
+
+    <pre class="code js">const words = ["book", "teacher", "lesson", "bread", "water"];
+
+console.log(words.values().map((w, i) =&gt; `${i + 1}. ${w}`).toArray());
+// ['1. book', '2. teacher', '3. lesson', '4. bread', '5. water']
+console.log(words.values().drop(1).take(2).toArray(), words.slice(1, 3));   // ['teacher', 'lesson'] ['teacher', 'lesson']
+console.log(words.values().take(10).toArray().length);                     // 5</pre>
+
+    <p>Колбэк <code>map</code> и <code>filter</code> получает значение и его номер — как у массива, только
+    третьего аргумента «весь массив» нет: всего итератора не существует. <code>drop(n)</code> пропускает
+    первые n значений, <code>take(n)</code> выдаёт не больше n и закрывается; вместе они — <code>slice</code>
+    для итератора, а <code>take</code> больше, чем есть значений, просто отдаёт все. Аргумент превращается
+    в число; отрицательное или <code>NaN</code> — <code>RangeError</code> с текстом вида
+    <code>-1 must be positive</code>.</p>
+
+    <p>Цепочка помощников — сокращённая запись цикла. Страница MDN о <code>filter</code> показывает
+    равенство: два варианта ниже дают одно и то же, но первый читается как предложение.</p>
+
+    <pre class="code js">const marks = [5, 3, 4, 2, 5];
+
+const viaHelpers = marks.values().filter((m) =&gt; m &gt;= 4).map((m) =&gt; m * 10).take(2).toArray();
+
+const viaLoop = [];
+for (const m of marks) {
+  if (m &lt; 4) {
+    continue;
+  }
+  viaLoop.push(m * 10);
+  if (viaLoop.length === 2) {
+    break;
+  }
+}
+console.log(viaHelpers, viaLoop);   // [50, 40] [50, 40]</pre>
+
+    <p><code>flatMap</code> разворачивает то, что вернул колбэк, — и тут отличие от массива:</p>
+
+    <pre class="code js">function* letters(word) {
+  yield* word;
+}
+
+console.log(["ab", "cd"].values().flatMap((w) =&gt; letters(w)).toArray());   // ['a', 'b', 'c', 'd']
+console.log(["ab", "cd"].flatMap((w) =&gt; letters(w)).length);               // 2</pre>
+
+    <p><code>flatMap</code> массива разворачивает только массивы — два генератора остались двумя элементами.
+    <code>flatMap</code> итератора разворачивает любой итератор или перебираемый объект. Кроме строки:
+    вернуть из колбэка <code>"ab"</code> — <code>TypeError: Iterator.prototype.flatMap called on non-object</code>.
+    MDN объясняет, что перебор строки по знакам редко нужен на самом деле; если нужен — оберните её в
+    <code>Iterator.from</code> (раздел 8).</p>
+
+    <h2 id="consume">5. Методы, которые дают результат</h2>
+
+    <p>Остальные методы сразу перебирают итератор и возвращают ответ — не итератор:</p>
+
+    <pre class="code js">function* marks() {
+  yield* [5, 3, 4, 2, 5];
+}
+
+console.log(marks().reduce((sum, m) =&gt; sum + m, 0), marks().toArray().length);    // 19 5
+console.log(marks().some((m) =&gt; m === 2), marks().every((m) =&gt; m &gt;= 3));          // true false
+console.log(marks().find((m) =&gt; m &lt; 4), marks().includes(4), marks().join(" "));   // 3 true 5 3 4 2 5
+marks().take(2).forEach((m, i) =&gt; console.log(i, m));
+// 0 5
+// 1 3</pre>
+
+    <p>Каждый вызов <code>marks()</code> даёт новый генератор: потребитель исчерпывает итератор, и второй раз
+    его не перебрать (день 12). <code>toArray()</code> — то же, что <code>Array.from(it)</code> и
+    <code>[...it]</code>, но удобнее в конце цепочки. MDN советует звать его <strong>последним</strong>:
+    <code>take(10).toArray().filter(…)</code> строит лишний массив, а <code>take(10).filter(…).toArray()</code> — нет.</p>
+
+    <p><code>some</code>, <code>every</code>, <code>find</code> и <code>includes</code> останавливаются, как
+    только ответ ясен, и <strong>закрывают</strong> итератор методом <code>return()</code> — генератор
+    выполнит свой <code>finally</code>. MDN подчёркивает: итератор никогда не остаётся «наполовину»:</p>
+
+    <pre class="code js">function* lessons() {
+  yield "лекция";
+  yield "практика";
+  yield "проект";
+}
+
+const seq = lessons();
+console.log(seq.find((l) =&gt; l === "лекция"), seq.next());   // лекция {value: undefined, done: true}</pre>
+
+    <p>Нашлось на первом шаге — но «практику» после <code>find</code> уже не получить: генератор закрыт.
+    Нужно продолжить — берите не <code>find</code>, а <code>filter(…).next()</code>, он итератор не закрывает. <code>reduce</code> без начального значения на пустом итераторе —
+    <code>TypeError: Reduce of a done iterator with no initial value</code>. <code>includes</code> сравнивает
+    через SameValueZero дня 6, поэтому находит <code>NaN</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 226" role="img" aria-label="Две семьи методов. Помощники map, filter, take, drop, flatMap возвращают итератор, ленивы, сцепляются и работают с бесконечным. Потребители возвращают результат: toArray, reduce, forEach, join берут все значения; some, every, find, includes останавливаются на ответе и закрывают итератор. Цепочка помощников ничего не считает, пока в конце не встанет потребитель">
+            <rect x="14" y="20" width="282" height="128" rx="10" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="155" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#115e59">дают итератор — помощники</text>
+            <text x="155" y="70" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#115e59">map · filter · take · drop · flatMap</text>
+            <text x="155" y="96" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">ничего не считают сами — ленивы</text>
+            <text x="155" y="116" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">сцепляются друг с другом</text>
+            <text x="155" y="136" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">безопасны с бесконечным</text>
+
+            <path d="M 298 84 L 316 84" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 322 84 L 314 80 L 314 88 Z" fill="#94a3b8"/>
+
+            <rect x="324" y="20" width="282" height="128" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="465" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">дают результат — потребители</text>
+            <text x="465" y="70" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">toArray · reduce · forEach · join</text>
+            <text x="465" y="88" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">берут все значения — нужен конец</text>
+            <text x="465" y="114" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">some · every · find · includes</text>
+            <text x="465" y="132" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">до ответа, потом закрывают итератор</text>
+
+            <rect x="14" y="164" width="592" height="54" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="30" y="187" font-family="Consolas, monospace" font-size="11" fill="#334155">gen().filter(…).map(…).take(5)            ← ещё ничего не посчитано</text>
+            <text x="30" y="207" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#334155">gen().filter(…).map(…).take(5).toArray()  ← вся работа здесь</text>
+        </svg>
+        <figcaption>Помощники строят конвейер, потребитель его запускает</figcaption>
+    </figure>
+
+    <h2 id="infinite">6. Бесконечные последовательности</h2>
+
+    <p>Ради них методы и нужны. MDN приводит пример: <code>reduce</code> по значениям <code>Map</code> можно
+    записать через <code>[...map.values()].reduce(…)</code>, но с бесконечным генератором так нельзя — массив
+    из него не построить. А ленивые методы берут ровно столько, сколько нужно:</p>
+
+    <pre class="code js">function* fibonacci() {
+  let [current, after] = [0, 1];
+  while (true) {
+    yield current;
+    [current, after] = [after, current + after];
+  }
+}
+
+console.log(fibonacci().filter((n) =&gt; n % 2 === 0).take(5).toArray());   // [0, 2, 8, 34, 144]
+console.log(fibonacci().drop(5).take(3).toArray());                       // [5, 8, 13]
+console.log(fibonacci().take(10).reduce((a, b) =&gt; a + b));                // 88</pre>
+
+    <p>Порядок звеньев важен — пример со страницы MDN о <code>take</code>:</p>
+
+    <pre class="code js">function* naturals() {
+  let n = 1;
+  while (true) {
+    yield n++;
+  }
+}
+
+console.log(naturals().drop(2).take(5).toArray());   // [3, 4, 5, 6, 7]
+console.log(naturals().take(5).drop(2).toArray());   // [3, 4, 5]</pre>
+
+    <p>«Пропустить два, взять пять» и «взять пять, пропустить два» — разные куски. Так же
+    <code>filter(…).take(5)</code> — пять подходящих, а <code>take(5).filter(…)</code> — подходящие среди первых
+    пяти. А вот какие методы с бесконечным итератором опасны:</p>
+
+    <table>
+        <thead><tr><th>Безопасно</th><th>Зависнет без <code>take</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>map</code>, <code>filter</code>, <code>drop</code>, <code>take</code>, <code>flatMap</code> — ничего не считают, пока не попросят</td><td><code>toArray</code>, <code>reduce</code>, <code>forEach</code>, <code>join</code> — хотят все значения</td></tr>
+            <tr><td><code>find</code>, <code>some</code>, <code>includes</code> — если подходящее значение найдётся</td><td><code>find</code>, <code>some</code>, <code>includes</code>, если его нет; <code>every</code>, если все подходят</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="source">7. Помощник и его источник</h2>
+
+    <p>Помощник не копирует значения — он берёт их у источника по одному. Поэтому у них общая судьба. Пример
+    из справочника MDN:</p>
+
+    <pre class="code js">const source = [1, 2, 3].values();
+const copy = source.drop(0);   // как будто копия
+console.log(source.next().value, copy.next().value, source.next().value);   // 1 2 3</pre>
+
+    <p>«Копия» и источник читают одну последовательность: значения достаются по очереди то одному, то другому.
+    Размножить итератор, чтобы пройти его дважды, нельзя. А закрытие помощника закрывает и источник:</p>
+
+    <pre class="code js">function* lessons() {
+  try {
+    yield "лекция";
+    yield "практика";
+    yield "проект";
+  } finally {
+    console.log("источник закрыт");
+  }
+}
+
+const firstTwo = lessons().take(2);
+console.log(firstTwo.next().value, firstTwo.next().value);
+console.log(firstTwo.next());
+// лекция практика
+// источник закрыт
+// {value: undefined, done: true}</pre>
+
+    <p>Отдав два значения, <code>take</code> на третьем запросе сам вызвал <code>return()</code> источника —
+    генератор прибрался, не дойдя до «проекта». Если же закрыть помощник, ни разу его не запустив, —
+    <code>lessons().take(2).return()</code>, — он закроет и источник, но тот ещё не начат, и его
+    <code>finally</code> молчит: правило «до старта уборки нет» дня 12 действует и здесь. И ещё одна мелочь:
+    помощник не передаёт источнику аргумент <code>next(value)</code> — разговор дня 12 через помощник не идёт.</p>
+
+    <h2 id="from">8. Iterator.from и правильные итераторы</h2>
+
+    <p>MDN различает два понятия. <strong>Итератор по протоколу</strong> — любой объект с <code>next()</code>
+    (день 11). <strong>Правильный итератор</strong> (proper iterator) ещё и наследует от <code>Iterator</code>
+    и получает методы. Итератор, написанный руками, — только первое:</p>
+
+    <pre class="code js">const plain = {
+  n: 0,
+  next() {
+    return this.n &lt; 3 ? { value: this.n++, done: false } : { value: undefined, done: true };
+  },
+};
+
+console.log(typeof plain.map);                                     // undefined
+const proper = Iterator.from(plain);
+console.log(proper.map((x) =&gt; x * 10).toArray(), proper === plain);   // [0, 10, 20] false</pre>
+
+    <p><code>Iterator.from</code> завернул <code>plain</code> в объект-обёртку, который наследует от
+    <code>Iterator</code> и передаёт <code>next</code> исходному. Правильный итератор возвращается как есть,
+    а перебираемый объект — его итератором:</p>
+
+    <pre class="code js">function* one() {
+  yield 1;
+}
+
+const gen = one();
+console.log(Iterator.from(gen) === gen, Iterator.from("Мары").toArray());   // true ['М', 'а', 'р', 'ы']</pre>
+
+    <p>Строку <code>Iterator.from</code> принимает и перебирает по кодовым точкам (день 11), а число —
+    нет: <code>Iterator.from(5)</code> — <code>TypeError: Iterator.from called on non-object</code>. Метод
+    нужен, когда итератор пришёл из чужого кода и неизвестно, правильный ли он.</p>
+
+    <h2 id="extends">9. Свой класс от Iterator</h2>
+
+    <p>Второй способ получить правильный итератор — наследовать от <code>Iterator</code> (день 10) и написать
+    свой <code>next</code>:</p>
+
+    <pre class="code js">class Countdown extends Iterator {
+  #n;
+
+  constructor(n) {
+    super();
+    this.#n = n;
+  }
+
+  next() {
+    return this.#n &gt; 0 ? { value: this.#n--, done: false } : { value: undefined, done: true };
+  }
+}
+
+console.log(new Countdown(5).filter((n) =&gt; n % 2 === 1).toArray(), [...new Countdown(3)]);   // [5, 3, 1] [3, 2, 1]
+new Iterator();
+// TypeError: Abstract class Iterator not directly constructable</pre>
+
+    <p>Методы и <code>[Symbol.iterator]</code> пришли от родителя. А сам <code>Iterator</code> — общий
+    (абстрактный) класс, как <code>Shape</code> дня 10: <code>next</code> у него нет, создавать его объекты
+    бессмысленно, и конструктор проверяет <code>new.target</code>. <code>new Iterator()</code> — ошибка со
+    страницы MDN «Iterator constructor can't be used directly»; вызов без <code>new</code> —
+    <code>TypeError: Constructor Iterator requires 'new'</code>.</p>
+
+    <p>Зачем это, если вчерашний генератор-метод <code>*[Symbol.iterator]()</code> короче? Страница MDN
+    о конструкторе разбирает как раз такой класс <code>Range</code> и называет две причины. Итератор из
+    генератора наследует от <code>Generator.prototype</code>: чужие правки этого общего объекта коснутся
+    и вашего итератора. И у него нет своего прототипа, куда можно добавить свои методы или подпись
+    <code>[Symbol.toStringTag]</code>. Наследник <code>Iterator</code> устроен как встроенные итераторы — так
+    пишут библиотеки. В своём коде генератора обычно хватает.</p>
+
+    <h2 id="more">10. concat, zip и остальные</h2>
+
+    <p>У <code>Iterator</code> есть ещё статические методы, которые собирают итератор из нескольких
+    перебираемых объектов:</p>
+
+    <pre class="code js">function* letters() {
+  yield "x";
+  yield "y";
+}
+
+const words = ["book", "water", "bread"];
+const ru = ["книга", "вода"];
+console.log(Iterator.concat([1, 2], letters()).toArray());   // [1, 2, 'x', 'y']
+for (const [word, translation] of Iterator.zip([words, ru])) {
+  console.log(word, "—", translation);
+}
+console.log(JSON.stringify(Iterator.zipKeyed({ word: words, ru }).toArray()));
+// book — книга
+// water — вода
+// [{"word":"book","ru":"книга"},{"word":"water","ru":"вода"}]</pre>
+
+    <ul>
+        <li><code>Iterator.concat(a, b, …)</code> выдаёт значения по очереди — это <code>yield*</code> дня 12
+            одним вызовом. Строки не принимает: <code>Iterator.concat called on non-object</code>.</li>
+        <li><code>Iterator.zip([a, b])</code> «застёгивает молнию»: выдаёт пары значений с одинаковым
+            номером. По умолчанию останавливается на самом коротком — <code>bread</code> без перевода
+            пропал. Режим <code>{ mode: "longest" }</code> дойдёт до самого длинного, дополнив
+            <code>undefined</code>, а <code>"strict"</code> бросит <code>TypeError</code>, если длины разные.</li>
+        <li><code>Iterator.zipKeyed({ word, ru })</code> — то же, но объектами с вашими ключами.</li>
+        <li><code>includes</code> и <code>join</code> — как у массива (раздел 5).</li>
+        <li><code>[Symbol.dispose]()</code> вызывает <code>return()</code> итератора; он нужен объявлению
+            <code>using</code> — курс 3.</li>
+        <li><code>chunks</code> и <code>windows</code> — порции и «скользящее окно» значений; MDN помечает их
+            экспериментальными, в Chrome 155 их нет.</li>
+    </ul>
+
+    <p>MDN показывает с <code>zip</code> приём: застегнуть данные с бесконечным счётчиком, чтобы получить
+    номера, — <code>zip</code> остановится на коротком, то есть на данных:</p>
+
+    <pre class="code js">function* counter() {
+  let n = 1;
+  while (true) {
+    yield n++;
+  }
+}
+
+for (const [n, word] of Iterator.zip([counter(), ["book", "water"]])) {
+  console.log(n, word);
+}
+// 1 book
+// 2 water</pre>
+
+    <p>Из этого списка в редакции спецификации 2026 года есть только <code>concat</code>; <code>zip</code>,
+    <code>zipKeyed</code>, <code>includes</code>, <code>join</code> и <code>[Symbol.dispose]</code> уже работают
+    в Chrome и описаны на MDN без пометки «экспериментальный», но в текст ECMA-262 ещё не вошли.</p>
+
+    <h2 id="errors">11. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Текст Chrome</th></tr></thead>
+        <tbody>
+            <tr><td><code>new Iterator()</code></td><td><code>Abstract class Iterator not directly constructable</code></td></tr>
+            <tr><td><code>Iterator()</code></td><td><code>Constructor Iterator requires 'new'</code></td></tr>
+            <tr><td><code>[1, 2].take(1)</code></td><td><code>[1,2].take is not a function</code> — нужен <code>values()</code></td></tr>
+            <tr><td><code>take(-1)</code>, <code>drop(-1)</code></td><td><code>-1 must be positive</code> (<code>RangeError</code>)</td></tr>
+            <tr><td><code>[].values().reduce((a, b) =&gt; a + b)</code></td><td><code>Reduce of a done iterator with no initial value</code></td></tr>
+            <tr><td><code>flatMap((x) =&gt; String(x))</code></td><td><code>Iterator.prototype.flatMap called on non-object</code></td></tr>
+            <tr><td><code>Iterator.from(5)</code></td><td><code>Iterator.from called on non-object</code></td></tr>
+            <tr><td><code>map(5)</code></td><td><code>number 5 is not a function</code></td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="spec">12. Раздел 27.1.3 спецификации</h2>
+
+    <p>Прочитаем <a href="https://tc39.es/ecma262/2026/#sec-iterator-objects">27.1.3 Iterator Objects</a> — раздел
+    про конструктор и методы. Начинается он с конструктора (27.1.3.1): <code>Iterator</code> — свойство
+    глобального объекта, задуман для наследования, а его алгоритм — две строки: «если NewTarget —
+    <code>undefined</code> или сам <code>Iterator</code>, бросить <code>TypeError</code>; иначе создать объект
+    с прототипом <code>Iterator.prototype</code>». Это проверка <code>new.target</code> дня 10, записанная
+    языком спецификации.</p>
+
+    <p>Статические методы (27.1.3.2). <strong>Iterator.from</strong> получает итератор операцией
+    GetIteratorFlattenable (строка разрешена, число — нет), затем проверяет OrdinaryHasInstance дня 7: если
+    итератор уже наследует от <code>Iterator</code> — вернуть его; если нет — создать обёртку с прототипом
+    <code>%WrapForValidIteratorPrototype%</code>, у которой <code>next</code> зовёт <code>next</code> исходного.
+    <strong>Iterator.concat</strong> сначала у каждого аргумента берёт метод <code>%Symbol.iterator%</code>
+    (не объект или нет метода — <code>TypeError</code>), а перебирает их уже лениво.</p>
+
+    <p>Методы прототипа (27.1.3.3) устроены по одному образцу. Перескажем
+    <a href="https://tc39.es/ecma262/2026/#sec-iterator.prototype.map">27.1.3.3.8 map</a>:</p>
+
+    <ol>
+        <li><code>this</code> не объект — <code>TypeError</code>; <code>mapper</code> не функция — закрыть
+            итератор и бросить <code>TypeError</code>.</li>
+        <li>GetIteratorDirect дня 11 — один раз запомнить <code>next</code> источника.</li>
+        <li>Описать «замыкание» без параметров: счётчик 0; в цикле взять следующее значение
+            (IteratorStepValue), кончились — вернуть; вызвать <code>mapper(значение, счётчик)</code>;
+            выдать результат операцией <strong>Yield</strong>; ошибка — закрыть источник.</li>
+        <li>Превратить замыкание в объект операцией <strong>CreateIteratorFromClosure</strong> с меткой
+            <code>"Iterator Helper"</code> и вернуть его.</li>
+    </ol>
+
+    <p>Yield — та самая операция генераторов из раздела 27.5.3 вчерашнего дня. Помощник — это
+    <strong>генератор, написанный спецификацией</strong>: у него есть <code>[[GeneratorState]]</code> с четырьмя
+    состояниями, а метка <code>"Iterator Helper"</code> попадает в слот <code>[[GeneratorBrand]]</code>, который
+    вчера у наших генераторов был пустым. Об этом говорит и раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-iterator-helper-objects">27.1.2 Iterator Helper Objects</a>:
+    у общего прототипа помощников <code>next()</code> — это GeneratorResume с меткой «Iterator Helper», а
+    <code>return()</code> закрывает источники. Поэтому помощник ленив (тело замыкания стоит на паузе до
+    <code>next()</code>) и умеет закрываться.</p>
+
+    <p>Алгоритм <a href="https://tc39.es/ecma262/2026/#sec-iterator.prototype.take">27.1.3.3.11 take</a> объясняет
+    ошибки и закрытие источника: аргумент превращается в число, <code>NaN</code> — <code>RangeError</code>,
+    отрицательное — <code>RangeError</code>; в цикле, когда счётчик дошёл до нуля, — IteratorClose
+    источника. Это и был «источник закрыт» раздела 7.</p>
+
+    <p>Потребители в том же разделе проще: в них нет замыкания и Yield, это обычные циклы по
+    IteratorStepValue. В <code>reduce</code> первый шаг — если начального значения нет, взять первое значение
+    итератора, а кончились значения — <code>TypeError</code>; так выглядит ошибка раздела 5 на языке
+    спецификации. В <code>some</code>, <code>every</code> и <code>find</code> есть шаг «ответ найден —
+    IteratorClose и вернуть его»: это закрытие итератора, которое мы видели на <code>find</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Цепочка помощников: потребитель toArray тянет значения у take, take у filter, filter у map, map у источника. Каждый помощник — генератор спецификации с меткой Iterator Helper, хранит источник и стоит на паузе. take, отдав нужное, закрывает источник">
+            <rect x="14" y="40" width="104" height="54" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="66" y="62" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#334155">источник</text>
+            <text x="66" y="80" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#64748b">fibonacci()</text>
+            <rect x="138" y="40" width="96" height="54" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="186" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#115e59">map</text>
+            <text x="186" y="80" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9.5" fill="#115e59">помощник</text>
+            <rect x="254" y="40" width="96" height="54" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="302" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#115e59">filter</text>
+            <text x="302" y="80" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9.5" fill="#115e59">помощник</text>
+            <rect x="370" y="40" width="96" height="54" rx="8" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="418" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#115e59">take(5)</text>
+            <text x="418" y="80" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9.5" fill="#115e59">помощник</text>
+            <rect x="486" y="40" width="120" height="54" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="546" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1d4ed8">toArray()</text>
+            <text x="546" y="80" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="9.5" fill="#1d4ed8">потребитель</text>
+
+            <path d="M 484 56 L 474 56" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 468 56 L 476 52 L 476 60 Z" fill="#3b82f6"/>
+            <path d="M 368 56 L 358 56" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 352 56 L 360 52 L 360 60 Z" fill="#3b82f6"/>
+            <path d="M 252 56 L 242 56" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 236 56 L 244 52 L 244 60 Z" fill="#3b82f6"/>
+            <path d="M 136 56 L 126 56" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 120 56 L 128 52 L 128 60 Z" fill="#3b82f6"/>
+            <text x="310" y="28" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">← next(): запрос идёт к источнику</text>
+
+            <path d="M 120 82 L 130 82" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 136 82 L 128 78 L 128 86 Z" fill="#14b8a6"/>
+            <path d="M 236 82 L 246 82" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 252 82 L 244 78 L 244 86 Z" fill="#14b8a6"/>
+            <path d="M 352 82 L 362 82" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 368 82 L 360 78 L 360 86 Z" fill="#14b8a6"/>
+            <path d="M 468 82 L 478 82" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 484 82 L 476 78 L 476 86 Z" fill="#14b8a6"/>
+            <text x="250" y="114" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#0f766e">значения идут обратно через Yield →</text>
+
+            <path d="M 418 96 L 418 136 L 66 136 L 66 100" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M 66 96 L 62 104 L 70 104 Z" fill="#ef4444"/>
+            <text x="242" y="152" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">take отдал пять — IteratorClose: return() источника</text>
+
+            <rect x="14" y="166" width="592" height="40" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="191" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Помощник — генератор спецификации с меткой «Iterator Helper»: на паузе до next().</text>
+        </svg>
+        <figcaption>Как устроена цепочка <code>fibonacci().map(…).filter(…).take(5).toArray()</code></figcaption>
+    </figure>
+
+    <h2 id="cards">13. «Карточки»: ленивая колода</h2>
+
+    <p>Колоде дня 12 методы итераторов достаются даром: её <code>[Symbol.iterator]</code> — генератор, то есть
+    правильный итератор, и <code>Iterator.from(deck)</code> вернёт его как есть. Добавим бесконечный круг
+    повторения <code>cycle()</code>: он ходит по невыученным карточкам снова и снова, пока они есть.</p>
+
+    <pre class="code js">const LEARNED = Symbol("learned");
+
+class Deck {
+  #cards;
+
+  constructor(cards) {
+    this.#cards = cards.map((card) =&gt; ({ ...card }));
+  }
+
+  learn(word) {
+    this.#cards.find((c) =&gt; c.word === word)[LEARNED] = true;
+  }
+
+  *[Symbol.iterator]() {
+    yield* this.#cards;
+  }
+
+  *cycle() {                                        // бесконечный круг по невыученным
+    while (this.#cards.some((card) =&gt; !card[LEARNED])) {
+      for (const card of this.#cards) {
+        if (!card[LEARNED]) yield card;
+      }
+    }
+  }
+}
+
+const deck = new Deck([
+  { word: "book", translation: "книга", topic: "школа" },
+  { word: "teacher", translation: "учитель", topic: "школа" },
+  { word: "lesson", translation: "урок", topic: "школа" },
+  { word: "bread", translation: "хлеб", topic: "еда" },
+  { word: "water", translation: "вода", topic: "еда" },
+  { word: "apple", translation: "яблоко", topic: "еда" },
+  { word: "house", translation: "дом", topic: "дом" },
+  { word: "window", translation: "окно", topic: "дом" },
+]);
+deck.learn("teacher");
+deck.learn("water");
+
+console.log(Iterator.from(deck).filter((c) =&gt; !c[LEARNED]).map((c) =&gt; c.word).take(3).toArray());
+console.log(Iterator.from(deck).filter((c) =&gt; c.topic === "еда").map((c) =&gt; c.translation).join(", "));
+console.log(Iterator.from(deck).reduce((count, c) =&gt; count + (c[LEARNED] ? 1 : 0), 0));
+console.log(Iterator.from(deck).find((c) =&gt; c.word.length &gt; 5).word);
+console.log(Iterator.from(deck).some((c) =&gt; c.topic === "спорт"), Iterator.from(deck).every((c) =&gt; c.translation !== ""));
+console.log(deck.cycle().map((c) =&gt; c.word).drop(5).take(4).toArray());</pre>
+
+    <div class="result-box">
+        (3) ['book', 'lesson', 'bread']<br>
+        хлеб, вода, яблоко<br>
+        2<br>
+        teacher<br>
+        false true<br>
+        (4) ['window', 'book', 'lesson', 'bread']
+    </div>
+
+    <p><strong>Строка 1 — урок на сегодня:</strong> первые три невыученные карточки. Цепочка остановилась на
+    третьей подходящей; <code>house</code> и <code>window</code> никто не трогал.</p>
+
+    <p><strong>Строки 2–5 — потребители.</strong> Переводы темы «еда» одной строкой через <code>join</code>;
+    число выученных через <code>reduce</code>; первое длинное слово через <code>find</code>; проверки
+    <code>some</code> и <code>every</code>. Каждый раз <code>Iterator.from(deck)</code> — новый генератор, так
+    что колода перебирается сколько угодно раз.</p>
+
+    <p><strong>Строка 6 — бесконечный круг.</strong> <code>cycle()</code> без конца выдаёт шесть невыученных
+    слов по кругу. <code>drop(5)</code> пропустил пять, <code>take(4)</code> взял четыре — и круг пошёл на
+    второй оборот: после <code>window</code> снова <code>book</code>. Без <code>take</code> вызов
+    <code>toArray()</code> не закончился бы никогда.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите <code>.take(3)</code> из строки 1. Сколько слов получится — и сколько
+        вызовов <code>filter</code> понадобилось раньше, с <code>take</code>?
+        <br><br>
+        <strong>Второй.</strong> Выучите все восемь слов до вывода. Что дадут строки 1 и 6 — почему
+        <code>cycle()</code> тогда не бесконечный?
+        <br><br>
+        <strong>Третий.</strong> В строке 2 поставьте <code>.toArray()</code> сразу после
+        <code>Iterator.from(deck)</code>. Результат тот же — какие методы теперь работают у массива и сколько
+        промежуточных массивов появилось?
+    </div>
+
+    <h2 id="module">14. Итоги модуля и что дальше</h2>
+
+    <p>Модуль «Итераторы и генераторы» закончен. Три дня — снизу вверх:</p>
+
+    <table>
+        <thead><tr><th>День</th><th>Главная мысль</th><th>В спецификации</th></tr></thead>
+        <tbody>
+            <tr><td>11</td><td>символы; протокол: <code>[Symbol.iterator]</code> и <code>next()</code></td><td>27.1.1</td></tr>
+            <tr><td>12</td><td>генератор пишет протокол за нас; пауза, <code>yield</code>, <code>yield*</code></td><td>27.5</td></tr>
+            <tr><td>13</td><td>методы итераторов: ленивые цепочки, бесконечные последовательности</td><td>27.1.3</td></tr>
+        </tbody>
+    </table>
+
+    <p>Следующий модуль — коллекции с ключами. На дне 14 придёт <code>Map</code>: словарь, где ключом может быть
+    что угодно, а его <code>keys</code>, <code>values</code>, <code>entries</code> — итераторы со всеми
+    сегодняшними методами. День 15 — <code>Set</code> и операции над множествами, день 16 — мини-проект
+    «журнал группы» на классах дней 7–10.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator">Iterator</a></td><td>общий родитель итераторов; помощники; правильные итераторы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/from">Iterator.from()</a></td><td>сделать итератор правильным</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/map">Iterator.prototype.map()</a></td><td>ленивое преобразование</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/filter">Iterator.prototype.filter()</a></td><td>ленивый отбор</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/take">Iterator.prototype.take()</a></td><td>первые n значений; закрывает источник</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/drop">Iterator.prototype.drop()</a></td><td>пропустить n значений</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/flatMap">Iterator.prototype.flatMap()</a></td><td>развернуть итераторы; строки — ошибка</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/reduce">Iterator.prototype.reduce()</a></td><td>свести к одному значению</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/toArray">Iterator.prototype.toArray()</a></td><td>собрать в массив — последним</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/forEach">Iterator.prototype.forEach()</a></td><td>обойти все значения</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/some">Iterator.prototype.some()</a></td><td>есть ли подходящее; закрывает итератор</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/every">Iterator.prototype.every()</a></td><td>все ли подходят</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/find">Iterator.prototype.find()</a></td><td>первое подходящее</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iterator-objects">ECMA-262, 27.1.3 Iterator Objects</a></td><td>конструктор, <code>from</code>, <code>concat</code>, алгоритмы методов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/Iterator">Iterator() constructor</a></td><td>только для наследования</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/Symbol.iterator">Iterator.prototype[Symbol.iterator]()</a></td><td>возвращает сам итератор</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/Symbol.dispose">Iterator.prototype[Symbol.dispose]()</a></td><td>вызывает <code>return()</code>; для <code>using</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/concat">Iterator.concat()</a></td><td>значения нескольких перебираемых по очереди</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/zip">Iterator.zip()</a></td><td>пары значений с одним номером</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/zipKeyed">Iterator.zipKeyed()</a></td><td>то же объектами с ключами</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/includes">Iterator.prototype.includes()</a></td><td>есть ли значение; SameValueZero</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/join">Iterator.prototype.join()</a></td><td>склеить в строку</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/chunks">Iterator.prototype.chunks()</a></td><td>порции; экспериментальный, в Chrome 155 нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/windows">Iterator.prototype.windows()</a></td><td>скользящее окно; экспериментальный, в Chrome 155 нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Constructor_cant_be_used_directly">Ошибка: Iterator constructor can't be used directly</a></td><td><code>Abstract class Iterator not directly constructable</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iterator-helper-objects">ECMA-262, 27.1.2 Iterator Helper Objects</a></td><td>помощник — генератор с меткой «Iterator Helper»</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// методы итераторов, НЕ массивов: arr.values().map(…), gen().take(…)
+// дают итератор (лениво, можно сцеплять): map, filter, take, drop, flatMap
+// дают результат (перебирают сразу): reduce, toArray, forEach, some, every, find, includes, join
+// ленивость: ничего не считается до next(); значение идёт через все звенья сразу
+// toArray() — последним; take(10).filter(…).toArray(), а не take(10).toArray().filter(…)
+// бесконечный генератор: filter/map/take — можно; toArray/reduce/forEach/join — только после take
+// some/every/find/includes останавливаются рано и закрывают итератор (return → finally)
+// take(n) отдал n — закрыл источник; помощник и источник — одна последовательность
+// flatMap итератора разворачивает любые итераторы, но строку из колбэка — TypeError
+// Iterator.from(x) — правильный итератор (с методами); строка — по знакам, число — TypeError
+// class X extends Iterator { next() { … } } — свой правильный итератор; new Iterator() — ошибка
+// Iterator.concat(a, b) — подряд; Iterator.zip([a, b]) — пары; zipKeyed({ k: a }) — объекты</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>[1, 2, 3].take(2)</code> — ошибка, а <code>[1, 2, 3].values().take(2)</code> работает?
+                <details class="answer"><summary>Ответ</summary>
+                    Методы лежат в <code>Iterator.prototype</code> — у итераторов. Массив перебираемый, но не итератор;
+                    его итератор даёт <code>values()</code>.
+                </details>
+            </li>
+            <li>Что напечатается раньше: «цепочка готова» или первый вызов колбэка <code>map</code> в
+                <code>const c = arr.values().map(f);</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    «Цепочка готова». Помощник ленив: колбэк вызывается только при <code>next()</code> или в потребителе.
+                </details>
+            </li>
+            <li>Какие методы безопасны с бесконечным генератором?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>map</code>, <code>filter</code>, <code>drop</code>, <code>take</code>, <code>flatMap</code> —
+                    всегда; <code>find</code>, <code>some</code>, <code>includes</code> — если ответ найдётся. Остальным
+                    нужен <code>take</code>.
+                </details>
+            </li>
+            <li>Зачем нужен <code>Iterator.from</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Сделать правильным итератор, у которого есть только <code>next</code>: обёртка наследует от
+                    <code>Iterator</code> и получает методы. Правильный итератор возвращается как есть.
+                </details>
+            </li>
+            <li>Что общего у помощника <code>map</code> и генератора?
+                <details class="answer"><summary>Ответ</summary>
+                    По спецификации помощник — генератор с меткой «Iterator Helper»: он выдаёт значения через Yield,
+                    стоит на паузе до <code>next()</code> и умеет закрываться.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

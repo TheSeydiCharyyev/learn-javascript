@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 11 — Символы и протоколы итерации</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #14b8a6; }
+        h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+        h3 { color: #115e59; }
+        .step-number { background: #14b8a6; }
+        .toc a { color: #0f766e; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 11</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 11 &bull; урок 1</span>
+        <h1>Символы и протоколы итерации</h1>
+        <p>Курс 2, Intermediate. Модуль «Итераторы и генераторы» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>создавать символы, читать их описание и использовать их как ключи свойств, которых не видят
+                <code>Object.keys</code>, <code>for...in</code> и JSON;</li>
+            <li>различать символы из <code>Symbol()</code> и общие символы реестра <code>Symbol.for</code>;</li>
+            <li>объяснять два протокола итерации: перебираемый объект и итератор с методом <code>next()</code>;</li>
+            <li>делать свой объект перебираемым через <code>[Symbol.iterator]</code> и проходить итератор
+                вручную;</li>
+            <li>пользоваться итераторами массива <code>keys</code>, <code>values</code>, <code>entries</code>
+                и знать, что они читают массив на каждом шаге.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#question">Почему одно перебирается, а другое нет</a></li>
+            <li><a href="#symbol">Символ — значение-ключ</a></li>
+            <li><a href="#convert">Символ и строки</a></li>
+            <li><a href="#keys">Символ как ключ свойства</a></li>
+            <li><a href="#registry">Общие символы: Symbol.for и keyFor</a></li>
+            <li><a href="#well-known">Встроенные символы</a></li>
+            <li><a href="#protocol">Протокол итерации: два договора</a></li>
+            <li><a href="#range">Свой перебираемый объект: диапазон</a></li>
+            <li><a href="#once">Итератор одноразовый</a></li>
+            <li><a href="#array">Итераторы массива: keys, values, entries</a></li>
+            <li><a href="#who">Кто ещё перебирается</a></li>
+            <li><a href="#close">Перебор бросили: метод return</a></li>
+            <li><a href="#errors">Сломанный протокол</a></li>
+            <li><a href="#spec">Раздел 27.1.1 спецификации</a></li>
+            <li><a href="#cards">«Карточки»: колода для for...of</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="question">1. Почему одно перебирается, а другое нет</h2>
+
+    <p>На дне 11 Essentials таблица «что можно перебрать» называла массив, строку и <code>NodeList</code>,
+    а обычный объект давал <code>TypeError: user is not iterable</code>. Потом список рос:
+    на дне 4 курса <code>for...of</code> прошёл по <code>arguments</code>, хотя это не массив. А вчера
+    стопка <code>Stack</code> из задания 7 перебираться отказалась, и про колоду <code>ReadOnlyWords</code>
+    из раздела 12 мы обещали, что она научится работать в <code>for...of</code>. Посмотрим на разницу:</p>
+
+    <pre class="code js">class ReadOnlyWords {
+  #items;
+
+  constructor(items) {
+    this.#items = [...items];
+  }
+}
+
+const list = new ReadOnlyWords(["book", "water"]);
+console.log(typeof [][Symbol.iterator], typeof "Мары"[Symbol.iterator], typeof list[Symbol.iterator]);
+for (const word of list) {
+  console.log(word);
+}
+// function function undefined
+// TypeError: list is not iterable</pre>
+
+    <p>У массива и строки есть метод под странным ключом <code>[Symbol.iterator]</code>, у нашего класса —
+    нет. Этот метод и делает объект перебираемым. Ключ у него не строка, а <strong>символ</strong> —
+    значение седьмого примитивного типа. Поэтому день устроен так: сначала символы, потом договор,
+    по которому работает <code>for...of</code>, — его называют <strong>протоколом итерации</strong>.
+    К концу дня <code>ReadOnlyWords</code> и колода «Карточек» будут перебираться, не становясь
+    массивами.</p>
+
+    <h2 id="symbol">2. Символ — значение-ключ</h2>
+
+    <p>На дне 5 Essentials символ мелькнул одной строкой: <code>Symbol("id") === Symbol("id")</code> —
+    <code>false</code>. Это главное его свойство. Каждый вызов <code>Symbol()</code> создаёт новое
+    значение, которое не равно ничему, кроме самого себя:</p>
+
+    <pre class="code js">const id = Symbol("id");
+const other = Symbol("id");
+
+console.log(typeof id, id === other, id === id);         // symbol false true
+console.log(id, id.description, Symbol().description);   // Symbol(id) id undefined
+console.log(Symbol(42).description, typeof Symbol(42).description);   // 42 string</pre>
+
+    <p>Строка в скобках — <strong>описание</strong>, подпись для отладки. Она не делает символ «символом
+    по имени id»: два символа с одним описанием — разные значения, как два ученика с одинаковым именем.
+    Прочитать описание можно свойством <code>description</code>; без аргумента оно
+    <code>undefined</code>, а число превращается в строку <code>"42"</code>. Спецификация в разделе
+    <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-symbol-type">6.1.5</a> говорит
+    коротко: символ — значение, которое не строка, но годится в ключ свойства; каждый символ уникален
+    и неизменяем, а описание хранится во внутреннем слоте <code>[[Description]]</code>.</p>
+
+    <p>Создают символ только вызовом без <code>new</code>:</p>
+
+    <pre class="code js">const id = new Symbol("id");
+// TypeError: Symbol is not a constructor</pre>
+
+    <p>Первый шаг алгоритма
+    <a href="https://tc39.es/ecma262/2026/#sec-symbol-description">20.4.1.1 Symbol ( [ description ] )</a>
+    — проверить вчерашний <code>new.target</code> и при вызове с <code>new</code> бросить <code>TypeError</code>.
+    Так символу запретили объект-обёртку вроде <code>new Number(5)</code>, от которой предостерегал
+    день 5 Essentials.</p>
+
+    <div class="important">
+        Слово «символ» в русском занято. На дне 11 Essentials строка перебиралась «по символам» — то есть
+        по буквам. Сегодня <strong>символ</strong> — значение типа <code>symbol</code>, а буквы строки мы
+        будем называть <strong>знаками</strong>.
+    </div>
+
+    <h2 id="convert">3. Символ и строки</h2>
+
+    <p>Символ охотно показывает себя, но сам в строку не превращается:</p>
+
+    <pre class="code js">const id = Symbol("id");
+
+console.log(id.toString(), String(id), id.description);   // Symbol(id) Symbol(id) id
+console.log(id.valueOf() === id, typeof Object(id));      // true object
+console.log("ключ: " + id);
+// TypeError: Cannot convert a Symbol value to a string</pre>
+
+    <p>Явно — можно: <code>toString()</code> и <code>String(id)</code> дают <code>"Symbol(id)"</code>,
+    <code>description</code> — одно описание. Неявно — нельзя: сложение со строкой и шаблон
+    <code>`${id}`</code> бросают ту же ошибку, а <code>+id</code> и <code>id * 2</code> —
+    <code>Cannot convert a Symbol value to a number</code>. Так язык не даёт по ошибке склеить из символа
+    строковый ключ. Сравнение <code>id == "Symbol(id)"</code> ничего не преобразует и даёт
+    <code>false</code>; в логическом контексте символ всегда <code>true</code>.</p>
+
+    <p><code>valueOf()</code> возвращает сам символ, а <code>Object(id)</code> из дня 6 даёт объект-обёртку —
+    ту, которую нельзя получить через <code>new</code>. Методы символ одалживает у
+    <code>Symbol.prototype</code>, как строка у <code>String.prototype</code> (день 7). Там же лежит
+    <code>description</code> — геттер без сеттера, как на дне 5: присваивание <code>id.description = "x"</code>
+    тихо пропадёт, а в строгом режиме упадёт с <code>Cannot set property description of [object Symbol]
+    which has only a getter</code>.</p>
+
+    <h2 id="keys">4. Символ как ключ свойства</h2>
+
+    <p>Ради этого символы и придуманы. Ключом свойства может быть строка или символ. Символьный ключ
+    пишут в квадратных скобках — как вычисляемое имя метода из дня 5:</p>
+
+    <pre class="code js">const id = Symbol("id");
+const student = { name: "Аман", [id]: 7 };
+
+student.id = "A-7";
+console.log(student[id], student.id, student);
+// 7 A-7 {name: 'Аман', id: 'A-7', Symbol(id): 7}</pre>
+
+    <p><code>student[id]</code> и <code>student.id</code> — два разных свойства: первое под символом,
+    второе под строкой <code>"id"</code>. Достать символьное свойство можно только тем же символом,
+    поэтому его хранят в переменной. Зачем это нужно? Представьте, что объект ученика метят два куска кода,
+    написанные разными людьми, — журнал и кружок. Оба хотят свойство «id». Со строками второй затрёт
+    первого. С символами они не встретятся:</p>
+
+    <pre class="code js">const user = { name: "Аман" };
+const journalId = Symbol("id");   // код журнала
+const clubId = Symbol("id");      // код кружка
+
+user[journalId] = 101;
+user[clubId] = "K-7";
+console.log(user[journalId], user[clubId], Object.keys(user));   // 101 K-7 ['name']</pre>
+
+    <h3>Кто видит символьный ключ</h3>
+
+    <p>Обратите внимание на <code>Object.keys(user)</code> — в нём только <code>name</code>. Вспомним
+    таблицу учебника MDN «Enumerability and ownership of properties» из дня 5. Тогда мы смотрели
+    в ней на перечисляемость, а теперь у неё появляется вторая ось — строка или символ:</p>
+
+    <pre class="code js">const id = Symbol("id");
+const student = { name: "Аман", [id]: 7 };
+
+const seen = [];
+for (const key in student) {
+  seen.push(key);
+}
+console.log(Object.keys(student), seen, JSON.stringify(student));
+// ['name'] ['name'] {"name":"Аман"}
+console.log(Object.getOwnPropertyNames(student), Object.getOwnPropertySymbols(student));
+// ['name'] [Symbol(id)]
+console.log({ ...student }[id], Object.assign({}, student)[id], id in student, Object.hasOwn(student, id));
+// 7 7 true true</pre>
+
+    <table>
+        <thead><tr><th>Инструмент</th><th>строковый ключ</th><th>ключ-символ</th></tr></thead>
+        <tbody>
+            <tr><td><code>Object.keys</code>, <code>values</code>, <code>entries</code></td><td>да</td><td>нет</td></tr>
+            <tr><td><code>for...in</code>, <code>JSON.stringify</code></td><td>да</td><td>нет</td></tr>
+            <tr><td><code>Object.getOwnPropertyNames</code></td><td>да</td><td>нет</td></tr>
+            <tr><td><code>Object.getOwnPropertySymbols</code></td><td>нет</td><td>да</td></tr>
+            <tr><td>spread <code>{...obj}</code>, <code>Object.assign</code></td><td>да, если перечисляемый</td><td>да, если перечисляемый</td></tr>
+            <tr><td><code>in</code>, <code>Object.hasOwn</code>, <code>propertyIsEnumerable</code></td><td>да</td><td>да</td></tr>
+        </tbody>
+    </table>
+
+    <p>Это ответ на домашнее задание дня 5: <code>getOwnPropertyNames</code> и
+    <code>getOwnPropertySymbols</code> — пара, первый отдаёт все свои строковые ключи, второй — все свои
+    символьные. Порядок ключей задаёт раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinaryownpropertykeys">10.1.11.1 OrdinaryOwnPropertyKeys</a>:
+    сначала номера по возрастанию, потом строки в порядке создания, в самом конце символы — тоже
+    в порядке создания:</p>
+
+    <pre class="code js">const second = Symbol("второй");
+const first = Symbol("первый");
+const lesson = { b: 1, [second]: 2, 10: 3, a: 4, [first]: 5, 2: 6 };
+
+console.log(Object.getOwnPropertyNames(lesson), Object.getOwnPropertySymbols(lesson));
+// ['2', '10', 'b', 'a'] [Symbol(второй), Symbol(первый)]</pre>
+
+    <h3>Спрятано, но не заперто</h3>
+
+    <p>MDN называет это «слабой инкапсуляцией»: символьное свойство не попадёт в JSON и не столкнётся
+    с чужим ключом, но его найдёт любой через <code>getOwnPropertySymbols</code>. Сравним с подчёркиванием
+    дня 5 и решёткой дня 9:</p>
+
+    <table>
+        <thead><tr><th></th><th><code>_mark</code></th><th><code>[MARK]</code></th><th><code>#mark</code></th></tr></thead>
+        <tbody>
+            <tr><td>видно в <code>keys</code>, <code>for...in</code>, JSON</td><td>да</td><td>нет</td><td>нет</td></tr>
+            <tr><td>чужой код может случайно затереть</td><td>да</td><td>нет</td><td>нет</td></tr>
+            <tr><td>можно достать снаружи нарочно</td><td>да</td><td>да, через <code>getOwnPropertySymbols</code></td><td>нет</td></tr>
+            <tr><td>работает для любого объекта, не только своего класса</td><td>да</td><td>да</td><td>нет</td></tr>
+        </tbody>
+    </table>
+
+    <p>Последняя строка — главное отличие от <code>#</code>: символьный ключ можно повесить на
+    <strong>чужой</strong> объект — карточку из JSON, элемент страницы — и он никому не помешает.</p>
+
+    <h2 id="registry">5. Общие символы: Symbol.for и keyFor</h2>
+
+    <p>Уникальность бывает неудобной. Пусть карточки метят два куска кода, которые не знают переменных друг
+    друга: библиотека и ваша программа или два модуля (день 30) — у каждого своя область видимости.
+    <code>Symbol("learned")</code>, вызванный в каждом, даст два разных символа. А передать один символ
+    через глобальную переменную — значит вернуться к столкновению имён, от которого символы спасали.
+    Для этого есть <strong>глобальный реестр символов</strong>:</p>
+
+    <pre class="code js">const learned = Symbol.for("cards.learned");
+const again = Symbol.for("cards.learned");
+const local = Symbol("cards.learned");
+
+console.log(learned === again, learned === local, learned.description);   // true false cards.learned
+console.log(Symbol.keyFor(learned), Symbol.keyFor(local));                // cards.learned undefined</pre>
+
+    <p><code>Symbol.for(key)</code> ищет в реестре символ с таким строковым ключом. Нашёл — возвращает
+    его, нет — создаёт, записывает в реестр и возвращает (шаги раздела
+    <a href="https://tc39.es/ecma262/2026/#sec-symbol.for">20.4.2.2</a>). Ключ становится и описанием.
+    <code>Symbol.keyFor(sym)</code> — обратная операция: ключ символа из реестра или <code>undefined</code>
+    для обычного символа. Не символ в аргументе — ошибка: <code>Symbol.keyFor("cards.learned")</code>
+    даёт <code>TypeError: cards.learned is not a symbol</code>.</p>
+
+    <p>Реестр общий на всю страницу и даже на окна внутри неё. Поэтому если один кусок кода пишет
+    <code>card[Symbol.for("cards.learned")] = true</code>, другой своим <code>Symbol.for("cards.learned")</code>
+    найдёт ту же метку. Плата — уникальность: такой символ получит любой, кто знает строку. MDN советует
+    ставить перед ключом приставку своей программы, как <code>"cards."</code> здесь, чтобы не столкнуться
+    с ключами чужих библиотек.</p>
+
+    <h2 id="well-known">6. Встроенные символы</h2>
+
+    <p>У конструктора <code>Symbol</code> есть статические свойства, которые сами символы. Один из них —
+    наш знакомый:</p>
+
+    <pre class="code js">console.log(typeof Symbol.iterator, Symbol.iterator.description, Symbol.keyFor(Symbol.iterator));
+// symbol Symbol.iterator undefined
+console.log(Symbol.iterator === Symbol.for("Symbol.iterator"));   // false</pre>
+
+    <p>Это <strong>встроенные</strong> (well-known) символы: язык создаёт их заранее и сам ищет у объекта
+    метод под таким ключом. В реестре их нет, а свойство <code>Symbol.iterator</code> только для чтения
+    и неудаляемое (дни 5–6). В спецификации их пишут со знаками процента — <code>%Symbol.iterator%</code>,
+    в старых текстах — <code>@@iterator</code>. Таблица 1 раздела
+    <a href="https://tc39.es/ecma262/2026/#sec-well-known-symbols">6.1.5.1</a> перечисляет 13 символов;
+    Chrome и MDN знают ещё два — <code>Symbol.dispose</code> и <code>Symbol.asyncDispose</code>
+    для объявления <code>using</code> (курс 3).</p>
+
+    <table>
+        <thead><tr><th>Символ</th><th>Кто его спрашивает</th><th>Где в курсе</th></tr></thead>
+        <tbody>
+            <tr><td><code>Symbol.iterator</code></td><td><code>for...of</code>, spread, деструктуризация</td><td>сегодня</td></tr>
+            <tr><td><code>Symbol.asyncIterator</code></td><td><code>for await...of</code></td><td>день 29</td></tr>
+            <tr><td><code>Symbol.hasInstance</code></td><td><code>instanceof</code> (день 7)</td><td>пример ниже, подробно — курс 3</td></tr>
+            <tr><td><code>Symbol.species</code></td><td>какой класс создают <code>filter</code> и <code>map</code> (день 10)</td><td>дни 14–15 кратко, курс 3</td></tr>
+            <tr><td><code>toPrimitive</code>, <code>toStringTag</code> и ещё семь</td><td>ToPrimitive и <code>[object …]</code> дня 6, методы строк с регулярными выражениями, <code>concat</code>, <code>with</code></td><td>курс 3</td></tr>
+        </tbody>
+    </table>
+
+    <p>На дне 7 мы обещали: алгоритм <code>instanceof</code>
+    (<a href="https://tc39.es/ecma262/2026/#sec-instanceofoperator">13.10.2</a>) начинается с вопроса,
+    нет ли у правого операнда метода <code>%Symbol.hasInstance%</code>. Вот он в деле — только для
+    знакомства, в своём коде так не делают:</p>
+
+    <pre class="code js">class Even {
+  static [Symbol.hasInstance](value) {
+    return value % 2 === 0;
+  }
+}
+
+console.log(4 instanceof Even, 5 instanceof Even);             // true false
+console.log(typeof Function.prototype[Symbol.hasInstance]);   // function</pre>
+
+    <p>У каждой функции такой метод уже есть — в <code>Function.prototype</code>, он делает проверку
+    цепочки дня 7. А почему протоколы спрятаны под символами, а не под словами вроде
+    <code>"iterator"</code>? MDN объясняет: раньше язык брал строковые имена — <code>toJSON</code>,
+    <code>toString</code>, <code>valueOf</code>. Но новое «волшебное» имя могло совпасть со свойством
+    в чьём-то старом коде и сломать его. Символ ни с чем не совпадёт.</p>
+
+    <h2 id="protocol">7. Протокол итерации: два договора</h2>
+
+    <p>«Протокол» — не класс и не конструкция, а договорённость: кто её соблюдает, тот работает
+    с <code>for...of</code>. Договоров два.</p>
+
+    <ul>
+        <li><strong>Перебираемый объект</strong> (iterable) — у него, своим или по цепочке прототипов, есть
+            метод <code>[Symbol.iterator]()</code> без аргументов, который возвращает итератор.</li>
+        <li><strong>Итератор</strong> (iterator) — объект с методом <code>next()</code>. Каждый вызов
+            возвращает объект-результат <code>{ value, done }</code>: <code>value</code> — очередное
+            значение, <code>done</code> — кончились ли значения.</li>
+    </ul>
+
+    <p>Пройдём массив вручную — так, как его проходит <code>for...of</code>:</p>
+
+    <pre class="code js">const marks = [5, 4];
+const iterator = marks[Symbol.iterator]();
+
+console.log(iterator.next());   // {value: 5, done: false}
+console.log(iterator.next());   // {value: 4, done: false}
+console.log(iterator.next());   // {value: undefined, done: true}
+console.log(iterator.next());   // {value: undefined, done: true}</pre>
+
+    <p>Итератор помнит, где остановился. Кончились значения — на каждый вызов <code>done: true</code>.
+    Сам цикл <code>for...of</code> через <code>while</code> дня 10 Essentials:</p>
+
+    <pre class="code js">const marks = [5, 4, 3];
+const iterator = marks[Symbol.iterator]();   // 1. взять итератор
+let step = iterator.next();                  // 2. первый шаг
+while (!step.done) {                         // 3. пока не конец
+  console.log(step.value);                   // 4. тело цикла
+  step = iterator.next();
+}
+// 5
+// 4
+// 3</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 250" role="img" aria-label="Протокол итерации: for...of вызывает у перебираемого объекта метод Symbol.iterator и получает итератор; затем раз за разом вызывает next и получает объекты value и done; done true — конец цикла">
+            <rect x="14" y="20" width="168" height="72" rx="10" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="98" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#115e59">перебираемый объект</text>
+            <text x="98" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#115e59">marks</text>
+            <text x="98" y="82" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#64748b">[Symbol.iterator]()</text>
+            <path d="M 184 56 L 236 56" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 244 56 L 234 51 L 234 61 Z" fill="#14b8a6"/>
+            <text x="214" y="46" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#0f766e">1 раз</text>
+            <rect x="246" y="20" width="150" height="72" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="321" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">итератор</text>
+            <text x="321" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1d4ed8">next()</text>
+            <text x="321" y="82" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">помнит, где остановился</text>
+            <path d="M 398 56 L 450 56" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 458 56 L 448 51 L 448 61 Z" fill="#3b82f6"/>
+            <text x="428" y="46" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">каждый шаг</text>
+            <rect x="460" y="20" width="146" height="72" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="533" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">результат шага</text>
+            <text x="533" y="64" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">{ value, done }</text>
+            <text x="533" y="82" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">новый объект</text>
+
+            <rect x="14" y="116" width="170" height="48" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="99" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">{value: 5, done: false}</text>
+            <text x="99" y="154" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#0f766e">тело цикла: mark = 5</text>
+            <rect x="204" y="116" width="170" height="48" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="289" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">{value: 4, done: false}</text>
+            <text x="289" y="154" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#0f766e">тело цикла: mark = 4</text>
+            <rect x="394" y="116" width="212" height="48" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="500" y="136" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#991b1b">{value: undefined, done: true}</text>
+            <text x="500" y="154" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">цикл закончен</text>
+            <path d="M 185 140 L 196 140" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <path d="M 202 140 L 194 136 L 194 144 Z" fill="#94a3b8"/>
+            <path d="M 375 140 L 386 140" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <path d="M 392 140 L 384 136 L 384 144 Z" fill="#94a3b8"/>
+
+            <rect x="14" y="184" width="592" height="58" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="207" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Перебираемый объект умеет выдать итератор, итератор умеет сделать шаг.</text>
+            <text x="310" y="228" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">for...of = взять итератор один раз и звать next(), пока done не станет true.</text>
+        </svg>
+        <figcaption>Два договора протокола итерации</figcaption>
+    </figure>
+
+    <h2 id="range">8. Свой перебираемый объект: диапазон</h2>
+
+    <p>Раз протокол — просто договорённость, его может выполнить любой объект. Сделаем
+    <strong>диапазон</strong> чисел от <code>from</code> до <code>to</code>, которого нет в памяти массивом:
+    числа появляются по одному, когда их просят.</p>
+
+    <pre class="code js">const range = {
+  from: 1,
+  to: 4,
+  [Symbol.iterator]() {
+    let current = this.from;   // this — сам range: метод вызван у него
+    const last = this.to;
+    return {
+      next() {
+        if (current &lt;= last) {
+          return { value: current++, done: false };
+        }
+        return { value: undefined, done: true };
+      },
+    };
+  },
+};
+
+for (const n of range) {
+  console.log(n);
+}
+console.log([...range], Math.max(...range), Array.from(range));
+const [first, second, ...others] = range;
+console.log(first, second, others, Object.keys(range));</pre>
+
+    <div class="result-box">
+        1<br>
+        2<br>
+        3<br>
+        4<br>
+        (4) [1, 2, 3, 4] 4 (4) [1, 2, 3, 4]<br>
+        1 2 (2) [3, 4] (2) ['from', 'to']
+    </div>
+
+    <p>Один метод — и <code>range</code> работает везде, где язык перебирает: в <code>for...of</code>,
+    в spread внутри массива и вызова, в <code>Array.from</code> дня 19 Essentials, в деструктуризации
+    дня 22. Это потребители одного протокола, и каждый получает свежий итератор — диапазон можно
+    перебирать сколько угодно раз. <code>Object.keys</code> ключа-символа не видит.</p>
+
+    <p>Два места с <code>this</code>. В <code>[Symbol.iterator]()</code> он — <code>range</code>: метод
+    вызван у объекта (день 2). В <code>next()</code> <code>this</code> был бы итератором, поэтому границы
+    взяты в замыкание дня 1. Ловушка: стрелка <code>[Symbol.iterator]: () =&gt; {…}</code> возьмёт
+    <code>this</code> снаружи — окно без <code>from</code>, — и <code>[...range]</code> молча станет пустым.</p>
+
+    <h2 id="once">9. Итератор одноразовый</h2>
+
+    <p>Перебираемый объект и итератор — разные роли, но один объект может играть обе. У итераторов
+    массива метод <code>[Symbol.iterator]()</code> возвращает <strong>сам итератор</strong>. Такой объект
+    MDN называет перебираемым итератором (iterable iterator). Отсюда следствие:</p>
+
+    <pre class="code js">const marks = [5, 4, 3];
+const iterator = marks[Symbol.iterator]();
+
+console.log(iterator[Symbol.iterator]() === iterator);
+for (const mark of iterator) {
+  console.log("первый проход:", mark);
+  if (mark === 4) {
+    break;
+  }
+}
+for (const mark of iterator) {
+  console.log("второй проход:", mark);
+}
+for (const mark of iterator) {
+  console.log("третий проход:", mark);
+}</pre>
+
+    <div class="result-box">
+        true<br>
+        первый проход: 5<br>
+        первый проход: 4<br>
+        второй проход: 3
+    </div>
+
+    <p>Второй цикл продолжил с места, где первый вышел, третьему не досталось ничего. Массив же
+    каждый <code>for...of</code> перебирает с начала. <strong>Перебираемый объект — источник,
+    итератор — одноразовый проход</strong> по нему.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Слева: массив marks на каждый вызов Symbol.iterator создаёт новый итератор, каждый проход начинается с начала. Справа: итератор массива на Symbol.iterator возвращает сам себя, поэтому второй проход продолжает первый, а после конца ничего не даёт">
+            <rect x="14" y="20" width="292" height="136" rx="10" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="160" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#115e59">перебираемый объект — источник</text>
+            <rect x="30" y="62" width="88" height="40" rx="8" fill="#ffffff" stroke="#14b8a6" stroke-width="1.5"/>
+            <text x="74" y="87" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#115e59">marks</text>
+            <path d="M 120 76 L 170 66" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 176 65 L 167 62 L 168 70 Z" fill="#14b8a6"/>
+            <path d="M 120 88 L 170 108" fill="none" stroke="#14b8a6" stroke-width="1.5"/>
+            <path d="M 176 110 L 166 103 L 169 111 Z" fill="#14b8a6"/>
+            <rect x="178" y="50" width="116" height="30" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="236" y="70" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">итератор 1: 5, 4, 3</text>
+            <rect x="178" y="96" width="116" height="30" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="236" y="116" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">итератор 2: 5, 4, 3</text>
+            <text x="160" y="146" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">каждый for...of — новый итератор с начала</text>
+
+            <rect x="322" y="20" width="284" height="136" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="464" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1d4ed8">перебираемый итератор — проход</text>
+            <rect x="340" y="62" width="104" height="40" rx="8" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="392" y="87" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#1d4ed8">iterator</text>
+            <path d="M 446 72 C 486 52, 486 112, 446 92" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+            <path d="M 444 91 L 453 88 L 451 96 Z" fill="#3b82f6"/>
+            <text x="488" y="76" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">[Symbol.iterator]()</text>
+            <text x="488" y="90" font-family="Segoe UI, sans-serif" font-size="10" fill="#1d4ed8">→ он сам</text>
+            <text x="464" y="126" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">проход 1: 5, 4 · проход 2: 3</text>
+            <text x="464" y="146" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">проход 3: пусто — исчерпан</text>
+
+            <rect x="14" y="170" width="592" height="36" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="193" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">[Symbol.iterator]() источника — каждый раз новый итератор; у итератора — он сам.</text>
+        </svg>
+        <figcaption>Источник и проход</figcaption>
+    </figure>
+
+    <p>Итератор нашего диапазона так не умеет: <code>const it = range[Symbol.iterator]();</code> и затем
+    <code>for (const n of it)</code> дадут <code>it is not iterable</code>. MDN советует добавлять итератору <code>[Symbol.iterator]() { return this; }</code>:
+    почти всё в языке ждёт перебираемый объект. Встроенные итераторы получают этот метод по цепочке:</p>
+
+    <pre class="code js">const iterator = [5, 4][Symbol.iterator]();
+const arrayIteratorProto = Object.getPrototypeOf(iterator);
+
+console.log(iterator, String(iterator));                       // Array Iterator {} [object Array Iterator]
+console.log(Object.getOwnPropertyNames(arrayIteratorProto));   // ['next']</pre>
+
+    <p>Прототип итераторов массива хранит один <code>next</code>, а следующее звено —
+    <code>Iterator.prototype</code>, общий для всех встроенных итераторов: там лежат
+    <code>[Symbol.iterator]() { return this; }</code>
+    (<a href="https://tc39.es/ecma262/2026/#sec-iterator.prototype-%25symbol.iterator%25">27.1.3.3.13</a>)
+    и методы дня 13. Подпись <code>[object Array Iterator]</code> вместо <code>[object Object]</code>
+    дня 6 дал <code>Symbol.toStringTag</code>.</p>
+
+    <h2 id="array">10. Итераторы массива: keys, values, entries</h2>
+
+    <p>Массив выдаёт итераторы не только через <code>[Symbol.iterator]</code>. Три метода дают три вида
+    прохода:</p>
+
+    <pre class="code js">const words = ["book", "water", "bread"];
+
+console.log([...words.keys()], [...words.values()]);   // [0, 1, 2] ['book', 'water', 'bread']
+console.log(words.entries().next().value);              // [0, 'book']
+for (const [index, word] of words.entries()) {
+  console.log(`${index + 1}. ${word}`);
+}
+console.log(words.values === words[Symbol.iterator], words[Symbol.iterator].name);   // true values
+console.log(words.keys().length);                       // undefined</pre>
+
+    <div class="result-box">
+        (3) [0, 1, 2] (3) ['book', 'water', 'bread']<br>
+        (2) [0, 'book']<br>
+        1. book<br>
+        2. water<br>
+        3. bread<br>
+        true values<br>
+        undefined
+    </div>
+
+    <p><code>keys()</code> отдаёт номера, <code>values()</code> — значения, <code>entries()</code> — пары
+    <code>[номер, значение]</code>. Запись <code>for (const [index, mark] of marks.entries())</code> дня 11
+    Essentials теперь разобрана целиком: <code>entries()</code> возвращает итератор пар, а деструктуризация
+    дня 22 раскладывает каждую пару по двум переменным. <code>values</code> и <code>[Symbol.iterator]</code> —
+    одна функция. <code>length</code> у итератора нет: это проход, а не массив; массив из него дают
+    <code>[...]</code> и <code>Array.from</code>.</p>
+
+    <p>Первая особенность — дырки: <code>Object.keys</code> видит только существующие номера, а итератор
+    проходит все от 0 до <code>length - 1</code>:</p>
+
+    <pre class="code js">const marks = [5, , 3];
+console.log(Object.keys(marks), [...marks.keys()], [...marks.values()]);
+// ['0', '2'] [0, 1, 2] [5, undefined, 3]</pre>
+
+    <p>Вторая — итератор не копирует массив: он помнит массив и следующий номер, а значение читает
+    в момент шага:</p>
+
+    <pre class="code js">const words = ["book", "water", "bread"];
+const iterator = words.values();
+
+console.log(iterator.next().value);   // book
+words[1] = "tea";
+console.log(iterator.next().value);   // tea
+words.push("house");
+console.log(iterator.next().value, iterator.next().value, iterator.next().done);   // bread house true
+words.push("window");
+console.log(iterator.next().done);    // true</pre>
+
+    <p>Правка второго слова видна, добавленное в конец — тоже: длину итератор проверяет на каждом шаге.
+    Поэтому <code>for (const x of arr) { arr.push(x); }</code> сам не кончится: на каждом шаге длина растёт
+    на один, и итератор её не догонит — MDN приводит этот пример как ловушку. Но последняя строка показывает, что исчерпанный итератор не оживает: после
+    первого <code>done: true</code> он забывает массив. Почему — увидим в спецификации, раздел 14.</p>
+
+    <p>И последнее: эти методы <strong>обобщённые</strong>, как <code>slice</code> на дне 7. Им нужен только
+    <code>length</code> и номера, поэтому их можно одолжить объекту, похожему на массив:</p>
+
+    <pre class="code js">const arrayLike = { length: 2, 0: "a", 1: "b" };
+
+console.log([...Array.prototype.values.call(arrayLike)], Array.from(arrayLike));   // ['a', 'b'] ['a', 'b']
+for (const x of arrayLike) {
+  console.log(x);
+}
+// TypeError: arrayLike is not iterable</pre>
+
+    <p>Номера и <code>length</code> ещё не делают объект перебираемым. А <code>Array.from</code> принимает
+    и перебираемый объект, и похожий на массив — поэтому <code>Array.from({ name: "Аман" })</code> не падает,
+    а молча даёт пустой массив: <code>length</code> у объекта нет.</p>
+
+    <h2 id="who">11. Кто ещё перебирается</h2>
+
+    <p><strong>Строка.</strong> Её метод <code>[Symbol.iterator]</code> отдаёт по одному знаку:</p>
+
+    <pre class="code js">const city = "Мары";
+const iterator = city[Symbol.iterator]();
+
+console.log(iterator.next(), [...city]);    // {value: 'М', done: false} ['М', 'а', 'р', 'ы']
+console.log("😀".length, [..."😀"].length);   // 2 1</pre>
+
+    <p>Во второй строке — тонкость. <code>length</code> смайлика 2: внутри строки он занимает две ячейки,
+    и <code>"😀"[0]</code> — половинка, которая сама по себе ничего не значит. Итератор строки идёт
+    не по ячейкам, а по кодовым точкам Unicode и отдаёт смайлик целиком. Поэтому <code>[...str]</code>
+    честнее, чем перебор по номерам. Что такое кодовые точки — день 20.</p>
+
+    <p><strong><code>arguments</code>.</strong> Долг дня 4:</p>
+
+    <pre class="code js">function show() {
+  console.log(Object.hasOwn(arguments, Symbol.iterator), arguments[Symbol.iterator] === Array.prototype.values);
+  for (const value of arguments) {
+    console.log("перебор:", value);
+  }
+}
+
+show("a", "b");
+// true true
+// перебор: a
+// перебор: b</pre>
+
+    <p>Объект <code>arguments</code> получает <strong>своё</strong> свойство <code>[Symbol.iterator]</code>,
+    и это та же функция <code>Array.prototype.values</code> — её одолжили объекту, похожему на массив,
+    как в прошлом примере. Так записано в разделах
+    <a href="https://tc39.es/ecma262/2026/#sec-createunmappedargumentsobject">10.4.4.6</a> и
+    <a href="https://tc39.es/ecma262/2026/#sec-createmappedargumentsobject">10.4.4.7</a> — для строгого
+    и обычного режимов. <code>NodeList</code> из дня 24 Essentials устроен так же: его
+    <code>[Symbol.iterator]</code> в <code>NodeList.prototype</code> — тоже <code>values</code> массива.</p>
+
+    <p>Проверить, перебирается ли значение, можно тем же путём, что и язык: есть ли функция под ключом
+    <code>Symbol.iterator</code>. Необязательная цепочка дня 22 защищает от <code>null</code>:</p>
+
+    <pre class="code js">function isIterable(value) {
+  return typeof value?.[Symbol.iterator] === "function";
+}
+
+console.log(isIterable([5]), isIterable("Мары"), isIterable({}), isIterable(42), isIterable(null));
+// true true false false false</pre>
+
+    <table>
+        <thead><tr><th>Перебирается</th><th>Не перебирается</th></tr></thead>
+        <tbody>
+            <tr><td>массив и его итераторы, строка, <code>arguments</code></td><td>обычный объект — нет порядка значений</td></tr>
+            <tr><td><code>NodeList</code>, <code>HTMLCollection</code> (день 24 Essentials)</td><td>число, <code>true</code>/<code>false</code></td></tr>
+            <tr><td><code>Map</code> и <code>Set</code> (дни 14–15), генераторы (день 12)</td><td><code>null</code> и <code>undefined</code></td></tr>
+            <tr><td>любой объект со своим <code>[Symbol.iterator]</code></td><td>похожий на массив без <code>[Symbol.iterator]</code></td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="close">12. Перебор бросили: метод return</h2>
+
+    <p>У итератора, кроме <code>next</code>, может быть необязательный метод <code>return()</code>. Язык
+    вызывает его, когда перебор бросили, не дойдя до конца, — чтобы итератор мог прибраться: закрыть
+    файл, отпустить ресурс. Посмотрим, когда это происходит:</p>
+
+    <pre class="code js">const lessons = {
+  [Symbol.iterator]() {
+    let n = 0;
+    return {
+      next() {
+        n++;
+        console.log("next", n);
+        return n &lt;= 3 ? { value: n, done: false } : { value: undefined, done: true };
+      },
+      return() {
+        console.log("return: перебор бросили");
+        return { value: undefined, done: true };
+      },
+    };
+  },
+};
+
+const [lesson] = lessons;
+for (const item of lessons) {
+  if (item === 2) {
+    break;
+  }
+}
+console.log([...lessons]);</pre>
+
+    <div class="result-box">
+        next 1<br>
+        return: перебор бросили<br>
+        next 1<br>
+        next 2<br>
+        return: перебор бросили<br>
+        next 1<br>
+        next 2<br>
+        next 3<br>
+        next 4<br>
+        (3) [1, 2, 3]
+    </div>
+
+    <p>Деструктуризация взяла одно значение и бросила перебор — <code>return</code>. <code>break</code> —
+    <code>return</code>, как и <code>return</code> из функции посреди цикла и ошибка в теле. Spread дошёл
+    до <code>done: true</code> — итератор закончил сам, <code>return</code> не нужен. У итераторов массива
+    метода <code>return</code> нет, поэтому в разделе 9 проход после <code>break</code> продолжился.
+    А <code>value</code> из результата с <code>done: true</code> <code>for...of</code> и spread
+    отбрасывают.</p>
+
+    <h2 id="errors">13. Сломанный протокол</h2>
+
+    <p>Если объект нарушил договор, язык сообщит, на каком шаге. Пример — <code>next</code> вернул
+    не объект:</p>
+
+    <pre class="code js">const broken = {
+  [Symbol.iterator]() {
+    return {
+      next() {
+        return 5;
+      },
+    };
+  },
+};
+
+for (const x of broken) {
+  console.log(x);
+}
+// TypeError: Iterator result 5 is not an object</pre>
+
+    <table>
+        <thead><tr><th>Что сломано</th><th>Текст Chrome</th></tr></thead>
+        <tbody>
+            <tr><td>нет <code>[Symbol.iterator]</code> или это не функция</td><td><code>broken is not iterable</code>; в вызове <code>f(...obj)</code> — <code>Spread syntax requires ...iterable[Symbol.iterator] to be a function</code></td></tr>
+            <tr><td><code>[Symbol.iterator]()</code> вернул не объект</td><td><code>Result of the Symbol.iterator method is not an object</code></td></tr>
+            <tr><td>у итератора нет <code>next</code></td><td>в <code>for...of</code> — <code>undefined is not a function</code>, в <code>[...obj]</code> — <code>broken is not iterable</code></td></tr>
+            <tr><td><code>next()</code> или <code>return()</code> вернул не объект</td><td><code>Iterator result 5 is not an object</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>На MDN у этих ошибок другие тексты — не те, что пишет Chrome. Все четыре — <code>TypeError</code>,
+    их ловит один <code>try...catch</code> вокруг цикла.</p>
+
+    <h2 id="spec">14. Раздел 27.1.1 спецификации</h2>
+
+    <p>Итерации посвящён раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-iteration">27.1 Iteration</a>. Его подразделы распределены
+    по модулю: 27.1.1 — интерфейсы, сегодня; 27.1.2 и 27.1.3 — объект <code>Iterator</code> и его методы,
+    день 13; 27.1.4 и 27.1.5 — асинхронная итерация, день 29. Прочитаем
+    <a href="https://tc39.es/ecma262/2026/#sec-common-iteration-interfaces">27.1.1 Common Iteration
+    Interfaces</a>.</p>
+
+    <p>Он начинается с определения: <strong>интерфейс</strong> — набор ключей свойств, значения которых
+    отвечают описанию; объект, у которого все такие свойства есть, соответствует интерфейсу. Отдельного
+    объекта «интерфейс» нет, и один объект может соответствовать нескольким сразу — как итератор массива
+    из раздела 9. Дальше три таблицы:</p>
+
+    <ul>
+        <li><strong>Iterable</strong> (таблица 78): свойство <code>%Symbol.iterator%</code> — функция,
+            которая возвращает итератор.</li>
+        <li><strong>Iterator</strong> (таблицы 79 и 80): обязательный <code>next</code>, который возвращает
+            IteratorResult. После первого <code>done: true</code> все следующие вызовы тоже должны давать
+            <code>done: true</code> — «однако это требование не проверяется». <code>next</code> может
+            принимать аргументы, но <code>for...of</code> их не передаёт. Необязательные методы —
+            <code>return</code> (раздел 12) и <code>throw</code> (день 12); <code>for...of</code>,
+            <code>yield*</code> и деструктуризация зовут их, только проверив, что они есть.</li>
+        <li><strong>IteratorResult</strong> (таблица 84): <code>done</code> — логическое значение; нет
+            свойства <code>done</code> — считается <code>false</code>. <code>value</code> — очередное значение,
+            а при <code>done: true</code> — «значение возврата», и тогда его может не быть вовсе.</li>
+    </ul>
+
+    <p>Между ними — асинхронные варианты 27.1.1.3 и 27.1.1.4, где <code>next</code> возвращает промис, —
+    день 29. «Не проверяется» повторяется в таблицах не раз: спецификация описывает, как итератор
+    <strong>должен</strong> себя вести, а язык ему доверяет.</p>
+
+    <h3>for...of по шагам</h3>
+
+    <p>Что всё-таки проверяется, видно в алгоритмах цикла:</p>
+
+    <ol>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-forinofheadevaluation">14.7.5.6</a>
+            вычисляет выражение справа от <code>of</code> и вызывает
+            <a href="https://tc39.es/ecma262/2026/#sec-getiterator">GetIterator</a> (7.4.4): взять метод
+            по ключу <code>%Symbol.iterator%</code>, нет метода — <code>TypeError</code> («is not iterable»).</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-getiteratorfrommethod">GetIteratorFromMethod</a>
+            (7.4.3) вызывает метод; результат не объект — <code>TypeError</code> («Result of the
+            Symbol.iterator method is not an object»).</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-getiteratordirect">GetIteratorDirect</a> (7.4.2)
+            <strong>один раз</strong> читает у итератора <code>next</code> и запоминает его в записи
+            итератора (Iterator Record, 7.4.1).</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset">14.7.5.7</a>
+            повторяет: вызвать запомненный <code>next</code>, результат не объект — <code>TypeError</code>
+            («Iterator result … is not an object»), <code>done</code> истинно — выйти, иначе положить
+            <code>value</code> в переменную цикла и выполнить тело.</li>
+        <li>Цикл прервали — <a href="https://tc39.es/ecma262/2026/#sec-iteratorclose">IteratorClose</a>
+            (7.4.11): если у итератора есть <code>return</code>, вызвать его.</li>
+    </ol>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 252" role="img" aria-label="for...of по шагам спецификации: GetIterator берёт метод Symbol.iterator и вызывает его, GetIteratorDirect один раз запоминает next, затем цикл: вызвать next, проверить done, выполнить тело; break, return или ошибка ведут к IteratorClose, который вызывает return итератора">
+            <rect x="14" y="20" width="182" height="64" rx="10" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="105" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#115e59">1–2. GetIterator</text>
+            <text x="105" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#115e59">obj[Symbol.iterator]()</text>
+            <text x="105" y="76" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#991b1b">нет метода, не объект — ошибка</text>
+            <path d="M 198 52 L 214 52" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 220 52 L 212 48 L 212 56 Z" fill="#14b8a6"/>
+            <rect x="222" y="20" width="176" height="64" rx="10" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+            <text x="310" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#115e59">3. GetIteratorDirect</text>
+            <text x="310" y="60" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#115e59">запомнить next</text>
+            <text x="310" y="76" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b">один раз на весь цикл</text>
+            <path d="M 400 52 L 416 52" fill="none" stroke="#14b8a6" stroke-width="2"/>
+            <path d="M 422 52 L 414 48 L 414 56 Z" fill="#14b8a6"/>
+            <rect x="424" y="20" width="182" height="64" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="515" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1d4ed8">4. шаг: next()</text>
+            <text x="515" y="60" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#1d4ed8">результат — объект?</text>
+            <text x="515" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#1d4ed8">done?</text>
+
+            <path d="M 515 86 L 515 110" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <path d="M 515 116 L 511 108 L 519 108 Z" fill="#3b82f6"/>
+            <text x="525" y="104" font-family="Segoe UI, sans-serif" font-size="10" fill="#1d4ed8">false</text>
+            <rect x="424" y="118" width="182" height="48" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="515" y="138" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#1d4ed8">value → переменная цикла,</text>
+            <text x="515" y="156" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#1d4ed8">тело цикла</text>
+            <path d="M 422 150 L 410 150 L 410 72 L 416 72" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M 422 72 L 414 68 L 414 76 Z" fill="#3b82f6"/>
+            <text x="402" y="108" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="10" fill="#1d4ed8">снова шаг</text>
+
+            <rect x="14" y="118" width="182" height="48" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="105" y="138" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">done: true —</text>
+            <text x="105" y="156" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">выход, return не нужен</text>
+            <rect x="222" y="118" width="134" height="48" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="289" y="138" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#991b1b">5. break, ошибка —</text>
+            <text x="289" y="156" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#991b1b">IteratorClose</text>
+
+            <rect x="14" y="186" width="592" height="58" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="209" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Проверяется форма: метод есть, вернул объект, next вернул объект.</text>
+            <text x="310" y="230" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Смысл — «после done: true снова done: true» — язык не проверяет.</text>
+        </svg>
+        <figcaption>Цикл <code>for...of</code> по алгоритмам спецификации</figcaption>
+    </figure>
+
+    <p>Шаг 3 легко увидеть на опыте: подменим <code>next</code> посреди цикла.</p>
+
+    <pre class="code js">const marks = [5, 4, 3];
+const iterator = marks[Symbol.iterator]();
+const source = {
+  [Symbol.iterator]() {
+    console.log("взяли итератор");
+    return iterator;
+  },
+};
+
+for (const mark of source) {
+  console.log(mark);
+  iterator.next = () =&gt; ({ value: "подмена", done: false });
+}
+// взяли итератор
+// 5
+// 4
+// 3</pre>
+
+    <p>Цикл не заметил подмены: он зовёт <code>next</code>, запомненный на шаге 3. Итераторы массива
+    создаёт <a href="https://tc39.es/ecma262/2026/#sec-createarrayiterator">CreateArrayIterator</a>
+    (23.1.5.1) — объект с тремя слотами: <code>[[IteratedArrayLike]]</code> — массив,
+    <code>[[ArrayLikeNextIndex]]</code> — следующий номер, <code>[[ArrayLikeIterationKind]]</code> —
+    <em>key</em>, <em>value</em> или <em>key+value</em>. Это и есть <code>keys</code>, <code>values</code>
+    и <code>entries</code>: один механизм с тремя настройками. Его <code>next</code>
+    (<a href="https://tc39.es/ecma262/2026/#sec-%25arrayiteratorprototype%25.next">23.1.5.2.1</a>) каждый
+    раз заново читает длину и значение — отсюда «живой» итератор раздела 10. А дойдя до длины, записывает
+    в <code>[[IteratedArrayLike]]</code> <code>undefined</code>: массив забыт, итератор исчерпан навсегда.</p>
+
+    <h2 id="cards">15. «Карточки»: колода для for...of</h2>
+
+    <p>Соберём день в «Карточках». Колода <code>Deck</code> устроена композицией, как
+    <code>ReadOnlyWords</code> дня 10: карточки лежат в приватном поле. Выученную карточку пометим ключом-символом
+    <code>LEARNED</code> — метка не попадёт ни в JSON, ни в <code>Object.keys</code>, и данные карточки
+    останутся чистыми. А <code>for...of</code> по колоде будет пропускать выученное.</p>
+
+    <pre class="code js">const LEARNED = Symbol("learned");
+
+class Deck {
+  #cards;
+
+  constructor(cards) {
+    this.#cards = cards.map((card) =&gt; ({ ...card }));   // свои копии карточек
+  }
+
+  learn(word) {
+    const card = this.#cards.find((c) =&gt; c.word === word);
+    card[LEARNED] = true;
+    return card;
+  }
+
+  [Symbol.iterator]() {
+    const cards = this.#cards;
+    let index = 0;
+    return {
+      next() {
+        while (index &lt; cards.length &amp;&amp; cards[index][LEARNED]) {
+          index++;                                        // выученные пропускаем
+        }
+        if (index &lt; cards.length) {
+          return { value: cards[index++], done: false };
+        }
+        return { value: undefined, done: true };
+      },
+    };
+  }
+}
+
+const deck = new Deck([
+  { word: "book", translation: "книга", topic: "школа" },
+  { word: "teacher", translation: "учитель", topic: "школа" },
+  { word: "bread", translation: "хлеб", topic: "еда" },
+  { word: "water", translation: "вода", topic: "еда" },
+  { word: "house", translation: "дом", topic: "дом" },
+]);
+
+const teacher = deck.learn("teacher");
+deck.learn("water");
+
+for (const card of deck) {
+  console.log(`${card.word} — ${card.translation}`);
+}
+const [first, ...rest] = deck;
+console.log(first.word, rest.length, [...deck].map((card) =&gt; card.topic));
+console.log(JSON.stringify(teacher), Object.keys(teacher).length, teacher[LEARNED]);
+console.log(Object.getOwnPropertySymbols(teacher), Object.getOwnPropertySymbols(first));
+const iterator = deck[Symbol.iterator]();
+console.log(iterator.next().value.word, iterator.next().value.word, iterator.next().value.word, iterator.next().done);</pre>
+
+    <div class="result-box">
+        book — книга<br>
+        bread — хлеб<br>
+        house — дом<br>
+        book 2 (3) ['школа', 'еда', 'дом']<br>
+        {"word":"teacher","translation":"учитель","topic":"школа"} 3 true<br>
+        (1) [Symbol(learned)] (0) []<br>
+        book bread house true
+    </div>
+
+    <p><strong>Строки 1–3 — свой протокол.</strong> <code>for...of</code> получил итератор колоды, и его
+    <code>next</code> перешагнул <code>teacher</code> и <code>water</code>, помеченные символом.</p>
+
+    <p><strong>Строка 4 — все потребители.</strong> Деструктуризация и spread вызвали
+    <code>[Symbol.iterator]()</code> каждая заново и прошли колоду с начала; <code>...rest</code> — две
+    оставшиеся карточки.</p>
+
+    <p><strong>Строки 5–6 — метка-символ.</strong> В JSON и в <code>Object.keys</code> у <code>teacher</code>
+    три поля данных, но <code>teacher[LEARNED]</code> — <code>true</code>, и <code>getOwnPropertySymbols</code>
+    метку находит. У невыученной <code>first</code> символов нет.</p>
+
+    <p><strong>Строка 7 — итератор вручную:</strong> три шага, три слова, четвёртый — <code>done: true</code>.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Переименуйте метод <code>[Symbol.iterator]()</code> в <code>iterator()</code>.
+        Какая строка упадёт первой и с каким текстом?
+        <br><br>
+        <strong>Второй.</strong> Замените метку на строковую: <code>card.learned = true</code> и
+        <code>cards[index].learned</code>. Что изменится в строках 5 и 6 — и чем это плохо, если карточки
+        сохраняют через JSON в <code>localStorage</code>, как прогресс на дне 35 Essentials?
+        <br><br>
+        <strong>Третий.</strong> В последнем <code>return</code> итератора напишите
+        <code>{ value: "конец", done: true }</code>. Напечатает ли <code>for...of</code> слово «конец»?
+        Какая таблица раздела 14 отвечает на этот вопрос?
+    </div>
+
+    <h2 id="next">16. Что дальше</h2>
+
+    <p>Итератор, написанный руками, многословен: счётчик в замыкании, объекты <code>{ value, done }</code>,
+    <code>[Symbol.iterator]() { return this; }</code>. Завтра, на дне 12, это заменят
+    <strong>генераторы</strong>: функция со звёздочкой и словом <code>yield</code> сама выполняет протокол,
+    и итератор колоды займёт три строки. День 13 — методы <code>Iterator</code>: <code>map</code>,
+    <code>filter</code>, <code>take</code> прямо на итераторе. А сегодняшний протокол лежит под всем этим
+    и под <code>Map</code> и <code>Set</code> дней 14–15.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol">Symbol</a></td><td>уникальные ключи; реестр; встроенные символы; символы и <code>for...in</code>, JSON</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/Symbol">Symbol() constructor</a></td><td>создание символа; <code>new Symbol()</code> — ошибка</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/description">Symbol.prototype.description</a></td><td>описание символа, геттер</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/iterator">Symbol.iterator</a></td><td>ключ метода, который выдаёт итератор</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols">Iteration protocols</a></td><td>перебираемый объект и итератор; <code>return</code>; ошибки протокола</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/keys">Array.prototype.keys()</a></td><td>итератор номеров, дырки</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/values">Array.prototype.values()</a></td><td>итератор значений; одноразовость; правки во время прохода</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/entries">Array.prototype.entries()</a></td><td>итератор пар <code>[номер, значение]</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/Symbol.iterator">Array.prototype[Symbol.iterator]()</a></td><td>та же функция, что <code>values</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-common-iteration-interfaces">ECMA-262, 27.1.1 Common Iteration Interfaces</a></td><td>интерфейсы Iterable, Iterator, IteratorResult</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/for">Symbol.for()</a></td><td>общий символ из реестра по строке</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/keyFor">Symbol.keyFor()</a></td><td>строка символа из реестра или <code>undefined</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/toString">Symbol.prototype.toString()</a></td><td><code>"Symbol(описание)"</code>; неявно в строку — ошибка</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/valueOf">Symbol.prototype.valueOf()</a></td><td>сам символ</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/Symbol.iterator">String.prototype[Symbol.iterator]()</a></td><td>перебор строки по кодовым точкам</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertySymbols">Object.getOwnPropertySymbols()</a></td><td>все свои ключи-символы</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteration">ECMA-262, 27.1 Iteration</a></td><td>как устроен раздел об итерации</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// const id = Symbol("id");            // новый уникальный символ; new Symbol() — ошибка
+// id.description                      // "id"; String(id) — "Symbol(id)"; "" + id — TypeError
+// const obj = { [id]: 7 };            // ключ-символ: obj[id], не obj.id
+// keys, for...in, JSON — не видят; getOwnPropertySymbols, spread, assign, in — видят
+// Symbol.for("app.key")               // общий символ из реестра; Symbol.keyFor(sym) — его строка
+// Symbol.iterator                     // встроенный символ: ключ метода, который выдаёт итератор
+
+// перебираемый объект: [Symbol.iterator]() { return итератор; } — каждый раз новый
+// итератор: next() { return { value, done }; }; необязательно return() — когда перебор бросили
+// потребители: for...of, [...x], f(...x), const [a, b] = x, Array.from(x)
+// массив: keys() — номера, values() = [Symbol.iterator]() — значения, entries() — [номер, значение]
+// итератор массива одноразовый, читает массив на каждом шаге; исчерпанный — навсегда
+// проверка: typeof value?.[Symbol.iterator] === "function"</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чем <code>Symbol("id")</code> отличается от <code>Symbol.for("id")</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>Symbol("id")</code> каждый раз создаёт новый символ. <code>Symbol.for("id")</code> берёт
+                    символ из реестра по строке: два вызова дают один символ, <code>Symbol.keyFor</code> вернёт
+                    <code>"id"</code>.
+                </details>
+            </li>
+            <li>Объект <code>{ name: "Аман", [id]: 7 }</code> сохранили через <code>JSON.stringify</code>.
+                Что попало в строку и как всё-таки найти символьное свойство?
+                <details class="answer"><summary>Ответ</summary>
+                    Только <code>{"name":"Аман"}</code>: JSON, <code>Object.keys</code> и <code>for...in</code>
+                    символьных ключей не видят. Найти их можно через <code>Object.getOwnPropertySymbols</code>.
+                </details>
+            </li>
+            <li>Что нужно объекту, чтобы по нему прошёл <code>for...of</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Метод под ключом <code>Symbol.iterator</code>, который возвращает итератор — объект
+                    с методом <code>next()</code>, а тот возвращает объекты <code>{ value, done }</code>.
+                </details>
+            </li>
+            <li>Почему массив можно перебрать дважды, а его итератор — нет?
+                <details class="answer"><summary>Ответ</summary>
+                    Каждый <code>for...of</code> вызывает <code>[Symbol.iterator]()</code> массива и получает новый
+                    итератор. Итератор массива на этот вызов возвращает себя, а он уже исчерпан.
+                </details>
+            </li>
+            <li>Когда язык вызывает у итератора метод <code>return()</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Когда перебор бросили до конца: <code>break</code>, <code>return</code>, ошибка в теле,
+                    деструктуризация взяла меньше значений. После <code>done: true</code> — не вызывается.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 21 — BigInt и Date целиком: разбор строк, UTC, сеттеры</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #06b6d4; }
+        h2 { color: #0e7490; background: #ecfeff; border-left-color: #06b6d4; }
+        h3 { color: #155e75; }
+        .step-number { background: #06b6d4; }
+        .toc a { color: #0e7490; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 21</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 21 &bull; урок 1</span>
+        <h1>BigInt и Date целиком: разбор строк, UTC, сеттеры</h1>
+        <p>Курс 2, Intermediate. Модуль «Числа и даты: Date, Temporal, основы Intl» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>считать целыми любого размера через <code>BigInt</code> и не смешивать их с обычными числами;</li>
+            <li>понимать дату как один момент и читать его по местному времени и по UTC;</li>
+            <li>превращать строку в дату без ловушек: <code>Date.parse</code>, стандартный формат, свой разбор;</li>
+            <li>менять дату сеттерами и знать, куда «переезжают» лишние дни и месяцы;</li>
+            <li>превращать дату в строку, в число и в JSON — и обратно.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Два старых обещания</a></li>
+            <li><a href="#bigint">BigInt: целые без границы</a></li>
+            <li><a href="#math">Арифметика без смешивания</a></li>
+            <li><a href="#compare">Сравнения, условия, коллекции</a></li>
+            <li><a href="#tostring">toString, asIntN, asUintN</a></li>
+            <li><a href="#json">BigInt и JSON</a></li>
+            <li><a href="#bigerrors">Ошибки BigInt</a></li>
+            <li><a href="#moment">Дата: один момент, два прочтения</a></li>
+            <li><a href="#parse">Строка в дату: Date.parse и ловушки</a></li>
+            <li><a href="#utc">Date.UTC</a></li>
+            <li><a href="#setters">Сеттеры: дата меняется на месте</a></li>
+            <li><a href="#out">Дата в строку, в число и в JSON</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: даты повторения</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Два старых обещания</h2>
+
+    <p>День 5 Essentials показал, что <code>Number.MAX_SAFE_INTEGER + 1</code> равно <code>MAX_SAFE_INTEGER + 2</code>,
+    назвал выход — <code>BigInt</code> — и отложил его. День 17 Essentials научил собирать дату и пообещал курсу 2
+    «полный разбор поясов». В курсе 2 долги копились дальше: день 6 упомянул <code>BigInt</code> в алгоритме
+    <code>==</code> и <code>valueOf</code> у даты, день 8 назвал дату изменяемой, день 14 — что <code>Date()</code> без
+    <code>new</code> возвращает строку. Сегодня закрываем всё сразу.</p>
+
+    <pre class="code js">console.log(Number.MAX_SAFE_INTEGER + 1 === Number.MAX_SAFE_INTEGER + 2, 9007199254740993, 9007199254740993n);   // true 9007199254740992 9007199254740993n
+const d = new Date(2026, 9, 12, 14, 30);
+console.log(d.getHours(), d.getUTCHours(), d.toISOString(), d + 1 === d.toString() + "1", d - 1);   // 14 9 2026-10-12T09:30:00.000Z true 1791797399999</pre>
+
+    <p>В первой строке обычное число не смогло записать 9007199254740993 и молча стало …992, а с буквой
+    <code>n</code> — смогло. Во второй одна и та же дата — 14 часов и 9 часов, а <code>+ 1</code> и <code>- 1</code>
+    делают с ней совсем разное. Все примеры дня, как и в дне 17 Essentials, посчитаны для пояса Ашхабада (UTC+5); в
+    другом поясе часы в выводе будут другими.</p>
+
+    <h2 id="bigint">2. BigInt: целые без границы</h2>
+
+    <pre class="code js">console.log(typeof 10n, 9007199254740993n, BigInt(9007199254740991), BigInt("9007199254740993"), BigInt("0x1fffffffffffff"), BigInt("  123  "), BigInt(true));
+// bigint 9007199254740993n 9007199254740991n 9007199254740993n 9007199254740991n 123n 1n
+console.log(BigInt(9007199254740993), typeof Object(1n), Object(1n) === 1n);   // 9007199254740992n object false</pre>
+
+    <p><code>BigInt</code> — восьмой тип из таблицы дня 3 Essentials, примитив для целых чисел любого размера. Его пишут
+    литералом с <code>n</code> на конце или получают функцией <code>BigInt(value)</code> — только без <code>new</code>.
+    Из числа — лишь целое; из строки — запись целого, можно в шестнадцатеричном виде и с пробелами по краям; из
+    <code>true</code> — <code>1n</code>. Ловушка во второй строке: литерал <code>9007199254740993</code> без
+    <code>n</code> округлился ещё при чтении программы, и <code>BigInt</code> получил уже …992. Большие числа передают
+    строкой или литералом с <code>n</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 210" role="img" aria-label="Ось целых чисел от 9007199254740990 до 9007199254740996. Number хранит точно числа до 9007199254740992 включительно, а дальше только чётные: 994 и 996; 993 и 995 пропускает. BigInt хранит каждое целое">
+            <text x="310" y="20" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">целые около 2⁵³ = 9 007 199 254 740 992</text>
+            <path d="M 50 86 L 580 86" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <g stroke="#94a3b8" stroke-width="1.5">
+                <path d="M 80 80 L 80 92"/><path d="M 160 80 L 160 92"/><path d="M 240 80 L 240 92"/><path d="M 320 80 L 320 92"/>
+                <path d="M 400 80 L 400 92"/><path d="M 480 80 L 480 92"/><path d="M 560 80 L 560 92"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="80" y="108">…990</text><text x="160" y="108">…991</text><text x="240" y="108">…992</text><text x="320" y="108">…993</text>
+                <text x="400" y="108">…994</text><text x="480" y="108">…995</text><text x="560" y="108">…996</text>
+            </g>
+            <text x="14" y="60" font-family="Segoe UI, sans-serif" font-size="11" fill="#0e7490">Number</text>
+            <g fill="#06b6d4">
+                <circle cx="80" cy="56" r="6"/><circle cx="160" cy="56" r="6"/><circle cx="240" cy="56" r="6"/><circle cx="400" cy="56" r="6"/><circle cx="560" cy="56" r="6"/>
+            </g>
+            <g fill="none" stroke="#f43f5e" stroke-width="2">
+                <path d="M 314 50 L 326 62 M 326 50 L 314 62"/><path d="M 474 50 L 486 62 M 486 50 L 474 62"/>
+            </g>
+            <text x="320" y="40" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#9f1239">…993 → …992</text>
+            <text x="14" y="134" font-family="Segoe UI, sans-serif" font-size="11" fill="#15803d">BigInt</text>
+            <g fill="#16a34a">
+                <circle cx="80" cy="130" r="6"/><circle cx="160" cy="130" r="6"/><circle cx="240" cy="130" r="6"/><circle cx="320" cy="130" r="6"/>
+                <circle cx="400" cy="130" r="6"/><circle cx="480" cy="130" r="6"/><circle cx="560" cy="130" r="6"/>
+            </g>
+            <text x="160" y="72" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#475569">MAX_SAFE_INTEGER</text>
+            <rect x="14" y="152" width="592" height="50" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#334155">
+                <text x="310" y="172">До 2⁵³ Number хранит каждое целое; дальше — только каждое второе, потом каждое четвёртое.</text>
+                <text x="310" y="191" font-weight="700">BigInt хранит любое целое точно — но с Number в одном выражении его не смешать.</text>
+            </g>
+        </svg>
+        <figcaption>Где кончается точность <code>Number</code> и почему нужен <code>BigInt</code></figcaption>
+    </figure>
+
+    <h2 id="math">3. Арифметика без смешивания</h2>
+
+    <pre class="code js">const previousMaxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+console.log(previousMaxSafe + 1n, previousMaxSafe + 2n, previousMaxSafe * 2n, 2n ** 64n);
+// 9007199254740992n 9007199254740993n 18014398509481982n 18446744073709551616n
+console.log(5n / 2n, -5n / 2n, 7n % 3n, -7n % 3n, "Итого: " + 5n, `${5n}`);   // 2n -2n 1n -1n Итого: 5 5
+console.log(Number(2n ** 64n), Number(9007199254740993n), BigInt(Math.round(2.6)) + 1n, Number(5n) + 0.5);   // 18446744073709552000 9007199254740992 4n 5.5
+1n + 1;
+// TypeError: Cannot mix BigInt and other types, use explicit conversions</pre>
+
+    <p>Пример справочника MDN: после <code>MAX_SAFE_INTEGER</code> счёт идёт честно — «…993 теперь работает». Работают
+    <code>+ - * ** %</code>, но деление целое: дробь отбрасывается к нулю, поэтому <code>-5n / 2n</code> — это
+    <code>-2n</code>, а остаток берёт знак делимого. Строка с <code>BigInt</code> склеивается, как с числом. Смешивать
+    <code>BigInt</code> и <code>Number</code> в арифметике нельзя: язык не угадывает, какую точность вы готовы
+    потерять, — переводите сами, <code>BigInt(x)</code> или <code>Number(x)</code>, и помните, что <code>Number</code>
+    округлит большое. <code>Math</code> с <code>BigInt</code> тоже не работает. Практика плана — факториал 30:</p>
+
+    <pre class="code js">function factorial(n) {
+  let result = 1n;
+  for (let i = 2n; i &lt;= n; i++) result *= i;
+  return result;
+}
+function factorialNumber(n) {
+  let result = 1;
+  for (let i = 2; i &lt;= n; i++) result *= i;
+  return result;
+}
+console.log(factorial(30n), String(factorial(30n)).length, factorialNumber(30));   // 265252859812191058636308480000000n 33 2.6525285981219103e+32
+console.log(BigInt(factorialNumber(22)) === factorial(22n), BigInt(factorialNumber(23)) === factorial(23n));   // true false</pre>
+
+    <p>30! — 33 цифры, все точные. Обычное число показывает лишь начало в записи с <code>e+32</code>, а точным
+    перестаёт быть уже на 23!. Счётчик <code>i</code> тоже <code>BigInt</code>: <code>result *= i</code> с числом
+    <code>i</code> упал бы с той же ошибкой смешивания. Справочник советует: брать <code>BigInt</code>, только когда
+    правда ждёте чисел больше 2<sup>53</sup>, и не гонять значения туда-обратно.</p>
+
+    <h2 id="compare">4. Сравнения, условия, коллекции</h2>
+
+    <pre class="code js">console.log(0n == 0, 0n === 0, 1n &lt; 2, 2n &gt;= 2, 1n == "1", Boolean(0n), 0n || 12n);   // true false true true true false 12n
+const mixed = [4n, 6, -12n, 10, 4, 0, 0n];
+console.log([...mixed].sort(), [...mixed].sort((a, b) =&gt; (a &lt; b ? -1 : a &gt; b ? 1 : 0)));
+// [-12n, 0, 0n, 10, 4n, 4, 6] [-12n, 0, 0n, 4n, 4, 6, 10]
+console.log(new Set([1, 1n]).size, new Map([[1n, "a"]]).get(1), Object.is(0n, -0n));   // 2 undefined true</pre>
+
+    <p>Сравнивать можно и смешанно: <code>==</code> и <code>&lt;</code> сравнивают значения — так и записано в алгоритме
+    дня 6, — а <code>===</code> видит разные типы. Ложно только <code>0n</code>. Пример MDN с сортировкой: без
+    функции <code>sort</code> сравнивает строки (день 20 Essentials), а с функцией нужны сравнения, не вычитание —
+    <code>a - b</code> для смеси типов бросит ошибку. В <code>Set</code> и <code>Map</code> (дни 14–15)
+    <code>1</code> и <code>1n</code> — разные ключи: SameValueZero не превращает типы. Отрицательного нуля у
+    <code>BigInt</code> нет — <code>-0n</code> это просто <code>0n</code>.</p>
+
+    <h2 id="tostring">5. toString, asIntN, asUintN</h2>
+
+    <pre class="code js">console.log(254n.toString(16), 66n.toString(2), (-10n).toString(2), (-0n).toString(), 255n.toString(36));   // fe 1000010 -1010 0 73
+const max = 2n ** 63n - 1n;
+console.log(BigInt.asIntN(64, max), BigInt.asIntN(64, max + 1n), BigInt.asUintN(64, 2n ** 64n), BigInt.asUintN(8, 257n), BigInt.asIntN(4, 25n));
+// 9223372036854775807n -9223372036854775808n 0n 1n -7n
+console.log(typeof Object(1n).valueOf(), BigInt.prototype.toString.call(Object(5n)));   // bigint 5</pre>
+
+    <p><code>toString(radix)</code> — как у чисел дня 17 Essentials, основание от 2 до 36; знак минус сохраняется и в
+    двоичной записи. <code>BigInt.asIntN(bits, x)</code> и <code>asUintN</code> оставляют только <code>bits</code>
+    младших двоичных разрядов: первое читает их как число со знаком, второе — без знака. Так эмулируют 64-битные
+    целые других языков: максимум плюс один «переворачивается» в самое отрицательное значение, как одометр. Это
+    статические функции — <code>BigInt.asIntN(…)</code>, а не метод числа. <code>valueOf</code> достаёт примитив из
+    обёртки <code>Object(5n)</code>.</p>
+
+    <h2 id="json">6. BigInt и JSON</h2>
+
+    <pre class="code js">const replacer = (key, value) =&gt; (typeof value === "bigint" ? { $bigint: value.toString() } : value);
+const reviver = (key, value) =&gt; (value !== null &amp;&amp; typeof value === "object" &amp;&amp; "$bigint" in value ? BigInt(value.$bigint) : value);
+const text = JSON.stringify({ number: 1, big: 18014398509481982n }, replacer);
+console.log(text, JSON.parse(text, reviver).big, JSON.parse('{"id": 9007199254740993}').id);
+// {"number":1,"big":{"$bigint":"18014398509481982"}} 18014398509481982n 9007199254740992</pre>
+
+    <p><code>JSON.stringify</code> с <code>BigInt</code> бросает <code>TypeError</code> — в JSON такого типа нет.
+    Выход — функции дня 23 Essentials: replacer записывает число строкой в особый объект, reviver превращает обратно.
+    День 23 так и говорил: оживитель нужен там, где JSON беднее данных, — «даты, большие числа». Справочник предупреждает:
+    объект с ключом <code>$bigint</code> уже не отличить от настоящего числа, поэтому reviver пишут под известную форму
+    данных. Последний вызов — откуда беда: большое число в JSON <code>parse</code> читает обычным числом и округляет.
+    Ещё вариант со страницы MDN — свой <code>BigInt.prototype.toJSON</code>: <code>stringify</code> зовёт его у
+    <code>BigInt</code>, как у даты (раздел 12).</p>
+
+    <h2 id="bigerrors">7. Ошибки BigInt</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Текст Chrome</th></tr></thead>
+        <tbody>
+            <tr><td><code>1n / 0n</code></td><td><code>RangeError: Division by zero</code></td></tr>
+            <tr><td><code>2n ** -1n</code></td><td><code>RangeError: Exponent must be positive</code></td></tr>
+            <tr><td><code>BigInt(1.5)</code></td><td><code>RangeError: The number 1.5 cannot be converted to a BigInt because it is not an integer</code></td></tr>
+            <tr><td><code>+1n</code>, <code>Math.max(1n, 2n)</code></td><td><code>TypeError: Cannot convert a BigInt value to a number</code></td></tr>
+            <tr><td><code>BigInt(undefined)</code></td><td><code>TypeError: Cannot convert undefined to a BigInt</code></td></tr>
+            <tr><td><code>BigInt("1.5")</code></td><td><code>SyntaxError: Cannot convert 1.5 to a BigInt</code></td></tr>
+            <tr><td><code>1n + 1</code></td><td><code>TypeError: Cannot mix BigInt and other types, use explicit conversions</code></td></tr>
+            <tr><td><code>new BigInt(1)</code></td><td><code>TypeError: BigInt is not a constructor</code></td></tr>
+            <tr><td><code>JSON.stringify({ a: 1n })</code></td><td><code>TypeError: Do not know how to serialize a BigInt</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Шесть первых — по странице MDN на каждую. Деление на ноль у целых — ошибка, а не <code>Infinity</code>: у
+    <code>BigInt</code> бесконечности нет. Отрицательная степень дала бы дробь. Текст Chrome «must be positive»
+    неточен: <code>2n ** 0n</code> разрешено и равно <code>1n</code>. Унарный плюс — единственный арифметический
+    оператор, которого у <code>BigInt</code> нет совсем: справочник объясняет это совместимостью со старым кодом.</p>
+
+    <pre class="code js">console.log(2n ** 0n, 0n ** 0n, Number(1n) + 1);   // 1n 1n 2
+[3n, 1].sort((a, b) =&gt; a - b);
+// TypeError: Cannot mix BigInt and other types, use explicit conversions</pre>
+
+    <h2 id="moment">8. Дата: один момент, два прочтения</h2>
+
+    <p>Учебник MDN начинает с главного: внутри дата — число миллисекунд от полуночи 1 января 1970 года по UTC (эпохи).
+    Это число одинаково во всём мире. Пояс в дате не хранится — его берут с устройства, и каждый момент можно прочитать
+    двумя способами: по местному времени или по UTC.</p>
+
+    <pre class="code js">const d = new Date(2026, 9, 12, 14, 30, 15, 250);
+console.log(d.getHours(), d.getUTCHours(), d.getTimezoneOffset(), d.getDay(), d.getSeconds(), d.getMilliseconds());   // 14 9 -300 1 15 250
+console.log(d.toISOString(), d.getTime(), new Date(0).getHours(), new Date(0).toISOString());   // 2026-10-12T09:30:15.250Z 1791797415250 5 1970-01-01T00:00:00.000Z
+console.log(new Date("1990-07-01T12:00").getTimezoneOffset(), new Date("1992-07-01T12:00").getTimezoneOffset());   // -360 -300</pre>
+
+    <p><code>getHours</code> читает момент по местному времени, <code>getUTCHours</code> — по UTC. Разницу в минутах
+    даёт <code>getTimezoneOffset</code>, и знак у неё неожиданный: <strong>минус — пояс восточнее UTC</strong>, Ашхабат
+    — −300. Смещение зависит и от самой даты: летом 1990 года в Туркменистане действовало летнее время UTC+6, и
+    браузер это помнит — база поясов хранит историю, как в примере MDN с Шанхаем. <code>getDay</code> — день недели,
+    от 0 (воскресенье) до 6; 12 октября 2026 года — понедельник, 1. Сеттера <code>setDay</code> нет — день недели
+    вычисляется сам. Полночь эпохи в Ашхабаде — уже 5 утра.</p>
+
+    <table>
+        <thead><tr><th>Часть</th><th>Местное время</th><th>UTC</th></tr></thead>
+        <tbody>
+            <tr><td>год, месяц, число</td><td><code>getFullYear</code>, <code>getMonth</code>, <code>getDate</code> (день 17 E)</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCFullYear"><code>getUTCFullYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCMonth"><code>getUTCMonth</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCDate"><code>getUTCDate</code></a></td></tr>
+            <tr><td>часы, минуты</td><td><code>getHours</code>, <code>getMinutes</code></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCHours"><code>getUTCHours</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCMinutes"><code>getUTCMinutes</code></a></td></tr>
+            <tr><td>секунды, мс</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getSeconds"><code>getSeconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getMilliseconds"><code>getMilliseconds</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCSeconds"><code>getUTCSeconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCMilliseconds"><code>getUTCMilliseconds</code></a></td></tr>
+            <tr><td>день недели</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getDay"><code>getDay</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getUTCDay"><code>getUTCDay</code></a></td></tr>
+            <tr><td>сеттеры (раздел 11)</td><td><code>setFullYear</code>, <code>setMonth</code>, <code>setDate</code>, <code>setHours</code>, <code>setMinutes</code>, <code>setSeconds</code>, <code>setMilliseconds</code></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setUTCFullYear"><code>setUTCFullYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setUTCMonth"><code>setUTCMonth</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setUTCDate"><code>setUTCDate</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setUTCHours"><code>setUTCHours</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setUTCMinutes"><code>setUTCMinutes</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setUTCSeconds"><code>setUTCSeconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setUTCMilliseconds"><code>setUTCMilliseconds</code></a></td></tr>
+        </tbody>
+    </table>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Один момент — число 1791797415250 миллисекунд от эпохи. По UTC это 09:30:15, в Ашхабаде (UTC+5) 14:30:15 и смещение минус 300 минут, в Нью-Йорке летом (UTC−4) 05:30:15 и смещение 240. Пояс берётся с устройства и в дате не хранится">
+            <text x="310" y="22" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#334155">момент: 1791797415250 мс от 1970-01-01T00:00Z</text>
+            <path d="M 40 46 L 580 46" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <circle cx="310" cy="46" r="7" fill="#06b6d4"/>
+            <g fill="none" stroke="#06b6d4" stroke-width="1.3" stroke-dasharray="4 3">
+                <path d="M 304 52 L 116 98"/><path d="M 310 53 L 310 98"/><path d="M 316 52 L 504 98"/>
+            </g>
+            <rect x="20" y="100" width="184" height="80" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <rect x="218" y="100" width="184" height="80" rx="8" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+            <rect x="416" y="100" width="184" height="80" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="12" text-anchor="middle" font-weight="700">
+                <text x="112" y="120" fill="#334155">UTC</text>
+                <text x="310" y="120" fill="#0e7490">Ашхабат, UTC+5</text>
+                <text x="508" y="120" fill="#334155">Нью-Йорк летом, UTC−4</text>
+            </g>
+            <g font-family="Consolas, monospace" font-size="11.5" text-anchor="middle" fill="#334155">
+                <text x="112" y="140">09:30:15</text><text x="310" y="140">14:30:15</text><text x="508" y="140">05:30:15</text>
+                <text x="112" y="158">getUTCHours() → 9</text><text x="310" y="158">getHours() → 14</text><text x="508" y="158">getHours() → 5</text>
+                <text x="112" y="174">смещение 0</text><text x="310" y="174">смещение −300</text><text x="508" y="174">смещение 240</text>
+            </g>
+            <rect x="14" y="196" width="592" height="58" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#334155">
+                <text x="310" y="218" font-weight="700">Число в дате одно на весь мир; пояс берётся с устройства и в дате не хранится.</text>
+                <text x="310" y="238">get… и set… — местное время, getUTC… и setUTC… — UTC; смещение «минус» — пояс восточнее.</text>
+            </g>
+        </svg>
+        <figcaption>Один и тот же момент по UTC и в двух поясах</figcaption>
+    </figure>
+
+    <p>Диапазон дат — ±8,64·10<sup>15</sup> миллисекунд, ровно 100 миллионов дней от эпохи: это чуть меньше
+    <code>MAX_SAFE_INTEGER</code>. Дальше — «Invalid Date» дня 17 Essentials.</p>
+
+    <h2 id="parse">9. Строка в дату: Date.parse и ловушки</h2>
+
+    <pre class="code js">console.log(Date.parse("2019-01-01"), Date.parse("2019-01-01T00:00:00.000Z"), Date.parse("2019-01-01T00:00:00"));   // 1546300800000 1546300800000 1546282800000
+console.log(new Date("2026-10-12").getHours(), new Date("2026-10-12T00:00").getHours(), new Date("2026-10-12T00:00Z").getHours(), new Date("2026-10-12T00:00+03:00").getHours());   // 5 0 5 2
+console.log(new Date("12.10.2026").getMonth(), String(new Date("2026-13-01")), new Date("2026-02-30").getDate(), String(new Date("12 октября 2026")));
+// 11 Invalid Date 2 Invalid Date</pre>
+
+    <p><code>Date.parse(строка)</code> возвращает число — момент; конструктор <code>new Date(строка)</code> разбирает так
+    же. Гарантирован только один формат — <strong>формат даты-времени</strong> спецификации, упрощённый ISO 8601:
+    <code>YYYY-MM-DDTHH:mm:ss.sssZ</code>, где хвост можно опускать, а в конце стоит <code>Z</code> (UTC) или смещение
+    <code>+03:00</code>. И в нём ловушка, которую MDN называет исторической ошибкой спецификации: <strong>дата без
+    времени читается как UTC, дата со временем без смещения — как местное время</strong>. Поэтому «2026-10-12» в
+    Ашхабаде — 5 утра, а «2026-10-12T00:00» — полночь. В поясе западнее UTC первая дата и вовсе покажет 11 октября.</p>
+
+    <p>Всё остальное — на усмотрение движка. Практика плана «ловушки разбора»: «12.10.2026» Chrome прочитал по-американски,
+    месяц первым, — получилось 10 декабря (месяц 11). Несуществующее «30 февраля» Chrome перенёс на 2 марта, а Safari,
+    по таблице MDN, вернул бы <code>NaN</code>. Русские названия месяцев не понимает никто. Вывод справочника: на входе —
+    только стандартный формат, а всё прочее разбирайте сами:</p>
+
+    <pre class="code js">function parseRuDate(text) {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(text);
+  if (!m) return null;
+  const [, day, month, year] = m.map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getDate() === day &amp;&amp; date.getMonth() === month - 1 ? date : null;
+}
+console.log(parseRuDate("12.10.2026")?.toDateString(), parseRuDate("31.02.2026"), parseRuDate("1.10.2026"));   // Mon Oct 12 2026 null null</pre>
+
+    <p>Группы дня 18 разбирают «ДД.ММ.ГГГГ», конструктор собирает местную дату, а проверка «вернулись те же число и
+    месяц» ловит 31 февраля: конструктор перенёс бы его на 3 марта, и число не совпало.</p>
+
+    <h2 id="utc">10. Date.UTC</h2>
+
+    <pre class="code js">console.log(Date.UTC(2026, 9, 12), Date.UTC(2026, 9, 12, 9, 30), new Date(Date.UTC(2026, 9, 12)).getHours(), Date.UTC(2026));   // 1791763200000 1791797400000 5 1767225600000
+console.log(new Date(2026, 9, 12).getTime() - Date.UTC(2026, 9, 12), new Date(2026).getFullYear(), Date.UTC(95, 0, 1) === Date.UTC(1995, 0, 1), new Date(99, 5, 24).getFullYear());   // -18000000 1970 true 1999</pre>
+
+    <p><code>Date.UTC</code> принимает те же части, что конструктор, но, по справочнику, отличается трижды: читает их
+    как UTC, возвращает число, а не дату, и единственный аргумент считает годом. Конструктор с одним числом считает его
+    миллисекундами — <code>new Date(2026)</code> вышел 1970 годом. Полночь по-местному на 5 часов (18 000 000 мс)
+    раньше полуночи UTC. Годы от 0 до 99 оба превращают в 1900-е. А когда нужно посчитать дни между датами, удобно
+    сравнивать <code>Date.UTC</code> от частей: в UTC не бывает перевода часов.</p>
+
+    <h2 id="setters">11. Сеттеры: дата меняется на месте</h2>
+
+    <pre class="code js">const d = new Date(2026, 9, 12, 14, 30);
+const ret = d.setDate(d.getDate() + 20);
+console.log(d.toDateString(), ret === d.getTime());   // Sun Nov 01 2026 true
+const theBigDay = new Date(1962, 6, 7, 12);
+const day = (t) =&gt; new Date(t).toISOString().slice(0, 10);
+console.log(day(new Date(theBigDay).setDate(24)), day(new Date(theBigDay).setDate(32)), day(new Date(theBigDay).setDate(0)), day(new Date(theBigDay).setDate(-50)));
+// 1962-07-24 1962-08-01 1962-06-30 1962-05-11
+console.log(new Date(2026, 2, 0).getDate(), new Date(2028, 2, 0).getDate());   // 28 29</pre>
+
+    <p>Сеттер меняет саму дату и возвращает новое число-момент. Выход за пределы не ошибка: лишнее переносится в
+    соседнюю часть — 12 октября плюс 20 дней стало 1 ноября. Пример MDN: 32 июля — 1 августа, <code>0</code> —
+    последний день прошлого месяца, −50 — 11 мая. Отсюда приём «сколько дней в месяце»: нулевое число следующего месяца.
+    В феврале 2026 года 28 дней, в 2028 — 29.</p>
+
+    <pre class="code js">const e = new Date(2026, 9, 12, 14, 30);
+e.setHours(25);
+console.log(e.getDate(), e.getHours());      // 13 1
+e.setMinutes(75);
+console.log(e.getHours(), e.getMinutes());   // 2 15
+e.setFullYear(2027, 1, 29);
+console.log(e.getMonth(), e.getDate());      // 2 1</pre>
+
+    <p>Каждый сеттер принимает и младшие части: <code>setHours(ч, мин, с, мс)</code>, <code>setFullYear(год, месяц,
+    число)</code>. 25 часов — это час ночи следующего дня, 75 минут — час и 15 минут, а 29 февраля 2027 года не
+    существует — 1 марта. Пара <code>setTime</code>/<code>getTime</code> работает с самим числом. UTC-сеттеры делают то
+    же по UTC — справочник советует их, когда нужно сдвинуть дату на точное количество часов в поясе с переводом
+    часов.</p>
+
+    <pre class="code js">function addDaysBad(date, n) {
+  date.setDate(date.getDate() + n);
+  return date;
+}
+const lesson = new Date(2026, 9, 12);
+const next = addDaysBad(lesson, 2);
+console.log(next === lesson, lesson.getDate());   // true 14</pre>
+
+    <p>Вот изменяемость дня 8: функция вернула «следующее занятие», но испортила и исходное — это один объект. Сначала
+    копия — <code>new Date(date)</code>, как в примерах MDN, — потом сеттер. И практика плана — «31 января плюс
+    месяц»:</p>
+
+    <pre class="code js">const jan31 = new Date(2026, 0, 31);
+jan31.setMonth(jan31.getMonth() + 1);
+console.log(jan31.toDateString());   // Tue Mar 03 2026
+function addMonths(date, n) {
+  const result = new Date(date);
+  const dayOfMonth = result.getDate();
+  result.setDate(1);
+  result.setMonth(result.getMonth() + n);
+  const last = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(dayOfMonth, last));
+  return result;
+}
+console.log(addMonths(new Date(2026, 0, 31), 1).toDateString(), addMonths(new Date(2028, 0, 31), 1).getDate(), addMonths(new Date(2026, 11, 15), 1).toDateString());
+// Sat Feb 28 2026 29 Fri Jan 15 2027</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 236" role="img" aria-label="31 января 2026 года, setMonth(1) делает 31 февраля, которого нет; три лишних дня переносятся, получается 3 марта. Функция addMonths сначала ставит 1 число, переходит на февраль и ставит меньшее из 31 и 28 — получается 28 февраля">
+            <g font-family="Segoe UI, sans-serif" font-size="12" text-anchor="middle">
+                <rect x="20" y="30" width="150" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="95" y="57" fill="#334155">31 января 2026</text>
+                <rect x="235" y="30" width="150" height="44" rx="8" fill="#fff1f2" stroke="#f43f5e" stroke-width="2" stroke-dasharray="5 3"/><text x="310" y="57" fill="#9f1239">«31 февраля»</text>
+                <rect x="450" y="30" width="150" height="44" rx="8" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/><text x="525" y="57" fill="#9f1239" font-weight="700">3 марта 2026</text>
+                <rect x="20" y="124" width="150" height="44" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="95" y="151" fill="#334155">31 января 2026</text>
+                <rect x="235" y="124" width="150" height="44" rx="8" fill="#ecfeff" stroke="#06b6d4" stroke-width="1.5"/><text x="310" y="151" fill="#0e7490">1 февраля</text>
+                <rect x="450" y="124" width="150" height="44" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/><text x="525" y="151" fill="#15803d" font-weight="700">28 февраля 2026</text>
+            </g>
+            <g fill="none" stroke-width="2">
+                <path d="M 170 52 L 227 52" stroke="#f43f5e"/><path d="M 385 52 L 442 52" stroke="#f43f5e"/>
+                <path d="M 170 146 L 227 146" stroke="#06b6d4"/><path d="M 385 146 L 442 146" stroke="#16a34a"/>
+            </g>
+            <g>
+                <path d="M 235 52 L 225 47 L 225 57 Z" fill="#f43f5e"/><path d="M 450 52 L 440 47 L 440 57 Z" fill="#f43f5e"/>
+                <path d="M 235 146 L 225 141 L 225 151 Z" fill="#06b6d4"/><path d="M 450 146 L 440 141 L 440 151 Z" fill="#16a34a"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle">
+                <text x="202" y="92" fill="#9f1239">setMonth(1)</text>
+                <text x="417" y="92" fill="#9f1239">+3 лишних дня</text>
+                <text x="202" y="186" fill="#0e7490">setDate(1), месяц + 1</text>
+                <text x="417" y="186" fill="#15803d">min(31, 28)</text>
+            </g>
+            <text x="20" y="18" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">setMonth напрямую</text>
+            <text x="20" y="112" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">addMonths</text>
+            <rect x="14" y="198" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="218" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">В феврале 2026 года 28 дней: «31 февраля» — это 28 февраля и ещё 3 дня, то есть 3 марта.</text>
+        </svg>
+        <figcaption>«31 января плюс месяц»: перенос лишних дней и как его избежать</figcaption>
+    </figure>
+
+    <p><code>setMonth(1)</code> на 31 января дал «31 февраля», а лишние три дня переехали в март — так описывает
+    справочник MDN пример с 31 августа. <code>addMonths</code> сначала встаёт на первое число, переходит на месяц
+    вперёд и ставит меньшее из «своего» числа и длины месяца — 28 февраля, в високосном 2028 году — 29. Ответ дня 22
+    на ту же задачу — одна строка <code>Temporal</code> и сразу <code>2026-02-28</code>.</p>
+
+    <h2 id="out">12. Дата в строку, в число и в JSON</h2>
+
+    <pre class="code js">const d = new Date(2026, 9, 12, 14, 30);
+console.log(d.toDateString(), "|", d.toUTCString(), "|", d.toISOString());   // Mon Oct 12 2026 | Mon, 12 Oct 2026 09:30:00 GMT | 2026-10-12T09:30:00.000Z
+console.log(d.toTimeString().slice(0, 17), d.toLocaleDateString("ru-RU"), typeof Date(), JSON.stringify({ when: d }));
+// 14:30:00 GMT+0500 12.10.2026 string {"when":"2026-10-12T09:30:00.000Z"}</pre>
+
+    <p>Методы «to»: <code>toString</code> — дата и время по-местному: «Mon Oct 12 2026 14:30:00 GMT+0500», а в скобках
+    название пояса на языке браузера — «(Туркменистан, стандартное время)» или «(Turkmenistan Standard Time)».
+    <code>toDateString</code> и <code>toTimeString</code> — две его половины, всегда по-английски.
+    <code>toUTCString</code> — по UTC, в виде заголовков интернета; <code>toISOString</code> — формат раздела 9, всегда с
+    <code>Z</code>. Для людей — <code>toLocaleDateString</code> и <code>toLocaleTimeString</code> дня 17 Essentials;
+    <code>toLocaleString</code> и настройки вида — день 25. <code>Date()</code>
+    без <code>new</code> возвращает строку <code>toString</code> текущего момента — обещание дня 14.</p>
+
+    <pre class="code js">const d = new Date(2026, 9, 12, 14, 30);
+console.log(typeof (d + 1), d - 1, d &gt; new Date(2026, 9, 11), d[Symbol.toPrimitive]("number"), `${d}`.slice(0, 15));   // string 1791797399999 true 1791797400000 Mon Oct 12 2026
+console.log(JSON.stringify({ when: new Date("x") }), new Date(0).toJSON(), new Date(0).valueOf());   // {"when":null} 1970-01-01T00:00:00.000Z 0</pre>
+
+    <p>Обещание дня 6 о ToPrimitive. У даты есть свой метод <code>[Symbol.toPrimitive](hint)</code>, и спецификация
+    подчёркивает: дата — единственный встроенный объект, который подсказку «default» понимает как «string». Поэтому
+    <code>d + 1</code> склеивает строку — частая ошибка «прибавить сутки миллисекундами» через <code>+</code>, — а
+    вычитание и сравнение просят число и получают <code>valueOf</code>, то же, что <code>getTime</code>.</p>
+
+    <p><code>JSON.stringify</code> зовёт у даты <code>toJSON</code>, а тот — <code>toISOString</code>; неверная дата
+    становится <code>null</code>, а не ошибкой <code>RangeError</code> дня 17 Essentials. Обратно — reviver дня 23
+    Essentials; справочник MDN отмечает, что он должен знать форму данных: дату-строку не отличить от обычной строки.</p>
+
+    <h2 id="spec">13. Что говорит спецификация</h2>
+
+    <p>Своих строк спецификации у дня в плане нет — главы 21 курс 2 не разбирает целиком. Поэтому — пересказ и ссылки на
+    места, из которых растут сегодняшние правила.</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-bigint-type">6.1.6.2 The BigInt Type</a>:
+            целое любого размера, «точные математические ответы». Деление (<code>BigInt::divide</code>) отбрасывает дробь
+            к нулю и при делителе 0 бросает <code>RangeError</code>; степень с отрицательным показателем — тоже; остаток
+            берёт знак делимого; беззнаковый сдвиг <code>&gt;&gt;&gt;</code> всегда <code>TypeError</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-bigint-constructor-number-value">21.2.1.1 BigInt(value)</a>:
+            вызов с <code>new</code> — <code>TypeError</code>; значение приводится к примитиву с подсказкой «number»; число
+            идёт в NumberToBigInt, где нецелое — <code>RangeError</code>; остальное — в ToBigInt (7.1.13), где строка
+            разбирается как запись целого, а <code>undefined</code> и символ — <code>TypeError</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-time-values-and-time-range">21.4.1.1 Time Values</a>: момент —
+            целое число миллисекунд от эпохи или <code>NaN</code> («нет момента»), в сутках ровно 86 400 секунд, високосные
+            секунды не учитываются, диапазон — ±8,64·10<sup>15</sup>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-localtime">LocalTime и UTC (21.4.1.25–26)</a> переводят момент в
+            местное время и обратно через смещение пояса; все <code>get…</code> без «UTC» читают через LocalTime.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-makeday">MakeDay (21.4.1.28)</a> — откуда перенос: к году прибавляется
+            <code>floor(месяц / 12)</code>, месяц берётся по модулю 12, затем к первому дню месяца прибавляется число минус
+            один. «Месяц 12» и «31 февраля» не ошибки — просто арифметика. MakeTime и MakeDate (21.4.1.27, 29) так же
+            складывают часы, минуты и дни.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-date-time-string-format">21.4.1.32 Date Time String Format</a> —
+            формат раздела 9; примечание разрешает «24:00» как конец суток.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-date.parse">21.4.3.2 Date.parse</a>: сначала формат 21.4.1.32 (дата
+            без смещения — UTC, дата со временем — местное), иначе — «по правилам реализации». Гарантировано лишь, что
+            строки <code>toString</code>, <code>toUTCString</code> и <code>toISOString</code> разбираются обратно в тот же
+            момент.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-date.prototype-%symbol.toprimitive%">21.4.4.45
+            Date.prototype[Symbol.toPrimitive]</a>: «string» и «default» — сначала строка, «number» — сначала число, иное —
+            <code>TypeError</code>.</li>
+    </ul>
+
+    <pre class="code js">console.log(new Date("2026-10-12T24:00").getDate(), new Date(8.64e15).toISOString(), String(new Date(8.64e15 + 1)));   // 13 +275760-09-13T00:00:00.000Z Invalid Date
+const moment = new Date(2026, 9, 12, 14, 30);
+console.log(Date.parse(moment.toString()) === moment.getTime(), Date.parse(moment.toUTCString()) === moment.getTime());   // true true</pre>
+
+    <h2 id="cards">14. «Карточки»: даты повторения</h2>
+
+    <p>Карточку полезно повторить не сразу, а через несколько дней. Добавим каждой дату следующего повтора, а
+    номер — как приходит из большой базы: 64-битное число, больше <code>MAX_SAFE_INTEGER</code>. Сохранять будем в JSON,
+    как в днях 23 и 31 Essentials.</p>
+
+    <pre class="code js">const cards = [
+  { id: 9007199254740993n, word: "book", next: new Date(2026, 9, 12) },
+  { id: 9007199254740995n, word: "water", next: new Date(2026, 9, 15) },
+];
+const addDays = (date, n) =&gt; {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + n);
+  return copy;
+};
+const save = (list) =&gt; JSON.stringify(list, (key, value) =&gt; (typeof value === "bigint" ? String(value) : value));
+const load = (text) =&gt; JSON.parse(text, (key, value) =&gt; (key === "id" ? BigInt(value) : key === "next" ? new Date(value) : value));
+
+const text = save(cards);
+const back = load(text);
+const today = new Date(2026, 9, 13);
+const due = back.filter((c) =&gt; c.next &lt;= today).map((c) =&gt; c.word);
+back[0].next = addDays(today, 3);
+console.log(text);
+console.log(due, back[0].id === cards[0].id, back[0].next.toDateString(), today.toDateString());</pre>
+
+    <div class="result-box">
+        [{"id":"9007199254740993","word":"book","next":"2026-10-11T19:00:00.000Z"},{"id":"9007199254740995","word":"water","next":"2026-10-14T19:00:00.000Z"}]<br>
+        (1) ['book'] true Fri Oct 16 2026 Tue Oct 13 2026
+    </div>
+
+    <p><strong>Строка 1 — сохранение.</strong> Replacer записал номера строкой — <code>stringify</code> больше не падает.
+    Даты превратились в ISO через <code>toJSON</code> ещё до replacer'а. И вот урок о поясах: полночь 12 октября в
+    Ашхабаде в JSON — «2026-10-11T19:00Z», ведь ISO всегда в UTC. Момент тот же, просто записан по UTC.</p>
+
+    <p><strong>Строка 2 — загрузка и повтор.</strong> Reviver вернул и <code>BigInt</code>, и даты: номер совпал с
+    исходным до последней цифры. Сравнение <code>c.next &lt;= today</code> работает через число-момент. Следующий повтор
+    — <code>addDays</code> с копией, поэтому «сегодня» не сдвинулось.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите из <code>save</code> второй аргумент <code>stringify</code>. Какая ошибка и
+        почему?
+        <br><br>
+        <strong>Второй.</strong> Сотрите <code>n</code> у первого номера и выведите <code>cards[0].id</code>. Что стало с
+        последней цифрой и в какой момент она пропала?
+        <br><br>
+        <strong>Третий.</strong> Перепишите <code>addDays</code> без копии — сеттером прямо на <code>date</code>. Какой
+        день теперь покажет <code>today.toDateString()</code>?
+    </div>
+
+    <h2 id="next">15. Что дальше</h2>
+
+    <p>Сегодня видно, за что <code>Date</code> ругают: месяцы с нуля, изменяемость, разбор строк «как решит движок»,
+    поясом управляет устройство, а не программа. Справочник MDN на странице <code>Date.parse</code> прямо говорит, что
+    его ненадёжность — одна из причин появления <code>Temporal</code>. Завтра, на дне 22, — <code>Temporal</code>:
+    <code>PlainDate</code>, <code>PlainTime</code>, <code>PlainDateTime</code> и <code>Temporal.Now</code>; месяцы с
+    единицы, неизменяемые объекты и «31 января плюс месяц» сразу как <code>2026-02-28</code>. Пояса — день 24, названия
+    дней недели на любом языке — <code>Intl</code> дня 25.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Representing_dates_times">Representing dates &amp; times</a></td><td>учебник: дата, методы get/set/to/parse</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt">BigInt</a></td><td>тип, операторы, сравнения, JSON</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt/BigInt">BigInt()</a></td><td>из числа, строки, булева; без <code>new</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt/toString">BigInt.prototype.toString()</a></td><td>запись по основанию</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/parse">Date.parse()</a></td><td>строка → момент; что гарантировано</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/UTC">Date.UTC()</a></td><td>части по UTC → число</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toISOString">Date.prototype.toISOString()</a></td><td>формат даты-времени, <code>Z</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTimezoneOffset">getTimezoneOffset()</a></td><td>смещение в минутах; знак; история</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getDay">getDay()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getSeconds">getSeconds()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getMilliseconds">getMilliseconds()</a></td><td>день недели, секунды, мс</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setFullYear">setFullYear()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setMonth">setMonth()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setDate">setDate()</a></td><td>сеттеры даты, перенос</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setHours">setHours()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setMinutes">setMinutes()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setSeconds">setSeconds()</a></td><td>сеттеры времени</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt/asIntN">BigInt.asIntN()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt/asUintN">BigInt.asUintN()</a></td><td>младшие биты со знаком и без</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt/valueOf">BigInt.prototype.valueOf()</a></td><td>примитив из обёртки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>UTC-геттеры и UTC-сеттеры — 15 страниц</td><td>ссылки в таблице раздела 8</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setMilliseconds">setMilliseconds()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setTime">setTime()</a></td><td>миллисекунды; момент целиком</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toString">toString()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toDateString">toDateString()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toTimeString">toTimeString()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toUTCString">toUTCString()</a></td><td>строки по-местному и по UTC</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toJSON">toJSON()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/valueOf">valueOf()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/Symbol.toPrimitive">[Symbol.toPrimitive]()</a></td><td>дата в JSON и в примитив</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/BigInt_division_by_zero">Ошибка: division by zero</a></td><td><code>Division by zero</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/BigInt_negative_exponent">Ошибка: negative exponent</a></td><td><code>Exponent must be positive</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_be_converted_to_BigInt_because_it_isnt_an_integer">Ошибка: not an integer</a></td><td><code>…cannot be converted to a BigInt because it is not an integer</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_convert_BigInt_to_number">Ошибка: can't convert BigInt to number</a></td><td><code>Cannot convert a BigInt value to a number</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_convert_x_to_BigInt">Ошибка: can't convert x to BigInt</a></td><td><code>Cannot convert undefined to a BigInt</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_BigInt_syntax">Ошибка: invalid BigInt syntax</a></td><td><code>Cannot convert 1.5 to a BigInt</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// 9007199254740993n, BigInt("123"), BigInt(5) — целые любого размера; typeof — "bigint"; без new
+// 5n / 2n → 2n (дробь отбрасывается); 1n + 1 — TypeError: переводите сами — BigInt(x) или Number(x)
+// 0n == 0 true, 0n === 0 false; ложно только 0n; в Set и Map 1 и 1n — разные ключи
+// JSON: replacer пишет BigInt строкой, reviver возвращает BigInt; большое число в JSON округлится
+// дата — число мс от 1970-01-01T00:00Z; get… — местное время, getUTC… — UTC; getTimezoneOffset: −300 = UTC+5
+// "2026-10-12" — UTC, "2026-10-12T00:00" — местное; прочие строки — как решит движок, разбирайте сами
+// Date.UTC(год, месяц, …) → число; new Date(2026) — это 2026 мс, а не год
+// сеттеры меняют дату на месте и переносят лишнее: setDate(0) — последний день прошлого месяца
+// d + 1 — строка, d - 1 — число; JSON.stringify(d) → ISO-строка, неверная дата → null</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>BigInt(9007199254740993)</code> дал <code>9007199254740992n</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Число без <code>n</code> округлилось ещё при чтении программы — <code>Number</code> не хранит это целое.
+                    Большое значение передают литералом <code>…n</code> или строкой: <code>BigInt("9007199254740993")</code>.
+                </details>
+            </li>
+            <li>Чем <code>new Date("2026-10-12")</code> отличается от <code>new Date("2026-10-12T00:00")</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Первая строка — только дата, она читается как полночь UTC; вторая — дата со временем без смещения,
+                    это полночь по-местному. В Ашхабаде первая — 5 утра.
+                </details>
+            </li>
+            <li>Что такое <code>new Date(2026, 2, 0)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Нулевое число марта — последний день февраля: 28 февраля 2026 года. Так узнают длину месяца.
+                </details>
+            </li>
+            <li>Почему <code>date + 86400000</code> не прибавляет сутки?
+                <details class="answer"><summary>Ответ</summary>
+                    Дата приводит себя к примитиву с подсказкой «default» как к строке, и <code>+</code> склеивает текст.
+                    Нужно <code>new Date(date.getTime() + 86400000)</code> или сеттер <code>setDate</code>.
+                </details>
+            </li>
+            <li>Почему функция, которая вызывает <code>setDate</code> на переданной дате, опасна?
+                <details class="answer"><summary>Ответ</summary>
+                    Дата — изменяемый объект, сеттер меняет его у всех, кто на него ссылается. Сначала копия —
+                    <code>new Date(date)</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Representing_dates_times">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

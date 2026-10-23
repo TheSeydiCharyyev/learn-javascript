@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 16 — Мини-проект: журнал группы на классах</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #eab308; }
+        h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+        h3 { color: #854d0e; }
+        .step-number { background: #eab308; }
+        .toc a { color: #a16207; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 16</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 16 &bull; урок 1</span>
+        <h1>Мини-проект: журнал группы на классах</h1>
+        <p>Курс 2, Intermediate. Проектный день после модулей I1–I5. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>собрать приложение, в котором данные — объекты своих классов;</li>
+            <li>прятать данные в приватных полях и отдавать наружу только геттеры и методы;</li>
+            <li>хранить учеников в <code>Map</code>, темы — в <code>Set</code>, а перебирать группу своим итератором;</li>
+            <li>держать проверки ввода в классе, а в слушателе только ловить их ошибки;</li>
+            <li>узнавать четыре типичные ошибки такого приложения по симптомам.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#why">Проект вместо новой темы</a></li>
+            <li><a href="#spec">Что должен уметь журнал</a></li>
+            <li><a href="#settings">Настройки под замком</a></li>
+            <li><a href="#student">Класс Student</a></li>
+            <li><a href="#group">Класс Group</a></li>
+            <li><a href="#iterator">Свой итератор</a></li>
+            <li><a href="#markup">Разметка</a></li>
+            <li><a href="#idea">Главная схема</a></li>
+            <li><a href="#row">Один ученик — одна строка</a></li>
+            <li><a href="#render">render: страница из группы</a></li>
+            <li><a href="#forms">Две формы, одна проверка</a></li>
+            <li><a href="#buttons">Оценки, удаление, фильтр</a></li>
+            <li><a href="#bug-leak">Разбор: средний больше пяти</a></li>
+            <li><a href="#bugs">Разбор: ещё три ошибки</a></li>
+            <li><a href="#whole">Программа целиком</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="why">1. Проект вместо новой темы</h2>
+
+    <p>Сегодня новых методов не будет. Пятнадцать дней курса дали всё, чтобы собрать приложение иначе, чем на
+    дне 29 Essentials. Там данные были массивом простых объектов, и любая функция могла испортить любое поле.
+    Сегодня данные — объекты своих классов: снаружи видно только то, что класс разрешил, а неверную оценку класс
+    просто не примет. Собираем <strong>журнал группы</strong>: ученики, их оценки, средний балл и темы
+    занятий.</p>
+
+    <table>
+        <thead><tr><th>Что понадобится</th><th>Откуда</th></tr></thead>
+        <tbody>
+            <tr><td>строгий режим</td><td>день 3</td></tr>
+            <tr><td>геттеры, <code>deepFreeze</code></td><td>дни 5–6</td></tr>
+            <tr><td>классы, приватные поля, <code>static</code></td><td>дни 8–9</td></tr>
+            <tr><td>генератор, <code>yield*</code>, <code>Iterator.from</code>, <code>filter</code>, <code>some</code></td><td>дни 12–13</td></tr>
+            <tr><td><code>Map</code>, <code>Set</code></td><td>дни 14–15</td></tr>
+            <tr><td>страница: элементы, события, формы, <code>try...catch</code></td><td>Essentials, дни 11, 24–28</td></tr>
+        </tbody>
+    </table>
+
+    <p>Порядок работы — как на дне 29: задание, данные, разметка, код — по одной возможности за раз, и после
+    каждого шага проверка в консоли. В конце — программа целиком и ошибки, которые почти наверняка встретятся в
+    заданиях.</p>
+
+    <h2 id="spec">2. Что должен уметь журнал</h2>
+
+    <table>
+        <thead><tr><th>№</th><th>Возможность</th><th>Как проверить</th></tr></thead>
+        <tbody>
+            <tr><td>1</td><td>показать учеников: имя, оценки, средний балл</td><td>при загрузке три ученика</td></tr>
+            <tr><td>2</td><td>добавить ученика через форму</td><td>имя, Enter — новая строка в конце</td></tr>
+            <tr><td>3</td><td>не пускать пустое имя и повтор</td><td>сообщение под формами, курсор в поле</td></tr>
+            <tr><td>4</td><td>поставить оценку 2–5</td><td>кнопки в строке; средний пересчитан</td></tr>
+            <tr><td>5</td><td>удалить ученика</td><td>кнопка «✕» в строке</td></tr>
+            <tr><td>6</td><td>показать всех или только отличников</td><td>отличник — средний от 4,5</td></tr>
+            <tr><td>7</td><td>темы занятий без повторов</td><td>вторая форма; повтор — сообщение</td></tr>
+            <tr><td>8</td><td>итоговая строка</td><td>учеников, средний по группе, отличников</td></tr>
+        </tbody>
+    </table>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 300" role="img" aria-label="Как выглядит журнал: заголовок, итоговая строка, форма нового ученика, кнопки фильтра, таблица из трёх учеников с оценками, средним и кнопками 2, 3, 4, 5 и крестиком, форма новой темы и строка тем">
+            <rect x="10" y="10" width="600" height="282" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+            <text x="30" y="40" font-family="Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#1e293b">Журнал группы JS-1</text>
+            <text x="30" y="62" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Учеников: 3 · средний по группе: 4.39 · отличников: 2</text>
+            <rect x="30" y="74" width="170" height="24" rx="4" fill="#f8fafc" stroke="#94a3b8"/>
+            <text x="38" y="90" font-family="Segoe UI, sans-serif" font-size="11" fill="#94a3b8">Имя ученика</text>
+            <rect x="208" y="74" width="76" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8"/>
+            <text x="246" y="90" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">Добавить</text>
+            <rect x="300" y="74" width="46" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8"/>
+            <text x="323" y="90" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#334155">Все</text>
+            <rect x="352" y="74" width="80" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8"/>
+            <text x="392" y="90" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">Отличники</text>
+
+            <line x1="30" y1="122" x2="590" y2="122" stroke="#cbd5e1"/>
+            <text x="34" y="116" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#334155">Ученик</text>
+            <text x="140" y="116" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#334155">Оценки</text>
+            <text x="250" y="116" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#334155">Средний</text>
+
+            <rect x="24" y="126" width="572" height="26" fill="#f7fee7"/>
+            <text x="34" y="143" font-family="Segoe UI, sans-serif" font-size="11" fill="#3f6212">Аман</text>
+            <text x="140" y="143" font-family="Segoe UI, sans-serif" font-size="11" fill="#3f6212">5, 4, 5</text>
+            <text x="250" y="143" font-family="Segoe UI, sans-serif" font-size="11" fill="#3f6212">4.67</text>
+            <text x="34" y="171" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">Мерет</text>
+            <text x="140" y="171" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">3, 4</text>
+            <text x="250" y="171" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">3.50</text>
+            <rect x="24" y="182" width="572" height="26" fill="#f7fee7"/>
+            <text x="34" y="199" font-family="Segoe UI, sans-serif" font-size="11" fill="#3f6212">Айна</text>
+            <text x="140" y="199" font-family="Segoe UI, sans-serif" font-size="11" fill="#3f6212">5, 5</text>
+            <text x="250" y="199" font-family="Segoe UI, sans-serif" font-size="11" fill="#3f6212">5.00</text>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155" text-anchor="middle">
+                <rect x="340" y="130" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="351" y="143">2</text>
+                <rect x="366" y="130" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="377" y="143">3</text>
+                <rect x="392" y="130" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="403" y="143">4</text>
+                <rect x="418" y="130" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="429" y="143">5</text>
+                <rect x="448" y="130" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="459" y="143">✕</text>
+                <rect x="340" y="158" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="351" y="171">2</text>
+                <rect x="366" y="158" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="377" y="171">3</text>
+                <rect x="392" y="158" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="403" y="171">4</text>
+                <rect x="418" y="158" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="429" y="171">5</text>
+                <rect x="448" y="158" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="459" y="171">✕</text>
+                <rect x="340" y="186" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="351" y="199">2</text>
+                <rect x="366" y="186" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="377" y="199">3</text>
+                <rect x="392" y="186" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="403" y="199">4</text>
+                <rect x="418" y="186" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="429" y="199">5</text>
+                <rect x="448" y="186" width="22" height="18" rx="3" fill="#f1f5f9" stroke="#94a3b8"/><text x="459" y="199">✕</text>
+            </g>
+            <text x="490" y="143" font-family="Segoe UI, sans-serif" font-size="10" fill="#4d7c0f">отличник</text>
+            <text x="490" y="199" font-family="Segoe UI, sans-serif" font-size="10" fill="#4d7c0f">отличник</text>
+
+            <rect x="30" y="226" width="170" height="24" rx="4" fill="#f8fafc" stroke="#94a3b8"/>
+            <text x="38" y="242" font-family="Segoe UI, sans-serif" font-size="11" fill="#94a3b8">Тема занятия</text>
+            <rect x="208" y="226" width="110" height="24" rx="4" fill="#f1f5f9" stroke="#94a3b8"/>
+            <text x="263" y="242" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">Добавить тему</text>
+            <text x="30" y="274" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Темы (3): классы, Map, Set</text>
+        </svg>
+        <figcaption>Журнал после загрузки: отличники подсвечены</figcaption>
+    </figure>
+
+    <p>Чего журнал <strong>не</strong> делает: не сохраняет данные — обновили страницу, и вернулись три
+    исходных ученика (сохранение — задание со звёздочкой), не сортирует и не исправляет оценки. Это тоже
+    задания.</p>
+
+    <h2 id="settings">3. Настройки под замком</h2>
+
+    <p>Первое в <code>app.js</code> — строгий режим дня 3: тихие ошибки станут громкими. Затем — постоянные
+    данные программы: название группы, допустимые оценки и порог отличника. Их никто не должен менять, поэтому —
+    <code>deepFreeze</code> из дня 6:</p>
+
+    <pre class="code js">"use strict";
+
+function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (typeof value === "object" &amp;&amp; value !== null &amp;&amp; !Object.isFrozen(value)) deepFreeze(value);
+  }
+  return obj;
+}
+
+const SETTINGS = deepFreeze({
+  title: "JS-1",
+  marks: [2, 3, 4, 5],
+  excellent: 4.5,
+});</pre>
+
+    <p>Обычный <code>Object.freeze</code> здесь не хватило бы: массив <code>marks</code> — отдельный объект, и
+    неглубокая заморозка его не трогает. Проверка шага в консоли:</p>
+
+    <pre class="code js">console.log(Object.isFrozen(SETTINGS), Object.isFrozen(SETTINGS.marks), SETTINGS.marks.includes(5));   // true true true
+SETTINGS.marks.push(6);
+// TypeError: Cannot add property 4, object is not extensible</pre>
+
+    <p><code>push</code> падает в любом режиме — это помнит день 6. А присваивание <code>SETTINGS.excellent = 4</code>
+    в консоли просто не сработает, а внутри <code>app.js</code> со строгим режимом упадёт с <code>Cannot assign to
+    read only property</code>.</p>
+
+    <h2 id="student">4. Класс Student</h2>
+
+    <p>Ученик — имя и оценки. Номер он получает сам из счётчика класса, а оценки хранит в приватном поле, куда
+    снаружи не дотянуться:</p>
+
+    <pre class="code js">class Student {
+  static #count = 0;
+  #id;
+  #name;
+  #marks = [];
+
+  constructor(name) {
+    Student.#count++;
+    this.#id = Student.#count;
+    this.#name = name;
+  }
+
+  get id() {
+    return this.#id;
+  }
+
+  get name() {
+    return this.#name;
+  }
+
+  get marks() {
+    return [...this.#marks];
+  }
+
+  get average() {
+    if (this.#marks.length === 0) return null;
+    return this.#marks.reduce((a, b) =&gt; a + b) / this.#marks.length;
+  }
+
+  get isExcellent() {
+    return this.average !== null &amp;&amp; this.average &gt;= SETTINGS.excellent;
+  }
+
+  addMark(mark) {
+    if (!SETTINGS.marks.includes(mark)) {
+      throw new RangeError(`Оценка ${mark}: можно только ${SETTINGS.marks.join(", ")}`);
+    }
+    this.#marks.push(mark);
+    return this;
+  }
+}</pre>
+
+    <p>Почти каждая строка — знакомый приём. Счётчик <code>static #count</code> общий для класса и спрятан (день
+    9), как <code>nextId</code> дня 29 Essentials, только теперь его не изменить снаружи. Геттеры <code>id</code> и
+    <code>name</code> без сеттеров — «только для чтения». <code>marks</code> отдаёт <strong>копию</strong> массива;
+    почему это важно — раздел 13. <code>average</code> и <code>isExcellent</code> вычисляются при каждом чтении,
+    поэтому всегда верны (день 5). Ученик без оценок получает средний <code>null</code>, а не <code>NaN</code>.
+    Единственный способ добавить оценку — <code>addMark</code>, и он проверяет её по настройкам.
+    <code>return this</code> даёт цепочку вызовов (день 8).</p>
+
+    <pre class="code js">const gulnar = new Student("Гүлнар");
+gulnar.addMark(5).addMark(4);
+console.log(gulnar.id, gulnar.name, gulnar.marks, gulnar.average, gulnar.isExcellent);   // 1 Гүлнар [5, 4] 4.5 true
+gulnar.marks.push(2);
+console.log(gulnar.marks.length);   // 2 — изменилась только копия
+gulnar.addMark(7);
+// RangeError: Оценка 7: можно только 2, 3, 4, 5</pre>
+
+    <p>Средний 4,5 — уже отличник: условие <code>&gt;=</code>. Попытка дописать оценку через копию ничего не
+    изменила, а неверная оценка остановлена ошибкой.</p>
+
+    <h2 id="group">5. Класс Group</h2>
+
+    <p>Группа хранит учеников в <code>Map</code> по номеру (день 14) — «быстро найти ученика по номеру», как
+    обещал день 36 Essentials. Темы — в <code>Set</code> (день 15): тема бывает в группе один раз.</p>
+
+    <pre class="code js">class Group {
+  #title;
+  #students = new Map();
+  #topics = new Set();
+
+  constructor(title) {
+    this.#title = title;
+  }
+
+  get title() {
+    return this.#title;
+  }
+
+  get size() {
+    return this.#students.size;
+  }
+
+  get topics() {
+    return [...this.#topics];
+  }
+
+  get average() {
+    const averages = Iterator.from(this).map((s) =&gt; s.average).filter((a) =&gt; a !== null).toArray();
+    if (averages.length === 0) return null;
+    return averages.reduce((a, b) =&gt; a + b) / averages.length;
+  }
+
+  *[Symbol.iterator]() {
+    yield* this.#students.values();
+  }
+
+  add(name) {
+    const clean = name.trim();
+    if (clean === "") throw new Error("Напишите имя ученика");
+    if (Iterator.from(this).some((s) =&gt; s.name === clean)) throw new Error(`${clean} уже в группе`);
+    const student = new Student(clean);
+    this.#students.set(student.id, student);
+    return student;
+  }
+
+  get(id) {
+    return this.#students.get(id);
+  }
+
+  remove(id) {
+    return this.#students.delete(id);
+  }
+
+  addTopic(topic) {
+    const clean = topic.trim();
+    if (clean === "") throw new Error("Напишите тему");
+    if (this.#topics.has(clean)) throw new Error(`Тема «${clean}» уже есть`);
+    this.#topics.add(clean);
+  }
+}</pre>
+
+    <p>Все проверки ввода — здесь, в классе: пустое имя, повтор, пустая и повторная тема. Метод бросает ошибку с
+    готовым текстом для человека, а показывать её — дело страницы. <code>Set</code> и сам не пустил бы вторую
+    «Map», но молча; человеку нужно сообщение, поэтому сначала <code>has</code>. Средний по группе считают только
+    ученики с оценками.</p>
+
+    <p>И данные журнала — сразу за классами:</p>
+
+    <pre class="code js">const group = new Group(SETTINGS.title);
+group.add("Аман").addMark(5).addMark(4).addMark(5);
+group.add("Мерет").addMark(3).addMark(4);
+group.add("Айна").addMark(5).addMark(5);
+["классы", "Map", "Set"].forEach((topic) =&gt; group.addTopic(topic));
+let filter = "all";</pre>
+
+    <p><code>add</code> возвращает нового ученика, поэтому оценки ставятся тут же цепочкой. Переменная
+    <code>filter</code> — что показывать: <code>"all"</code> или <code>"excellent"</code>. Проверка шага:</p>
+
+    <pre class="code js">console.log(group.size, group.get(2).name, group.get(2).average, group.topics);   // 3 Мерет 3.5 ['классы', 'Map', 'Set']
+console.log(group.average.toFixed(2), group.get("2"));                           // 4.39 undefined
+group.add(" Аман ");
+// Error: Аман уже в группе</pre>
+
+    <p><code>group.get("2")</code> — <code>undefined</code>: ключи <code>Map</code> не превращаются в строки, и
+    строка <code>"2"</code> — другой ключ (день 14). Это ещё встретится.</p>
+
+    <h2 id="iterator">6. Свой итератор</h2>
+
+    <p>Строка <code>*[Symbol.iterator]()</code> делает группу перебираемой (день 11), а генератор (день 12)
+    пишет протокол за нас. <code>yield*</code> отдаёт по одному всё, что выдаёт итератор
+    <code>this.#students.values()</code>, — учеников в порядке добавления.</p>
+
+    <pre class="code js">for (const student of group) console.log(student.name, student.marks.join(" "));
+console.log([...group].length, Iterator.from(group).filter((s) =&gt; s.isExcellent).map((s) =&gt; s.name).toArray());
+console.log(String(group[Symbol.iterator]()));</pre>
+
+    <div class="result-box">
+        Аман 5 4 5<br>
+        Мерет 3 4<br>
+        Айна 5 5<br>
+        3 (2) ['Аман', 'Айна']<br>
+        [object Generator]
+    </div>
+
+    <p>Снаружи никто не знает, что внутри <code>Map</code>: группа просто перебирается, как массив. Методы итераторов
+    дня 13 работают через <code>Iterator.from(group)</code>. Его же используют <code>add</code> (<code>some</code> —
+    есть ли такое имя) и <code>average</code> (<code>map</code> и <code>filter</code>), и лишнего массива при этом не
+    строится. Перебрать <code>#students</code> напрямую снаружи нельзя — поле приватное.</p>
+
+    <h2 id="markup">7. Разметка</h2>
+
+    <pre class="code html">&lt;!DOCTYPE html&gt;
+&lt;html lang="ru"&gt;
+&lt;head&gt;
+  &lt;meta charset="UTF-8"&gt;
+  &lt;title&gt;Журнал группы&lt;/title&gt;
+  &lt;style&gt;
+    .excellent { background: #f7fee7; }
+    .filters .active { font-weight: bold; }
+    .error { color: #b91c1c; }
+  &lt;/style&gt;
+  &lt;script src="app.js" defer&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1 id="title"&gt;&lt;/h1&gt;
+  &lt;p id="summary"&gt;&lt;/p&gt;
+  &lt;form id="new-student"&gt;
+    &lt;input name="name" placeholder="Имя ученика"&gt;
+    &lt;button&gt;Добавить&lt;/button&gt;
+  &lt;/form&gt;
+  &lt;p class="filters"&gt;
+    &lt;button data-filter="all"&gt;Все&lt;/button&gt;
+    &lt;button data-filter="excellent"&gt;Отличники&lt;/button&gt;
+  &lt;/p&gt;
+  &lt;table&gt;
+    &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Ученик&lt;/th&gt;&lt;th&gt;Оценки&lt;/th&gt;&lt;th&gt;Средний&lt;/th&gt;&lt;th&gt;&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+    &lt;tbody id="students"&gt;&lt;/tbody&gt;
+  &lt;/table&gt;
+  &lt;form id="new-topic"&gt;
+    &lt;input name="topic" placeholder="Тема занятия"&gt;
+    &lt;button&gt;Добавить тему&lt;/button&gt;
+  &lt;/form&gt;
+  &lt;p id="topics"&gt;&lt;/p&gt;
+  &lt;p id="error" class="error"&gt;&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+    <p>Пустая рама, как на дне 29: строки таблицы, итог и темы появятся кодом. Элементы находим один раз:</p>
+
+    <pre class="code js">const title = document.querySelector("#title");
+const summary = document.querySelector("#summary");
+const studentForm = document.querySelector("#new-student");
+const topicForm = document.querySelector("#new-topic");
+const filters = document.querySelector(".filters");
+const rows = document.querySelector("#students");
+const topicsLine = document.querySelector("#topics");
+const error = document.querySelector("#error");</pre>
+
+    <pre class="code js">console.log(rows.children.length, filters.children.length, title.textContent === "");   // 0 2 true</pre>
+
+    <h2 id="idea">8. Главная схема</h2>
+
+    <p>Схема дня 29 остаётся: страница — картинка данных, слушатель меняет данные и зовёт <code>render</code>. Новое —
+    кто меняет данные. Раньше слушатель сам писал в массив и сам проверял ввод. Теперь он только зовёт метод
+    класса, а метод либо меняет данные, либо бросает ошибку с текстом для человека.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 236" role="img" aria-label="Слушатель вызывает метод класса Group или Student. Если метод принял данные, слушатель зовёт render, и страница перестраивается из группы. Если метод бросил ошибку, catch показывает её текст под формой, данные не меняются">
+            <rect x="14" y="20" width="150" height="56" rx="10" fill="#ffffff" stroke="#a16207" stroke-width="2"/>
+            <text x="89" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#854d0e">Слушатель</text>
+            <text x="89" y="63" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">submit, click</text>
+
+            <rect x="234" y="20" width="160" height="56" rx="10" fill="#fefce8" stroke="#eab308" stroke-width="2"/>
+            <text x="314" y="44" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#854d0e">group.add(name)</text>
+            <text x="314" y="63" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">метод класса проверяет</text>
+            <path d="M 164 48 L 224 48" fill="none" stroke="#a16207" stroke-width="2"/>
+            <path d="M 234 48 L 224 43 L 224 53 Z" fill="#a16207"/>
+
+            <rect x="456" y="20" width="150" height="56" rx="10" fill="#fefce8" stroke="#eab308" stroke-width="2"/>
+            <text x="531" y="44" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#854d0e">Данные</text>
+            <text x="531" y="63" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#854d0e">#students, #topics</text>
+            <path d="M 394 48 L 446 48" fill="none" stroke="#a16207" stroke-width="2"/>
+            <path d="M 456 48 L 446 43 L 446 53 Z" fill="#a16207"/>
+            <text x="425" y="40" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#854d0e">принял</text>
+
+            <rect x="456" y="140" width="150" height="56" rx="10" fill="#ffffff" stroke="#a16207" stroke-width="2"/>
+            <text x="531" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#854d0e">render()</text>
+            <text x="531" y="183" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">страница из группы</text>
+            <path d="M 531 76 L 531 130" fill="none" stroke="#a16207" stroke-width="2"/>
+            <path d="M 531 140 L 526 130 L 536 130 Z" fill="#a16207"/>
+
+            <rect x="234" y="140" width="160" height="56" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="314" y="164" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#991b1b">catch (e)</text>
+            <text x="314" y="183" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#991b1b">e.message — под форму</text>
+            <path d="M 314 76 L 314 130" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="5 4"/>
+            <path d="M 314 140 L 309 130 L 319 130 Z" fill="#ef4444"/>
+            <text x="324" y="108" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">throw</text>
+
+            <rect x="14" y="140" width="150" height="56" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="89" y="164" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#334155">Страница</text>
+            <text x="89" y="183" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">что видит учитель</text>
+            <path d="M 89 140 L 89 86" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 89 76 L 84 86 L 94 86 Z" fill="#94a3b8"/>
+            <text x="99" y="114" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">щелчок, Enter</text>
+
+            <path d="M 531 196 L 531 208 L 89 208 L 89 206" fill="none" stroke="#a16207" stroke-width="2"/>
+            <path d="M 89 196 L 84 206 L 94 206 Z" fill="#a16207"/>
+
+            <text x="310" y="228" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Проверка — в классе, текст ошибки — для человека, показ — в render.</text>
+        </svg>
+        <figcaption>Слушатель → метод класса → данные и <code>render</code>; ошибка метода → <code>catch</code></figcaption>
+    </figure>
+
+    <p>Выгода: проверку нельзя забыть. Добавит ученика форма, консоль или будущий импорт из файла — путь один,
+    через <code>group.add</code>, и пустое имя не пройдёт нигде. На дне 29 проверка жила в слушателе формы, и
+    <code>tasks.push</code> из консоли её обходил.</p>
+
+    <h2 id="row">9. Один ученик — одна строка</h2>
+
+    <pre class="code js">function format(average) {
+  return average === null ? "—" : average.toFixed(2);
+}
+
+function makeRow(student) {
+  const tr = document.createElement("tr");
+  const name = document.createElement("td");
+  const marks = document.createElement("td");
+  const average = document.createElement("td");
+  const actions = document.createElement("td");
+
+  name.textContent = student.name;
+  marks.textContent = student.marks.join(", ");
+  average.textContent = format(student.average);
+  for (const mark of SETTINGS.marks) {
+    const button = document.createElement("button");
+    button.textContent = mark;
+    button.dataset.mark = mark;
+    actions.append(button, " ");
+  }
+  const del = document.createElement("button");
+  del.textContent = "✕";
+  del.classList.add("delete");
+  actions.append(del);
+
+  tr.append(name, marks, average, actions);
+  tr.dataset.id = student.id;
+  tr.classList.toggle("excellent", student.isExcellent);
+  return tr;
+}</pre>
+
+    <p>Это <code>makeItem</code> дня 29: функция создаёт строку и ничего не вставляет. Читает она только геттеры —
+    до приватных полей ей не дотянуться, и это правильно. Кнопки оценок строятся из настроек: появится оценка 1 в
+    <code>SETTINGS.marks</code> — появится и кнопка. <code>data-id</code> — ниточка от строки к ученику, как раньше.</p>
+
+    <pre class="code js">const row = makeRow(group.get(1));
+console.log(row.dataset.id, row.className, row.children[1].textContent, row.children[2].textContent, row.querySelectorAll("button").length);
+// 1 excellent 5, 4, 5 4.67 5</pre>
+
+    <h2 id="render">10. <code>render</code>: страница из группы</h2>
+
+    <pre class="code js">function isVisible(student) {
+  return filter === "all" || student.isExcellent;
+}
+
+function render() {
+  title.textContent = `Журнал группы ${group.title}`;
+  rows.textContent = "";
+  rows.append(...Iterator.from(group).filter(isVisible).map(makeRow));
+
+  const excellent = Iterator.from(group).filter((s) =&gt; s.isExcellent).toArray().length;
+  summary.textContent = `Учеников: ${group.size} · средний по группе: ${format(group.average)} · отличников: ${excellent}`;
+  topicsLine.textContent = `Темы (${group.topics.length}): ${group.topics.join(", ")}`;
+  filters.querySelectorAll("button").forEach((b) =&gt; b.classList.toggle("active", b.dataset.filter === filter));
+}
+
+render();</pre>
+
+    <p>Строка <code>rows.append(...)</code> — сердце программы. На дне 29 было
+    <code>tasks.filter(isVisible).map(makeItem)</code> по массиву; теперь та же цепочка идёт по итератору группы, и
+    никакого массива не строится: ученик проходит фильтр, превращается в строку и уходит в <code>append</code>
+    (день 13). Итоги считаются по <strong>всей</strong> группе, а не по видимым строкам.</p>
+
+    <pre class="code js">console.log(rows.children.length, summary.textContent);
+console.log(topicsLine.textContent);</pre>
+
+    <div class="result-box">
+        3 Учеников: 3 · средний по группе: 4.39 · отличников: 2<br>
+        Темы (3): классы, Map, Set
+    </div>
+
+    <h2 id="forms">11. Две формы, одна проверка</h2>
+
+    <p>У обеих форм одинаковая работа: взять текст из поля, отдать его методу группы и либо показать ошибку, либо
+    очистить форму и перерисовать. Одинаковую работу пишут один раз:</p>
+
+    <pre class="code js">function submitWith(form, action) {
+  const input = form.querySelector("input");
+  form.addEventListener("submit", (event) =&gt; {
+    event.preventDefault();
+    try {
+      action(input.value);
+    } catch (e) {
+      error.textContent = e.message;
+      input.focus();
+      return;
+    }
+    error.textContent = "";
+    form.reset();
+    render();
+  });
+}
+
+submitWith(studentForm, (name) =&gt; group.add(name));
+submitWith(topicForm, (topic) =&gt; group.addTopic(topic));</pre>
+
+    <p><code>try...catch</code> дня 11 Essentials ловит ошибку, которую бросил класс, и показывает её
+    <code>message</code>. Слушатель не знает ни одного правила про имена и темы — все они в классе. Обратите внимание
+    на стрелку <code>(name) =&gt; group.add(name)</code>: без неё метод потеряет <code>this</code> (раздел 14).</p>
+
+    <p>Проверка шага: наберите «&nbsp;&nbsp;Сапар&nbsp;&nbsp;», нажмите <span class="kbd">Enter</span>, потом
+    «Сапар» ещё раз.</p>
+
+    <pre class="code js">console.log(group.size, group.get(4).name, rows.children.length, error.textContent);   // 4 Сапар 4 Сапар уже в группе</pre>
+
+    <h2 id="buttons">12. Оценки, удаление, фильтр</h2>
+
+    <pre class="code js">function studentOf(element) {
+  return group.get(Number(element.closest("tr").dataset.id));
+}
+
+rows.addEventListener("click", (event) =&gt; {
+  const button = event.target.closest("button");
+  if (!button) return;
+  const student = studentOf(button);
+  if (button.matches(".delete")) {
+    group.remove(student.id);
+  } else {
+    student.addMark(Number(button.dataset.mark));
+  }
+  render();
+});
+
+filters.addEventListener("click", (event) =&gt; {
+  const button = event.target.closest("button");
+  if (!button) return;
+  filter = button.dataset.filter;
+  render();
+});</pre>
+
+    <p>Один слушатель на все кнопки таблицы — делегирование дня 27 Essentials. <code>studentOf</code> — это
+    <code>taskOf</code> дня 29, но ищет не перебором <code>find</code>, а по ключу <code>Map</code>. Здесь нет
+    <code>try...catch</code>: кнопки дают только допустимые оценки. Если <code>addMark</code> всё-таки бросит ошибку,
+    это ошибка программиста, и пусть она громко появится в консоли, а не тихо под формой.</p>
+
+    <p>Проверка шага на свежей странице: «3» у Айны, «✕» у Мерета, потом «Отличники».</p>
+
+    <pre class="code js">console.log(group.get(3).marks, group.get(3).average.toFixed(2), group.size, rows.children.length);   // [5, 5, 3] 4.33 2 1
+console.log(summary.textContent);   // Учеников: 2 · средний по группе: 4.50 · отличников: 1</pre>
+
+    <p>Айна с тройкой опустилась до 4,33 и перестала быть отличницей, поэтому в списке «Отличники» остался только
+    Аман. А средний по группе — 4,50: (4,67 + 4,33) / 2.</p>
+
+    <h2 id="bug-leak">13. Разбор: средний больше пяти</h2>
+
+    <p>Частая первая версия геттера отдаёт сам массив: <code>get marks() { return this.#marks; }</code>. Пока
+    массив только читают, всё работает. Но однажды кто-то пишет в консоли или в другой функции:</p>
+
+    <pre class="code js">group.get(1).marks.push(9);
+console.log(group.get(1).marks, group.get(1).average);   // [5, 4, 5, 9] 5.75</pre>
+
+    <p><strong>Шаг 1. Что не так?</strong> Средний больше пяти — такой оценки быть не может, <code>addMark</code> не
+    пропустил бы девятку.</p>
+
+    <p><strong>Шаг 2. Как она попала?</strong> Мимо <code>addMark</code>. Приватное поле прячет <em>переменную</em>,
+    но геттер отдал наружу ссылку на тот же массив, и <code>push</code> изменил его изнутри. Та же история, что с
+    неглубокой заморозкой дня 6: защита стоит на объекте, а не на том, на что он ссылается.</p>
+
+    <p><strong>Шаг 3. Чиним.</strong> Геттер отдаёт копию: <code>return [...this.#marks];</code>. Теперь
+    <code>push</code> меняет копию, и раздел 4 это проверил: длина осталась 2.</p>
+
+    <h2 id="bugs">14. Разбор: ещё три ошибки</h2>
+
+    <h3>Под формой — «Iterator.from called on non-object»</h3>
+
+    <p>Хотели короче: <code>submitWith(studentForm, group.add)</code>. Метод передан без объекта, и при вызове
+    <code>action(input.value)</code> у него нет <code>this</code> — день 2. Тело класса строгое (день 8), поэтому
+    <code>this</code> — <code>undefined</code>, и первая же строка, где он нужен, падает.
+    <code>catch</code> честно показал текст ошибки человеку:</p>
+
+    <pre class="code js">["Сапар", "Гүлнар"].forEach(group.add);
+// TypeError: Iterator.from called on non-object</pre>
+
+    <p>Странный текст — подсказка: ошибка не в данных, а в вызове. Лечится стрелкой
+    <code>(name) =&gt; group.add(name)</code> или <code>group.add.bind(group)</code>.</p>
+
+    <h3>Нажимаю «5» — ничего</h3>
+
+    <p>В слушателе забыли <code>Number</code>: <code>student.addMark(button.dataset.mark)</code>. На странице ничего не
+    меняется, а в консоли:</p>
+
+    <pre class="code js">group.get(1).addMark("5");
+// RangeError: Оценка 5: можно только 2, 3, 4, 5</pre>
+
+    <p>Текст сбивает с толку: «пять нельзя, можно пять?» Всё, что читается из <code>dataset</code>, — строки
+    (день 25 Essentials), а <code>includes</code> сравнивает по SameValueZero: <code>"5"</code> не равно
+    <code>5</code>. С <code>Map</code> то же самое: без <code>Number</code> в <code>studentOf</code>
+    <code>group.get("1")</code> вернёт <code>undefined</code> (раздел 5), и упадёт уже
+    <code>Cannot read properties of undefined (reading 'addMark')</code>.</p>
+
+    <h3>Таблица пустая, в консоли ошибка про join</h3>
+
+    <p>В итераторе забыли <code>.values()</code>: <code>yield* this.#students</code>. Перебор <code>Map</code> выдаёт
+    пары <code>[номер, ученик]</code> (день 14), и в <code>makeRow</code> приходит массив вместо ученика:</p>
+
+    <pre class="code js">const [first] = new Map([[1, group.get(1)]]);
+console.log(first.length, first.name, first.marks);   // 2 undefined undefined</pre>
+
+    <p>У пары нет <code>name</code> и <code>marks</code>, и <code>student.marks.join</code> падает с <code>Cannot read
+    properties of undefined (reading 'join')</code>. Первый вопрос, как и на дне 29: <strong>что в данных?</strong>
+    <code>[...group][0]</code> в консоли сразу покажет пару вместо ученика.</p>
+
+    <table>
+        <thead><tr><th>Симптом</th><th>Причина</th><th>Где смотреть</th></tr></thead>
+        <tbody>
+            <tr><td>средний больше 5</td><td>геттер отдал сам массив</td><td><code>get marks</code></td></tr>
+            <tr><td><code>Iterator.from called on non-object</code></td><td>метод передан без объекта</td><td>вызов <code>submitWith</code></td></tr>
+            <tr><td>«Оценка 5: можно только …5»</td><td>строка из <code>dataset</code></td><td><code>Number</code> в слушателе</td></tr>
+            <tr><td><code>Cannot read properties of undefined (reading 'join')</code></td><td>итератор отдаёт пары <code>Map</code></td><td><code>yield*</code> в <code>Group</code></td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="whole">15. Программа целиком</h2>
+
+    <pre class="code js">// app.js — журнал группы
+"use strict";
+
+// 1. Настройки — под замком
+function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (typeof value === "object" &amp;&amp; value !== null &amp;&amp; !Object.isFrozen(value)) deepFreeze(value);
+  }
+  return obj;
+}
+
+const SETTINGS = deepFreeze({
+  title: "JS-1",
+  marks: [2, 3, 4, 5],
+  excellent: 4.5,
+});
+
+// 2. Классы: данные и правила
+class Student {
+  static #count = 0;
+  #id;
+  #name;
+  #marks = [];
+
+  constructor(name) {
+    Student.#count++;
+    this.#id = Student.#count;
+    this.#name = name;
+  }
+
+  get id() {
+    return this.#id;
+  }
+
+  get name() {
+    return this.#name;
+  }
+
+  get marks() {
+    return [...this.#marks];
+  }
+
+  get average() {
+    if (this.#marks.length === 0) return null;
+    return this.#marks.reduce((a, b) =&gt; a + b) / this.#marks.length;
+  }
+
+  get isExcellent() {
+    return this.average !== null &amp;&amp; this.average &gt;= SETTINGS.excellent;
+  }
+
+  addMark(mark) {
+    if (!SETTINGS.marks.includes(mark)) {
+      throw new RangeError(`Оценка ${mark}: можно только ${SETTINGS.marks.join(", ")}`);
+    }
+    this.#marks.push(mark);
+    return this;
+  }
+}
+
+class Group {
+  #title;
+  #students = new Map();
+  #topics = new Set();
+
+  constructor(title) {
+    this.#title = title;
+  }
+
+  get title() {
+    return this.#title;
+  }
+
+  get size() {
+    return this.#students.size;
+  }
+
+  get topics() {
+    return [...this.#topics];
+  }
+
+  get average() {
+    const averages = Iterator.from(this).map((s) =&gt; s.average).filter((a) =&gt; a !== null).toArray();
+    if (averages.length === 0) return null;
+    return averages.reduce((a, b) =&gt; a + b) / averages.length;
+  }
+
+  *[Symbol.iterator]() {
+    yield* this.#students.values();
+  }
+
+  add(name) {
+    const clean = name.trim();
+    if (clean === "") throw new Error("Напишите имя ученика");
+    if (Iterator.from(this).some((s) =&gt; s.name === clean)) throw new Error(`${clean} уже в группе`);
+    const student = new Student(clean);
+    this.#students.set(student.id, student);
+    return student;
+  }
+
+  get(id) {
+    return this.#students.get(id);
+  }
+
+  remove(id) {
+    return this.#students.delete(id);
+  }
+
+  addTopic(topic) {
+    const clean = topic.trim();
+    if (clean === "") throw new Error("Напишите тему");
+    if (this.#topics.has(clean)) throw new Error(`Тема «${clean}» уже есть`);
+    this.#topics.add(clean);
+  }
+}
+
+// 3. Данные журнала
+const group = new Group(SETTINGS.title);
+group.add("Аман").addMark(5).addMark(4).addMark(5);
+group.add("Мерет").addMark(3).addMark(4);
+group.add("Айна").addMark(5).addMark(5);
+["классы", "Map", "Set"].forEach((topic) =&gt; group.addTopic(topic));
+let filter = "all";
+
+// 4. Элементы страницы — один раз
+const title = document.querySelector("#title");
+const summary = document.querySelector("#summary");
+const studentForm = document.querySelector("#new-student");
+const topicForm = document.querySelector("#new-topic");
+const filters = document.querySelector(".filters");
+const rows = document.querySelector("#students");
+const topicsLine = document.querySelector("#topics");
+const error = document.querySelector("#error");
+
+// 5. Показ: из группы — в элементы
+function format(average) {
+  return average === null ? "—" : average.toFixed(2);
+}
+
+function makeRow(student) {
+  const tr = document.createElement("tr");
+  const name = document.createElement("td");
+  const marks = document.createElement("td");
+  const average = document.createElement("td");
+  const actions = document.createElement("td");
+
+  name.textContent = student.name;
+  marks.textContent = student.marks.join(", ");
+  average.textContent = format(student.average);
+  for (const mark of SETTINGS.marks) {
+    const button = document.createElement("button");
+    button.textContent = mark;
+    button.dataset.mark = mark;
+    actions.append(button, " ");
+  }
+  const del = document.createElement("button");
+  del.textContent = "✕";
+  del.classList.add("delete");
+  actions.append(del);
+
+  tr.append(name, marks, average, actions);
+  tr.dataset.id = student.id;
+  tr.classList.toggle("excellent", student.isExcellent);
+  return tr;
+}
+
+function isVisible(student) {
+  return filter === "all" || student.isExcellent;
+}
+
+function render() {
+  title.textContent = `Журнал группы ${group.title}`;
+  rows.textContent = "";
+  rows.append(...Iterator.from(group).filter(isVisible).map(makeRow));
+
+  const excellent = Iterator.from(group).filter((s) =&gt; s.isExcellent).toArray().length;
+  summary.textContent = `Учеников: ${group.size} · средний по группе: ${format(group.average)} · отличников: ${excellent}`;
+  topicsLine.textContent = `Темы (${group.topics.length}): ${group.topics.join(", ")}`;
+  filters.querySelectorAll("button").forEach((b) =&gt; b.classList.toggle("active", b.dataset.filter === filter));
+}
+
+// 6. Действия: метод класса, потом render()
+function submitWith(form, action) {
+  const input = form.querySelector("input");
+  form.addEventListener("submit", (event) =&gt; {
+    event.preventDefault();
+    try {
+      action(input.value);
+    } catch (e) {
+      error.textContent = e.message;
+      input.focus();
+      return;
+    }
+    error.textContent = "";
+    form.reset();
+    render();
+  });
+}
+
+submitWith(studentForm, (name) =&gt; group.add(name));
+submitWith(topicForm, (topic) =&gt; group.addTopic(topic));
+
+function studentOf(element) {
+  return group.get(Number(element.closest("tr").dataset.id));
+}
+
+rows.addEventListener("click", (event) =&gt; {
+  const button = event.target.closest("button");
+  if (!button) return;
+  const student = studentOf(button);
+  if (button.matches(".delete")) {
+    group.remove(student.id);
+  } else {
+    student.addMark(Number(button.dataset.mark));
+  }
+  render();
+});
+
+filters.addEventListener("click", (event) =&gt; {
+  const button = event.target.closest("button");
+  if (!button) return;
+  filter = button.dataset.filter;
+  render();
+});
+
+// 7. Первый показ
+render();</pre>
+
+    <p>Сценарий, в котором каждая ветка программы сработала хотя бы раз, — по шагам на одной странице:</p>
+
+    <table class="scenario">
+        <thead><tr><th>Что сделали</th><th>Что на странице</th></tr></thead>
+        <tbody>
+            <tr><td>открыли страницу</td><td>Учеников: 3 · средний по группе: 4.39 · отличников: 2</td></tr>
+            <tr><td>«Добавить» с пустым полем</td><td>Напишите имя ученика</td></tr>
+            <tr><td>«&nbsp;&nbsp;Сапар&nbsp;&nbsp;», <span class="kbd">Enter</span></td><td>Учеников: 4 · средний по группе: 4.39 · отличников: 2</td></tr>
+            <tr><td>«Аман», <span class="kbd">Enter</span></td><td>Аман уже в группе</td></tr>
+            <tr><td>у Сапара «4» и «5»</td><td>Учеников: 4 · средний по группе: 4.42 · отличников: 3</td></tr>
+            <tr><td>тема «&nbsp;Set&nbsp;», <span class="kbd">Enter</span></td><td>Тема «Set» уже есть</td></tr>
+            <tr><td>тема «генераторы», <span class="kbd">Enter</span></td><td>Темы (4): классы, Map, Set, генераторы</td></tr>
+            <tr><td>«Отличники», «✕» у Айны</td><td>Учеников: 3 · средний по группе: 4.22 · отличников: 2</td></tr>
+            <tr><td>«Все»</td><td>строки: Аман, Мерет, Сапар</td></tr>
+        </tbody>
+    </table>
+
+    <p>Сапар без оценок не сдвинул средний по группе: в нём участвуют только ученики с оценками. С «4» и «5» его
+    средний — ровно 4,5, и он сразу стал отличником. Крайние случаи — каждый с чистой страницы:</p>
+
+    <table>
+        <thead><tr><th>Что сделали</th><th>Что на странице</th><th>Почему</th></tr></thead>
+        <tbody>
+            <tr><td>имя из пробелов</td><td>«Напишите имя ученика»</td><td><code>trim</code> в <code>add</code></td></tr>
+            <tr><td>«аман»</td><td>добавлен четвёртый ученик</td><td>сравнение имён точное, с регистром</td></tr>
+            <tr><td>имя <code>&lt;b&gt;Мерет&lt;/b&gt;</code></td><td>так и написано, со скобками</td><td><code>textContent</code> (день 25 Essentials)</td></tr>
+            <tr><td>удалили всех</td><td>Учеников: 0 · средний по группе: — · отличников: 0</td><td><code>average</code> группы — <code>null</code></td></tr>
+            <tr><td>ошибка, потом щелчок по оценке</td><td>сообщение висит</td><td>его снимает только удачная отправка формы</td></tr>
+        </tbody>
+    </table>
+
+    <div class="try-it">
+        Два опыта.
+        <br><br>
+        <strong>Первый.</strong> Поменяйте в <code>SETTINGS</code> порог <code>excellent</code> на 3.5 и обновите
+        страницу. Сколько стало отличников? Какую одну строку пришлось поменять и почему больше никакую?
+        <br><br>
+        <strong>Второй.</strong> Наберите в консоли <code>group.get(1).#marks</code>. Почему консоль пускает к
+        приватному полю (день 9), а та же строка в <code>app.js</code> даёт <code>SyntaxError</code>?
+    </div>
+
+    <h2 id="next">16. Что дальше</h2>
+
+    <p>Главный недостаток журнала — тот же, что у списка дел на дне 29: обновили страницу, и всё пропало. С
+    классами сохранение сложнее, чем с массивом: <code>JSON.stringify</code> не видит приватных полей, а счётчик
+    <code>Student.#count</code> после загрузки начнётся с нуля и выдаст занятые номера. Как это решить — задание 8:
+    <code>toData</code> и <code>fromJSON</code> из дня 9.</p>
+
+    <p>С дня 17 начинается модуль «Строки и регулярные выражения». Первое применение — уже здесь: проверить, что
+    имя ученика состоит из букв, одним шаблоном вместо цепочки условий.</p>
+
+    <h3>Как расширять проект самим</h3>
+
+    <table>
+        <thead><tr><th>Идея</th><th>Что понадобится</th></tr></thead>
+        <tbody>
+            <tr><td>сортировка по среднему</td><td>второй генератор в <code>Group</code>, <code>toSorted</code></td></tr>
+            <tr><td>посещаемость тем</td><td><code>Set</code> тем у ученика и <code>difference</code> (день 15)</td></tr>
+            <tr><td>отменить последнюю оценку</td><td>метод в <code>Student</code>, кнопка в строке</td></tr>
+            <tr><td>две группы и общие темы</td><td>второй <code>Group</code>, <code>intersection</code></td></tr>
+            <tr><td>сохранение</td><td><code>toData</code>, <code>fromJSON</code>, <code>localStorage</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Каждая идея ложится в ту же схему: правило — в класс, показ — в <code>makeRow</code> или
+    <code>render</code>, действие — в слушатель, который зовёт метод и <code>render</code>.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <p style="margin: 0 0 8px;">Новых страниц нет — проект пользуется разобранными раньше:</p>
+        <table>
+            <thead><tr><th>Страница</th><th>Где в проекте</th><th>День</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Strict_mode">Strict mode</a></td><td>первая строка <code>app.js</code></td><td>3</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get">get</a></td><td><code>average</code>, <code>isExcellent</code>, <code>marks</code></td><td>5</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/freeze">Object.freeze</a></td><td><code>deepFreeze</code> настроек</td><td>6</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes">Classes</a></td><td><code>Student</code>, <code>Group</code></td><td>8</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_elements">Private elements</a></td><td><code>#marks</code>, <code>#students</code>, <code>static #count</code></td><td>9</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*">function*</a></td><td><code>*[Symbol.iterator]</code> группы</td><td>12</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Iterator/from">Iterator.from</a></td><td>фильтр, итоги, проверка повтора</td><td>13</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map">Map</a></td><td>ученики по номеру</td><td>14</td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set">Set</a></td><td>темы без повторов</td><td>15</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// СХЕМА: правило — в классе, показ — в render, слушатель — между ними
+// слушатель: try { метод класса } catch (e) { e.message — под форму }; потом render()
+
+// КЛАСС ДЕРЖИТ ДАННЫЕ
+// #поле — снаружи не достать; геттер без сеттера — только для чтения
+// get marks() { return [...this.#marks]; }   — копию, не сам массив!
+// addMark(m) { if (!разрешено) throw new RangeError("текст для человека"); … return this; }
+
+// СВОЙ ПЕРЕБОР
+// *[Symbol.iterator]() { yield* this.#students.values(); }   — values(), не сам Map
+// rows.append(...Iterator.from(group).filter(isVisible).map(makeRow));
+
+// ОТ ЭЛЕМЕНТА К ОБЪЕКТУ
+// group.get(Number(element.closest("tr").dataset.id))   — Number обязательно: ключи Map не строки
+
+// МЕТОД КАК КОЛБЭК — только через стрелку
+// submitWith(form, (name) =&gt; group.add(name));   а не group.add</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему проверки ввода живут в классе, а не в слушателе формы?
+                <details class="answer"><summary>Ответ</summary>
+                    Тогда их нельзя обойти: форма, консоль и любой другой код добавляют ученика через тот же
+                    <code>group.add</code>. Слушатель только показывает текст ошибки.
+                </details>
+            </li>
+            <li>Зачем геттер <code>marks</code> возвращает копию массива?
+                <details class="answer"><summary>Ответ</summary>
+                    Иначе снаружи можно сделать <code>push</code> в сам приватный массив и обойти проверку
+                    <code>addMark</code>: средний получится больше пяти.
+                </details>
+            </li>
+            <li>Почему <code>group.get("2")</code> — <code>undefined</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Ключи <code>Map</code> — числа, а <code>"2"</code> — строка, другой ключ. Номер из
+                    <code>dataset</code> нужно превратить через <code>Number</code>.
+                </details>
+            </li>
+            <li>Что сломается, если написать <code>yield* this.#students</code> без <code>.values()</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Группа будет выдавать пары <code>[номер, ученик]</code>, у пары нет <code>name</code> и
+                    <code>marks</code>, и <code>makeRow</code> упадёт.
+                </details>
+            </li>
+            <li>Почему <code>submitWith(studentForm, group.add)</code> не работает?
+                <details class="answer"><summary>Ответ</summary>
+                    Метод вызывается без объекта, <code>this</code> внутри — <code>undefined</code> (тело класса
+                    строгое). Нужна стрелка <code>(name) =&gt; group.add(name)</code> или <code>bind</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

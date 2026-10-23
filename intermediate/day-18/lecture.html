@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 18 — Группы и проверки позиции: exec, match, matchAll</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f43f5e; }
+        h2 { color: #be123c; background: #fff1f2; border-left-color: #f43f5e; }
+        h3 { color: #9f1239; }
+        .step-number { background: #f43f5e; }
+        .toc a { color: #be123c; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 18</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 18 &bull; урок 1</span>
+        <h1>Группы и проверки позиции: exec, match, matchAll</h1>
+        <p>Курс 2, Intermediate. Модуль «Строки и регулярные выражения» — второй день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>проверять всю строку якорями <code>^</code> и <code>$</code> и знать, где <code>\b</code> не работает;</li>
+            <li>вынимать части совпадения группами — по номеру и по имени — и ссылаться на них в шаблоне;</li>
+            <li>смотреть вперёд и назад проверками позиции, не забирая символов;</li>
+            <li>получать найденное через <code>exec</code>, <code>match</code>, <code>matchAll</code> и понимать <code>lastIndex</code>;</li>
+            <li>работать с многострочным текстом флагом <code>m</code>.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#what">Что именно нашлось</a></li>
+            <li><a href="#anchors">Якоря ^ и $</a></li>
+            <li><a href="#boundary">Граница слова \b</a></li>
+            <li><a href="#groups">Группы</a></li>
+            <li><a href="#named">Именованные группы</a></li>
+            <li><a href="#backref">Обратные ссылки</a></li>
+            <li><a href="#look">Проверки позиции</a></li>
+            <li><a href="#exec">exec и lastIndex</a></li>
+            <li><a href="#match">match, жадность и лень</a></li>
+            <li><a href="#matchall">matchAll</a></li>
+            <li><a href="#flags">Флаги m, s, y, d и модификаторы</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Раздел 22.2.7 спецификации</a></li>
+            <li><a href="#cards">«Карточки»: импорт слов из текста</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="what">1. Что именно нашлось</h2>
+
+    <p>Вчера шаблоны отвечали «есть ли» (<code>test</code>) и «где начинается» (<code>search</code>). Задание 7 дня 17
+    собирало номера всех цифр циклом из <code>search</code> и <code>slice</code>, а лекция обещала: найденный текст,
+    жадность квантификаторов и разгадка флага <code>g</code> — сегодня. Вот метод, который возвращает само совпадение:</p>
+
+    <pre class="code js">const m = /(\d{2})\.(\d{2})\.(\d{4})/.exec("Сдача: 12.10.2026");
+console.log(m);
+console.log(m[0], m[1], m[2], m[3], m.index);   // 12.10.2026 12 10 2026 7
+console.log("Мары 744000, Ашхабат 744000".match(/\d+/g));   // ['744000', '744000']</pre>
+
+    <p><code>exec</code> вернул массив: на месте 0 — всё совпадение, дальше — части в круглых скобках, и у массива есть
+    свойства <code>index</code> (с какого символа), <code>input</code> (где искали) и <code>groups</code>. Так дата
+    «12.10.2026» разобрана по частям — первая практика плана дня. Последняя строка — все числа текста одним вызовом,
+    без цикла дня 17. Разберём по порядку: сначала новые части шаблона, потом методы.</p>
+
+    <h2 id="anchors">2. Якоря ^ и $</h2>
+
+    <p><code>^</code> — «начало строки», <code>$</code> — «конец строки». Это <strong>проверки позиции</strong>:
+    символов они не забирают, а только требуют, чтобы шаблон стоял у края. Вчерашние проверки ввода становятся одной
+    строкой:</p>
+
+    <pre class="code js">const isIndex = (text) =&gt; /^\d{6}$/.test(text);
+const isGroup = (text) =&gt; /^[A-Z]{2,3}-\d{1,2}$/.test(text);
+console.log(["744000", "7440001", "индекс 744000", " 744000"].map(isIndex));   // [true, false, false, false]
+console.log(["JS-1", "1JS-1", "JS-123"].map(isGroup));                         // [true, false, false]
+console.log(/^A/.test("an A"), /^A/.test("An A"), /t$/.test("eater"), /^[^A]/.test("Orange"));   // false true false true</pre>
+
+    <p>«7440001» и «1JS-1» — те самые строки, которые вчерашние проверки пропускали (раздел 10 и задание 4 дня 17). С якорями
+    шаблон обязан занять строку целиком. У <code>^</code> два значения: снаружи скобок — начало строки, сразу после
+    <code>[</code> — «кроме» (день 17); <code>/^[^A]/</code> из справочника MDN — «начинается не с A».</p>
+
+    <h2 id="boundary">3. Граница слова \b</h2>
+
+    <p><code>\b</code> — ещё одна проверка позиции: место между символом слова и не-словом. Справочник MDN:
+    <code>/\bm/</code> находит «m» в «moon», а <code>/oo\b/</code> — нет, потому что после «oo» стоит буква.</p>
+
+    <pre class="code js">console.log(/\bcat\b/.test("a cat!"), /\bcat\b/.test("cats"), /\bкот\b/.test("кот"));   // true false false
+console.log("мой кот".search(/\b/), "мой кот".search(/\B/));                            // -1 0</pre>
+
+    <div class="mistake">
+        «Символ слова» для <code>\b</code> — то же, что <code>\w</code>: только латиница, цифры и <code>_</code> (день 17).
+        Для русского текста <code>\b</code> не работает никогда: в строке «мой кот» нет ни одной границы слова, и
+        <code>search</code> отвечает -1. Своя граница для кириллицы строится проверками позиции — раздел 7.
+    </div>
+
+    <p><code>\B</code> — «не граница»: <code>/\Bon/</code> находит «on» внутри «noon». Справочник предупреждает и о
+    языках без пробелов между словами — для них есть <code>Intl.Segmenter</code> (курс 3).</p>
+
+    <h2 id="groups">4. Группы</h2>
+
+    <p>Круглые скобки делают из части шаблона один элемент. Отсюда два применения: квантификатор и <code>|</code> на
+    целую часть — и запомнить, что в этой части совпало.</p>
+
+    <pre class="code js">console.log(/(ab)+/.exec("ababab")[0], /\.(png|jpe?g)$/i.exec("photo.JPEG")[1]);   // ababab JPEG
+console.log(/(ab)|(cd)/.exec("cd")[1], /([ab])+/.exec("abc")[1]);                    // undefined b
+console.log(/\.(?:png|jpe?g)$/i.exec("photo.jpg").length);                          // 1</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 244" role="img" aria-label="Шаблон из трёх групп для даты: группы нумеруются по открывающим скобкам слева направо — 1, 2, 3. Результат exec для строки Сдача: 12.10.2026 — массив: на месте 0 всё совпадение 12.10.2026, на местах 1, 2, 3 — 12, 10, 2026; index 7, input — исходная строка, groups undefined">
+            <g font-family="Consolas, monospace" font-size="16" text-anchor="middle">
+                <text x="120" y="50" fill="#9f1239" font-weight="700">(</text><text x="160" y="50" fill="#334155">\d{2}</text><text x="200" y="50" fill="#9f1239" font-weight="700">)</text>
+                <text x="225" y="50" fill="#334155">\.</text>
+                <text x="250" y="50" fill="#0369a1" font-weight="700">(</text><text x="290" y="50" fill="#334155">\d{2}</text><text x="330" y="50" fill="#0369a1" font-weight="700">)</text>
+                <text x="355" y="50" fill="#334155">\.</text>
+                <text x="380" y="50" fill="#15803d" font-weight="700">(</text><text x="420" y="50" fill="#334155">\d{4}</text><text x="460" y="50" fill="#15803d" font-weight="700">)</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle">
+                <text x="120" y="24" fill="#9f1239">1</text><text x="250" y="24" fill="#0369a1">2</text><text x="380" y="24" fill="#15803d">3</text>
+            </g>
+            <text x="540" y="24" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">номер — по «(»</text>
+
+            <g font-family="Consolas, monospace" font-size="12" text-anchor="middle">
+                <rect x="30" y="90" width="130" height="34" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="95" y="112" fill="#334155">[0] '12.10.2026'</text>
+                <rect x="170" y="90" width="90" height="34" rx="6" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/><text x="215" y="112" fill="#9f1239">[1] '12'</text>
+                <rect x="270" y="90" width="90" height="34" rx="6" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.5"/><text x="315" y="112" fill="#0369a1">[2] '10'</text>
+                <rect x="370" y="90" width="110" height="34" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/><text x="425" y="112" fill="#15803d">[3] '2026'</text>
+            </g>
+            <path d="M 160 58 L 200 88" fill="none" stroke="#f43f5e" stroke-width="1.2" stroke-dasharray="3 3"/>
+            <path d="M 290 58 L 305 88" fill="none" stroke="#0ea5e9" stroke-width="1.2" stroke-dasharray="3 3"/>
+            <path d="M 420 58 L 425 88" fill="none" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="3 3"/>
+            <g font-family="Consolas, monospace" font-size="11.5" fill="#334155">
+                <text x="40" y="152">index: 7</text>
+                <text x="140" y="152">input: 'Сдача: 12.10.2026'</text>
+                <text x="370" y="152">groups: undefined</text>
+            </g>
+            <rect x="14" y="172" width="592" height="62" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="194" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Место 0 — всё совпадение, места 1, 2, 3 — группы в порядке открывающих скобок.</text>
+            <text x="310" y="214" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">(?:…) группирует, но не запоминает — в массиве для неё места нет.</text>
+        </svg>
+        <figcaption>Группы даты и массив, который вернул <code>exec</code></figcaption>
+    </figure>
+
+    <p>Группы нумеруются по открывающим скобкам слева направо. Группа, которая не участвовала в совпадении (её вариант
+    <code>|</code> не подошёл), даёт <code>undefined</code>; группа с квантификатором помнит <em>последнее</em>
+    повторение — в «abc» это «b». Если запоминать не нужно, пишут <strong>незахватывающую группу</strong>
+    <code>(?:…)</code>: она только группирует, и в массиве для неё места нет. Справочник MDN советует её по
+    умолчанию — так номера нужных групп не съезжают, когда шаблон меняется. Вот и ответ дню 17: с группой выбор
+    <code>|</code> больше не растягивается на весь шаблон — <code>\.(?:png|jpe?g)$</code>.</p>
+
+    <pre class="code js">const parseIso = (s) =&gt; /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)?.slice(1).map(Number) ?? null;
+console.log(parseIso("2026-10-12"), parseIso("12.10.2026"));                                  // [2026, 10, 12] null
+const hasThanks = (s) =&gt; /\b(?:thanks|thank you)\b/i.test(s);
+console.log(hasThanks("Thanks! You helped me."), hasThanks("Thanksgiving is near."));   // true false</pre>
+
+    <p>Два примера MDN. «Matching date»: <code>slice(1)</code> отрезает всё совпадение и оставляет группы, а
+    <code>map(Number)</code> делает из строк числа; <code>?.</code> дня 22 Essentials защищает от <code>null</code>.
+    И граница слова вокруг группы: в «Thanksgiving» после «thanks» идёт буква — границы нет.</p>
+
+    <h2 id="named">5. Именованные группы</h2>
+
+    <pre class="code js">const m = /(?&lt;day&gt;\d{2})\.(?&lt;month&gt;\d{2})\.(?&lt;year&gt;\d{4})/.exec("Сдача: 12.10.2026");
+console.log(m.groups, m.groups.year === m[3], Object.getPrototypeOf(m.groups));   // {day: '12', month: '10', year: '2026'} true null
+const { day, month, year } = m.groups;
+console.log(new Date(year, month - 1, day).getMonth(), day + "/" + month);   // 9 12/10</pre>
+
+    <p><code>(?&lt;имя&gt;…)</code> — та же группа, но ещё и с именем: её значение лежит и под номером, и в объекте
+    <code>groups</code>. Объект создан без прототипа (день 7) — в нём только имена групп. Деструктуризация дня 22
+    Essentials раскладывает его сразу, а <code>new Date</code> дня 17 Essentials собирает дату — месяц там с нуля,
+    поэтому <code>month - 1</code>, и <code>getMonth()</code> даёт 9. Группы — всегда строки: склейка
+    <code>day + "/" + month</code> не складывает числа.
+    Справочник MDN называет три выгоды имён: смысл вместо номера, не нужно помнить порядок, перестановка групп ничего
+    не ломает. Имена в одном шаблоне уникальны; повторить имя можно только в разных вариантах <code>|</code>, где
+    совпасть может лишь один.</p>
+
+    <h2 id="backref">6. Обратные ссылки</h2>
+
+    <p><strong>Обратная ссылка</strong> <code>\1</code> требует ещё раз тот же текст, что совпал с группой 1;
+    <code>\k&lt;имя&gt;</code> — то же по имени.</p>
+
+    <pre class="code js">console.log(/\b(\w+)\s+\1\b/i.exec("Hello hello world")[1], /\b(\w+)\s+\1\b/i.exec("Hello hellos"));   // Hello null
+const parseTitle = (s) =&gt; s.match(/title=(["'])(.*?)\1/)[2];
+console.log(parseTitle('title="foo"'), parseTitle("title='foo' lang='en'"));   // foo foo
+console.log(/title=(?&lt;quote&gt;["'])(.*?)\k&lt;quote&gt;/.exec("title='x'").groups.quote);   // '</pre>
+
+    <p>Первая строка — пример MDN «повторённое слово», частая опечатка; с флагом <code>i</code> ссылка совпадает и
+    при другом регистре. Вторая — «закрывающая кавычка та же, что открывающая». Обещанный вчера пример учебника MDN
+    — телефон, где разделитель повторяется ссылкой:</p>
+
+    <pre class="code js">const phone = /^(?:\d{3}|\(\d{3}\))([-/.])\d{3}\1\d{4}$/;
+console.log(["123-456-7890", "123-456.7890", "123/456/7890", "1234567890"].map((s) =&gt; phone.test(s)));
+// [true, false, true, false]</pre>
+
+    <p>Якоря, незахватывающая группа для выбора «три цифры или три цифры в скобках», захватывающая группа для
+    разделителя и <code>\1</code>: разделители «-» и «.» вперемешку не пройдут.</p>
+
+    <p>Ссылки по номеру хрупкие. Справочник MDN показывает, как <code>parseTitle</code> ломается от одной добавленной
+    группы:</p>
+
+    <pre class="code js">const parseAttr = (s) =&gt; s.match(/(title|name)=(["'])(.*?)\1/)?.[3];
+const parseAttr2 = (s) =&gt; s.match(/(?:title|name)=(["'])(.*?)\1/)?.[2];
+console.log(parseAttr('name="foo"'), parseAttr2('name="foo"'));   // undefined foo</pre>
+
+    <p>Группа <code>(title|name)</code> стала первой, и <code>\1</code> теперь требует в конце слово «name», а не
+    кавычку. Незахватывающая группа или имена <code>\k&lt;quote&gt;</code> от этого защищают.</p>
+
+    <h2 id="look">7. Проверки позиции</h2>
+
+    <p>Иногда нужно проверить, что стоит рядом, но не включать это в найденное. Для этого — четыре проверки, которые,
+    как <code>^</code> и <code>\b</code>, символов не забирают:</p>
+
+    <table>
+        <thead><tr><th>Запись</th><th>Смысл</th></tr></thead>
+        <tbody>
+            <tr><td><code>x(?=y)</code></td><td>x, если справа y — опережающая</td></tr>
+            <tr><td><code>x(?!y)</code></td><td>x, если справа не y</td></tr>
+            <tr><td><code>(?&lt;=y)x</code></td><td>x, если слева y — ретроспективная</td></tr>
+            <tr><td><code>(?&lt;!y)x</code></td><td>x, если слева не y</td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">console.log("100 манат и 20 тенге".match(/\d+(?= манат)/)[0], "Цена: TMT 250".match(/(?&lt;=TMT )\d+/)[0], /\d+(?!\.)/.exec("3.141")[0]);
+// 100 250 141
+const strong = (p) =&gt; /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/.test(p);
+console.log(["Aman2010x", "aman2010x", "Aman2010", "Amanxxxxx"].map(strong));   // [true, false, true, false]</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 210" role="img" aria-label="Строка 100 манат. Шаблон d+ забирает цифры 1, 0, 0. Опережающая проверка смотрит вправо на пробел и манат, но не забирает их: совпадение — только 100. Ретроспективная смотрит влево">
+            <g font-family="Consolas, monospace" font-size="14" text-anchor="middle">
+                <rect x="40" y="50" width="36" height="34" rx="4" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/><text x="58" y="72" fill="#9f1239" font-weight="700">1</text>
+                <rect x="80" y="50" width="36" height="34" rx="4" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/><text x="98" y="72" fill="#9f1239" font-weight="700">0</text>
+                <rect x="120" y="50" width="36" height="34" rx="4" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/><text x="138" y="72" fill="#9f1239" font-weight="700">0</text>
+                <rect x="160" y="50" width="36" height="34" rx="4" fill="#e0f2fe" stroke="#0ea5e9" stroke-dasharray="4 3"/><text x="178" y="72" fill="#0369a1">␣</text>
+                <rect x="200" y="50" width="36" height="34" rx="4" fill="#e0f2fe" stroke="#0ea5e9" stroke-dasharray="4 3"/><text x="218" y="72" fill="#0369a1">м</text>
+                <rect x="240" y="50" width="36" height="34" rx="4" fill="#e0f2fe" stroke="#0ea5e9" stroke-dasharray="4 3"/><text x="258" y="72" fill="#0369a1">а</text>
+                <rect x="280" y="50" width="36" height="34" rx="4" fill="#e0f2fe" stroke="#0ea5e9" stroke-dasharray="4 3"/><text x="298" y="72" fill="#0369a1">н</text>
+                <rect x="320" y="50" width="36" height="34" rx="4" fill="#e0f2fe" stroke="#0ea5e9" stroke-dasharray="4 3"/><text x="338" y="72" fill="#0369a1">а</text>
+                <rect x="360" y="50" width="36" height="34" rx="4" fill="#e0f2fe" stroke="#0ea5e9" stroke-dasharray="4 3"/><text x="378" y="72" fill="#0369a1">т</text>
+            </g>
+            <line x1="158" y1="36" x2="158" y2="98" stroke="#334155" stroke-width="2"/>
+            <text x="158" y="28" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">позиция после \d+</text>
+            <path d="M 40 104 L 156 104" fill="none" stroke="#f43f5e" stroke-width="2.5"/>
+            <text x="98" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#9f1239">\d+ забрал «100»</text>
+            <path d="M 160 104 L 396 104" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-dasharray="5 4"/>
+            <path d="M 406 104 L 396 99 L 396 109 Z" fill="#0ea5e9"/>
+            <text x="278" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#0369a1">(?= манат) смотрит вправо, не забирает</text>
+            <text x="500" y="72" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#334155">match → '100'</text>
+
+            <rect x="14" y="142" width="592" height="60" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="164" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">(?=…) и (?!…) смотрят вправо от позиции, (?&lt;=…) и (?&lt;!…) — влево.</text>
+            <text x="310" y="184" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Позиция не сдвигается: проверенное в найденное не входит.</text>
+        </svg>
+        <figcaption>Опережающая проверка на строке «100 манат»</figcaption>
+    </figure>
+
+    <p>Проверка пароля — несколько опережающих подряд с одной позиции, начала строки: «где-то дальше есть цифра»,
+    «есть строчная», «есть заглавная», и только потом <code>.{8,}$</code> забирает всю строку. «Aman2010» прошёл: в нём
+    ровно восемь символов.</p>
+
+    <pre class="code js">const firstPart = (s) =&gt; /^.*?(?=[,.])/.exec(s)?.[0];
+console.log(firstPart("Привет, мир!"), firstPart("Спасибо."), firstPart("Без точки"));   // Привет Спасибо undefined</pre>
+
+    <p>Пример MDN «до первой запятой или точки»: ленивое <code>.*?</code> идёт, пока справа не окажется знак, а сам знак
+    в найденное не входит. Того же можно добиться группой — но проверка честнее говорит «посмотри, но не бери».</p>
+
+    <p>А вот обещанная граница слова для кириллицы: «слева не русская буква, справа не русская буква». Так же —
+    практика плана «повторённые слова»:</p>
+
+    <pre class="code js">const word = (w) =&gt; new RegExp(`(?&lt;![а-яё])${w}(?![а-яё])`, "i");
+console.log(word("кот").test("Кот спит"), word("кот").test("котлета"), word("кот").test("скот"));   // true false false
+const twice = /(?&lt;![а-яё])([а-яё]+)\s+\1(?![а-яё])/i;
+console.log(twice.exec("Мы мы пошли домой")[1], twice.exec("я не не знаю")[1], twice.exec("кот котлета"));   // Мы не null</pre>
+
+    <p>Ретроспективную проверку движок сопоставляет справа налево — справочник MDN показывает, как это меняет
+    захват групп внутри неё. Для наших примеров важно другое: проверки ничего не забирают, поэтому «Мы» и «мы» найдены
+    словами, а «кот котлета» — нет: после второго «кот» стоит буква.</p>
+
+    <h2 id="exec">8. exec и lastIndex</h2>
+
+    <p><code>exec</code> — главный метод: справочник MDN называет его «примитивом», через который работают все
+    остальные. Без флага <code>g</code> он всегда ищет с начала строки. С флагом <code>g</code> он начинает с места,
+    записанного в свойстве <code>lastIndex</code> самого объекта, и после удачи записывает туда конец совпадения:</p>
+
+    <pre class="code js">const re = /fo+/g;
+const str = "table football, foosball";
+let found;
+while ((found = re.exec(str)) !== null) {
+  console.log(found[0], found.index, re.lastIndex);
+}
+console.log(re.lastIndex);</pre>
+
+    <div class="result-box">
+        foo 6 9<br>
+        foo 16 19<br>
+        0
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 196" role="img" aria-label="Цикл exec с флагом g по строке table football, foosball: первый вызов ищет с lastIndex 0 и находит foo на месте 6, lastIndex становится 9; второй ищет с 9 и находит foo на месте 16, lastIndex 19; третий ищет с 19, не находит, возвращает null и сбрасывает lastIndex в 0">
+            <g font-family="Segoe UI, sans-serif" font-size="11.5" text-anchor="middle">
+                <rect x="20" y="20" width="170" height="74" rx="8" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+                <text x="105" y="42" fill="#9f1239" font-weight="700">вызов 1</text>
+                <text x="105" y="62" fill="#334155">ищет с lastIndex 0</text>
+                <text x="105" y="82" fill="#334155">«foo» на 6 → lastIndex 9</text>
+                <rect x="225" y="20" width="170" height="74" rx="8" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+                <text x="310" y="42" fill="#9f1239" font-weight="700">вызов 2</text>
+                <text x="310" y="62" fill="#334155">ищет с 9</text>
+                <text x="310" y="82" fill="#334155">«foo» на 16 → lastIndex 19</text>
+                <rect x="430" y="20" width="170" height="74" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+                <text x="515" y="42" fill="#334155" font-weight="700">вызов 3</text>
+                <text x="515" y="62" fill="#334155">ищет с 19 — нет</text>
+                <text x="515" y="82" fill="#334155">null, lastIndex → 0</text>
+            </g>
+            <path d="M 190 57 L 215 57" fill="none" stroke="#f43f5e" stroke-width="2"/>
+            <path d="M 225 57 L 215 52 L 215 62 Z" fill="#f43f5e"/>
+            <path d="M 395 57 L 420 57" fill="none" stroke="#f43f5e" stroke-width="2"/>
+            <path d="M 430 57 L 420 52 L 420 62 Z" fill="#f43f5e"/>
+            <rect x="14" y="112" width="592" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="134" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">lastIndex — свойство объекта-шаблона, а не строки: оно переживает смену строки.</text>
+            <text x="310" y="154" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">test(…) с флагом g — это тот же exec: true (9) → false (0) → true (9).</text>
+            <text x="310" y="174" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Без g lastIndex не читается и не меняется — поиск всегда с начала.</text>
+        </svg>
+        <figcaption>Цикл <code>exec</code> с флагом <code>g</code> и свойство <code>lastIndex</code></figcaption>
+    </figure>
+
+    <p>Правила справочника MDN: удача — <code>lastIndex</code> становится концом совпадения; неудача — 0;
+    <code>lastIndex</code> больше длины строки — сразу <code>null</code> и 0. Вот и разгадка вчерашней ловушки:</p>
+
+    <pre class="code js">const g = /fo+/g;
+console.log(g.test("table football"), g.lastIndex, g.test("table football"), g.lastIndex, g.test("table football"));
+// true 9 false 0 true
+const r = /foo/g;
+console.log(r.test("foo bar"), r.test("foo baz"));   // true false
+r.lastIndex = 0;
+console.log(r.test("foo baz"));   // true</pre>
+
+    <p><code>test</code> внутри — тот же <code>exec</code>. Второй вызов искал с девятого символа, «foo» дальше нет —
+    <code>false</code> и сброс в 0; третий снова нашёл. <code>lastIndex</code> можно записать вручную — так «чинят» шаблон
+    между строками, — но надёжнее для <code>test</code> вообще не ставить <code>g</code>.</p>
+
+    <div class="mistake">
+        Два способа устроить бесконечный цикл, о которых предупреждает MDN. Литерал внутри условия —
+        <code>while ((found = /fo+/g.exec(str)))</code>: каждый проход создаёт новый объект с <code>lastIndex</code> 0, и
+        находится одно и то же. И шаблон, который может совпасть с пустой строкой, например <code>/x*/g</code>: после
+        пустого совпадения <code>lastIndex</code> не сдвигается. В обоих случаях спасает <code>matchAll</code>.
+    </div>
+
+    <p>Второй случай — на примере справочника MDN. Шаблон <code>/(hi)?/g</code> может совпасть с пустой строкой:
+    группа необязательна.</p>
+
+    <pre class="code js">const hi = /(hi)?/g;
+console.log([...hi.exec("hi")], hi.lastIndex);   // ['hi', 'hi'] 2
+console.log([...hi.exec("hi")], hi.lastIndex);   // ['', undefined] 2
+console.log([...hi.exec("hi")], hi.lastIndex);   // ['', undefined] 2</pre>
+
+    <p>Первый вызов забрал «hi» и поставил <code>lastIndex</code> на 2 — конец строки. Второй искал с 2 и нашёл пустое
+    совпадение: группа не участвовала — <code>undefined</code>, а конец пустого совпадения — та же позиция 2. Третий
+    повторяет второй, и так без конца: цикл <code>while</code> этого раздела не кончился бы никогда. Spread дня 22
+    Essentials оставляет от результата только элементы, без <code>index</code> и <code>input</code>.</p>
+
+    <p>Справочник предлагает и защиту от побочных действий <code>lastIndex</code>: держать свою копию шаблона в
+    замыкании (день 1) и ставить <code>lastIndex</code> перед каждым поиском.</p>
+
+    <pre class="code js">function createMatcher(pattern) {
+  const regex = new RegExp(pattern, "g");   // копия: исходный шаблон не меняется
+  return (input, offset) =&gt; {
+    regex.lastIndex = offset;
+    return regex.exec(input);
+  };
+}
+const foo = /foo/;
+const matchFoo = createMatcher(foo);
+console.log(matchFoo("foo bar", 0)[0], matchFoo("foo baz", 0)[0], matchFoo("foo baz", 1), foo.lastIndex);   // foo foo null 0</pre>
+
+    <p>Второй вызов снова нашёл «foo», хотя после первого <code>lastIndex</code> копии был 3: функция сама задаёт начало
+    поиска. С места 1 «foo» дальше нет — <code>null</code>. А сам <code>foo</code> не тронут: <code>new RegExp(re, "g")</code>
+    дня 17 создаёт новый объект.</p>
+
+    <h2 id="match">9. match, жадность и лень</h2>
+
+    <p><code>строка.match(re)</code> ведёт себя по-разному в зависимости от флага <code>g</code>:</p>
+
+    <pre class="code js">const text = "Мары 744000, Ашхабат 744000";
+console.log(text.match(/\d+/).index, text.match(/\d+/g), text.match(/\d+/g).index, text.match(/x/g));   // 5 ['744000', '744000'] undefined null
+const html = "&lt;b&gt;Аман&lt;/b&gt; и &lt;b&gt;Айна&lt;/b&gt;";
+console.log(html.match(/&lt;b&gt;.+&lt;\/b&gt;/)[0], "|", html.match(/&lt;b&gt;.+?&lt;\/b&gt;/)[0]);
+// &lt;b&gt;Аман&lt;/b&gt; и &lt;b&gt;Айна&lt;/b&gt; | &lt;b&gt;Аман&lt;/b&gt;</pre>
+
+    <p>Без <code>g</code> <code>match</code> — то же, что <code>exec</code>: первое совпадение с группами,
+    <code>index</code> и <code>input</code>. С <code>g</code> — массив всех совпадений строками, без групп и без
+    <code>index</code>. Ничего не нашлось — <code>null</code>, не пустой массив, поэтому пишут
+    <code>text.match(re) ?? []</code>. Строку и даже число <code>match</code> превращает в шаблон, как <code>search</code>
+    дня 17, а вызов без аргумента ищет пустую строку:</p>
+
+    <pre class="code js">const digits = (s) =&gt; (s.match(/\d/g) ?? []).length;
+console.log(digits("Мары 744000"), digits("без цифр"), "65 лет".match(65)[0], "Nothing".match()[0] === "");   // 6 0 65 true</pre>
+
+    <p>Вторая строка — обещанная жадность. <code>.+</code> берёт как можно больше и отступает лишь настолько, чтобы
+    после него нашлось <code>&lt;/b&gt;</code>, — поэтому захватил от первого тега до последнего. Ленивый
+    <code>.+?</code> берёт как можно меньше и останавливается на первом <code>&lt;/b&gt;</code>. Справочник MDN
+    предлагает и третий путь, без лени: <code>&lt;b&gt;[^&lt;]+&lt;\/b&gt;</code> — «всё, кроме начала следующего
+    тега».</p>
+
+    <h2 id="matchall">10. matchAll</h2>
+
+    <p>У <code>match</code> с <code>g</code> пропадают группы, у цикла <code>exec</code> — ловушки раздела 8.
+    <code>matchAll</code> даёт и то и другое без ловушек: итератор (день 11) по результатам, каждый — как у
+    <code>exec</code>.</p>
+
+    <pre class="code js">const text = "Сдали: 12.10.2026, 19.10.2026 и 26.10.2026";
+const re = /(?&lt;day&gt;\d{2})\.(?&lt;month&gt;\d{2})/g;
+for (const m of text.matchAll(re)) console.log(m.groups.day, m.groups.month, m.index);
+console.log(text.matchAll(re).map((m) =&gt; m.groups.day).toArray(), re.lastIndex);
+console.log(Array.from("a1b22".matchAll(/\d/g), (m) =&gt; m.index), [..."12 345".matchAll(/\d+/g)].map((m) =&gt; m[0]));
+const post = "Сдали #экзамен по #JS! Завтра #каникулы";
+console.log(post.match(/#\w+/g), post.match(/#[\wа-яё]+/gi));</pre>
+
+    <div class="result-box">
+        12 10 7<br>
+        19 10 19<br>
+        26 10 32<br>
+        (3) ['12', '19', '26'] 0<br>
+        (3) [1, 3, 4] (2) ['12', '345']<br>
+        (1) ['#JS'] (3) ['#экзамен', '#JS', '#каникулы']
+    </div>
+
+    <p>Итератор <code>matchAll</code> наследует <code>Iterator.prototype</code>, поэтому у него сразу есть
+    <code>map</code> и <code>toArray</code> дня 13. Шаблон он копирует: <code>re.lastIndex</code> после перебора — по-прежнему
+    0. Третья строка закрывает задание 7 дня 17: номера всех цифр — одной строкой, а с <code>\d+</code> — целые числа,
+    а не каждая цифра. Последняя строка — практика «все хэштеги»: <code>\w</code> не знает кириллицы, поэтому в класс
+    добавлены <code>а-яё</code>. Флаг <code>g</code> обязателен: без него <code>matchAll</code> бросает
+    <code>TypeError</code>, чтобы не выдать молча одно совпадение.</p>
+
+    <p>Пять методов дня 17 и сегодняшнего вместе. Справочник MDN советует брать тот, что точнее говорит о намерении:</p>
+
+    <table>
+        <thead><tr><th>Нужно</th><th>Метод</th><th>Ответ</th></tr></thead>
+        <tbody>
+            <tr><td>есть ли совпадение</td><td><code>re.test(s)</code></td><td><code>true</code> / <code>false</code></td></tr>
+            <tr><td>где первое</td><td><code>s.search(re)</code></td><td>номер или -1</td></tr>
+            <tr><td>первое с группами</td><td><code>s.match(re)</code> без <code>g</code>, <code>re.exec(s)</code></td><td>массив или <code>null</code></td></tr>
+            <tr><td>все найденные строки</td><td><code>s.match(re)</code> с <code>g</code></td><td>массив строк или <code>null</code></td></tr>
+            <tr><td>все с группами и местами</td><td><code>s.matchAll(re)</code></td><td>итератор</td></tr>
+            <tr><td>самому двигать <code>lastIndex</code></td><td><code>re.exec(s)</code> в цикле</td><td>массив или <code>null</code></td></tr>
+        </tbody>
+    </table>
+
+    <p><code>exec</code> — самый быстрый, но по нему хуже всего видно, чего хотел автор, поэтому его оставляют для
+    последней строки таблицы. И ещё одно отличие: <code>matchAll</code> копирует шаблон, так что правка
+    <code>re.lastIndex</code> посреди перебора на него не влияет. Строку <code>matchAll</code>, как и <code>match</code>,
+    превращает в шаблон — сам, с флагом <code>g</code>: <code>"a.b".matchAll(".")</code> находит три символа.</p>
+
+    <h2 id="flags">11. Флаги m, s, y, d и модификаторы</h2>
+
+    <pre class="code js">const list = "book — книга\nwater — вода";
+console.log(/^water/.test(list), /^water/m.test(list), list.match(/^\w+/gm), list.match(/[а-я]+$/gm));
+// false true ['book', 'water'] ['книга', 'вода']
+console.log(/a.c/.test("a\nc"), /a.c/s.test("a\nc"), /(?i:Hello) world/.test("HELLO world"), /(?i:Hello) world/.test("HELLO WORLD"));
+// false true true false</pre>
+
+    <p><strong><code>m</code></strong> (multiline, свойство <code>multiline</code>) — <code>^</code> и <code>$</code>
+    срабатывают у начала и конца каждой строки текста, а не только всего текста. С <code>g</code> он перебирает
+    многострочный текст построчно — без <code>split</code>, которого у нас ещё нет. Остальное кратко:</p>
+
+    <ul>
+        <li><code>s</code> (<code>dotAll</code>) — точка берёт и перенос строки (долг дня 17);</li>
+        <li><code>y</code> (<code>sticky</code>) — искать строго с <code>lastIndex</code>, не дальше: основа разборщиков
+            текста;</li>
+        <li><code>d</code> (<code>hasIndices</code>) — у результата появляется <code>indices</code>: начало и конец
+            каждой группы;</li>
+        <li>модификатор <code>(?i:…)</code> включает или выключает <code>i</code>, <code>m</code>, <code>s</code> только
+            для части шаблона;</li>
+        <li><code>\A</code>, <code>\z</code>, <code>\Z</code> — края всего текста даже при <code>m</code>; на MDN они
+            экспериментальные, требуют флага <code>u</code>, и в Chrome 155 их нет.</li>
+    </ul>
+
+    <p>Чем <code>y</code> отличается от <code>g</code>, видно на примере справочника MDN: разборщик ищет строку в
+    кавычках ровно с текущего места.</p>
+
+    <pre class="code js">const stringPattern = /"[^"]*"/y;
+const input = `const message = "Hello world";`;
+stringPattern.lastIndex = 6;
+console.log(stringPattern.exec(input), stringPattern.lastIndex);      // null 0
+stringPattern.lastIndex = 16;
+console.log(stringPattern.exec(input)[0], stringPattern.lastIndex);   // "Hello world" 29
+const fooAt = /foo/dg;
+console.log(fooAt.exec("foo bar foo").indices[0], fooAt.exec("foo bar foo").indices[0], /foo/.exec("foo").indices);
+// [0, 3] [8, 11] undefined</pre>
+
+    <p>С места 6 стоит «message», а не кавычка, и <code>y</code> сразу сдаётся; <code>g</code> пошёл бы дальше и нашёл
+    строку на месте 16. Флаг <code>d</code> добавил <code>indices</code>: у совпадения — пара «начало, конец», и конец,
+    как у <code>slice</code>, не включается. Без флага свойства нет. А если у шаблона оба флага, <code>g</code> и
+    <code>y</code>, — <code>exec</code> ищет как <code>y</code>.</p>
+
+    <h2 id="errors">12. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Текст Chrome</th></tr></thead>
+        <tbody>
+            <tr><td><code>/(?1)/</code></td><td><code>Invalid regular expression: /(?1)/: Invalid group</code></td></tr>
+            <tr><td><code>/(?&lt;1&gt;x)/</code></td><td><code>…: Invalid capture group name</code></td></tr>
+            <tr><td><code>/(?&lt;a&gt;x)(?&lt;a&gt;y)/</code></td><td><code>…: Duplicate capture group name</code></td></tr>
+            <tr><td><code>/(?&lt;x&gt;a)\k&lt;y&gt;/</code></td><td><code>…: Invalid named capture referenced</code></td></tr>
+            <tr><td><code>"abc".matchAll(/./)</code></td><td><code>TypeError: String.prototype.matchAll called with a non-global RegExp argument</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Первые четыре — <code>SyntaxError</code> при разборе шаблона: после <code>(?</code> движок ждёт одно из
+    <code>:</code>, <code>=</code>, <code>!</code>, <code>&lt;</code> или модификатор; имя группы — правильное имя
+    переменной; имена не повторяются; ссылка — только на существующее имя. Последняя — <code>TypeError</code> при
+    вызове. Тонкость дня 17: без флага <code>u</code> и без именованных групп <code>\k&lt;x&gt;</code> — не ошибка,
+    а просто буква «k» (приложение B).</p>
+
+    <h2 id="spec">13. Раздел 22.2.7 спецификации</h2>
+
+    <p>Прочитаем <a href="https://tc39.es/ecma262/2026/#sec-abstract-operations-for-regexp-matching">22.2.7 Abstract
+    Operations for RegExp Matching</a> — то, что вчера осталось за словом RegExpExec.</p>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-regexpexec">RegExpExec</a> (22.2.7.1): прочитать у объекта свойство
+    <code>exec</code>; если это функция — вызвать её. Только если её нет — встроенный алгоритм. Значит,
+    <code>test</code>, <code>match</code> и остальные зовут <code>exec</code> через обычный поиск свойства, и подмена
+    видна сразу:</p>
+
+    <pre class="code js">const re = /a/;
+re.exec = () =&gt; null;
+console.log(re.test("a"), "a".search(re), Object.getOwnPropertyDescriptor(/x/g, "lastIndex"));
+// false -1 {value: 0, writable: true, enumerable: false, configurable: false}</pre>
+
+    <p>Примечание объясняет зачем: совместимость с кодом, написанным под прошлые редакции.
+    <a href="https://tc39.es/ecma262/2026/#sec-regexpbuiltinexec">RegExpBuiltinExec</a> (22.2.7.2) — сердце дня. Пересказ:</p>
+
+    <ol>
+        <li>Прочитать <code>lastIndex</code>; если флагов <code>g</code> и <code>y</code> нет — считать его нулём (не
+            записывая).</li>
+        <li>Повторять: если <code>lastIndex</code> больше длины строки — при <code>g</code>/<code>y</code> записать 0 и
+            вернуть <code>null</code>. Иначе приложить сопоставитель с этой позиции. Неудача: при <code>y</code> — 0 и
+            <code>null</code> сразу; иначе сдвинуться на символ (AdvanceStringIndex, 22.2.7.3) и пробовать дальше —
+            это перебор позиций со схемы дня 17.</li>
+        <li>Удача: при <code>g</code>/<code>y</code> записать в <code>lastIndex</code> конец совпадения. Собрать массив:
+            <code>index</code>, <code>input</code>, на месте 0 — подстрока по Match Record (22.2.7.5–6: начало и конец),
+            <code>groups</code> — объект без прототипа, если в шаблоне есть имена, иначе <code>undefined</code>, затем
+            группы по номерам; при флаге <code>d</code> — ещё <code>indices</code>.</li>
+    </ol>
+
+    <p>Две мелочи из соседних пунктов. AdvanceStringIndex без флагов <code>u</code>/<code>v</code> — просто «плюс один»;
+    с ними — перешагнуть пару 16-битных частей целиком (день 20). А <code>indices</code> собирается из тех же Match
+    Record: для каждой — пара «начало, конец» (GetMatchIndexPair, 22.2.7.7): у
+    <code>/(\d{2})\.(\d{2})/d.exec("Дата: 12.10")</code> <code>indices[1]</code> — <code>[6, 8]</code>.</p>
+
+    <p>Кратко о соседях. <a href="https://tc39.es/ecma262/2026/#sec-properties-of-regexp-instances">22.2.8</a>:
+    <code>lastIndex</code> — единственное собственное свойство объекта, записываемое, но неперечисляемое и
+    ненастраиваемое (день 5); примечание напоминает, что до ES2015 <code>source</code> и <code>global</code> тоже
+    были собственными. <a href="https://tc39.es/ecma262/2026/#sec-regexp-string-iterator-objects">22.2.9</a> —
+    итератор <code>matchAll</code>: хранит копию шаблона и строку, а его <code>next</code> зовёт RegExpExec и после пустого
+    совпадения сам сдвигает <code>lastIndex</code> — поэтому <code>matchAll</code> не зацикливается.
+    <a href="https://tc39.es/ecma262/2026/#sec-pattern-semantics">22.2.2</a> описывает, как шаблон превращается в
+    сопоставитель: без флагов <code>u</code>/<code>v</code> он видит строку как 16-битные части — отсюда два
+    «символа» в смайлике (день 20).</p>
+
+    <h2 id="cards">14. «Карточки»: импорт слов из текста</h2>
+
+    <p>Учитель присылает слова списком: «слово — перевод (тема)» по строке. Разберём его одним шаблоном с именованными
+    группами, флагами <code>g</code> и <code>m</code> — без <code>split</code>. Неправильная строка просто не совпадёт.</p>
+
+    <pre class="code js">const text = `book — книга (школа)
+teacher — учитель (школа)
+bread — хлеб (еда)
+плохая строка
+water — вода (еда)`;
+const LINE = /^(?&lt;word&gt;[a-z]+) — (?&lt;translation&gt;[а-яё ]+) \((?&lt;topic&gt;[а-яё]+)\)$/gm;
+const cards = [...text.matchAll(LINE)].map((m, i) =&gt; ({ id: i + 1, ...m.groups }));
+console.log(cards.length, cards.map((c) =&gt; c.word), cards[1]);
+
+function highlight(word, query) {
+  const m = word.match(new RegExp(query, "i"));
+  return m ? `${word.slice(0, m.index)}[${m[0]}]${word.slice(m.index + m[0].length)}` : word;
+}
+console.log(highlight("teacher", "EA"), highlight("bread", "ea"), highlight("book", "x"));</pre>
+
+    <div class="result-box">
+        4 (4) ['book', 'teacher', 'bread', 'water'] {id: 2, word: 'teacher', translation: 'учитель', topic: 'школа'}<br>
+        t[ea]cher br[ea]d book
+    </div>
+
+    <p><strong>Строка 1 — импорт.</strong> <code>^</code> и <code>$</code> с флагом <code>m</code> требуют, чтобы шаблон
+    занял строку текста целиком, поэтому «плохая строка» пропущена. Скобки темы экранированы — они буквальные, а
+    именованные группы — служебные. Spread дня 22 Essentials раскладывает <code>groups</code> в объект карточки.</p>
+
+    <p><strong>Строка 2 — подсветка.</strong> <code>match</code> без <code>g</code> дал и найденный текст, и
+    <code>index</code>: этого хватает, чтобы обернуть совпадение скобками. Регистр в выводе — как в слове, а не как в
+    запросе.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите из <code>LINE</code> флаг <code>m</code>. Сколько карточек станет и почему?
+        <br><br>
+        <strong>Второй.</strong> Добавьте в текст строку «book — книжка (школа)». Как найти слова, которые встретились
+        дважды, обратной ссылкой или через <code>Map.groupBy</code> дня 14?
+        <br><br>
+        <strong>Третий.</strong> Вызовите <code>highlight("teacher", "e")</code>. Почему подсвечена только первая «e» и
+        что нужно, чтобы подсветить обе (подсказка — <code>matchAll</code>)?
+    </div>
+
+    <h2 id="next">15. Что дальше</h2>
+
+    <p>За два дня шаблон научился проверять, искать, разбирать и смотреть по сторонам. Не хватает одного — менять
+    текст. Завтра, на дне 19, — <code>replace</code> и <code>replaceAll</code> с <code>$1</code>, <code>$&lt;имя&gt;</code>
+    и функцией замены, <code>split</code> по шаблону и <code>RegExp.escape</code> — экранирование запроса человека,
+    обещанное вчера. День 20 — Юникод: флаги <code>u</code> и <code>v</code> и буквы любого алфавита.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Assertions">Assertions</a></td><td>учебник: якоря, граница слова, проверки позиции</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Groups_and_backreferences">Groups and backreferences</a></td><td>учебник: группы, имена, ссылки</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Input_boundary_assertion">Input boundary assertion</a></td><td><code>^</code> и <code>$</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Word_boundary_assertion">Word boundary assertion</a></td><td><code>\b</code>, <code>\B</code> — только ASCII</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Capturing_group">Capturing group</a></td><td><code>(…)</code>, номера, <code>undefined</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Named_capturing_group">Named capturing group</a></td><td><code>(?&lt;имя&gt;…)</code>, <code>groups</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Non-capturing_group">Non-capturing group</a></td><td><code>(?:…)</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Backreference">Backreference</a></td><td><code>\1</code>, <code>\2</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Named_backreference">Named backreference</a></td><td><code>\k&lt;имя&gt;</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Lookahead_assertion">Lookahead assertion</a></td><td><code>(?=…)</code>, <code>(?!…)</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Lookbehind_assertion">Lookbehind assertion</a></td><td><code>(?&lt;=…)</code>, <code>(?&lt;!…)</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/exec">RegExp.prototype.exec()</a></td><td>массив-результат; цикл с <code>g</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/lastIndex">RegExp: lastIndex</a></td><td>откуда искать дальше; правила</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/multiline">RegExp.prototype.multiline</a></td><td>флаг <code>m</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/match">String.prototype.match()</a></td><td>с <code>g</code> и без</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll">String.prototype.matchAll()</a></td><td>итератор совпадений с группами</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-abstract-operations-for-regexp-matching">ECMA-262, 22.2.7</a></td><td>RegExpExec, RegExpBuiltinExec, Match Record</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/dotAll">RegExp.prototype.dotAll</a></td><td>флаг <code>s</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/sticky">RegExp.prototype.sticky</a></td><td>флаг <code>y</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/hasIndices">RegExp.prototype.hasIndices</a></td><td>флаг <code>d</code>, <code>indices</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Modifier">Modifier</a></td><td><code>(?i:…)</code>, <code>(?-i:…)</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Buffer_boundary_assertion">Buffer boundary assertion</a></td><td><code>\A \z \Z</code> — экспериментальные</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_group">Ошибка: invalid regexp group</a></td><td><code>Invalid group</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_capture_group_name">Ошибка: invalid capture group name</a></td><td><code>Invalid capture group name</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_duplicate_capture_group_name">Ошибка: duplicate capture group name</a></td><td><code>Duplicate capture group name</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_named_capture_reference">Ошибка: invalid named capture reference</a></td><td><code>Invalid named capture referenced</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Requires_global_RegExp">Ошибка: matchAll must be called with a global RegExp</a></td><td>без флага <code>g</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-pattern-semantics">ECMA-262, 22.2.2</a></td><td>как шаблон становится сопоставителем</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-regexp-instances">ECMA-262, 22.2.8</a></td><td><code>lastIndex</code>: атрибуты</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-regexp-string-iterator-objects">ECMA-262, 22.2.9</a></td><td>итератор <code>matchAll</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// ^ $ — начало и конец строки (с m — каждой строки текста): /^\d{6}$/ — ровно шесть цифр
+// \b \B — граница слова; только латиница! для кириллицы: (?&lt;![а-яё])слово(?![а-яё])
+// (…) — группа: квантификатор, |, запомнить;  (?:…) — без запоминания;  номера — по «(»
+// (?&lt;имя&gt;…) → m.groups.имя;   \1, \k&lt;имя&gt; — тот же текст ещё раз
+// x(?=y) x(?!y) (?&lt;=y)x (?&lt;!y)x — смотрят вправо/влево, символов не забирают
+// re.exec(s) → [всё, группы…, index, input, groups] или null; с g — с lastIndex
+// lastIndex: удача — конец совпадения, неудача — 0; test с g чередует ответы
+// s.match(re) — без g как exec; с g — строки без групп; ничего — null (?? [])
+// s.matchAll(re) — итератор exec-результатов; только с g; шаблон копирует; .map().toArray()
+// .+ жадный, .+? ленивый: разница видна в найденном тексте
+// флаги: m — построчно, s — точка и перенос, y — строго с lastIndex, d — indices</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>/\d{6}/.test("7440001")</code> — <code>true</code>, а <code>/^\d{6}$/.test("7440001")</code> —
+                <code>false</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Без якорей шаблон ищется где-то в строке. С <code>^</code> и <code>$</code> он обязан начаться в начале
+                    и закончиться в конце — ровно шесть цифр.
+                </details>
+            </li>
+            <li>Почему <code>/\bкот\b/</code> не находит «кот»?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>\b</code> — граница между <code>\w</code> и не-<code>\w</code>, а кириллица для <code>\w</code> —
+                    не символы слова. Для русского — <code>(?&lt;![а-яё])кот(?![а-яё])</code>.
+                </details>
+            </li>
+            <li>Чем <code>"a1b2".match(/\d/g)</code> отличается от <code>[..."a1b2".matchAll(/\d/g)]</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>match</code> с <code>g</code> — массив строк <code>['1', '2']</code> без групп и номеров.
+                    <code>matchAll</code> — результаты как у <code>exec</code>: с группами, <code>index</code> и
+                    <code>input</code>.
+                </details>
+            </li>
+            <li>Почему <code>/fo+/g.test</code> на одной строке отвечает <code>true</code>, потом <code>false</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    С флагом <code>g</code> поиск идёт с <code>lastIndex</code>. После первой удачи он стал 9, дальше «foo» нет —
+                    <code>false</code> и сброс в 0.
+                </details>
+            </li>
+            <li>Зачем писать <code>(?:png|jpe?g)</code>, а не <code>(png|jpe?g)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Если текст группы не нужен, незахватывающая группа не занимает номер: номера нужных групп и ссылки
+                    <code>\1</code> не съезжают.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Groups_and_backreferences">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

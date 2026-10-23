@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 15 — Set, WeakSet и операции над множествами</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #84cc16; }
+        h2 { color: #4d7c0f; background: #f7fee7; border-left-color: #84cc16; }
+        h3 { color: #3f6212; }
+        .step-number { background: #84cc16; }
+        .toc a { color: #4d7c0f; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 15</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 15 &bull; урок 1</span>
+        <h1>Set, WeakSet и операции над множествами</h1>
+        <p>Курс 2, Intermediate. Модуль «Коллекции: Map, Set, WeakMap, WeakSet» — второй, последний день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>хранить уникальные значения в <code>Set</code>: <code>add</code>, <code>has</code>, <code>delete</code>,
+                <code>size</code>, <code>clear</code>;</li>
+            <li>убирать повторы, переводить <code>Set</code> в массив и обратно и выбирать между ними;</li>
+            <li>объединять, пересекать и вычитать множества и проверять, входит ли одно в другое;</li>
+            <li>понимать, какие объекты годятся в операции над множествами, кроме самого <code>Set</code>;</li>
+            <li>отмечать объекты через <code>WeakSet</code>: «уже обработан», «уже подписан».</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Три долга дня 36 Essentials</a></li>
+            <li><a href="#basics">Пять операций</a></li>
+            <li><a href="#same">Что считается одинаковым</a></li>
+            <li><a href="#convert">Из массива и обратно</a></li>
+            <li><a href="#iterate">Перебор и порядок</a></li>
+            <li><a href="#vs-array">Set или массив</a></li>
+            <li><a href="#ops">Четыре операции над множествами</a></li>
+            <li><a href="#relations">Подмножество, надмножество, без общих</a></li>
+            <li><a href="#setlike">Похожие на множество</a></li>
+            <li><a href="#weak">WeakSet: отметка без следов</a></li>
+            <li><a href="#seen">«Уже обработан»</a></li>
+            <li><a href="#errors">Ошибки дня и Symbol.species</a></li>
+            <li><a href="#spec">Раздел 24.2 спецификации</a></li>
+            <li><a href="#cards">«Карточки»: выученное как множество</a></li>
+            <li><a href="#module">Итоги модуля и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Три долга дня 36 Essentials</h2>
+
+    <p>На дне 36 Essentials проверки «Карточек» нашли три слабых места. Одно слово попадало в <code>learned</code>
+    дважды — <code>[2, 2]</code>, и счётчик считал его за два. Две вкладки затирали прогресс друг друга. А на десяти
+    тысячах слов <code>learned.includes</code> становился заметно медленным — «ускорить можно коллекцией
+    <code>Set</code>, её проходят в курсе 2». И был приём «без повторов» дней 32–34: добавлять, только если
+    <code>includes</code> ещё не нашёл. Сегодня всё это делает одна коллекция:</p>
+
+    <pre class="code js">const learned = [2, 2];
+const names = [];
+["роман", "повесть", "роман"].forEach((g) =&gt; {
+  if (!names.includes(g)) names.push(g);
+});
+console.log(learned.length, names);   // 2 ['роман', 'повесть']
+
+const learnedSet = new Set([2, 2]);
+const genres = new Set(["роман", "повесть", "роман"]);
+console.log(learnedSet.size, genres);   // 1 Set(2) {'роман', 'повесть'}</pre>
+
+    <p><code>Set</code> — <strong>множество</strong>: коллекция, в которой каждое значение встречается не больше
+    одного раза. Справочник MDN описывает его так: <code>Set</code> хранит уникальные значения любого типа —
+    примитивы и ссылки на объекты — и перебирает их в порядке добавления. Вчерашний <code>Map</code> хранил пары,
+    у <code>Set</code> — только сами элементы. Скорость и вкладки — в разделах 6 и 14.</p>
+
+    <h2 id="basics">2. Пять операций</h2>
+
+    <pre class="code js">const topics = new Set();
+topics.add("циклы").add("массивы").add("циклы");
+console.log(topics.size, topics.has("циклы"), topics.has("классы"));      // 2 true false
+console.log(topics.delete("массивы"), topics.delete("массивы"), topics);   // true false Set(1) {'циклы'}
+topics.clear();
+console.log(topics.size);   // 0</pre>
+
+    <table>
+        <thead><tr><th>Операция</th><th>Что делает</th><th>Возвращает</th></tr></thead>
+        <tbody>
+            <tr><td><code>add(value)</code></td><td>добавить, если такого ещё нет</td><td>само множество — можно сцеплять</td></tr>
+            <tr><td><code>has(value)</code></td><td>есть ли значение</td><td><code>true</code> / <code>false</code></td></tr>
+            <tr><td><code>delete(value)</code></td><td>убрать значение</td><td><code>true</code>, если было что убирать</td></tr>
+            <tr><td><code>size</code></td><td>число элементов — свойство, не метод</td><td>число</td></tr>
+            <tr><td><code>clear()</code></td><td>убрать всё</td><td><code>undefined</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Повторный <code>add</code> ничего не меняет и ошибки не даёт: проверять «а нет ли уже» не нужно. Метода
+    <code>get</code> нет: элемент и есть то, что ищут, а на вопрос «есть ли» отвечает <code>has</code>.
+    <code>size</code> — геттер без сеттера (день 5): в строгом режиме <code>topics.size = 10</code> даст
+    <code>Cannot set property size of #&lt;Set&gt; which has only a getter</code>. Конструктор принимает любой
+    перебираемый объект (день 11): <code>new Set(["циклы", "массивы"])</code>; без <code>new</code> —
+    <code>Constructor Set requires 'new'</code>, как у <code>Map</code>. В консоли множество видно как
+    <code>Set(1) {'циклы'}</code> — без стрелок.</p>
+
+    <h2 id="same">3. Что считается одинаковым</h2>
+
+    <pre class="code js">const s = new Set([NaN, NaN, 0, -0, 1, "1"]);
+console.log(s);   // Set(4) {NaN, 0, 1, '1'}
+
+const point = { x: 10 };
+s.add(point).add({ x: 10 }).add(point);
+console.log(s.size, s.has(point), s.has({ x: 10 }));   // 6 true false</pre>
+
+    <p>Правило то же, что у ключей <code>Map</code>: алгоритм <strong>SameValueZero</strong> дня 6. Второй
+    <code>NaN</code> не добавился, хотя <code>NaN !== NaN</code>; <code>-0</code> совпал с <code>0</code>;
+    число <code>1</code> и строка <code>"1"</code> — разные элементы. Объект сравнивается по ссылке: второй
+    литерал <code>{ x: 10 }</code> — другой объект, он добавился, а <code>has</code> с третьим таким литералом его
+    не находит.</p>
+
+    <p>Отсюда совет MDN: удалить объект можно только той же ссылкой. Если ссылки нет, объект ищут перебором по
+    его свойствам — пример со страницы <code>delete</code>:</p>
+
+    <pre class="code js">const points = new Set([{ x: 10, y: 20 }, { x: 20, y: 30 }]);
+points.forEach((p) =&gt; {
+  if (p.x &gt; 10) points.delete(p);
+});
+console.log(points.size, [...points][0].x);   // 1 10</pre>
+
+    <p>Удалять текущий элемент внутри <code>forEach</code> можно — почему, увидим в спецификации.</p>
+
+    <h2 id="convert">4. Из массива и обратно</h2>
+
+    <p>Массив превращается в множество конструктором, множество в массив — spread дня 22 Essentials или
+    <code>Array.from</code> дня 19 — тот самый «результат <code>Set</code>», который день 19 Essentials обещал
+    передавать в <code>Array.from</code>. Самый частый приём — убрать повторы:</p>
+
+    <pre class="code js">const numbers = [2, 13, 4, 4, 2, 13, 13, 4, 5];
+const unique = [...new Set(numbers)];
+console.log(unique, Array.from(new Set("банан")).join(""));   // [2, 13, 4, 5] бан
+console.log(new Set(numbers).size === numbers.length);       // false — повторы есть</pre>
+
+    <p>Порядок первых появлений сохраняется, повторы выпадают. Строка перебирается по символам (день 11), поэтому
+    <code>new Set("банан")</code> — набор разных букв. Сравнение <code>size</code> с <code>length</code> — пример
+    MDN «гарантировать, что значения уникальны». Оно заменяет проверку дня 34 Essentials
+    <code>learned.filter((id, i) =&gt; learned.indexOf(id) !== i).length</code>.</p>
+
+    <p>С объектами этот приём не работает: одинаковые по содержимому объекты — разные элементы. Для них нужен
+    вчерашний <code>Map</code> с ключом-номером:</p>
+
+    <pre class="code js">const cards = [{ id: 1, word: "book" }, { id: 2, word: "bread" }, { id: 1, word: "book" }];
+console.log(new Set(cards).size);   // 3 — три разных объекта
+const byId = new Map(cards.map((c) =&gt; [c.id, c]));
+console.log([...byId.values()].map((c) =&gt; c.word));   // ['book', 'bread']</pre>
+
+    <p>И JSON — та же история, что у <code>Map</code>: <code>JSON.stringify</code> элементов множества не видит.</p>
+
+    <pre class="code js">const topics = new Set(["циклы", "классы"]);
+const text = JSON.stringify([...topics]);
+console.log(JSON.stringify(topics), text, new Set(JSON.parse(text)).has("классы"));   // {} ["циклы","классы"] true</pre>
+
+    <p>Сохраняем массивом <code>[...topics]</code>, читаем обратно через <code>new Set(JSON.parse(text))</code>.
+    Если в сохранённом массиве были повторы, при чтении они исчезнут сами.</p>
+
+    <h2 id="iterate">5. Перебор и порядок</h2>
+
+    <pre class="code js">const topics = new Set(["циклы", "массивы", "классы"]);
+for (const t of topics) console.log(t);
+topics.forEach((value, key, set) =&gt; console.log(value, key, set === topics));
+console.log([...topics.entries()][0], topics.keys === topics.values, topics[Symbol.iterator] === topics.values);
+console.log(topics.values().filter((t) =&gt; t.length &gt; 6).toArray());</pre>
+
+    <div class="result-box">
+        циклы<br>
+        массивы<br>
+        классы<br>
+        циклы циклы true<br>
+        массивы массивы true<br>
+        классы классы true<br>
+        (2) ['циклы', 'циклы'] true true<br>
+        (1) ['массивы']
+    </div>
+
+    <p>Колбэк <code>forEach</code> получает элемент <strong>дважды</strong>, третьим аргументом — само множество:
+    так, объясняет MDN, колбэк выглядит как у <code>forEach</code> массива и <code>Map</code>. По той же причине
+    <code>keys</code> — та же функция, что <code>values</code>, а <code>entries</code> выдаёт пары
+    <code>[v, v]</code>: для перебора <code>Set</code> выглядит как <code>Map</code>, у которого ключ равен значению.
+    <code>[Symbol.iterator]</code> у <code>Set</code> — это <code>values</code> (у <code>Map</code> был
+    <code>entries</code>). Итераторы — с методами дня 13.</p>
+
+    <p>Порядок — порядок первого добавления. Повторный <code>add</code> место не меняет, а удалённый и
+    добавленный заново элемент уходит в конец — пример MDN:</p>
+
+    <pre class="code js">const s = new Set([1, 5, "текст"]);
+s.add(1);
+console.log([...s]);   // [1, 5, 'текст']
+s.delete(1);
+s.add(1);
+console.log([...s]);   // [5, 'текст', 1]
+console.log(new Set([...new Set(["water", "book", "bread"])].toSorted()));   // Set(3) {'book', 'bread', 'water'}</pre>
+
+    <p>Сортировки у множества нет — собирают новое из отсортированного массива. Перебор «живой», как у
+    <code>Map</code>: добавленные во время перебора элементы будут пройдены, удалённые до своей очереди — нет.</p>
+
+    <h2 id="vs-array">6. Set или массив</h2>
+
+    <p>Второй долг дня 36 — скорость. Повторим его опыт: десять тысяч слов, пять тысяч выученных номеров.</p>
+
+    <pre class="code js">const big = [];
+for (let i = 1; i &lt;= 10000; i++) big.push({ id: i, word: `word${i}` });
+const learned = [];
+for (let i = 1; i &lt;= 5000; i++) learned.push(i);
+const learnedSet = new Set(learned);
+
+let start = Date.now();
+const left1 = big.filter((w) =&gt; !learned.includes(w.id)).length;
+const arrayMs = Date.now() - start;
+start = Date.now();
+const left2 = big.filter((w) =&gt; !learnedSet.has(w.id)).length;
+const setMs = Date.now() - start;
+console.log(left1, left2, arrayMs &gt; setMs);   // 5000 5000 true</pre>
+
+    <p>Ответ одинаковый, время — нет: в наших прогонах <code>includes</code> занимал 5–6 мс, <code>has</code> — 0–1
+    мс. Причина — в спецификации: <code>includes</code> (23.1.3.16) идёт по массиву с начала и сравнивает каждый
+    элемент, а от <code>Set</code> раздел 24.2 требует доступа «в среднем быстрее перебора», например
+    хеш-таблицей.</p>
+
+    <p>Учебник MDN «Keyed collections» добавляет ещё три довода: удалять из массива по значению —
+    <code>splice(indexOf(…), 1)</code> — медленно; <code>indexOf</code> не находит <code>NaN</code>; повторы в
+    <code>Set</code> не надо отслеживать вручную.</p>
+
+    <pre class="code js">const deck = ["book", "bread", "water"];
+deck.splice(deck.indexOf("house"), 1);
+console.log(deck, [NaN].indexOf(NaN));   // ['book', 'bread'] -1
+const deckSet = new Set(["book", "bread", "water"]);
+console.log(deckSet.delete("house"), deckSet.size, new Set([NaN]).has(NaN));   // false 3 true</pre>
+
+    <div class="mistake">
+        Ловушка дня 19 Essentials: слова <code>"house"</code> в колоде нет, <code>indexOf</code> вернул
+        <code>-1</code>, а <code>splice(-1, 1)</code> считает отрицательное начало с конца и молча удаляет
+        <strong>последнее</strong> слово. Там спасала проверка <code>i !== -1</code>; <code>delete</code> у множества
+        в таком случае просто отвечает <code>false</code>.
+    </div>
+
+    <table>
+        <thead><tr><th></th><th>Массив</th><th>Set</th></tr></thead>
+        <tbody>
+            <tr><td>повторы</td><td>хранит</td><td>отбрасывает</td></tr>
+            <tr><td>доступ по номеру</td><td><code>arr[i]</code>, <code>at</code></td><td>нет, только перебор</td></tr>
+            <tr><td>«есть ли значение»</td><td><code>includes</code> — перебором</td><td><code>has</code> — быстро</td></tr>
+            <tr><td>удалить по значению</td><td><code>splice(indexOf(x), 1)</code></td><td><code>delete(x)</code></td></tr>
+            <tr><td>сортировка, <code>map</code>, <code>filter</code></td><td>есть</td><td>через массив или итератор</td></tr>
+            <tr><td>JSON</td><td>сразу</td><td>через <code>[...set]</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Правило: важны номер и повторы — массив; главный вопрос «есть ли» — <code>Set</code>. Часто нужны оба:
+    колода — массив, выученное — множество.</p>
+
+    <h2 id="ops">7. Четыре операции над множествами</h2>
+
+    <p>Возьмём темы, которые прошли две группы, — пример для общего занятия:</p>
+
+    <pre class="code js">const groupA = new Set(["циклы", "массивы", "объекты", "классы"]);
+const groupB = new Set(["классы", "Map", "циклы"]);
+
+console.log(groupA.union(groupB));
+console.log(groupA.intersection(groupB));
+console.log(groupA.difference(groupB), groupB.difference(groupA));
+console.log(groupA.symmetricDifference(groupB));</pre>
+
+    <div class="result-box">
+        Set(5) {'циклы', 'массивы', 'объекты', 'классы', 'Map'}<br>
+        Set(2) {'классы', 'циклы'}<br>
+        Set(2) {'массивы', 'объекты'} Set(1) {'Map'}<br>
+        Set(3) {'массивы', 'объекты', 'Map'}
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 256" role="img" aria-label="Четыре диаграммы двух пересекающихся кругов a и b. union закрашивает оба круга целиком, intersection — только общую часть, difference — часть a без b, symmetricDifference — оба круга без общей части">
+            <defs>
+                <clipPath id="venn-a2"><circle cx="212" cy="74" r="36"/></clipPath>
+                <clipPath id="venn-a3"><circle cx="364" cy="74" r="36"/></clipPath>
+                <clipPath id="venn-a4"><circle cx="516" cy="74" r="36"/></clipPath>
+            </defs>
+
+            <rect x="10" y="12" width="144" height="176" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <circle cx="60" cy="74" r="36" fill="#d9f99d"/>
+            <circle cx="104" cy="74" r="36" fill="#d9f99d"/>
+            <circle cx="60" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <circle cx="104" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <text x="40" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">a</text>
+            <text x="124" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">b</text>
+            <text x="82" y="134" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">union</text>
+            <text x="82" y="151" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">a ∪ b</text>
+            <text x="82" y="170" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#4d7c0f">все 5 тем</text>
+
+            <rect x="162" y="12" width="144" height="176" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <circle cx="256" cy="74" r="36" fill="#d9f99d" clip-path="url(#venn-a2)"/>
+            <circle cx="212" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <circle cx="256" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <text x="192" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">a</text>
+            <text x="276" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">b</text>
+            <text x="234" y="134" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">intersection</text>
+            <text x="234" y="151" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">a ∩ b</text>
+            <text x="234" y="170" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#4d7c0f">классы, циклы</text>
+
+            <rect x="314" y="12" width="144" height="176" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <circle cx="364" cy="74" r="36" fill="#d9f99d"/>
+            <circle cx="408" cy="74" r="36" fill="#f8fafc" clip-path="url(#venn-a3)"/>
+            <circle cx="364" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <circle cx="408" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <text x="344" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">a</text>
+            <text x="428" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">b</text>
+            <text x="386" y="134" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">difference</text>
+            <text x="386" y="151" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">a ∖ b</text>
+            <text x="386" y="170" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#4d7c0f">массивы, объекты</text>
+
+            <rect x="466" y="12" width="144" height="176" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <circle cx="516" cy="74" r="36" fill="#d9f99d"/>
+            <circle cx="560" cy="74" r="36" fill="#d9f99d"/>
+            <circle cx="560" cy="74" r="36" fill="#f8fafc" clip-path="url(#venn-a4)"/>
+            <circle cx="516" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <circle cx="560" cy="74" r="36" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <text x="496" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">a</text>
+            <text x="580" y="79" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#3f6212">b</text>
+            <text x="538" y="134" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">symmetricDifference</text>
+            <text x="538" y="151" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">(a ∖ b) ∪ (b ∖ a)</text>
+            <text x="538" y="170" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#4d7c0f">массивы, объекты, Map</text>
+
+            <rect x="10" y="200" width="600" height="48" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="220" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">a — темы группы A: циклы, массивы, объекты, классы; b — группы B: классы, Map, циклы</text>
+            <text x="310" y="239" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Каждая операция возвращает новый Set; a и b не меняются.</text>
+        </svg>
+        <figcaption>Четыре операции на кругах Венна</figcaption>
+    </figure>
+
+    <table>
+        <thead><tr><th>Метод</th><th>Что в результате</th><th>Порядок результата</th></tr></thead>
+        <tbody>
+            <tr><td><code>a.union(b)</code></td><td>всё, что есть хотя бы в одном</td><td>сначала <code>a</code>, потом новое из <code>b</code></td></tr>
+            <tr><td><code>a.intersection(b)</code></td><td>то, что есть в обоих</td><td>как у меньшего из двух</td></tr>
+            <tr><td><code>a.difference(b)</code></td><td>то, что есть в <code>a</code>, но нет в <code>b</code></td><td>как у <code>a</code></td></tr>
+            <tr><td><code>a.symmetricDifference(b)</code></td><td>то, что есть ровно в одном</td><td>сначала <code>a</code>, потом <code>b</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>На языке задачи: <code>union</code> — все темы обеих групп; <code>intersection</code> — общие, с них начнём
+    занятие; <code>difference</code> — что группе B надо догнать, а в обратную сторону — чего не прошла A;
+    <code>symmetricDifference</code> — в чём группы расходятся. <code>difference</code>, как вычитание чисел, от
+    перестановки меняется.</p>
+
+    <p>Пересечение оказалось в порядке <code>groupB</code>, а не <code>groupA</code>: метод перебирает меньшее из двух
+    множеств. Нагляднее на числах:</p>
+
+    <pre class="code js">const big = new Set([4, 3, 2, 1]);
+const small = new Set([1, 2, 3]);
+console.log(big.intersection(small), small.intersection(big));   // Set(3) {1, 2, 3} Set(3) {1, 2, 3}</pre>
+
+    <p>До этих методов пересечение и разность писали руками — пример MDN:</p>
+
+    <pre class="code js">const a = new Set([1, 2, 3, 4]);
+const c = new Set([3, 4, 5, 6]);
+const common = new Set([...a].filter((x) =&gt; c.has(x)));
+const onlyA = new Set([...a].filter((x) =&gt; !c.has(x)));
+const all = new Set([...a, ...c]);
+console.log(common, onlyA, all.size);   // Set(2) {3, 4} Set(2) {1, 2} 6</pre>
+
+    <p>Работает, но строит промежуточный массив и всегда перебирает <code>a</code>, даже когда <code>c</code> в сто
+    раз меньше. Встроенные методы выбирают сторону сами и принимают не только <code>Set</code> (раздел 9).</p>
+
+    <h2 id="relations">8. Подмножество, надмножество, без общих</h2>
+
+    <p>Ещё три метода не строят нового множества, а отвечают <code>true</code> или <code>false</code>:</p>
+
+    <pre class="code js">const basics = new Set(["циклы", "массивы"]);
+const groupA = new Set(["циклы", "массивы", "объекты", "классы"]);
+console.log(basics.isSubsetOf(groupA), groupA.isSupersetOf(basics), groupA.isSubsetOf(basics));   // true true false
+console.log(basics.isDisjointFrom(new Set(["Map", "классы"])), basics.isSubsetOf(basics));       // true true
+
+const same = (x, y) =&gt; x.size === y.size &amp;&amp; x.isSubsetOf(y);
+console.log(new Set([1, 2, 3]) === new Set([3, 2, 1]), same(new Set([1, 2, 3]), new Set([3, 2, 1])));   // false true</pre>
+
+    <ul>
+        <li><code>a.isSubsetOf(b)</code> — <strong>подмножество</strong>: каждый элемент <code>a</code> есть в
+            <code>b</code>. «Прошла ли группа всё, что нужно для новой темы?» —
+            <code>required.isSubsetOf(passed)</code>.</li>
+        <li><code>a.isSupersetOf(b)</code> — <strong>надмножество</strong>: то же отношение с другой стороны, всё из
+            <code>b</code> есть в <code>a</code>.</li>
+        <li><code>a.isDisjointFrom(b)</code> — <strong>без общих элементов</strong>: пересечение пустое. «Не
+            повторяет ли новый модуль ничего из пройденного?»</li>
+    </ul>
+
+    <p>Подмножество здесь нестрогое, подчёркивает MDN: множества с одинаковыми элементами — подмножества друг друга.
+    Метода «равны ли» нет, а <code>===</code> сравнивает ссылки (день 6). Одинаковые множества — это одинаковый
+    размер плюс <code>isSubsetOf</code>; порядок не важен.</p>
+
+    <h2 id="setlike">9. Похожие на множество</h2>
+
+    <p>Аргумент этих семи методов не обязан быть <code>Set</code>. Алгоритм берёт у него три вещи: число
+    <code>size</code>, метод <code>has</code> и метод <code>keys</code>. MDN называет такие объекты
+    <strong>set-like</strong> — «похожими на множество». <code>Map</code> — похож: у него есть и <code>size</code>, и
+    <code>has(key)</code>, и <code>keys()</code>. В операциях он ведёт себя как множество своих ключей:</p>
+
+    <pre class="code js">const present = new Set(["Аман", "Мерет", "Айна"]);
+const marks = new Map([["Аман", 5], ["Сапар", 4], ["Айна", 3]]);
+console.log(present.intersection(marks), present.difference(marks));   // Set(2) {'Аман', 'Айна'} Set(1) {'Мерет'}
+present.union(["Сапар"]);
+// TypeError: The .size property is NaN</pre>
+
+    <p>Мерет пришёл, но оценки не получил — разность нашла его без единого цикла. Почему алгоритм зовёт
+    <code>keys()</code>, а не <code>[Symbol.iterator]</code>? Ради <code>Map</code>: его итератор выдаёт пары, а
+    <code>has</code> принимает ключ, объясняет MDN. Массив не годится: у него нет <code>size</code> и
+    <code>has</code> (<code>undefined</code> превращается в <code>NaN</code> — отсюда текст ошибки), а
+    <code>keys()</code> выдаёт номера. Массив сначала превращают в множество:
+    <code>present.union(new Set(["Сапар"]))</code>.</p>
+
+    <p>Похожий объект можно написать самому. Вот «все чётные числа» — бесконечное множество:</p>
+
+    <pre class="code js">const evens = {
+  size: Infinity,
+  has: (n) =&gt; n % 2 === 0,
+  *keys() {
+    for (let n = 0; ; n += 2) yield n;
+  },
+};
+const grades = new Set([5, 4, 3, 2]);
+console.log(grades.intersection(evens), grades.difference(evens), grades.isSubsetOf(evens));   // Set(2) {4, 2} Set(2) {5, 3} false</pre>
+
+    <p><code>grades</code> меньше, поэтому алгоритм перебрал его и спрашивал <code>evens.has</code>; бесконечный
+    генератор <code>keys</code> (день 12) даже не был вызван. А <code>grades.union(evens)</code> перебирает
+    <code>keys</code> всегда и не закончится никогда — вкладка зависнет, как от <code>[...бесконечный]</code>
+    дня 12.</p>
+
+    <h2 id="weak">10. WeakSet: отметка без следов</h2>
+
+    <p><code>WeakSet</code> («слабое множество») относится к <code>Set</code> так же, как <code>WeakMap</code> дня 14
+    к <code>Map</code>. Он держит свои элементы слабо: если до объекта больше никак не добраться, сборщик мусора
+    забирает его, и элемент исчезает из коллекции.</p>
+
+    <pre class="code js">const ws = new WeakSet();
+const aman = { name: "Аман" };
+const meret = { name: "Мерет" };
+ws.add(aman).add(meret);
+console.log(ws.has(aman), ws.delete(aman), ws.has(aman), ws.has(meret));   // true true false true
+console.log(ws.has("Аман"), ws.size, typeof ws.forEach);                   // false undefined undefined
+ws.add(1);
+// TypeError: Invalid value used in weak set</pre>
+
+    <ul>
+        <li><strong>Элемент — только объект или символ не из реестра.</strong> Причина та же, что у ключей
+            <code>WeakMap</code>: у строки и числа нет «времени жизни», за которым следить. <code>Symbol("x")</code>
+            можно, и даже встроенный <code>Symbol.iterator</code>; <code>Symbol.for("x")</code> — нельзя.
+            <code>has</code> и <code>delete</code> с примитивом не падают, а отвечают <code>false</code>.</li>
+        <li><strong>Нет <code>size</code>, перебора и <code>clear</code>.</strong> Список элементов зависел бы от
+            того, успел ли поработать сборщик. Своих методов у прототипа три: <code>add</code>, <code>has</code>,
+            <code>delete</code>.</li>
+        <li><strong>Сравнение — по ссылке.</strong> MDN замечает: для объектов и символов SameValueZero — то же,
+            что <code>===</code>.</li>
+    </ul>
+
+    <p><code>WeakMap</code> хранит <em>данные</em> об объекте — попытки, кеш расчёта; <code>WeakSet</code> — один
+    бит: отмечен объект или нет. Применений у него немного, говорит учебник MDN: отмечать объекты, не держа их в
+    памяти, например элементы страницы.</p>
+
+    <h2 id="seen">11. «Уже обработан»</h2>
+
+    <p>День 23 Essentials предупреждал: в настоящих данных цикл получается легко — «студент знает свою группу, а
+    группа — список студентов». <code>JSON.stringify</code> на таком падает, а обход вложенных объектов ходит по кругу
+    без конца. Пример MDN «Detecting circular references» на наших данных:</p>
+
+    <pre class="code js">const group = { title: "JS-1", students: [] };
+const aman = { name: "Аман", group };
+const meret = { name: "Мерет", group };
+group.students.push(aman, meret);
+
+function walk(value, visit, seen = new WeakSet()) {
+  if (typeof value !== "object" || value === null || seen.has(value)) return;
+  seen.add(value);
+  visit(value);
+  for (const inner of Object.values(value)) walk(inner, visit, seen);
+}
+
+let count = 0;
+walk(group, () =&gt; count++);
+console.log(count);   // 4 — группа, массив, Аман, Мерет</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 252" role="img" aria-label="Объекты group, group.students, aman и meret ссылаются друг на друга по кругу: у aman и meret свойство group снова ведёт к group. Номера показывают порядок, в котором walk добавляет объекты в seen. Обратные ссылки ведут к объекту, который уже отмечен, и обход на них останавливается">
+            <rect x="30" y="70" width="140" height="44" rx="8" fill="#f7fee7" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="100" y="88" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">1. group</text>
+            <text x="100" y="104" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#3f6212">{ title, students }</text>
+            <path d="M 170 92 L 230 92" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <path d="M 240 92 L 230 87 L 230 97 Z" fill="#65a30d"/>
+
+            <rect x="240" y="70" width="140" height="44" rx="8" fill="#f7fee7" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="310" y="88" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">2. students</text>
+            <text x="310" y="104" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#3f6212">[aman, meret]</text>
+            <path d="M 380 82 L 440.5 63" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <path d="M 450 60 L 442 67.8 L 439 58.2 Z" fill="#65a30d"/>
+            <path d="M 380 102 L 440.8 126.1" fill="none" stroke="#65a30d" stroke-width="1.5"/>
+            <path d="M 450 130 L 438.8 130.7 L 442.8 121.5 Z" fill="#65a30d"/>
+
+            <rect x="450" y="40" width="140" height="40" rx="8" fill="#f7fee7" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="520" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">3. aman</text>
+            <text x="520" y="71" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#3f6212">{ name, group }</text>
+            <rect x="450" y="110" width="140" height="40" rx="8" fill="#f7fee7" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="520" y="126" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">4. meret</text>
+            <text x="520" y="141" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#3f6212">{ name, group }</text>
+
+            <path d="M 520 40 C 520 8, 100 8, 100 60" fill="none" stroke="#991b1b" stroke-width="1.5" stroke-dasharray="5 4"/>
+            <path d="M 100 70 L 95 60 L 105 60 Z" fill="#991b1b"/>
+            <text x="310" y="40" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">aman.group — уже в seen, стоп</text>
+            <path d="M 520 150 C 520 182, 100 182, 100 124" fill="none" stroke="#991b1b" stroke-width="1.5" stroke-dasharray="5 4"/>
+            <path d="M 100 114 L 95 124 L 105 124 Z" fill="#991b1b"/>
+            <text x="310" y="190" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#991b1b">meret.group — уже в seen, стоп</text>
+
+            <rect x="14" y="200" width="592" height="46" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="219" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Номер — порядок seen.add. Отметки лежат в WeakSet, сами объекты не меняются.</text>
+            <text x="310" y="237" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Без seen: group → students → aman → group → … — переполнение стека.</text>
+        </svg>
+        <figcaption>Обход по кругу и отметки <code>seen</code></figcaption>
+    </figure>
+
+    <p>Без строки <code>seen.has(value)</code> обход пошёл бы по кругу и упал бы с <code>RangeError: Maximum call
+    stack size exceeded</code>. Параметр по умолчанию <code>seen = new WeakSet()</code> создаёт множество отметок
+    при первом вызове, рекурсивные вызовы передают его дальше. <code>deepFreeze</code> дня 6 решал ту же задачу
+    проверкой <code>isFrozen</code>, но та отметка меняла сам объект; <code>WeakSet</code> отмечает снаружи. Число
+    отметок и их порядок не нужны, нужен только ответ «был ли» — поэтому MDN и советует здесь
+    <code>WeakSet</code>.</p>
+
+    <p>Второе применение — «уже подписан». День 32 Essentials предупреждал, что функция, вызванная из
+    <code>render</code>, дописывает кнопки после каждого действия; с подпиской на события то же самое — второй
+    <code>addEventListener</code> на ту же кнопку, и один щелчок считается дважды:</p>
+
+    <pre class="code js">const bound = new WeakSet();
+let clicks = 0;
+function bindOnce(button) {
+  if (bound.has(button)) return false;
+  bound.add(button);
+  button.addEventListener("click", () =&gt; clicks++);
+  return true;
+}
+
+const button = document.createElement("button");
+console.log(bindOnce(button), bindOnce(button));   // true false
+button.click();
+console.log(clicks);   // 1 — один слушатель, а не два</pre>
+
+    <p>Когда кнопку уберут со страницы и забудут, её отметка уйдёт вместе с ней — это тот случай, о котором учебник
+    MDN говорит «не будет утечки памяти».</p>
+
+    <h2 id="errors">12. Ошибки дня и Symbol.species</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Текст Chrome</th></tr></thead>
+        <tbody>
+            <tr><td><code>Set()</code>, <code>WeakSet()</code></td><td><code>Constructor Set requires 'new'</code></td></tr>
+            <tr><td><code>new Set(5)</code></td><td><code>number 5 is not iterable (cannot read property Symbol(Symbol.iterator))</code></td></tr>
+            <tr><td><code>ws.add(1)</code>, <code>ws.add(Symbol.for("x"))</code>, <code>new WeakSet([1])</code></td><td><code>Invalid value used in weak set</code></td></tr>
+            <tr><td><code>for (const x of ws)</code></td><td><code>ws is not iterable</code></td></tr>
+            <tr><td><code>s.union([1, 2])</code>, <code>s.union(new WeakSet())</code></td><td><code>The .size property is NaN</code></td></tr>
+            <tr><td><code>s.union({ size: -1, … })</code></td><td><code>RangeError: '-1' is an invalid size</code></td></tr>
+            <tr><td><code>s.union("ab")</code></td><td><code>Set.prototype.union argument must be an object</code></td></tr>
+            <tr><td><code>s.size = 10</code> в строгом режиме</td><td><code>Cannot set property size of #&lt;Set&gt; which has only a getter</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Ошибку <code>WeakSet</code> разбирает та же страница ошибок MDN, что и ошибку ключа <code>WeakMap</code> на
+    дне 14. Все ошибки, кроме <code>'-1' is an invalid size</code>, — <code>TypeError</code>.</p>
+
+    <p><code>Set[Symbol.species]</code> — геттер, который возвращает сам конструктор, как у <code>Map</code>. MDN
+    отмечает: ни один метод <code>Set</code> его не использует. Операции над множествами создают результат
+    напрямую — обычный <code>Set</code>, даже у наследника:</p>
+
+    <pre class="code js">class TopicSet extends Set {
+  add(value) {
+    console.log("add", value);
+    return super.add(value);
+  }
+}
+const t = new TopicSet(["циклы", "классы"]);
+const u = t.union(new Set(["Map"]));
+console.log(u instanceof TopicSet, u);</pre>
+
+    <div class="result-box">
+        add циклы<br>
+        add классы<br>
+        false Set(3) {'циклы', 'классы', 'Map'}
+    </div>
+
+    <p>Конструктор наследника вызвал переопределённый <code>add</code> для каждого элемента — так же, как
+    конструктор <code>Map</code> звал <code>set</code> на дне 14. А <code>union</code> не позвал ни
+    <code>add</code>, ни <code>species</code>: результат — не <code>TopicSet</code>. По-настоящему
+    <code>Symbol.species</code> работает у массивов (день 10).</p>
+
+    <h2 id="spec">13. Раздел 24.2 спецификации</h2>
+
+    <p>Прочитаем <a href="https://tc39.es/ecma262/2026/#sec-set-objects">24.2 Set Objects</a>. Вводная часть
+    повторяет вчерашнюю: каждое различное значение встречается не больше одного раза, различаются они по
+    SameValueZero, доступ — быстрее перебора, а структура данных в тексте описывает поведение, а не способ
+    программировать.</p>
+
+    <p>Эта структура — слот <code>[[SetData]]</code>: <strong>список значений</strong>, без пар — в отличие от
+    <code>[[MapData]]</code>. Методы — пересказом:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-set.prototype.add">add</a> (24.2.4.1): превратить
+            <code>-0</code> в <code>+0</code> (CanonicalizeKeyedCollectionKey дня 14); пройти список — нашлось равное
+            по SameValue, вернуть множество; нет — дописать значение <strong>в конец</strong>. После замены
+            <code>-0</code> сравнение SameValue и даёт поведение SameValueZero.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-set.prototype.delete">delete</a> (24.2.4.4) помечает
+            найденный элемент особым значением <em>empty</em>, а
+            <a href="https://tc39.es/ecma262/2026/#sec-set.prototype.clear">clear</a> (24.2.4.2) помечает так все.
+            Примечание к <code>clear</code>: сам список сохраняется, потому что посреди него могут стоять на паузе
+            итераторы. <code>size</code> (24.2.4.14) считает непустые элементы.</li>
+        <li><code>forEach</code> (24.2.4.7) и итераторы идут по списку номером, пропуская <em>empty</em>, и на каждом
+            шаге заново смотрят длину — отсюда «живой» перебор. Итератор <code>Set</code> (24.2.6) — снова генератор
+            спецификации, с меткой <code>%SetIteratorPrototype%</code> и <code>Iterator.prototype</code> в цепочке.
+            <code>keys</code> и <code>[Symbol.iterator]</code> (24.2.4.13, 24.2.4.18) — та же функция, что
+            <code>values</code>; <code>entries</code> выдаёт <code>[e, e]</code>.</li>
+    </ul>
+
+    <p>Опыт с примечанием к <code>clear</code>: итератор на паузе переживает очистку и видит новый элемент.</p>
+
+    <pre class="code js">const s = new Set([1, 2, 3]);
+const it = s.values();
+console.log(it.next().value);   // 1
+s.clear();
+s.add(4);
+console.log(it.next().value, it.next().done);   // 4 true</pre>
+
+    <p>Теперь операции над множествами. Раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-abstract-operations-for-set-objects">24.2.1</a> вводит
+    <strong>Set Record</strong> — запись с четырьмя полями: <code>[[SetObject]]</code> (сам объект),
+    <code>[[Size]]</code>, <code>[[Has]]</code>, <code>[[Keys]]</code>. Её строит операция
+    <a href="https://tc39.es/ecma262/2026/#sec-getsetrecord">GetSetRecord</a> (24.2.1.2): аргумент не объект —
+    <code>TypeError</code>; прочитать <code>size</code> и превратить в число, <code>NaN</code> —
+    <code>TypeError</code>; меньше нуля — <code>RangeError</code>; прочитать <code>has</code> и <code>keys</code>,
+    не функции — <code>TypeError</code>. Это и есть все ошибки раздела 12 про аргумент. А <code>this</code> должен
+    быть настоящим <code>Set</code> со слотом <code>[[SetData]]</code>, иначе <code>Method Set.prototype.union called
+    on incompatible receiver</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 294" role="img" aria-label="Алгоритм intersection: у this берётся список SetData, у other — запись Set Record с полями Size, Has и Keys. Если размер this не больше Size, перебирается this и вызывается other.has; иначе перебирается other.keys и проверяется наличие в this. Результат — новый обычный Set в порядке перебранного, меньшего множества">
+            <rect x="14" y="14" width="290" height="70" rx="10" fill="#f7fee7" stroke="#84cc16" stroke-width="2"/>
+            <text x="159" y="33" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#3f6212">this = groupA: [[SetData]]</text>
+            <rect x="24" y="44" width="64" height="28" rx="6" fill="#ffffff" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="56" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#3f6212">циклы</text>
+            <rect x="94" y="44" width="64" height="28" rx="6" fill="#ffffff" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="126" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#3f6212">массивы</text>
+            <rect x="164" y="44" width="64" height="28" rx="6" fill="#ffffff" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="196" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#3f6212">объекты</text>
+            <rect x="234" y="44" width="64" height="28" rx="6" fill="#ffffff" stroke="#84cc16" stroke-width="1.5"/>
+            <text x="266" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#3f6212">классы</text>
+
+            <rect x="316" y="14" width="290" height="70" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="461" y="33" text-anchor="middle" font-family="Consolas, monospace" font-size="11" font-weight="700" fill="#1d4ed8">other = groupB → GetSetRecord</text>
+            <rect x="326" y="44" width="86" height="28" rx="6" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="369" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">[[Size]]: 3</text>
+            <rect x="418" y="44" width="86" height="28" rx="6" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="461" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">[[Has]]: has</text>
+            <rect x="510" y="44" width="86" height="28" rx="6" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
+            <text x="553" y="62" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#1d4ed8">[[Keys]]: keys</text>
+
+            <path d="M 159 84 L 230 104" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <path d="M 461 84 L 390 104" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <rect x="170" y="104" width="280" height="46" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="123" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">SetDataSize(this) ≤ [[Size]] ?</text>
+            <text x="310" y="141" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">у groupA 4, у groupB 3 — нет</text>
+
+            <path d="M 200 150 L 159 170" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="166" y="158" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">да</text>
+            <path d="M 420 150 L 461 170" fill="none" stroke="#3b82f6" stroke-width="2"/>
+            <text x="458" y="158" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" font-weight="700" fill="#1d4ed8">нет</text>
+
+            <rect x="14" y="170" width="290" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <text x="159" y="192" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">перебрать список this;</text>
+            <text x="159" y="210" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">для каждого e вызвать other.has(e)</text>
+            <rect x="316" y="170" width="290" height="56" rx="8" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="461" y="192" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#1d4ed8">перебрать other.keys(); оставить то,</text>
+            <text x="461" y="210" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#1d4ed8">что есть в this → классы, циклы</text>
+
+            <rect x="14" y="240" width="592" height="46" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="259" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Результат — новый обычный Set: OrdinaryObjectCreate(%Set.prototype%).</text>
+            <text x="310" y="277" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">Перебирается меньшее множество — в его порядке и выходит результат.</text>
+        </svg>
+        <figcaption>Как <code>groupA.intersection(groupB)</code> выбирает, что перебирать</figcaption>
+    </figure>
+
+    <p>Алгоритм <a href="https://tc39.es/ecma262/2026/#sec-set.prototype.intersection">intersection</a> (24.2.4.9)
+    сравнивает размеры. Если <code>this</code> не больше — идёт по своему списку и для каждого элемента зовёт
+    <code>other.has</code>; иначе перебирает <code>other.keys()</code> и проверяет каждый ключ в своём списке.
+    Так устроены и <code>difference</code>, и <code>isDisjointFrom</code>; <code>isSubsetOf</code> при
+    <code>this</code> больше <code>other</code> сразу отвечает <code>false</code>, <code>isSupersetOf</code> — наоборот.
+    А <code>union</code> и <code>symmetricDifference</code> копируют список <code>this</code> и всегда перебирают
+    <code>other.keys()</code> — потому <code>union</code> с бесконечными <code>evens</code> и не кончается. Результат
+    создаётся напрямую с прототипом <code>%Set.prototype%</code> — вот почему наследник получил обычный
+    <code>Set</code>. Подглядим, что именно зовёт алгоритм:</p>
+
+    <pre class="code js">const calls = [];
+const other = {
+  size: 2,
+  has(x) {
+    calls.push(`has(${x})`);
+    return x === 1;
+  },
+  keys() {
+    calls.push("keys()");
+    return [1, 9].values();
+  },
+};
+new Set([1]).intersection(other);
+new Set([1, 2, 3]).intersection(other);
+new Set([1]).union(other);
+console.log(calls);   // ['has(1)', 'keys()', 'keys()']</pre>
+
+    <p>Множество из одного элемента меньше — вызван <code>has</code>; из трёх больше — <code>keys</code>;
+    <code>union</code> — <code>keys</code> всегда.</p>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-weakset-objects">24.4</a> про <code>WeakSet</code> короче.
+    Его вводная часть объясняет, почему нет перебора: движок может удалять недостижимые элементы с любой задержкой,
+    и если бы программа могла это заметить, её поведение стало бы непредсказуемым. Поэтому узнать про элемент
+    можно, только предъявив его самого. <code>add</code> при значении, которое нельзя держать слабо
+    (CanBeHeldWeakly дня 14), бросает <code>TypeError</code>, а <code>has</code> и <code>delete</code> — просто
+    возвращают <code>false</code>.</p>
+
+    <p>Для сравнения — как спецификация описывает массив (раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-array-objects">23.1</a>, кратко). Массив — особый (exotic) объект, у
+    которого по-особому ведут себя свойства-номера (10.4.2): элементы — это свойства с именами
+    <code>"0"</code>, <code>"1"</code>…, а <code>length</code> экземпляра (23.1.4.1) — свойство-данные, которое нельзя
+    перечислить и удалить. Конструктор (23.1.1) работает и без <code>new</code> — <code>Array(3)</code> то же, что
+    <code>new Array(3)</code> дня 19 Essentials. <code>Array.prototype</code> сам — массив, ради совместимости со
+    старым кодом. Итераторы массива (23.1.5) мы читали на дне 11.</p>
+
+    <pre class="code js">console.log(Object.keys(["a", "b"]), Array(3).length, Array.isArray(Array.prototype));   // ['0', '1'] 3 true
+console.log(Object.getOwnPropertyDescriptor(["a"], "length"));
+// {value: 1, writable: true, enumerable: false, configurable: false}</pre>
+
+    <p>У множества нет ни номеров, ни <code>length</code>: только «есть или нет» — и потому быстрый
+    <code>has</code>.</p>
+
+    <h2 id="cards">14. «Карточки»: выученное как множество</h2>
+
+    <p>Закроем долги дня 36. Номера выученных — множество: повтор невозможен. Колода — разность «все минус
+    выученные». Прогресс двух вкладок не затирается, а объединяется. Темы — множества номеров, и «тема выучена» —
+    это <code>isSubsetOf</code>. Карточки, показанные в этой сессии, отмечаем в <code>WeakSet</code>.</p>
+
+    <pre class="code js">const cards = [
+  { id: 1, word: "book", translation: "книга", topic: "школа" },
+  { id: 2, word: "teacher", translation: "учитель", topic: "школа" },
+  { id: 3, word: "bread", translation: "хлеб", topic: "еда" },
+  { id: 4, word: "water", translation: "вода", topic: "еда" },
+  { id: 5, word: "house", translation: "дом", topic: "дом" },
+];
+const allIds = new Set(cards.map((card) =&gt; card.id));
+const topicIds = new Map(Map.groupBy(cards, (card) =&gt; card.topic).entries().map(([topic, list]) =&gt; [topic, new Set(list.map((c) =&gt; c.id))]));
+
+const learnedA = new Set([1, 3]);                 // память вкладки A
+learnedA.add(3);                                   // «Знаю» дважды — номер один
+const savedB = new Set(JSON.parse("[1,4]"));       // что записала в хранилище вкладка B
+
+const learned = learnedA.union(savedB);            // не затираем, а объединяем
+const deck = allIds.difference(learned);           // что ещё учить
+console.log(learnedA, learned, deck);
+console.log(learnedA.symmetricDifference(savedB), JSON.stringify([...learned]));
+console.log(new Map(topicIds.entries().map(([topic, ids]) =&gt; [topic, `${ids.intersection(learned).size} из ${ids.size}`])));
+console.log([...topicIds.keys()].filter((topic) =&gt; topicIds.get(topic).isSubsetOf(learned)));
+
+const shown = new WeakSet();                       // показано в этой сессии
+function nextCard() {
+  const card = cards.find((c) =&gt; deck.has(c.id) &amp;&amp; !shown.has(c));
+  if (!card) return "колода пройдена";
+  shown.add(card);
+  return card.word;
+}
+console.log(nextCard(), nextCard(), nextCard());</pre>
+
+    <div class="result-box">
+        Set(2) {1, 3} Set(3) {1, 3, 4} Set(2) {2, 5}<br>
+        Set(2) {3, 4} [1,3,4]<br>
+        Map(3) {'школа' =&gt; '1 из 2', 'еда' =&gt; '2 из 2', 'дом' =&gt; '0 из 1'}<br>
+        (1) ['еда']<br>
+        teacher house колода пройдена
+    </div>
+
+    <p><strong>Строка 1 — без повторов и без потерь.</strong> Второй <code>add(3)</code> ничего не добавил. Запись
+    вкладки B <code>[1, 4]</code> раньше затёрла бы память A, а <code>union</code> сохранил и то и другое. Колода —
+    всё, чего нет в выученном.</p>
+
+    <p><strong>Строка 2 — где вкладки расходятся.</strong> <code>symmetricDifference</code> — номера, о которых знает
+    только одна вкладка. Оговорка: если в B нажали «Начать сначала», <code>union</code> вернёт стёртый прогресс из
+    A — объединение не умеет «удалять».</p>
+
+    <p><strong>Строки 3 и 4 — темы.</strong> Пересечение темы с выученным даёт «сколько из скольких»,
+    <code>isSubsetOf</code> — выучена ли тема целиком.</p>
+
+    <p><strong>Строка 5 — показанные.</strong> <code>nextCard</code> берёт первую карточку колоды, которой нет в
+    <code>shown</code>, и отмечает её; сами карточки не меняются.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Замените <code>learnedA.union(savedB)</code> на <code>savedB</code> — так работала
+        запись дня 36. Какие строки изменились и какой выученный номер пропал?
+        <br><br>
+        <strong>Второй.</strong> Добавьте после <code>learnedA.add(3)</code> строку <code>learnedA.add("3")</code> —
+        так бывает, когда номер пришёл из <code>dataset</code> кнопки (день 25 Essentials). Каким стал
+        <code>learnedA</code> и почему?
+        <br><br>
+        <strong>Третий.</strong> Замените <code>new WeakSet()</code> на <code>new Set()</code>. Вывод тот же — когда
+        разница всё-таки появится?
+    </div>
+
+    <h2 id="module">15. Итоги модуля и что дальше</h2>
+
+    <p>Модуль «Коллекции: Map, Set, WeakMap, WeakSet» закончен. Два дня — две пары коллекций:</p>
+
+    <table>
+        <thead><tr><th>День</th><th>Главная мысль</th><th>В спецификации</th></tr></thead>
+        <tbody>
+            <tr><td>14</td><td><code>Map</code> — ключи любых типов, порядок вставки; <code>WeakMap</code> — данные об объекте, пока он жив</td><td>24.1</td></tr>
+            <tr><td>15</td><td><code>Set</code> — уникальные значения и операции над множествами; <code>WeakSet</code> — отметка об объекте</td><td>24.2</td></tr>
+        </tbody>
+    </table>
+
+    <p>День 16 — мини-проект «журнал группы»: весь день руками. Ученик и группа — классы с приватными полями и
+    геттерами дней 8–9, ученики — в <code>Map</code>, темы — в <code>Set</code>, группа перебирается
+    <code>for...of</code> через генератор дня 12, настройки заморожены (день 6). С дня 17 начинается модуль «Строки и
+    регулярные выражения».</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set">Set</a></td><td>уникальные значения; операции; похожие на множество; примеры</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/Set">Set() constructor</a></td><td>из перебираемого объекта; только с <code>new</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/add">Set.prototype.add()</a></td><td>добавить, если нет; возвращает множество</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/has">Set.prototype.has()</a></td><td>есть ли значение</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/delete">Set.prototype.delete()</a></td><td>убрать; <code>true</code>, если было</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/clear">Set.prototype.clear()</a></td><td>убрать всё</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/size">Set.prototype.size</a></td><td>число элементов; только для чтения</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/forEach">Set.prototype.forEach()</a></td><td>колбэк (элемент, элемент, множество)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/union">Set.prototype.union()</a></td><td>объединение</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/intersection">Set.prototype.intersection()</a></td><td>пересечение; порядок меньшего</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/difference">Set.prototype.difference()</a></td><td>разность</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/symmetricDifference">Set.prototype.symmetricDifference()</a></td><td>то, что ровно в одном</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/isSubsetOf">Set.prototype.isSubsetOf()</a></td><td>подмножество, нестрогое</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/isSupersetOf">Set.prototype.isSupersetOf()</a></td><td>надмножество</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/isDisjointFrom">Set.prototype.isDisjointFrom()</a></td><td>нет общих элементов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet">WeakSet</a></td><td>слабые элементы; отметки; обход с циклами</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/WeakSet">WeakSet() constructor</a></td><td>из перебираемого объекта; только с <code>new</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/add">WeakSet.prototype.add()</a></td><td>объект или символ не из реестра</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/has">WeakSet.prototype.has()</a></td><td>отмечен ли объект</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/delete">WeakSet.prototype.delete()</a></td><td>снять отметку</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-set-objects">ECMA-262, 24.2 Set Objects</a></td><td><code>[[SetData]]</code>; GetSetRecord; выбор стороны</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/values">Set.prototype.values()</a></td><td>итератор элементов</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/keys">Set.prototype.keys()</a></td><td>другое имя <code>values</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/entries">Set.prototype.entries()</a></td><td>итератор пар <code>[v, v]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/Symbol.iterator">Set.prototype[Symbol.iterator]()</a></td><td>то же, что <code>values</code>; <code>for...of</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/Symbol.species">Set[Symbol.species]</a></td><td>конструктор для производных; методами <code>Set</code> не используется</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-abstract-operations-for-set-objects">ECMA-262, 24.2.1–24.2.6</a></td><td>Set Record, конструктор, его свойства, прототип, экземпляры, итераторы</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-weakset-objects">ECMA-262, 24.4 и 24.4.1–24.4.4</a></td><td><code>WeakSet</code>: почему нет перебора; CanBeHeldWeakly</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-array-objects">ECMA-262, 23.1 и 23.1.1–23.1.5</a></td><td>массив: особый объект, конструктор, прототип, <code>length</code>, итераторы</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// const s = new Set([1, 2, 2]);   // Set(2) {1, 2}; без new — TypeError
+// s.add(x).add(y)   s.has(x)   s.delete(x)   s.size   s.clear()   — get нет
+// одинаковые — по SameValueZero: NaN находится, -0 = 0, объект — по ссылке
+// [...new Set(arr)] — без повторов;   new Set(arr).size === arr.length — повторов нет
+// for (const x of s)   s.forEach((x) =&gt; …)   keys = values = [Symbol.iterator]; entries — [x, x]
+// JSON.stringify(s) — "{}";  сохранять JSON.stringify([...s]), читать new Set(JSON.parse(text))
+// a.union(b)  a.intersection(b)  a.difference(b)  a.symmetricDifference(b) — новый Set
+// a.isSubsetOf(b)  a.isSupersetOf(b)  a.isDisjointFrom(b) — true / false
+// равны: a.size === b.size &amp;&amp; a.isSubsetOf(b);   a === b — сравнение ссылок
+// b — Set или похожий: size, has(), keys(); Map подходит, массив — нет
+// WeakSet: только объекты и Symbol() (не Symbol.for); add / has / delete; нет size и перебора
+// WeakSet — отметка «уже был»: обход с циклами, кнопка, подписанная один раз</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Как одной строкой убрать повторы из массива и как проверить, были ли они?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>[...new Set(arr)]</code> — без повторов, в порядке первых появлений. Повторов не было, если
+                    <code>new Set(arr).size === arr.length</code>.
+                </details>
+            </li>
+            <li>Почему <code>new Set([{ id: 1 }, { id: 1 }]).size</code> — 2?
+                <details class="answer"><summary>Ответ</summary>
+                    Объекты сравниваются по ссылке, а это два разных объекта. Убрать повторы по содержимому помогает
+                    <code>Map</code> с ключом <code>id</code>.
+                </details>
+            </li>
+            <li>Чем <code>a.difference(b)</code> отличается от <code>a.symmetricDifference(b)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Разность — то, что есть в <code>a</code> и нет в <code>b</code>; от перестановки результат меняется.
+                    Симметричная разность — то, что есть ровно в одном из двух, с обеих сторон.
+                </details>
+            </li>
+            <li>Можно ли передать в <code>union</code> массив? А <code>Map</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Массив — нет: у него нет <code>size</code> и <code>has</code>, будет <code>The .size property is
+                    NaN</code>. <code>Map</code> — да: у него есть <code>size</code>, <code>has</code> и <code>keys</code>,
+                    и он работает как множество своих ключей.
+                </details>
+            </li>
+            <li>Зачем обходу объектов <code>WeakSet</code>, если можно ставить отметку свойством на самом объекте?
+                <details class="answer"><summary>Ответ</summary>
+                    Отметка-свойство меняет чужие объекты и попадает в JSON и <code>Object.keys</code>.
+                    <code>WeakSet</code> отмечает снаружи и не держит объекты в памяти.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 24 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #06b6d4; }
+        h2 { color: #0e7490; background: #ecfeff; border-left-color: #06b6d4; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 24</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 24. Temporal: Instant, ZonedDateTime и часовые пояса</h1>
+    <p class="subtitle">Выжимка лекции: момент, момент с поясом, мост от <code>Date</code>, смещения и перевод часов.</p>
+
+    <h2>Главное</h2>
+
+    <pre class="code js">new Date(2026, 9, 12, 14, 30).toTemporalInstant().toString();                      // "2026-10-12T09:30:00Z"
+Temporal.Instant.from("2026-10-12T09:30Z").toZonedDateTimeISO("Europe/Berlin").hour;  // 11
+Temporal.ZonedDateTime.from("2026-10-12T14:30[Asia/Ashgabat]").offset;              // "+05:00"
+Temporal.ZonedDateTime.from("2026-10-25T12:00[Europe/Berlin]").hoursInDay;           // 25
+Temporal.ZonedDateTime.from("2026-03-29T02:30[Europe/Berlin]").hour;                 // 3 — 02:30 не было
+Temporal.Instant.fromEpochMilliseconds(0).epochNanoseconds;                         // 0n — BigInt</pre>
+
+    <h2>Два класса с моментом</h2>
+
+    <table>
+        <thead><tr><th></th><th>Instant</th><th>ZonedDateTime</th></tr></thead>
+        <tbody>
+            <tr><td>хранит</td><td>наносекунды от эпохи</td><td>наносекунды, пояс, календарь</td></tr>
+            <tr><td>строка</td><td><code>2026-10-12T09:30:00Z</code></td><td><code>2026-10-12T14:30:00+05:00[Asia/Ashgabat]</code></td></tr>
+            <tr><td>год, час</td><td>нет</td><td>есть, по поясу</td></tr>
+            <tr><td>сутки</td><td>нельзя прибавить</td><td>по календарю: 23, 24 или 25 часов</td></tr>
+            <tr><td>переход</td><td><code>toZonedDateTimeISO(пояс)</code></td><td><code>toInstant()</code>, <code>toPlainDate()</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="definition">
+        <strong>Местное время = UTC + смещение.</strong> Смещение зависит от пояса и момента: Берлин летом +02:00, зимой
+        +01:00; Ашхабад с 1992 года всегда +05:00. Пояс называют по базе IANA — <code>"Asia/Ashgabat"</code>, а не
+        <code>"+05:00"</code>: смещение может поменяться.
+    </div>
+
+    <h2>Города курса осенью 2026 года</h2>
+
+    <table>
+        <thead><tr><th>Пояс</th><th>Смещение</th><th>Перевод часов</th><th>Сутки не по 24 часа</th></tr></thead>
+        <tbody>
+            <tr><td><code>Asia/Ashgabat</code></td><td>+05:00</td><td>нет с 19 января 1992 года</td><td>нет</td></tr>
+            <tr><td><code>Europe/Berlin</code></td><td>+02:00 → +01:00</td><td>25 октября, 03:00 → 02:00</td><td>29 марта — 23, 25 октября — 25</td></tr>
+            <tr><td><code>America/New_York</code></td><td>−04:00 → −05:00</td><td>1 ноября, 02:00 → 01:00</td><td>8 марта — 23, 1 ноября — 25</td></tr>
+        </tbody>
+    </table>
+
+    <div class="key-point">
+        <code>withTimeZone(пояс)</code> — тот же момент, другие часы на стене;
+        <code>toPlainDateTime().toZonedDateTime(пояс)</code> — те же часы, другой момент. Дни прибавляются по календарю
+        (<code>add({ days: 1 })</code> — завтра в то же время), часы — по точному времени (<code>add({ hours: 24 })</code>
+        в ночь перевода — на час раньше).
+    </div>
+
+    <div class="remember">
+        В ночь перевода часов местного времени может не быть (весной) или оно бывает дважды (осенью). Настройка
+        <code>disambiguation</code>: <code>"compatible"</code> (по умолчанию, как у <code>Date</code>),
+        <code>"earlier"</code>, <code>"later"</code>, <code>"reject"</code>. Разница в днях между разными поясами —
+        <code>RangeError</code>: сначала <code>withTimeZone</code>.
+    </div>
+
+    <div class="note-box">
+        Мост: <code>date.toTemporalInstant()</code> и обратно <code>new Date(instant.epochMilliseconds)</code>. Для неверной
+        даты — ошибка <code>BigInt</code> дня 21. <code>new Temporal.Instant(…)</code> принимает только <code>BigInt</code>.
+        <code>Temporal.Now.instant()</code> и <code>zonedDateTimeISO()</code> дают «сейчас», но в тексте их значения не
+        печатаем.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите имя пояса своего города в базе IANA и проверьте его через <code>Temporal.Now.timeZoneId()</code>.</li>
+            <li>Выведите, когда в 2027 году переводят часы в Берлине и в Нью-Йорке, через <code>getTimeZoneTransition</code>.</li>
+            <li>Прочитайте на странице
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime">Temporal.ZonedDateTime</a>
+                раздел «Offset ambiguity» и объясните пример с Сан-Паулу своими словами.</li>
+            <li>Найдите в тексте предложения <code>Temporal</code> раздел AddZonedDateTime и объясните, почему сначала
+                прибавляется дата, а потом время.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

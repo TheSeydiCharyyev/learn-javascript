@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 24 — Temporal: Instant, ZonedDateTime и часовые пояса</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #06b6d4; }
+        h2 { color: #0e7490; background: #ecfeff; border-left-color: #06b6d4; }
+        h3 { color: #155e75; }
+        .step-number { background: #06b6d4; }
+        .toc a { color: #0e7490; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 24</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 24 &bull; урок 1</span>
+        <h1>Temporal: Instant, ZonedDateTime и часовые пояса</h1>
+        <p>Курс 2, Intermediate. Модуль «Числа и даты: Date, Temporal, основы Intl» — четвёртый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>переводить <code>Date</code> в <code>Temporal</code> и обратно;</li>
+            <li>хранить момент (<code>Instant</code>) и момент с поясом (<code>ZonedDateTime</code>) и переходить между ними;</li>
+            <li>понимать пояс, смещение и перевод часов: сутки в 23 и 25 часов, пропущенный и повторённый час;</li>
+            <li>выбирать класс <code>Temporal</code> под задачу.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания дней 21–23</a></li>
+            <li><a href="#instant">Instant: момент без пояса</a></li>
+            <li><a href="#zoned">ZonedDateTime: момент, пояс и календарь</a></li>
+            <li><a href="#zones">Пояса и смещения</a></li>
+            <li><a href="#meeting">withTimeZone. Практика: созвон трёх городов</a></li>
+            <li><a href="#days">Сутки в 23 и 25 часов</a></li>
+            <li><a href="#gaps">Пропущенный и повторённый час</a></li>
+            <li><a href="#math">Арифметика и сравнение</a></li>
+            <li><a href="#strings">Строки и JSON</a></li>
+            <li><a href="#shared">Методы двух классов</a></li>
+            <li><a href="#choose">Какой класс взять</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: напоминания в поясе ученика</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания дней 21–23</h2>
+
+    <p>За три дня накопились долги. День 21 показал, что <code>Date</code> — это момент, а пояс берётся с устройства; день
+    22 отложил созвон «Ашхабад — Берлин» и всё, что связано с поясами; день 23 обещал сутки не по 24 часа. И нужен мост от
+    старого кода с <code>Date</code> к <code>Temporal</code>:</p>
+
+    <pre class="code js">const old = new Date(2026, 9, 12, 14, 30);
+const instant = old.toTemporalInstant();
+const ashgabat = instant.toZonedDateTimeISO("Asia/Ashgabat");
+console.log(instant.toString(), ashgabat.toString(), ashgabat.withTimeZone("Europe/Berlin").toString());
+// 2026-10-12T09:30:00Z 2026-10-12T14:30:00+05:00[Asia/Ashgabat] 2026-10-12T11:30:00+02:00[Europe/Berlin]</pre>
+
+    <p><code>toTemporalInstant</code> превращает дату в <code>Temporal.Instant</code> — тот же момент, 9:30 по UTC.
+    <code>toZonedDateTimeISO</code> «вешает» на момент пояс Ашхабада и получает <code>ZonedDateTime</code>: 14:30, смещение
+    +05:00, имя пояса в квадратных скобках. <code>withTimeZone</code> показывает тот же момент в Берлине — 11:30.
+    Сегодня — эти два класса, последние из восьми.</p>
+
+    <h2 id="instant">2. Instant: момент без пояса</h2>
+
+    <pre class="code js">const a = Temporal.Instant.from("2026-10-12T09:30Z");
+const b = Temporal.Instant.from("2026-10-12T14:30+05:00");
+const c = Temporal.Instant.fromEpochMilliseconds(1791797400000);
+const d = new Temporal.Instant(1791797400000000000n);
+console.log(a.equals(b), a.equals(c), a.equals(d), a.epochMilliseconds, a.epochNanoseconds, typeof a.year);   // true true true 1791797400000 1791797400000000000n undefined
+console.log(a.toString(), a.toString({ timeZone: "Asia/Ashgabat" }), new Date(a.epochMilliseconds).getHours(), a.epochNanoseconds === BigInt(a.epochMilliseconds) * 1000000n);   // 2026-10-12T09:30:00Z 2026-10-12T14:30:00+05:00 14 true
+console.log(a);   // Instant {epochMilliseconds: 1791797400000, epochNanoseconds: 1791797400000000000n}
+Temporal.Instant.from("2026-10-12T14:30");   // RangeError: Temporal error: Required fields missing from Instant string.</pre>
+
+    <p>Справочник называет <code>Instant</code> «по смыслу тем же, что <code>Date</code>»: одна точка на шкале времени.
+    Отличий два. Точность — наносекунды, а не миллисекунды, поэтому главное поле <code>epochNanoseconds</code> —
+    <code>BigInt</code> дня 21: 1,79·10<sup>18</sup> почти в двести раз больше <code>MAX_SAFE_INTEGER</code>, и обычное
+    число теряло бы последние наносекунды. И никаких лет и часов:
+    <code>Instant</code> не знает ни пояса, ни календаря, поэтому <code>year</code> у него нет. Это защищает от ошибки
+    <code>Date</code>, где <code>getHours</code> молча берёт пояс устройства.</p>
+
+    <p>Создают момент строкой с <code>Z</code> или со смещением (без них строка — <code>RangeError</code>: непонятно,
+    какой это момент), числом миллисекунд, числом наносекунд или конструктором с <code>BigInt</code>. Обратно в
+    <code>Date</code> — <code>new Date(instant.epochMilliseconds)</code>; в прямую сторону справочник советует
+    <code>toTemporalInstant</code>, а не <code>fromEpochMilliseconds(date.getTime())</code>: кода меньше. Это практика
+    плана: <code>epochNanoseconds</code> ровно в миллион раз больше миллисекунд, и сравнить их можно только как
+    <code>BigInt</code>. Консоль показывает <code>Instant</code> целиком — у него всего два поля.</p>
+
+    <pre class="code js">const legacy = new Date(Date.UTC(2026, 9, 12, 9, 30));
+const zoned = legacy.toTemporalInstant().toZonedDateTimeISO("America/New_York");
+console.log(legacy.getHours(), zoned.hour, zoned.toPlainTime().toString());   // 14 5 05:30:00</pre>
+
+    <p>Долг дня 21: <code>getHours</code> одного и того же момента в Ашхабаде даёт 14, а на компьютере в Нью-Йорке — 5, и
+    программа на это не влияет. У <code>ZonedDateTime</code> пояс записан в коде, поэтому 5 часов по Нью-Йорку выйдут на
+    любом устройстве.</p>
+
+    <h2 id="zoned">3. ZonedDateTime: момент, пояс и календарь</h2>
+
+    <pre class="code js">const z = Temporal.ZonedDateTime.from("2026-10-12T14:30[Asia/Ashgabat]");
+console.log(z.toString(), z.timeZoneId, z.offset, z.hour, z.toPlainDate().toString(), z.toInstant().toString(), z.epochMilliseconds);
+// 2026-10-12T14:30:00+05:00[Asia/Ashgabat] Asia/Ashgabat +05:00 14 2026-10-12 2026-10-12T09:30:00Z 1791797400000
+const y = Temporal.ZonedDateTime.from({ timeZone: "Europe/Berlin", year: 2026, month: 10, day: 12, hour: 11, minute: 30 });
+const x = new Temporal.ZonedDateTime(1791797400000000000n, "America/New_York");
+console.log(y.toString(), x.toString(), z.equals(y), Temporal.ZonedDateTime.compare(z, y), z.toInstant().equals(y.toInstant()));
+// 2026-10-12T11:30:00+02:00[Europe/Berlin] 2026-10-12T05:30:00-04:00[America/New_York] false 0 true
+Temporal.ZonedDateTime.from("2026-10-12T14:30+05:00");   // RangeError: Temporal error: Time zone annotation is required for parsing a zoned date time.</pre>
+
+    <p><code>ZonedDateTime</code> — единственный класс <code>Temporal</code>, который знает пояс. Справочник называет его
+    мостом между «точным временем» и «временем на часах»: внутри он хранит момент, пояс и календарь, а часы, число и
+    смещение вычисляет. Поэтому у него поля обоих миров: всё, что у <code>PlainDateTime</code>, плюс
+    <code>timeZoneId</code>, <code>offset</code>, <code>offsetNanoseconds</code>, <code>epochMilliseconds</code>,
+    <code>epochNanoseconds</code>.</p>
+
+    <p>Строка для <code>from</code> обязана содержать пояс в квадратных скобках — смещения мало, о причине раздел 6.
+    Объект требует <code>timeZone</code>, конструктор — наносекунды и пояс. 14:30 в Ашхабаде и 11:30 в Берлине —
+    один момент: <code>compare</code> даёт 0, но <code>equals</code> — <code>false</code>, потому что сравнивает ещё и
+    пояс. Дату и время <code>Plain</code> к поясу приводят методы дня 22 <code>toZonedDateTime</code>, «сейчас» —
+    <code>Temporal.Now.zonedDateTimeISO()</code> из таблицы дня 22.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Мосты между классами: Date через toTemporalInstant становится Instant, Instant через toZonedDateTimeISO с поясом — ZonedDateTime, ZonedDateTime через toPlainDateTime — Plain-классы. Обратно: PlainDateTime через toZonedDateTime с поясом — ZonedDateTime, ZonedDateTime через toInstant — Instant, Instant через new Date(epochMilliseconds) — Date">
+            <g fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="14" y="84" width="90" height="50" rx="8"/><rect x="494" y="84" width="112" height="50" rx="8"/>
+            </g>
+            <g fill="#ecfeff" stroke="#06b6d4" stroke-width="2">
+                <rect x="154" y="84" width="110" height="50" rx="8"/><rect x="314" y="84" width="130" height="50" rx="8"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" text-anchor="middle">
+                <text x="59" y="105" fill="#334155">Date</text><text x="209" y="105" fill="#0e7490">Instant</text><text x="379" y="105" fill="#0e7490">ZonedDateTime</text><text x="550" y="105" fill="#334155">PlainDateTime</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#475569">
+                <text x="59" y="123">момент, мс</text><text x="209" y="123">момент, нс</text><text x="379" y="123">момент + пояс</text><text x="550" y="123">часы на стене</text>
+            </g>
+            <g fill="none" stroke-width="1.8">
+                <path d="M 104 98 L 146 98" stroke="#0e7490"/><path d="M 264 98 L 306 98" stroke="#0e7490"/><path d="M 444 98 L 486 98" stroke="#0e7490"/>
+                <path d="M 154 120 L 112 120" stroke="#94a3b8"/><path d="M 314 120 L 272 120" stroke="#94a3b8"/><path d="M 494 120 L 452 120" stroke="#94a3b8"/>
+            </g>
+            <g>
+                <path d="M 154 98 L 145 93 L 145 103 Z" fill="#0e7490"/><path d="M 314 98 L 305 93 L 305 103 Z" fill="#0e7490"/><path d="M 494 98 L 485 93 L 485 103 Z" fill="#0e7490"/>
+                <path d="M 104 120 L 113 115 L 113 125 Z" fill="#94a3b8"/><path d="M 264 120 L 273 115 L 273 125 Z" fill="#94a3b8"/><path d="M 444 120 L 453 115 L 453 125 Z" fill="#94a3b8"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10" text-anchor="middle">
+                <text x="129" y="70" fill="#0e7490">toTemporalInstant()</text><text x="289" y="56" fill="#0e7490">toZonedDateTimeISO(пояс)</text><text x="469" y="70" fill="#0e7490">toPlainDateTime()</text>
+                <text x="129" y="156" fill="#475569">new Date(epochMilliseconds)</text><text x="289" y="170" fill="#475569">toInstant()</text><text x="469" y="156" fill="#475569">toZonedDateTime(пояс)</text>
+            </g>
+            <g fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3">
+                <path d="M 289 60 L 289 94"/><path d="M 289 124 L 289 160"/>
+            </g>
+            <rect x="14" y="180" width="592" height="28" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="199" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Пояс нужен, чтобы перейти от момента к часам на стене и обратно; Instant и Plain-классы его не хранят.</text>
+        </svg>
+        <figcaption>Мосты между Date и классами Temporal</figcaption>
+    </figure>
+
+    <h2 id="zones">4. Пояса и смещения</h2>
+
+    <pre class="code js">const moment = Temporal.Instant.from("2026-10-12T09:30Z");
+for (const zone of ["Asia/Ashgabat", "Europe/Berlin", "America/New_York", "UTC", "+03:00"]) {
+  const local = moment.toZonedDateTimeISO(zone);
+  console.log(zone, local.toPlainTime().toString({ smallestUnit: "minute" }), local.offset);
+}</pre>
+
+    <div class="result-box">
+        Asia/Ashgabat 14:30 +05:00<br>
+        Europe/Berlin 11:30 +02:00<br>
+        America/New_York 05:30 -04:00<br>
+        UTC 09:30 +00:00<br>
+        +03:00 12:30 +03:00
+    </div>
+
+    <p>Справочник даёт одну формулу: <strong>местное время = UTC + смещение</strong>. Смещение зависит от двух вещей —
+    пояса и момента. <strong>Пояс</strong> — область Земли, где часы всегда показывают одно и то же; его имя берут из базы
+    поясов IANA: <code>"Asia/Ashgabat"</code>, <code>"Europe/Berlin"</code>, особое <code>"UTC"</code>. Для каждого пояса
+    в базе хранится таблица: с какого момента какое смещение. Есть и «пояса-смещения» вроде <code>"+03:00"</code>, но
+    справочник советует брать имя: смещение может измениться по закону или с переводом часов.</p>
+
+    <pre class="code js">console.log(Temporal.ZonedDateTime.from("1990-07-01T12:00[Asia/Ashgabat]").offset, Temporal.ZonedDateTime.from("2026-10-12T14:30[asia/ashkhabad]").timeZoneId, Temporal.Now.timeZoneId());   // +06:00 Asia/Ashkhabad Asia/Ashgabat
+const ash = Temporal.ZonedDateTime.from("2026-06-01T00:00[Asia/Ashgabat]");
+console.log(ash.getTimeZoneTransition("next"), ash.getTimeZoneTransition("previous").toString());   // null 1992-01-19T03:00:00+05:00[Asia/Ashgabat]
+console.log(Temporal.ZonedDateTime.from("2026-10-12T14:30[Etc/GMT-5]").offset, Temporal.ZonedDateTime.from("2026-10-12T14:30[Etc/GMT+5]").offset);   // +05:00 -05:00</pre>
+
+    <p>История в базе есть: летом 1990 года в Ашхабаде было +06:00 — тот же факт, что <code>getTimezoneOffset</code>
+    показал на дне 21. <code>getTimeZoneTransition</code> ищет ближайшую смену смещения: следующей нет
+    (<code>null</code>), а последняя была 19 января 1992 года. С тех пор Ашхабад часы не переводит. Имена понимаются без
+    учёта регистра, а старое имя <code>Asia/Ashkhabad</code> — псевдоним в базе IANA — сохраняется как дано, не заменяясь
+    на новое. <code>Temporal.Now.timeZoneId()</code> отдаёт современное имя пояса устройства. И ещё одна причина брать
+    имена городов: в старых поясах <code>Etc/GMT…</code>, по справочнику, знак перевёрнут «по историческим причинам» —
+    <code>Etc/GMT-5</code> означает +05:00.</p>
+
+    <h2 id="meeting">5. withTimeZone. Практика: созвон трёх городов</h2>
+
+    <pre class="code js">function meeting(date, time, zones) {
+  const here = Temporal.PlainDate.from(date).toZonedDateTime({ timeZone: "Asia/Ashgabat", plainTime: time });
+  return zones.map((zone) =&gt; here.withTimeZone(zone).toPlainTime().toString({ smallestUnit: "minute" })).join(" | ");
+}
+for (const date of ["2026-10-22", "2026-10-29", "2026-11-05"]) console.log(date, meeting(date, "19:00", ["Europe/Berlin", "America/New_York"]));</pre>
+
+    <div class="result-box">
+        2026-10-22 16:00 | 10:00<br>
+        2026-10-29 15:00 | 10:00<br>
+        2026-11-05 15:00 | 09:00
+    </div>
+
+    <p>Практика плана: каждый четверг в 19:00 по Ашхабаду — созвон с Берлином и Нью-Йорком. <code>toZonedDateTime</code>
+    у даты дня 22 получает объект с поясом и временем, <code>withTimeZone</code> переносит <strong>тот же момент</strong> в
+    другой пояс. Три недели — три разных расписания: 25 октября Европа перешла на зимнее время, и Берлин стал отставать
+    от Ашхабада на 4 часа, а не на 3; 1 ноября то же сделали США. Ашхабад часы не переводит, поэтому «в 19:00 по
+    Ашхабаду» у других сдвигается.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Созвон в 19:00 по Ашхабаду: 22 октября в Берлине 16:00, в Нью-Йорке 10:00; 29 октября — 15:00 и 10:00; 5 ноября — 15:00 и 09:00. 25 октября Берлин перешёл с +2 на +1, 1 ноября Нью-Йорк — с −4 на −5">
+            <g font-family="Consolas, monospace" font-size="11" text-anchor="middle" fill="#475569">
+                <text x="230" y="30">2026-10-22</text><text x="370" y="30">2026-10-29</text><text x="510" y="30">2026-11-05</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">
+                <text x="20" y="72">Ашхабад, +5</text><text x="20" y="116">Берлин</text><text x="20" y="160">Нью-Йорк</text>
+            </g>
+            <g fill="#ecfeff" stroke="#06b6d4" stroke-width="1.5">
+                <rect x="170" y="50" width="120" height="34" rx="8"/><rect x="310" y="50" width="120" height="34" rx="8"/><rect x="450" y="50" width="120" height="34" rx="8"/>
+            </g>
+            <g fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="170" y="94" width="120" height="34" rx="8"/><rect x="170" y="138" width="120" height="34" rx="8"/><rect x="310" y="138" width="120" height="34" rx="8"/>
+            </g>
+            <g fill="#fff1f2" stroke="#f43f5e" stroke-width="2">
+                <rect x="310" y="94" width="120" height="34" rx="8"/><rect x="450" y="94" width="120" height="34" rx="8"/><rect x="450" y="138" width="120" height="34" rx="8"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="13" text-anchor="middle">
+                <text x="230" y="72" fill="#0e7490">19:00</text><text x="370" y="72" fill="#0e7490">19:00</text><text x="510" y="72" fill="#0e7490">19:00</text>
+                <text x="230" y="116" fill="#334155">16:00 +2</text><text x="370" y="116" fill="#9f1239">15:00 +1</text><text x="510" y="116" fill="#9f1239">15:00 +1</text>
+                <text x="230" y="160" fill="#334155">10:00 −4</text><text x="370" y="160" fill="#334155">10:00 −4</text><text x="510" y="160" fill="#9f1239">09:00 −5</text>
+            </g>
+            <g fill="none" stroke="#f43f5e" stroke-width="1.3" stroke-dasharray="4 3">
+                <path d="M 300 40 L 300 178"/><path d="M 440 40 L 440 178"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#9f1239">
+                <text x="300" y="196">25 октября: Берлин +2 → +1</text>
+                <text x="440" y="214">1 ноября: Нью-Йорк −4 → −5</text>
+            </g>
+            <rect x="14" y="226" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="246" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Ашхабад часы не переводит с 1992 года, поэтому сдвигается время у других.</text>
+        </svg>
+        <figcaption>Один и тот же созвон в три недели осени 2026 года</figcaption>
+    </figure>
+
+    <pre class="code js">const call = Temporal.ZonedDateTime.from("2026-10-12T12:00[America/New_York]");
+console.log(call.withTimeZone("Europe/Paris").toString(), call.toPlainDateTime().toZonedDateTime("Europe/Paris").toString());   // 2026-10-12T18:00:00+02:00[Europe/Paris] 2026-10-12T12:00:00+02:00[Europe/Paris]</pre>
+
+    <p>Пример MDN показывает разницу: <code>withTimeZone</code> держит момент (полдень в Нью-Йорке — шесть вечера в
+    Париже), а путь через <code>toPlainDateTime().toZonedDateTime(…)</code> держит «время на часах» и даёт уже другой
+    момент — полдень по Парижу.</p>
+
+    <h2 id="days">6. Сутки в 23 и 25 часов</h2>
+
+    <pre class="code js">const berlin = (text) =&gt; Temporal.ZonedDateTime.from(`${text}[Europe/Berlin]`);
+console.log(berlin("2026-03-29T12:00").hoursInDay, berlin("2026-10-25T12:00").hoursInDay, berlin("2026-10-26T12:00").hoursInDay, Temporal.ZonedDateTime.from("2026-10-25T12:00[Asia/Ashgabat]").hoursInDay);   // 23 25 24 24
+const sat = berlin("2026-10-24T12:00");
+console.log(sat.add({ days: 1 }).toString(), sat.add({ hours: 24 }).toString(), sat.add({ days: 1 }).since(sat).toString(), sat.add({ days: 1 }).since(sat, { largestUnit: "days" }).toString());
+// 2026-10-25T12:00:00+01:00[Europe/Berlin] 2026-10-25T11:00:00+01:00[Europe/Berlin] PT25H P1D
+console.log(berlin("2026-06-01T00:00").getTimeZoneTransition("next").toString(), Temporal.Duration.from({ days: 1 }).total({ unit: "hours", relativeTo: berlin("2026-10-25T00:00") }));   // 2026-10-25T02:00:00+01:00[Europe/Berlin] 25</pre>
+
+    <p>Практика плана. <code>hoursInDay</code> — сколько часов в сутках этой даты в этом поясе: в Берлине 29 марта 2026
+    года — 23 (часы перевели вперёд), 25 октября — 25 (назад), в обычный день и в Ашхабаде — 24. Справочник:
+    <code>ZonedDateTime</code> — единственный класс, где сутки бывают не по 24 часа; все остальные считают их ровно 24.</p>
+
+    <p>Отсюда два вида сложения. Дни прибавляются <strong>по календарю</strong>: суббота 12:00 плюс день — воскресенье
+    12:00, хотя прошло 25 часов. Часы прибавляются <strong>по точному времени</strong>: плюс 24 часа — воскресенье 11:00.
+    Справочник объясняет это ожиданиями людей: встречу «на день позже» ждут в тот же час, а друга «через два часа» — ровно
+    через два. Разница по умолчанию считается в часах — <code>PT25H</code>; с <code>largestUnit: "days"</code> — один
+    день. И обещание дня 23: с опорой-<code>ZonedDateTime</code> длительность «1 день» в эти сутки — 25 часов.</p>
+
+    <pre class="code js">const saoPaulo = Temporal.ZonedDateTime.from("2015-10-18T12:00-02:00[America/Sao_Paulo]");
+console.log(saoPaulo.startOfDay().toString(), saoPaulo.hoursInDay);   // 2015-10-18T01:00:00-02:00[America/Sao_Paulo] 23</pre>
+
+    <p><code>startOfDay</code> возвращает первый момент суток. Обычно это 00:00, но пример справочника — Бразилия, где
+    часы переводили ровно в полночь: 18 октября 2015 года в Сан-Паулу после 23:59 сразу наступил час ночи, и сутки начались
+    в 01:00. Так что «полночь» — не всегда 00:00, и <code>hoursInDay</code> считается от одного начала суток до
+    следующего.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 226" role="img" aria-label="Ночь 25 октября 2026 года в Берлине: по UTC часы идут подряд 22, 23, 00, 01, 02, 03, 04, а по Берлину — 00:00, 01:00, 02:00, снова 02:00, 03:00, 04:00, 05:00. Час с 02:00 до 02:59 бывает дважды: сначала со смещением +02:00, потом +01:00. hoursInDay даёт 25">
+            <g font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">
+                <text x="14" y="62">Берлин</text><text x="14" y="146">UTC</text>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle">
+                <text x="170" y="34" fill="#0e7490">смещение +02:00</text><text x="450" y="34" fill="#9f1239">смещение +01:00</text>
+            </g>
+            <g fill="none" stroke-width="1.5">
+                <path d="M 80 40 L 280 40" stroke="#06b6d4"/><path d="M 330 40 L 580 40" stroke="#f43f5e"/>
+            </g>
+            <path d="M 60 76 L 590 76" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <path d="M 60 124 L 590 124" fill="none" stroke="#94a3b8" stroke-width="2"/>
+            <g fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3">
+                <path d="M 90 76 L 90 124"/><path d="M 170 76 L 170 124"/><path d="M 250 76 L 250 124"/><path d="M 330 76 L 330 124"/><path d="M 410 76 L 410 124"/><path d="M 490 76 L 490 124"/><path d="M 570 76 L 570 124"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="12" text-anchor="middle">
+                <text x="90" y="64" fill="#334155">00:00</text><text x="170" y="64" fill="#334155">01:00</text><text x="250" y="64" fill="#9f1239" font-weight="700">02:00</text><text x="330" y="64" fill="#9f1239" font-weight="700">02:00</text><text x="410" y="64" fill="#334155">03:00</text><text x="490" y="64" fill="#334155">04:00</text><text x="570" y="64" fill="#334155">05:00</text>
+                <text x="90" y="144" fill="#475569">22:00</text><text x="170" y="144" fill="#475569">23:00</text><text x="250" y="144" fill="#475569">00:00</text><text x="330" y="144" fill="#475569">01:00</text><text x="410" y="144" fill="#475569">02:00</text><text x="490" y="144" fill="#475569">03:00</text><text x="570" y="144" fill="#475569">04:00</text>
+            </g>
+            <rect x="250" y="84" width="160" height="32" rx="6" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/>
+            <text x="330" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#9f1239">02:00–02:59 — дважды</text>
+            <text x="310" y="174" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">hoursInDay → 25 · add({ days: 1 }) → те же часы · add({ hours: 24 }) → на час раньше</text>
+            <rect x="14" y="188" width="592" height="32" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="209" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">В 03:00 по летнему времени часы переводят на 02:00: местный час повторяется, UTC идёт ровно.</text>
+        </svg>
+        <figcaption>Ночь перевода часов в Берлине: 25 часов в сутках</figcaption>
+    </figure>
+
+    <h2 id="gaps">7. Пропущенный и повторённый час</h2>
+
+    <pre class="code js">const gap = "2026-03-29T02:30[Europe/Berlin]";
+const twice = "2026-10-25T02:30[Europe/Berlin]";
+console.log(Temporal.ZonedDateTime.from(gap).toString(), Temporal.ZonedDateTime.from(gap, { disambiguation: "earlier" }).toString());   // 2026-03-29T03:30:00+02:00[Europe/Berlin] 2026-03-29T01:30:00+01:00[Europe/Berlin]
+console.log(Temporal.ZonedDateTime.from(twice).toString(), Temporal.ZonedDateTime.from(twice, { disambiguation: "later" }).toString());   // 2026-10-25T02:30:00+02:00[Europe/Berlin] 2026-10-25T02:30:00+01:00[Europe/Berlin]
+Temporal.ZonedDateTime.from(gap, { disambiguation: "reject" });   // RangeError: Temporal error: Rejecting ambiguous time zones.</pre>
+
+    <p>Из момента в местное время перевести просто, а обратно — нет. В ночь на 29 марта в Берлине после 01:59 сразу 03:00:
+    часа 02:30 <strong>не существует</strong>. В ночь на 25 октября 02:30 бывает <strong>дважды</strong>. Что делать,
+    решает настройка <code>disambiguation</code>: <code>"compatible"</code> (по умолчанию, как у <code>Date</code>) —
+    при пропуске сдвинуть вперёд, при повторе взять раннее; <code>"earlier"</code> и <code>"later"</code> — выбрать
+    раннее или позднее; <code>"reject"</code> — ошибка. Будильник на 02:30 в мартовскую ночь зазвонит в 03:30.</p>
+
+    <p>Вторая настройка, <code>offset</code>, нужна, когда в строке есть и смещение, и пояс, и они спорят:
+    <code>"2026-10-12T14:30+03:00[Asia/Ashgabat]"</code> по умолчанию даёт <code>RangeError</code>, <code>"use"</code>
+    верит смещению (момент сохраняется — 16:30 по Ашхабаду), <code>"ignore"</code> — поясу (14:30). Справочник
+    объясняет, откуда спор: время сохранили давно, а страна с тех пор поменяла правила. <code>Z</code> в такой строке —
+    не смещение +00:00, а «момент по UTC», и он не спорит: <code>"…T09:30Z[Asia/Ashgabat]"</code> — 14:30 по Ашхабаду.</p>
+
+    <h2 id="math">8. Арифметика и сравнение</h2>
+
+    <pre class="code js">const a = Temporal.Instant.from("2026-10-12T09:30Z");
+const later = a.add({ hours: 30 });
+console.log(later.toString(), later.since(a).toString(), later.since(a, { largestUnit: "hours" }).toString(), a.round({ smallestUnit: "hour" }).toString(), Temporal.Instant.compare(a, later));
+// 2026-10-13T15:30:00Z PT108000S PT30H 2026-10-12T10:00:00Z -1
+const z = a.toZonedDateTimeISO("Asia/Ashgabat");
+console.log(z.add({ months: 1, hours: 2 }).toString(), z.round({ smallestUnit: "day" }).toString(), z.until("2026-10-13T09:00+05:00[Asia/Ashgabat]").toString());   // 2026-11-12T16:30:00+05:00[Asia/Ashgabat] 2026-10-13T00:00:00+05:00[Asia/Ashgabat] PT18H30M
+a.add({ days: 1 });   // RangeError: Temporal error: Largest unit cannot be a date unit</pre>
+
+    <p>У <code>Instant</code> только точное время: прибавлять можно часы и мельче (сутки — <code>RangeError</code>: без
+    пояса непонятно, сколько в них часов), разница по умолчанию в секундах. У <code>ZonedDateTime</code> — всё, что у
+    <code>PlainDateTime</code>: <code>add</code>, <code>subtract</code>, <code>with</code>, <code>round</code>,
+    <code>since</code>, <code>until</code>; дни и месяцы идут по календарю, часы — по точному времени, как в разделе 6.
+    Разница двух <code>ZonedDateTime</code> по умолчанию в часах. <code>compare</code> у обоих классов сравнивает моменты,
+    <code>&lt;</code> снова даёт <code>TypeError</code>.</p>
+
+    <pre class="code js">const start = Temporal.ZonedDateTime.from("2026-10-24T12:00[Europe/Berlin]");
+const end = Temporal.ZonedDateTime.from("2026-10-25T20:00[Asia/Ashgabat]");
+console.log(end.since(start).toString(), end.withTimeZone("Europe/Berlin").since(start, { largestUnit: "days" }).toString(), end.since(start.withTimeZone("Asia/Ashgabat"), { largestUnit: "days" }).toString());   // PT29H P1DT4H P1DT5H
+end.since(start, { largestUnit: "days" });   // RangeError: Temporal error: Timezones must be the same if unit is a day unit.</pre>
+
+    <p>Почему разница в днях требует одного пояса? 29 часов — сколько это суток? В Берлине эти сутки длились 25 часов, и
+    выходит 1 день 4 часа; в Ашхабаде сутки обычные — 1 день 5 часов. Справочник называет такую разницу «гибридной»: дни —
+    по календарю, часы — по точному времени, и календарь у каждого пояса свой. Поэтому оба конца сначала приводят к одному
+    поясу через <code>withTimeZone</code>.</p>
+
+    <h2 id="strings">9. Строки и JSON</h2>
+
+    <pre class="code js">const z = Temporal.ZonedDateTime.from("2026-10-12T14:30[Asia/Ashgabat]");
+console.log(z.toString({ timeZoneName: "never" }), z.toString({ offset: "never" }), JSON.stringify({ z }));   // 2026-10-12T14:30:00+05:00 2026-10-12T14:30:00[Asia/Ashgabat] {"z":"2026-10-12T14:30:00+05:00[Asia/Ashgabat]"}
+const back = JSON.parse(JSON.stringify({ z }), (key, value) =&gt; (key === "z" ? Temporal.ZonedDateTime.from(value) : value));
+console.log(back.z.equals(z), JSON.stringify({ at: z.toInstant() }));   // true {"at":"2026-10-12T09:30:00Z"}</pre>
+
+    <p>Строка <code>ZonedDateTime</code> — самая полная в <code>Temporal</code>: дата, время, смещение и пояс. Настройки
+    <code>toString</code> убирают части: <code>timeZoneName: "never"</code> даёт обычную строку ISO 8601 для систем, не
+    знающих поясов, <code>offset: "never"</code> — время с поясом без смещения. <code>toJSON</code> пишет полную строку, и
+    reviver восстанавливает объект без потерь — даже правила пояса. <code>Instant</code> в JSON — строка с
+    <code>Z</code>. Вид «для людей» — <code>toLocaleString</code> и его настройки — день 25.</p>
+
+    <h2 id="shared">10. Методы двух классов</h2>
+
+    <table>
+        <thead><tr><th>Группа</th><th>Instant</th><th>ZonedDateTime</th></tr></thead>
+        <tbody>
+            <tr><td>создать</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/Instant">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/from"><code>from</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/fromEpochMilliseconds"><code>fromEpochMilliseconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/fromEpochNanoseconds"><code>fromEpochNanoseconds</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/ZonedDateTime">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/from"><code>from</code></a></td></tr>
+            <tr><td>момент</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/epochMilliseconds"><code>epochMilliseconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/epochNanoseconds"><code>epochNanoseconds</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/epochMilliseconds"><code>epochMilliseconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/epochNanoseconds"><code>epochNanoseconds</code></a></td></tr>
+            <tr><td>пояс</td><td>—</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/timeZoneId"><code>timeZoneId</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/offset"><code>offset</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/offsetNanoseconds"><code>offsetNanoseconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/hoursInDay"><code>hoursInDay</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/startOfDay"><code>startOfDay</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/getTimeZoneTransition"><code>getTimeZoneTransition</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/withTimeZone"><code>withTimeZone</code></a></td></tr>
+            <tr><td>поля даты и времени</td><td>—</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/year"><code>year</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/month"><code>month</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/day"><code>day</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/hour"><code>hour</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/minute"><code>minute</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/second"><code>second</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/millisecond"><code>millisecond</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/microsecond"><code>microsecond</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/nanosecond"><code>nanosecond</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/dayOfWeek"><code>dayOfWeek</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/dayOfYear"><code>dayOfYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/daysInMonth"><code>daysInMonth</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/daysInWeek"><code>daysInWeek</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/daysInYear"><code>daysInYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/monthsInYear"><code>monthsInYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/inLeapYear"><code>inLeapYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/monthCode"><code>monthCode</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/weekOfYear"><code>weekOfYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/yearOfWeek"><code>yearOfWeek</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/era"><code>era</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/eraYear"><code>eraYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/calendarId"><code>calendarId</code></a></td></tr>
+            <tr><td>заменить и сдвинуть</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/add"><code>add</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/subtract"><code>subtract</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/round"><code>round</code></a> — только время</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/add"><code>add</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/subtract"><code>subtract</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/round"><code>round</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/with"><code>with</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/withPlainTime"><code>withPlainTime</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/withCalendar"><code>withCalendar</code></a></td></tr>
+            <tr><td>разница и сравнение</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/since"><code>since</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/until"><code>until</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/equals"><code>equals</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/compare"><code>compare</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/since"><code>since</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/until"><code>until</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/equals"><code>equals</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/compare"><code>compare</code></a></td></tr>
+            <tr><td>в другой класс</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/toZonedDateTimeISO"><code>toZonedDateTimeISO</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toInstant"><code>toInstant</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toPlainDate"><code>toPlainDate</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toPlainTime"><code>toPlainTime</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toPlainDateTime"><code>toPlainDateTime</code></a></td></tr>
+            <tr><td>в строку и в число</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/toString"><code>toString</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/toJSON"><code>toJSON</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/toLocaleString"><code>toLocaleString</code></a>; <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/valueOf"><code>valueOf</code></a> — <code>TypeError</code></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toString"><code>toString</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toJSON"><code>toJSON</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toLocaleString"><code>toLocaleString</code></a>; <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/valueOf"><code>valueOf</code></a> — <code>TypeError</code></td></tr>
+            <tr><td>мост от <code>Date</code></td><td colspan="2"><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toTemporalInstant"><code>Date.prototype.toTemporalInstant()</code></a> → <code>Instant</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>В примере справочника к <code>Instant.toString</code> с <code>timeZone: "UTC"</code> стоит
+    «2029-12-31T23:00:00Z», а Chrome для того же момента (1577836800000 мс) печатает
+    <code>2020-01-01T00:00:00+00:00</code>; пример на странице ошибочен, верьте проверке.</p>
+
+    <h2 id="choose">11. Какой класс взять</h2>
+
+    <p>Сегодня модуль <code>Temporal</code> закончен — все восемь классов. Итог по справочнику MDN: выбирайте класс по
+    тому, что вы знаете и что хотите показать.</p>
+
+    <table>
+        <thead><tr><th>Что известно</th><th>Класс</th><th>Пример</th></tr></thead>
+        <tbody>
+            <tr><td>точный момент, пояс неважен: лог, отметка времени</td><td><code>Instant</code></td><td><code>2026-10-12T09:30:00Z</code></td></tr>
+            <tr><td>момент и место: созвон, рейс, напоминание</td><td><code>ZonedDateTime</code></td><td><code>…14:30+05:00[Asia/Ashgabat]</code></td></tr>
+            <tr><td>дата и время «на часах» без пояса</td><td><code>PlainDateTime</code></td><td><code>2026-10-12T09:00</code></td></tr>
+            <tr><td>дата / время / месяц года / день месяца</td><td><code>PlainDate</code>, <code>PlainTime</code>, <code>PlainYearMonth</code>, <code>PlainMonthDay</code></td><td><code>2026-10-12</code>, <code>09:00</code>, <code>2026-10</code>, <code>10-12</code></td></tr>
+            <tr><td>сколько длится</td><td><code>Duration</code></td><td><code>PT1H30M</code></td></tr>
+            <tr><td>старый код и чужие библиотеки</td><td><code>Date</code> и мост <code>toTemporalInstant</code></td><td><code>new Date(…)</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Совет справочника про <code>ZonedDateTime</code>: пояс <code>"UTC"</code> для людей почти никогда не нужен — в нём
+    никто не живёт. Если пояс неизвестен, а время на часах известно, берите <code>PlainDateTime</code>; если известен
+    только момент — <code>Instant</code>.</p>
+
+    <h2 id="errors">12. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Ошибка в Chrome</th><th>Что не так</th></tr></thead>
+        <tbody>
+            <tr><td><code>Instant.from("2026-10-12T14:30")</code></td><td><code>RangeError: Temporal error: Required fields missing from Instant string.</code></td><td>нужен <code>Z</code> или смещение</td></tr>
+            <tr><td><code>new Temporal.Instant(1791797400000)</code></td><td><code>TypeError: Cannot convert 1791797400000 to a BigInt</code></td><td>нужен <code>BigInt</code>: <code>…n</code></td></tr>
+            <tr><td><code>new Date("x").toTemporalInstant()</code></td><td><code>RangeError: The number NaN cannot be converted to a BigInt because it is not an integer</code></td><td>неверная дата, текст дня 21</td></tr>
+            <tr><td><code>instant.add({ days: 1 })</code></td><td><code>RangeError: Temporal error: Largest unit cannot be a date unit</code></td><td>у момента нет суток</td></tr>
+            <tr><td><code>ZonedDateTime.from("…14:30+05:00")</code></td><td><code>RangeError: Temporal error: Time zone annotation is required for parsing a zoned date time.</code></td><td>нужно <code>[пояс]</code></td></tr>
+            <tr><td><code>ZonedDateTime.from("…[Mars/Olympus]")</code></td><td><code>RangeError: Temporal error: Unknown time zone identifier</code></td><td>нет такого пояса</td></tr>
+            <tr><td><code>"…14:30+03:00[Asia/Ashgabat]"</code></td><td><code>RangeError: Temporal error: Offsets could not be determined without disambiguation</code></td><td>смещение спорит с поясом</td></tr>
+            <tr><td><code>{ disambiguation: "reject" }</code></td><td><code>RangeError: Temporal error: Rejecting ambiguous time zones.</code></td><td>пропущенный или повторённый час</td></tr>
+            <tr><td><code>since(…, { largestUnit: "days" })</code> между поясами</td><td><code>RangeError: Temporal error: Timezones must be the same if unit is a day unit.</code></td><td>сначала <code>withTimeZone</code></td></tr>
+            <tr><td><code>new Temporal.ZonedDateTime(0n)</code></td><td><code>TypeError: Temporal error: Time zone must be string</code></td><td>пояс обязателен</td></tr>
+            <tr><td><code>a &lt; b</code></td><td><code>TypeError: Do not use Temporal.Instant.prototype.valueOf; use Temporal.Instant.prototype.compare for comparison.</code></td><td><code>compare</code></td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="spec">13. Что говорит спецификация</h2>
+
+    <p>Текст — предложение <a href="https://tc39.es/proposal-temporal/">tc39.es/proposal-temporal</a>, как в днях 22–23.
+    Разделы дня:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal.instant">8.1.1 Temporal.Instant ( epochNanoseconds )</a>:
+            аргумент проходит ToBigInt дня 21 — число без <code>n</code> даёт <code>TypeError</code>; вне диапазона —
+            <code>RangeError</code>.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-properties-of-temporal-instant-instances">8.4</a> и
+            <a href="https://tc39.es/proposal-temporal/#sec-temporal-isvalidepochnanoseconds">8.5.1 IsValidEpochNanoseconds</a>:
+            один слот [[EpochNanoseconds]] — <code>BigInt</code>; диапазон ±10<sup>8</sup> суток от эпохи, тот же, что у
+            <code>Date</code> на дне 21.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-properties-of-temporal-zoneddatetime-instances">6.4 Properties of
+            Temporal.ZonedDateTime Instances</a>: слоты — наносекунды, пояс и календарь. Местное время не хранится, оно
+            вычисляется из момента и пояса.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal-addzoneddatetime">6.5.5 AddZonedDateTime</a>: «как
+            в RFC 5545» — часть с датой прибавляется по календарю (CalendarDateAdd дня 22) и переводится обратно в момент с
+            <code>compatible</code>, часть со временем — по точному времени.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal-disambiguatepossibleepochnanoseconds">11.1.12
+            DisambiguatePossibleEpochNanoseconds</a>: моментов-кандидатов один, два (повтор) или ноль (пропуск); при пропуске
+            время сдвигается на величину скачка смещения.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-get-temporal.zoneddatetime.prototype.hoursinday">6.3.23
+            hoursInDay</a> — разница между началом этих суток и началом следующих, а начало суток —
+            <a href="https://tc39.es/proposal-temporal/#sec-temporal-getstartofday">11.1.14 GetStartOfDay</a>: полночь, а
+            если её нет, первое существующее время.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-date.prototype.totemporalinstant">14.9.1
+            Date.prototype.toTemporalInstant</a> — поправка к ECMA-262: значение даты проходит NumberToBigInt дня 21 и
+            умножается на 10<sup>6</sup>. Для неверной даты NumberToBigInt(NaN) и даёт ту самую ошибку «not an integer».</li>
+    </ul>
+
+    <h2 id="cards">14. «Карточки»: напоминания в поясе ученика</h2>
+
+    <p>«Карточками» пользуются ученики из разных городов, и каждому нужно напоминание о повторе в 9:00 по его часам.
+    Сервер же думает моментами: он знает «сейчас» как <code>Instant</code> и рассылает тем, у кого 9:00 уже наступило.</p>
+
+    <pre class="code js">const students = [
+  { name: "Аман", zone: "Asia/Ashgabat" },
+  { name: "Мерет", zone: "Europe/Berlin" },
+  { name: "Сапар", zone: "America/New_York" },
+];
+const day = Temporal.PlainDate.from("2026-10-13");
+const reminders = students.map((s) =&gt; ({ name: s.name, at: day.toZonedDateTime({ timeZone: s.zone, plainTime: "09:00" }) }));
+const now = Temporal.Instant.from("2026-10-13T08:00Z");
+const sent = reminders.filter((r) =&gt; Temporal.Instant.compare(r.at.toInstant(), now) &lt;= 0).map((r) =&gt; r.name);
+console.log(reminders.map((r) =&gt; r.at.toInstant().toString()).join(" "));
+console.log(JSON.stringify(reminders[1]), sent);</pre>
+
+    <div class="result-box">
+        2026-10-13T04:00:00Z 2026-10-13T07:00:00Z 2026-10-13T13:00:00Z<br>
+        {"name":"Мерет","at":"2026-10-13T09:00:00+02:00[Europe/Berlin]"} (2) ['Аман', 'Мерет']
+    </div>
+
+    <p><strong>Строка 1 — моменты.</strong> Одно и то же «9:00» — три разных момента: в Ашхабаде оно наступает в 4:00 по
+    UTC, в Берлине в 7:00, в Нью-Йорке в 13:00.</p>
+
+    <p><strong>Строка 2 — рассылка.</strong> В JSON напоминание хранит всё: дату, время, смещение и пояс. В 8:00 по UTC
+    9:00 уже наступило у Амана и Мерет, а у Сапара ещё ночь.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Поставьте <code>day</code> на 26 октября. У кого изменился момент напоминания по UTC и
+        почему — а «9:00» при этом не изменилось ни у кого?
+        <br><br>
+        <strong>Второй.</strong> Восстановите напоминание Мерет из JSON через <code>Temporal.ZonedDateTime.from</code> и
+        сравните с исходным через <code>equals</code>. Что сохранилось?
+        <br><br>
+        <strong>Третий.</strong> Замените пояс Сапара на <code>"-04:00"</code>, поставьте <code>day</code> на 5 ноября и
+        переведите напоминание в <code>"America/New_York"</code> через <code>withTimeZone</code>. Во сколько по часам
+        Нью-Йорка оно придёт и почему справочник советует имена поясов, а не смещения?
+    </div>
+
+    <h2 id="next">15. Что дальше</h2>
+
+    <p>Классы <code>Temporal</code> пройдены, но выводили мы их строками ISO. Людям нужны «12 октября 2026 г.», «1 250,50
+    TMT» и «1 ч 30 мин». Это день 25, последний в модуле: <code>Intl</code>, <code>NumberFormat</code>,
+    <code>DateTimeFormat</code>, локали и <code>toLocaleString</code> с настройками. Там же — почему Chrome не знает
+    туркменскую локаль.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toTemporalInstant">Date.prototype.toTemporalInstant()</a></td><td>мост от <code>Date</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant">Temporal.Instant</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/Instant">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/from">from()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/fromEpochMilliseconds">fromEpochMilliseconds()</a></td><td>момент; строка с <code>Z</code>; <code>BigInt</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/epochMilliseconds">epochMilliseconds</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Instant/toZonedDateTimeISO">toZonedDateTimeISO()</a></td><td>в <code>Date</code> и в пояс</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime">Temporal.ZonedDateTime</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/ZonedDateTime">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/from">from()</a></td><td>пояса и смещения, неоднозначность, <code>disambiguation</code>, <code>offset</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/timeZoneId">timeZoneId</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/offset">offset</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/withTimeZone">withTimeZone()</a></td><td>пояс; тот же момент в другом поясе</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/hoursInDay">hoursInDay</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/startOfDay">startOfDay()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/add">add()</a></td><td>сутки в 23 и 25 часов; дни по календарю, часы по точному времени</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toInstant">toInstant()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime/toPlainDate">toPlainDate()</a></td><td>в момент и в дату</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td>прочие методы <code>Instant</code> — 13 страниц</td><td>ссылки в таблице раздела 10</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>поля и прочие методы <code>ZonedDateTime</code> — 41 страница</td><td>ссылки в таблице раздела 10</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// date.toTemporalInstant() → Instant; обратно new Date(instant.epochMilliseconds)
+// Instant: момент без пояса; from("…Z" или "…+05:00"), fromEpochMilliseconds, new Temporal.Instant(…n); epochNanoseconds — BigInt
+// instant.toZonedDateTimeISO("Asia/Ashgabat") → ZonedDateTime: момент + пояс + календарь
+// ZonedDateTime.from("2026-10-12T14:30[Asia/Ashgabat]"): timeZoneId, offset, hour…; toInstant(), toPlainDate()
+// местное время = UTC + смещение; смещение зависит от пояса и момента; пояс — по имени IANA, не "+05:00"
+// z.withTimeZone("Europe/Berlin") — тот же момент; z.toPlainDateTime().toZonedDateTime(…) — те же часы
+// hoursInDay: 23, 24 или 25; add({ days: 1 }) — по календарю, add({ hours: 24 }) — по точному времени
+// пропуск и повтор часа: { disambiguation: "compatible" | "earlier" | "later" | "reject" }
+// compare — по моменту; equals — момент, пояс и календарь; &lt; — TypeError</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чем <code>Instant</code> отличается от <code>Date</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Оба — момент. <code>Instant</code> точнее (наносекунды, <code>BigInt</code>) и не знает ни пояса, ни
+                    календаря: года и часа у него нет, чтобы не читать их случайно в поясе устройства.
+                </details>
+            </li>
+            <li>Почему <code>Temporal.ZonedDateTime.from("2026-10-12T14:30+05:00")</code> — ошибка?
+                <details class="answer"><summary>Ответ</summary>
+                    Нет пояса в квадратных скобках. Смещения мало: оно меняется с переводом часов, и без имени пояса
+                    <code>add</code> не сможет посчитать правильное смещение для другой даты.
+                </details>
+            </li>
+            <li>Чем <code>withTimeZone</code> отличается от <code>toPlainDateTime().toZonedDateTime(…)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>withTimeZone</code> сохраняет момент и меняет часы на стене; второй путь сохраняет часы на стене
+                    и даёт другой момент.
+                </details>
+            </li>
+            <li>Почему в Берлине 25 октября 2026 года <code>add({ days: 1 })</code> и <code>add({ hours: 24 })</code> дают
+                разное?
+                <details class="answer"><summary>Ответ</summary>
+                    В эти сутки 25 часов. Дни прибавляются по календарю — те же часы завтра, а часы — по точному времени,
+                    поэтому плюс 24 часа — на час раньше.
+                </details>
+            </li>
+            <li>Что будет с будильником на 02:30 в Берлине в ночь на 29 марта 2026 года?
+                <details class="answer"><summary>Ответ</summary>
+                    Такого времени нет: часы прыгают с 01:59 на 03:00. По умолчанию (<code>compatible</code>) он сдвинется на
+                    03:30; с <code>earlier</code> — 01:30, с <code>reject</code> — <code>RangeError</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/ZonedDateTime">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

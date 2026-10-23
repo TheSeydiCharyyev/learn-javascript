@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 23 — Temporal: Duration, PlainYearMonth, PlainMonthDay</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #06b6d4; }
+        h2 { color: #0e7490; background: #ecfeff; border-left-color: #06b6d4; }
+        h3 { color: #155e75; }
+        .step-number { background: #06b6d4; }
+        .toc a { color: #0e7490; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 23</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 23 &bull; урок 1</span>
+        <h1>Temporal: Duration, PlainYearMonth, PlainMonthDay</h1>
+        <p>Курс 2, Intermediate. Модуль «Числа и даты: Date, Temporal, основы Intl» — третий день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>создавать длительности, читать и писать их строки ISO 8601;</li>
+            <li>округлять длительность, переводить её в число и понимать, когда нужна дата-опора;</li>
+            <li>складывать и сравнивать длительности без <code>+</code> и <code>&lt;</code>;</li>
+            <li>работать с «месяцем года» и «днём месяца»: календарь месяца и дни рождения.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания дня 22</a></li>
+            <li><a href="#create">Duration: как создать и прочитать</a></li>
+            <li><a href="#iso">Строка длительности ISO 8601</a></li>
+            <li><a href="#sign">Знак и целые числа</a></li>
+            <li><a href="#round">Перенос и round</a></li>
+            <li><a href="#total">total: длительность в число</a></li>
+            <li><a href="#calendar">Календарные единицы и relativeTo</a></li>
+            <li><a href="#math">Сложение и сравнение длительностей</a></li>
+            <li><a href="#strings">Строки, JSON и toLocaleString</a></li>
+            <li><a href="#yearmonth">PlainYearMonth: месяц года</a></li>
+            <li><a href="#grid">Практика: календарь месяца</a></li>
+            <li><a href="#monthday">PlainMonthDay: день месяца</a></li>
+            <li><a href="#birthday">Практика: дни рождения</a></li>
+            <li><a href="#shared">Методы трёх классов</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: время занятий и интервалы</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания дня 22</h2>
+
+    <p>Вчера <code>until</code> вернул загадочную строку <code>P81D</code>, а в <code>add</code> можно было передать
+    <code>"P1M"</code>, и обе обещаны на сегодня. Обещан и подсчёт курса в часах: 36 дней по три урока — 108 уроков по 45
+    минут.</p>
+
+    <pre class="code js">const course = Temporal.PlainDate.from("2026-10-12").until("2027-01-01");
+const lessons = Temporal.Duration.from({ minutes: 45 * 108 });
+console.log(course.toString(), course.days, lessons.toString(), lessons.total("hours"));   // P81D 81 PT4860M 81</pre>
+
+    <p>Оба значения — объекты <code>Temporal.Duration</code>, длительности. Первое — 81 день на календаре, второе — 4860
+    минут, а метод <code>total</code> перевёл их в часы: ровно 81 час занятий. Совпадение чисел случайное, а сам ответ —
+    практика плана.</p>
+
+    <h2 id="create">2. Duration: как создать и прочитать</h2>
+
+    <pre class="code js">const a = Temporal.Duration.from({ hours: 1, minutes: 30 });
+const b = Temporal.Duration.from("P1Y2M3W4DT5H6M7.008S");
+const c = new Temporal.Duration(0, 0, 0, 0, 1, 30);
+const d = Temporal.Duration.from(a);
+console.log(a.toString(), b.toString(), c.toString(), d.toString(), a === d, Temporal.Duration.compare(a, c));   // PT1H30M P1Y2M3W4DT5H6M7.008S PT1H30M PT1H30M false 0
+console.log(b.years, b.months, b.weeks, b.days, b.hours, b.minutes, b.seconds, b.milliseconds, typeof a.equals);   // 1 2 3 4 5 6 7 8 undefined
+console.log(a);   // Duration {years: 0, months: 0, weeks: 0, days: 0, hours: 1, …}</pre>
+
+    <p>Длительность — не момент и не дата, а <strong>набор из десяти чисел</strong>: годы, месяцы, недели, дни, часы,
+    минуты, секунды, милли-, микро- и наносекунды. Создают её как даты дня 22: <code>from</code> с объектом (ключи во
+    множественном числе, отсутствующие — ноль), со строкой или с другой длительностью; конструктор принимает те же десять
+    чисел по порядку, поэтому полтора часа — это пять нулей и <code>1, 30</code>. Справочник советует <code>from</code>.
+    Консоль снова показывает поля, а не строку, — печатаем <code>toString()</code>.</p>
+
+    <p>Метода <code>equals</code> у длительности нет: «полтора часа» и «90 минут» — разные наборы полей, но одна и та же
+    длина. Сравнивает их <code>Temporal.Duration.compare</code> — раздел 8.</p>
+
+    <h2 id="iso">3. Строка длительности ISO 8601</h2>
+
+    <pre class="code js">const iso = (text) =&gt; Temporal.Duration.from(text).toString();
+console.log(["P40D", "PT2H30M", "P1M", "PT1M", "PT0.0021S", "P0D", "-PT1H30M", "p1dt12h", "PT1,5H"].map(iso));
+// (9) ['P40D', 'PT2H30M', 'P1M', 'PT1M', 'PT0.0021S', 'PT0S', '-PT1H30M', 'P1DT12H', 'PT1H30M']</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 222" role="img" aria-label="Разбор строки -P1Y2M3W4DT5H6M7.008S: минус — знак, P — период, 1Y годы, 2M месяцы, 3W недели, 4D дни, T — начало времени, 5H часы, 6M минуты, 7.008S секунды. До T — дата, после T — время, дробь бывает только у последней части времени. Ноль — PT0S. M до T — месяцы, после T — минуты">
+            <text x="310" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">Temporal.Duration.from("-P1Y2M3W4DT5H6M7.008S")</text>
+            <g fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="49" y="34" width="34" height="36" rx="6"/><rect x="91" y="34" width="34" height="36" rx="6"/><rect x="341" y="34" width="34" height="36" rx="6"/>
+            </g>
+            <g fill="#ecfeff" stroke="#06b6d4" stroke-width="1.5">
+                <rect x="133" y="34" width="44" height="36" rx="6"/><rect x="185" y="34" width="44" height="36" rx="6"/><rect x="237" y="34" width="44" height="36" rx="6"/><rect x="289" y="34" width="44" height="36" rx="6"/>
+            </g>
+            <g fill="#dcfce7" stroke="#16a34a" stroke-width="1.5">
+                <rect x="383" y="34" width="44" height="36" rx="6"/><rect x="435" y="34" width="44" height="36" rx="6"/><rect x="487" y="34" width="84" height="36" rx="6"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="14" font-weight="700" text-anchor="middle" fill="#334155">
+                <text x="66" y="57">−</text><text x="108" y="57">P</text><text x="155" y="57">1Y</text><text x="207" y="57">2M</text><text x="259" y="57">3W</text><text x="311" y="57">4D</text><text x="358" y="57">T</text><text x="405" y="57">5H</text><text x="457" y="57">6M</text><text x="529" y="57">7.008S</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#475569">
+                <text x="66" y="86">знак</text><text x="108" y="86">период</text><text x="155" y="86">годы</text><text x="207" y="86">месяцы</text><text x="259" y="86">недели</text><text x="311" y="86">дни</text><text x="358" y="86">время</text><text x="405" y="86">часы</text><text x="457" y="86">минуты</text><text x="529" y="86">секунды</text>
+            </g>
+            <g fill="none" stroke-width="1.5">
+                <path d="M 133 96 L 133 102 L 333 102 L 333 96" stroke="#0e7490"/><path d="M 383 96 L 383 102 L 571 102 L 571 96" stroke="#15803d"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle">
+                <text x="233" y="120" fill="#0e7490">дата: годы, месяцы, недели, дни</text>
+                <text x="477" y="120" fill="#15803d">время: часы, минуты, секунды</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11.5" text-anchor="middle" fill="#334155">
+                <text x="310" y="148">Ноль — PT0S. Дробь — только у последней части времени: PT1,5H — это PT1H30M.</text>
+                <text x="310" y="168">Знак один на всю длительность: −PT1H30M — минус и у часов, и у минут.</text>
+            </g>
+            <rect x="14" y="182" width="592" height="32" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="203" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">M до T — месяцы, после T — минуты: P1M — месяц, PT1M — минута.</text>
+        </svg>
+        <figcaption>Из чего состоит строка длительности</figcaption>
+    </figure>
+
+    <p>Формат ISO 8601 для длительностей начинается с <code>P</code> — «период». Дальше идут числа с буквами: годы
+    <code>Y</code>, месяцы <code>M</code>, недели <code>W</code>, дни <code>D</code>; после <code>T</code> — часы
+    <code>H</code>, минуты <code>M</code>, секунды <code>S</code>. Одна и та же буква <code>M</code> означает месяцы до
+    <code>T</code> и минуты после, поэтому <code>"P1M"</code> из дня 22 — месяц, а <code>"PT1M"</code> — минута. Нулевые
+    части пропускают, но ноль целиком пишется <code>PT0S</code>. Строчные буквы и запятая вместо точки тоже понимаются, а
+    в ответ <code>toString</code> пишет каноническую форму.</p>
+
+    <p>Справочник предупреждает: знак в начале и недели вместе с другими частями — расширения стандарта (ISO 8601-2).
+    Другие программы могут не принять <code>-P1M</code> или <code>P3W1D</code>.</p>
+
+    <h2 id="sign">4. Знак и целые числа</h2>
+
+    <pre class="code js">const late = Temporal.Duration.from({ hours: -1, minutes: -30 });
+const zero = Temporal.Duration.from({ hours: 0 });
+console.log(late.toString(), late.sign, late.hours, late.abs().toString(), late.negated().toString(), zero.toString(), zero.sign, zero.blank);   // -PT1H30M -1 -1 PT1H30M PT1H30M PT0S 0 true
+console.log(Temporal.Duration.from({ hours: 100, minutes: 100 }).with({ minutes: 0 }).toString());   // PT100H
+Temporal.Duration.from({ hours: 1, minutes: -30 });   // RangeError: Temporal error: Duration was not valid.</pre>
+
+    <p>Длительность бывает положительной, отрицательной и нулевой: <code>sign</code> даёт 1, −1 или 0, а
+    <code>blank</code> — «пустая ли она». Знак хранится в каждом поле, и все поля обязаны быть одного знака — отсюда
+    <code>RangeError</code> дня 22 для <code>{ months: 1, days: -1 }</code>. <code>abs</code> снимает минус,
+    <code>negated</code> переворачивает знак, <code>with</code> заменяет поля — как у дат, с проверкой знаков.</p>
+
+    <p>Числа в полях — только целые: <code>{ hours: 1.5 }</code> даёт <code>RangeError</code> «Expected finite integer», в
+    отличие от конструктора <code>PlainDate</code>, который дробь отбрасывал. Полтора часа пишут
+    <code>{ hours: 1, minutes: 30 }</code> или строкой <code>"PT1.5H"</code> — в строке дробь у последней части времени
+    разрешена.</p>
+
+    <h2 id="round">5. Перенос и round</h2>
+
+    <pre class="code js">const d = Temporal.Duration.from({ hours: 100, minutes: 100, seconds: 100 });
+console.log(d.toString(), d.round({ largestUnit: "days" }).toString(), d.round({ largestUnit: "hours" }).toString(), d.round("hours").toString());
+// PT100H100M100S P4DT5H41M40S PT101H41M40S PT102H
+const work = Temporal.Duration.from({ days: 3, hours: 1, minutes: 41, seconds: 5 });
+console.log(work.round({ largestUnit: "hours" }).toString(), Temporal.Duration.from({ hours: 1, minutes: 17 }).round({ smallestUnit: "minutes", roundingIncrement: 15 }).toString(), Temporal.Duration.from({ hours: 2, minutes: 30 }).round({ largestUnit: "minutes" }).toString());
+// PT73H41M5S PT1H15M PT150M</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 258" role="img" aria-label="Перенос в round: было 100 часов, 100 минут, 100 секунд. 100 секунд — это 1 минута и 40 секунд, минут становится 101 — это 1 час и 41 минута, часов 101 — это 4 суток и 5 часов. Итог P4DT5H41M40S. С largestUnit hours — PT101H41M40S, round до часов — PT102H">
+            <text x="310" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">PT100H100M100S → round({ largestUnit: "days" }) → P4DT5H41M40S</text>
+            <g font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" text-anchor="middle" fill="#475569">
+                <text x="90" y="44">дни</text><text x="230" y="44">часы</text><text x="370" y="44">минуты</text><text x="510" y="44">секунды</text>
+            </g>
+            <g fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="30" y="52" width="120" height="36" rx="8"/><rect x="170" y="52" width="120" height="36" rx="8"/><rect x="310" y="52" width="120" height="36" rx="8"/><rect x="450" y="52" width="120" height="36" rx="8"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="14" text-anchor="middle" fill="#334155">
+                <text x="90" y="75">0</text><text x="230" y="75">100</text><text x="370" y="75">100</text><text x="510" y="75">100</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#0e7490">
+                <text x="510" y="108">100 с =</text><text x="510" y="124">1 мин + 40 с</text>
+                <text x="370" y="108">100 + 1 = 101 мин =</text><text x="370" y="124">1 ч + 41 мин</text>
+                <text x="230" y="108">100 + 1 = 101 ч =</text><text x="230" y="124">4 сут + 5 ч</text>
+                <text x="90" y="108">0 + 4</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#06b6d4">
+                <text x="440" y="120">←</text><text x="300" y="120">←</text><text x="160" y="120">←</text>
+            </g>
+            <g fill="#dcfce7" stroke="#16a34a" stroke-width="2">
+                <rect x="30" y="138" width="120" height="36" rx="8"/><rect x="170" y="138" width="120" height="36" rx="8"/><rect x="310" y="138" width="120" height="36" rx="8"/><rect x="450" y="138" width="120" height="36" rx="8"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="14" font-weight="700" text-anchor="middle" fill="#15803d">
+                <text x="90" y="161">4</text><text x="230" y="161">5</text><text x="370" y="161">41</text><text x="510" y="161">40</text>
+            </g>
+            <text x="310" y="200" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">largestUnit: "hours" → PT101H41M40S · round("hours") → PT102H</text>
+            <rect x="14" y="216" width="592" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="238" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">round переносит лишнее в старшие единицы до largestUnit и округляет младшие до smallestUnit.</text>
+        </svg>
+        <figcaption>Перенос: секунды → минуты → часы → дни</figcaption>
+    </figure>
+
+    <p>Длительность хранит поля такими, какими их дали: «100 часов 100 минут 100 секунд» так и печатается. Справочник
+    называет это <strong>несбалансированной</strong> записью и объясняет: «полторы минуты» и «90 секунд» равны, и
+    программа не должна решать за вас, как показать. Перенос делает <code>round</code>, причём два дела сразу. Сначала
+    лишнее уходит в старшие единицы — но не выше <code>largestUnit</code>: с <code>"days"</code> выходят 4 дня 5 часов,
+    с <code>"hours"</code> — 101 час. Единицы старше <code>largestUnit</code>, наоборот, раскладываются вниз: 2 часа 30
+    минут при <code>"minutes"</code> — 150 минут. Потом всё мельче <code>smallestUnit</code> округляется: до часов — 102
+    часа, до четверти часа (<code>roundingIncrement: 15</code>) — час пятнадцать. Нужна хотя бы одна из двух настроек.
+    Пример MDN «73:41:05» — трое суток, разложенные в часы: <code>PT73H41M5S</code>.</p>
+
+    <h2 id="total">6. total: длительность в число</h2>
+
+    <pre class="code js">const d = Temporal.Duration.from({ hours: 1, minutes: 30 });
+console.log(d.total("minutes"), d.total("hours"), d.total({ unit: "seconds" }));   // 90 1.5 5400
+const lesson = Temporal.Duration.from({ minutes: 45 });
+const course = Temporal.Duration.from({ minutes: 45 * 108 });
+console.log(course.total("hours"), course.total("days"), course.round({ largestUnit: "days" }).toString(), course.total("minutes") / lesson.total("minutes"));   // 81 3.375 P3DT9H 108</pre>
+
+    <p><code>round</code> возвращает длительность, а <code>total</code> — обычное число в одной единице, с дробью:
+    полтора часа — 90 минут или 1,5 часа. Это мост к арифметике чисел: средние, доли, деление. Практика плана —
+    длительность курса: 108 уроков по 45 минут — 81 час, или 3,375 суток, то есть трое суток и девять часов без перерыва.
+    Обратно, 4860 минут на 45 — снова 108 уроков. Справочник предупреждает: результат <code>total</code> — число с
+    плавающей точкой и бывает неточным, как <code>0.1 + 0.2</code> дня 6 Essentials.</p>
+
+    <h2 id="calendar">7. Календарные единицы и relativeTo</h2>
+
+    <pre class="code js">const month = Temporal.Duration.from({ months: 1 });
+console.log(month.total({ unit: "days", relativeTo: Temporal.PlainDate.from("2026-01-01") }), month.total({ unit: "days", relativeTo: Temporal.PlainDate.from("2026-02-01") }), month.total({ unit: "days", relativeTo: "2028-02-01" }));   // 31 28 29
+const gap = Temporal.PlainDate.from("2026-10-12").until("2027-01-01");
+console.log(gap.round({ largestUnit: "months", relativeTo: Temporal.PlainDate.from("2026-10-12") }).toString(), gap.round({ largestUnit: "weeks", relativeTo: "2026-10-12" }).toString());   // P2M20D P11W4D
+month.total("days");   // RangeError: Temporal error:</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 236" role="img" aria-label="Сколько дней в P1M: от 2026-01-01 — 31 день, от 2026-02-01 — 28 дней, от 2028-02-01 — 29 дней. Без relativeTo — RangeError. Годы, месяцы и недели — календарные единицы, их длину в днях задаёт дата-опора">
+            <text x="310" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">Temporal.Duration.from({ months: 1 }).total({ unit: "days", relativeTo })</text>
+            <rect x="250" y="32" width="120" height="34" rx="8" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+            <text x="310" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="14" font-weight="700" fill="#0e7490">P1M</text>
+            <g fill="none" stroke="#06b6d4" stroke-width="1.3" stroke-dasharray="4 3">
+                <path d="M 296 66 L 112 100"/><path d="M 310 66 L 310 100"/><path d="M 324 66 L 508 100"/>
+            </g>
+            <g fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="20" y="100" width="184" height="58" rx="8"/><rect x="218" y="100" width="184" height="58" rx="8"/><rect x="416" y="100" width="184" height="58" rx="8"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="11" text-anchor="middle" fill="#475569">
+                <text x="112" y="118">от 2026-01-01</text><text x="310" y="118">от 2026-02-01</text><text x="508" y="118">от 2028-02-01</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" text-anchor="middle" fill="#0e7490">
+                <text x="112" y="137">31 день</text><text x="310" y="137">28 дней</text><text x="508" y="137">29 дней</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#475569">
+                <text x="112" y="152">январь</text><text x="310" y="152">февраль</text><text x="508" y="152">февраль високосного года</text>
+            </g>
+            <text x="310" y="180" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9f1239">без relativeTo — RangeError: месяц сам не знает, сколько в нём дней</text>
+            <rect x="14" y="194" width="592" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="216" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">Годы, месяцы и недели — календарные единицы: их длину в днях задаёт дата-опора.</text>
+        </svg>
+        <figcaption>Один «месяц» — разное число дней</figcaption>
+    </figure>
+
+    <p>Сколько дней в «одном месяце»? Зависит от месяца — 31, 28 или 29. Справочник называет годы, месяцы и недели
+    <strong>календарными единицами</strong>: их длина зависит от календаря и от того, откуда считать, а сама длительность
+    ни календаря, ни даты не хранит. Поэтому <code>total</code>, <code>round</code> и <code>compare</code> принимают
+    настройку <code>relativeTo</code> — дату-опору, <code>PlainDate</code> или <code>PlainDateTime</code> (строка тоже
+    подойдёт). Без неё перевод календарных единиц в дни — <code>RangeError</code>, причём Chrome оставляет текст пустым:
+    «Temporal error: ». А <code>round</code> до месяцев без опоры пишет и вовсе путаный текст «largestUnit when rounding
+    Duration was not the largest provided unit». Недели тоже календарные: в некоторых календарях неделя не из семи дней.
+    Сутки же считаются ровно по 24 часа — перевод часов появится только с поясами, на дне 24.</p>
+
+    <p>Так вчерашние 81 день раскладываются в «2 месяца 20 дней» — как <code>until</code> с <code>largestUnit</code> дня
+    22, но уже у готовой длительности.</p>
+
+    <h2 id="math">8. Сложение и сравнение длительностей</h2>
+
+    <pre class="code js">const a = Temporal.Duration.from({ hours: 1, minutes: 30 });
+console.log(a.add({ hours: -1, minutes: -20 }).toString(), a.subtract({ minutes: 45 }).toString(), a.add("PT45M").toString(), Temporal.Duration.from({ minutes: 50 }).add({ minutes: 20 }).toString(), Temporal.Duration.from({ days: 1 }).add({ hours: 30 }).toString());
+// PT10M PT45M PT2H15M PT70M P2DT6H
+const list = ["PT2H", "PT1H30M", "PT90M", "PT1H45M", "PT1H"].map((s) =&gt; Temporal.Duration.from(s));
+list.sort(Temporal.Duration.compare);
+console.log(list.join(" "), Temporal.Duration.compare("PT3S", "PT1M"), "PT3S" &gt; "PT1M");   // PT1H PT1H30M PT90M PT1H45M PT2H -1 true
+Temporal.Duration.from({ months: 1 }).add({ days: 1 });   // RangeError: Temporal error: Largest unit cannot be a calendar unit when adding two durations.</pre>
+
+    <p><code>add</code> и <code>subtract</code> складывают длительности и сразу переносят лишнее, но только до самой
+    крупной единицы слагаемых: 50 и 20 минут — 70 минут, а не час с минутами; сутки и 30 часов — двое суток и 6 часов.
+    Знаки выравниваются: полтора часа минус час двадцать — 10 минут. Календарные длительности так не складываются —
+    «месяц плюс день» без даты не посчитать. Справочник советует идти через дату:
+    <code>start.add(a).add(b).since(start)</code>.</p>
+
+    <p><code>compare</code> работает как у дат: −1, 0 или 1, поэтому его передают в <code>sort</code>. «1 час 30 минут» и
+    «90 минут» для него равны, и стабильная сортировка оставила их в исходном порядке. А <code>&gt;</code> и
+    <code>+</code> снова под запретом: <code>valueOf</code> бросает <code>TypeError</code>. Пример справочника
+    объясняет, почему это хорошо: как строки, <code>"PT3S" &gt; "PT1M"</code> — <code>true</code>, хотя три секунды
+    меньше минуты. Для календарных длительностей <code>compare</code> тоже просит <code>relativeTo</code> (задание 9).</p>
+
+    <h2 id="strings">9. Строки, JSON и toLocaleString</h2>
+
+    <pre class="code js">const record = Temporal.Duration.from({ seconds: 9, milliseconds: 580 });
+console.log(record.toString(), record.toString({ fractionalSecondDigits: 1 }), record.toString({ smallestUnit: "millisecond" }), `${record}`, JSON.stringify({ time: record }));   // PT9.58S PT9.5S PT9.580S PT9.58S {"time":"PT9.58S"}
+const ms = Temporal.Duration.from({ milliseconds: 1000 });
+console.log(ms.toString(), Temporal.Duration.from(ms.toString()).milliseconds, Temporal.Duration.from({ hours: 1, minutes: 30, seconds: 15 }).toLocaleString("ru-RU"));   // PT1S 0 1 ч 30 мин 15 с</pre>
+
+    <p>Пример MDN — мировой рекорд на 100 метров, 9,58 секунды. <code>toString</code> принимает
+    <code>fractionalSecondDigits</code> (сколько цифр после точки; лишние отрезаются) или <code>smallestUnit</code>.
+    <code>toJSON</code> пишет ту же строку, обратно — reviver с <code>Temporal.Duration.from</code>. Одна потеря: доли
+    секунды в строке — одно дробное число, поэтому «1000 миллисекунд» уходят как <code>PT1S</code> и возвращаются
+    «1 секундой». <code>toLocaleString</code> пишет длительность для людей; вид зависит от браузера, а настройки — день
+    25.</p>
+
+    <h2 id="yearmonth">10. PlainYearMonth: месяц года</h2>
+
+    <pre class="code js">const ym = Temporal.PlainYearMonth.from("2026-10");
+const b = new Temporal.PlainYearMonth(2026, 10);
+const c = Temporal.PlainDate.from("2026-10-12").toPlainYearMonth();
+console.log(ym.toString(), b.toString(), ym.equals(c), ym.year, ym.month, ym.monthCode, ym.daysInMonth, ym.inLeapYear, typeof ym.day);   // 2026-10 2026-10 true 2026 10 M10 31 false undefined
+console.log(ym.toPlainDate({ day: 1 }).toString(), ym.toPlainDate({ day: 1 }).dayOfWeek, ym.toPlainDate({ day: 40 }).toString(), JSON.stringify({ ym }));   // 2026-10-01 4 2026-10-31 {"ym":"2026-10"}</pre>
+
+    <p><code>PlainYearMonth</code> — месяц конкретного года без числа: «октябрь 2026», отчёт за месяц, срок оплаты,
+    страница календаря. Строка — <code>"2026-10"</code>, конструктор — год и месяц (снова с единицы), из даты —
+    <code>toPlainYearMonth()</code>. Поля — как у даты без дневных: <code>year</code>, <code>month</code>,
+    <code>monthCode</code>, <code>daysInMonth</code>, <code>daysInYear</code>, <code>monthsInYear</code>,
+    <code>inLeapYear</code>, <code>era</code>, <code>eraYear</code>, <code>calendarId</code>; <code>day</code> нет.
+    Обратно в дату — <code>toPlainDate({ day })</code>, число подгоняется: 40 октября — 31-е.</p>
+
+    <pre class="code js">const school = Temporal.PlainYearMonth.from("2026-09");
+const end = Temporal.PlainYearMonth.from("2027-05");
+console.log(school.add({ months: 4 }).toString(), end.subtract({ years: 1 }).toString(), school.until(end).toString(), end.since(school).months, Temporal.PlainYearMonth.compare(school, end));   // 2027-01 2026-05 P8M 8 -1
+const lengths = [];
+for (let m = school; Temporal.PlainYearMonth.compare(m, end) &lt;= 0; m = m.add({ months: 1 })) lengths.push(m.daysInMonth);
+console.log(lengths.length, lengths.join(" "));   // 9 30 31 30 31 31 28 31 30 31
+school.add({ days: 20 });   // RangeError: Temporal error: Can only add years or months to PlainYearMonth.</pre>
+
+    <p>Учебный год с сентября по май — девять месяцев, разница первого и последнего — <code>P8M</code>.
+    <code>add</code>, <code>subtract</code>, <code>until</code>, <code>since</code>, <code>with</code>,
+    <code>equals</code> и <code>compare</code> — как у даты, но единицы только годы и месяцы. Дни и недели — ошибка, и
+    здесь справочник MDN отстал: страница <code>add</code> обещает, что дни «меньше месяца ничего не меняют», а текст
+    предложения (раздел 16) и Chrome требуют <code>RangeError</code>. Разницу в днях считают через даты:
+    <code>toPlainDate({ day: 1 })</code> у обоих месяцев.</p>
+
+    <h2 id="grid">11. Практика: календарь месяца</h2>
+
+    <pre class="code js">function monthGrid(ym) {
+  const first = ym.toPlainDate({ day: 1 });
+  const cells = Array(first.dayOfWeek - 1).fill("··");
+  for (let day = 1; day &lt;= ym.daysInMonth; day++) cells.push(String(day).padStart(2, "0"));
+  const rows = [];
+  for (let i = 0; i &lt; cells.length; i += 7) rows.push(cells.slice(i, i + 7).join(" "));
+  return rows;
+}
+for (const row of monthGrid(Temporal.PlainYearMonth.from("2026-10"))) console.log(row);</pre>
+
+    <div class="result-box">
+        ·· ·· ·· 01 02 03 04<br>
+        05 06 07 08 09 10 11<br>
+        12 13 14 15 16 17 18<br>
+        19 20 21 22 23 24 25<br>
+        26 27 28 29 30 31
+    </div>
+
+    <p>Практика плана. Всё, что нужно для страницы календаря, даёт <code>PlainYearMonth</code>: день недели первого
+    числа (1 октября 2026 года — четверг, 4) и длина месяца. Пустые клетки до четверга — три точки-заглушки, числа
+    дополнены нулём методом <code>padStart</code> дня 16 Essentials, неделя — семь клеток с понедельника. Никаких
+    «нулевых чисел следующего месяца», как на дне 21.</p>
+
+    <h2 id="monthday">12. PlainMonthDay: день месяца</h2>
+
+    <pre class="code js">const md = Temporal.PlainMonthDay.from("10-12");
+const b = new Temporal.PlainMonthDay(10, 12);
+const c = Temporal.PlainDate.from("2026-10-12").toPlainMonthDay();
+const e = Temporal.PlainMonthDay.from({ monthCode: "M10", day: 12 });
+console.log(md.toString(), b.toString(), e.toString(), md.equals(c), md.monthCode, md.day, typeof md.month, typeof md.year, md.toString({ calendarName: "always" }));   // 10-12 10-12 10-12 true M10 12 undefined undefined 1972-10-12[u-ca=iso8601]
+console.log(md);   // PlainMonthDay {calendarId: 'iso8601', monthCode: 'M10', day: 12}
+const leap = Temporal.PlainMonthDay.from("02-29");
+console.log(leap.toString(), leap.toPlainDate({ year: 2027 }).toString(), leap.toPlainDate({ year: 2028 }).toString(), Temporal.PlainMonthDay.from({ year: 2027, month: 2, day: 29 }).toString(), typeof Temporal.PlainMonthDay.compare);   // 02-29 2027-02-28 2028-02-29 02-28 undefined</pre>
+
+    <p><code>PlainMonthDay</code> — день, который повторяется каждый год: день рождения, праздник. Строка —
+    <code>"10-12"</code> (или <code>"--10-12"</code>), конструктор — месяц и число. Полей всего три: календарь,
+    <code>monthCode</code> и <code>day</code>; даже <code>month</code> нет. Справочник объясняет: номер месяца без года в
+    календарях с високосным месяцем не определён, поэтому день рождения хранят кодом месяца — обещание дня 22. В превью
+    консоли полей мало, и оно впервые читается целиком.</p>
+
+    <p>Внутри всё же есть год — <strong>опорный 1972-й</strong>, первый високосный после эпохи; его видно с
+    <code>calendarName: "always"</code>. Поэтому 29 февраля — правильный день месяца. В конкретный год его переносит
+    <code>toPlainDate({ year })</code> с подгонкой: в 2027 году — 28 февраля, в 2028-м — 29-е. Если год передан сразу в
+    <code>from</code>, подгонка случается тут же. Сравнивать, складывать и вычитать <code>PlainMonthDay</code> нельзя:
+    смысл «раньше» и «на день позже» зависит от года. Есть только <code>equals</code> и <code>with</code>.</p>
+
+    <h2 id="birthday">13. Практика: дни рождения</h2>
+
+    <pre class="code js">function nextBirthday(birthday, today) {
+  const thisYear = birthday.toPlainDate({ year: today.year });
+  return Temporal.PlainDate.compare(thisYear, today) &gt;= 0 ? thisYear : birthday.toPlainDate({ year: today.year + 1 });
+}
+const today = Temporal.PlainDate.from("2026-10-12");
+for (const text of ["10-20", "10-12", "03-08", "02-29"]) {
+  const next = nextBirthday(Temporal.PlainMonthDay.from(text), today);
+  console.log(text, next.toString(), today.until(next).days);
+}</pre>
+
+    <div class="result-box">
+        10-20 2026-10-20 8<br>
+        10-12 2026-10-12 0<br>
+        03-08 2027-03-08 147<br>
+        02-29 2027-02-28 139
+    </div>
+
+    <p>Практика плана. Ближайший день рождения — в этом году, если он ещё не прошёл, иначе в следующем. Сегодняшний
+    считается: до него 0 дней. У родившегося 29 февраля в невисокосном 2027 году праздник подогнан к 28-му; кто-то празднует
+    1 марта — тогда нужна своя проверка <code>inLeapYear</code>. «Сегодня» снова приходит параметром.</p>
+
+    <h2 id="shared">14. Методы трёх классов</h2>
+
+    <p>У трёх классов дня общий с днём 22 набор методов, но урезанный по смыслу. Ссылки — на страницы справочника.</p>
+
+    <table>
+        <thead><tr><th>Группа</th><th>Duration</th><th>PlainYearMonth</th><th>PlainMonthDay</th></tr></thead>
+        <tbody>
+            <tr><td>создать</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/from"><code>from</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/Duration">конструктор</a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/from"><code>from</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/PlainYearMonth">конструктор</a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/from"><code>from</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/PlainMonthDay">конструктор</a></td></tr>
+            <tr><td>поля</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/years"><code>years</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/months"><code>months</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/weeks"><code>weeks</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/days"><code>days</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/hours"><code>hours</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/minutes"><code>minutes</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/seconds"><code>seconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/milliseconds"><code>milliseconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/microseconds"><code>microseconds</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/nanoseconds"><code>nanoseconds</code></a>; <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/sign"><code>sign</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/blank"><code>blank</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/year"><code>year</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/month"><code>month</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/monthCode"><code>monthCode</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/daysInMonth"><code>daysInMonth</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/daysInYear"><code>daysInYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/monthsInYear"><code>monthsInYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/inLeapYear"><code>inLeapYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/era"><code>era</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/eraYear"><code>eraYear</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/calendarId"><code>calendarId</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/monthCode"><code>monthCode</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/day"><code>day</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/calendarId"><code>calendarId</code></a></td></tr>
+            <tr><td>заменить и сдвинуть</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/with"><code>with</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/add"><code>add</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/subtract"><code>subtract</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/negated"><code>negated</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/abs"><code>abs</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/with"><code>with</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/add"><code>add</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/subtract"><code>subtract</code></a> — годы и месяцы</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/with"><code>with</code></a></td></tr>
+            <tr><td>разница</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/round"><code>round</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/total"><code>total</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/since"><code>since</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/until"><code>until</code></a></td><td>—</td></tr>
+            <tr><td>сравнить</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/compare"><code>compare</code></a>; <code>equals</code> нет</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/equals"><code>equals</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/compare"><code>compare</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/equals"><code>equals</code></a>; <code>compare</code> нет</td></tr>
+            <tr><td>в строку</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/toString"><code>toString</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/toJSON"><code>toJSON</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/toLocaleString"><code>toLocaleString</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/toString"><code>toString</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/toJSON"><code>toJSON</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/toLocaleString"><code>toLocaleString</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/toString"><code>toString</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/toJSON"><code>toJSON</code></a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/toLocaleString"><code>toLocaleString</code></a></td></tr>
+            <tr><td>в число — никогда</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/valueOf"><code>valueOf</code></a> — <code>TypeError</code></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/valueOf"><code>valueOf</code></a> — <code>TypeError</code></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/valueOf"><code>valueOf</code></a> — <code>TypeError</code></td></tr>
+            <tr><td>в дату</td><td>—</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/toPlainDate"><code>toPlainDate({ day })</code></a></td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/toPlainDate"><code>toPlainDate({ year })</code></a></td></tr>
+        </tbody>
+    </table>
+
+    <p>У <code>PlainYearMonth</code> и <code>PlainMonthDay</code> есть ловушка с <code>toLocaleString("ru-RU")</code>:
+    русская локаль пишет даты по григорианскому календарю, а у объекта календарь ISO, и Chrome бросает
+    <code>RangeError</code> «Mismatched calendars». Справочник объясняет это и предлагает передать календарь в
+    настройках — день 25.</p>
+
+    <h2 id="errors">15. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Ошибка в Chrome</th><th>Что не так</th></tr></thead>
+        <tbody>
+            <tr><td><code>Temporal.Duration(1)</code></td><td><code>TypeError: Method invoked on an object that is not Temporal.Duration.</code></td><td>конструктор без <code>new</code></td></tr>
+            <tr><td><code>Duration.from({ hours: 1.5 })</code></td><td><code>RangeError: Temporal error: Expected finite integer.</code></td><td>поля только целые</td></tr>
+            <tr><td><code>Duration.from({ hours: 1, minutes: -30 })</code></td><td><code>RangeError: Temporal error: Duration was not valid.</code></td><td>разные знаки</td></tr>
+            <tr><td><code>Duration.from({ hour: 1 })</code></td><td><code>TypeError: Temporal error: Did not provide any valid Duration fields.</code></td><td>ключи во множественном числе</td></tr>
+            <tr><td><code>Duration.from("1h30m")</code></td><td><code>RangeError: Temporal error: Invalid duration designator.</code></td><td>не формат ISO 8601</td></tr>
+            <tr><td><code>month.total("days")</code></td><td><code>RangeError: Temporal error: </code> (пустой текст)</td><td>нужен <code>relativeTo</code></td></tr>
+            <tr><td><code>gap.round({ largestUnit: "months" })</code></td><td><code>RangeError: Temporal error: largestUnit when rounding Duration was not the largest provided unit</code></td><td>нужен <code>relativeTo</code></td></tr>
+            <tr><td><code>month.add({ days: 1 })</code></td><td><code>RangeError: Temporal error: Largest unit cannot be a calendar unit when adding two durations.</code></td><td>складывать через дату</td></tr>
+            <tr><td><code>a &gt; b</code>, <code>a + b</code></td><td><code>TypeError: Do not use Temporal.Duration.prototype.valueOf; use Temporal.Duration.prototype.compare for comparison.</code></td><td><code>compare</code> и <code>total</code></td></tr>
+            <tr><td><code>ym.add({ days: 20 })</code></td><td><code>RangeError: Temporal error: Can only add years or months to PlainYearMonth.</code></td><td>единицы — годы и месяцы</td></tr>
+            <tr><td><code>md.toPlainDate(2027)</code></td><td><code>TypeError: Temporal error: year argument must be an object.</code></td><td>нужно <code>{ year: 2027 }</code></td></tr>
+            <tr><td><code>ym.toLocaleString("ru-RU")</code></td><td><code>RangeError: Mismatched calendars.</code></td><td>ISO против григорианского</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="spec">16. Что говорит спецификация</h2>
+
+    <p>Текст — то же предложение <a href="https://tc39.es/proposal-temporal/">tc39.es/proposal-temporal</a>, что на дне
+    22: в ECMA-262 2026 <code>Temporal</code> нет. Разделы дня:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal.duration">7.1.1 Temporal.Duration ( … )</a>: без
+            <code>new</code> — <code>TypeError</code>; каждый аргумент проходит ToIntegerIfIntegral — дробь даёт
+            <code>RangeError</code>, а не обрезается, как в конструкторе <code>PlainDate</code>.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-properties-of-temporal-duration-instances">7.4 Properties of
+            Temporal.Duration Instances</a>: десять слотов от [[Years]] до [[Nanoseconds]], целые, точно хранимые в обычном
+            числе.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-isvalidduration">7.5.16 IsValidDuration</a>: все поля одного
+            знака; годы, месяцы и недели меньше 2<sup>32</sup>; всё остальное в секундах меньше 2<sup>53</sup> —
+            <code>MAX_SAFE_INTEGER</code> дня 21.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal-adddurations">7.5.41 AddDurations</a>: самая крупная
+            единица — календарная → <code>RangeError</code>; иначе обе длительности переводятся в наносекунды с сутками по
+            24 часа, складываются и раскладываются обратно до этой единицы.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal.duration.prototype.total">7.3.21
+            Temporal.Duration.prototype.total</a>: три ветки — с опорой-поясом (день 24), с опорой-датой (прибавить к ней
+            и посчитать разницу), без опоры — календарная единица даёт <code>RangeError</code>.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal.duration.compare">7.2.3 Temporal.Duration.compare</a>:
+            если поля совпадают, сразу 0 — опора не нужна даже для месяцев; иначе календарные единицы требуют
+            <code>relativeTo</code>.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal-adddurationtoyearmonth">9.5.8 AddDurationToYearMonth</a>:
+            недели, дни или время — <code>RangeError</code>; к месяцу прибавляют от его первого дня.</li>
+        <li><a href="https://tc39.es/proposal-temporal/#sec-temporal-calendaryearmonthfromfields">12.3.13
+            CalendarYearMonthFromFields</a>: опорный день месяца — 1-е; <a href="https://tc39.es/proposal-temporal/#sec-temporal-calendarmonthdaytoisoreferencedate">12.3.24
+            CalendarMonthDayToISOReferenceDate</a>: опорный год для ISO — 1972, «первый високосный после эпохи».</li>
+    </ul>
+
+    <pre class="code js">console.log(Temporal.PlainYearMonth.from("2026-10").toString({ calendarName: "always" }), Temporal.Duration.compare({ months: 1 }, { months: 1 }), Temporal.Duration.from({ years: 2 ** 32 - 1 }).years);   // 2026-10-01[u-ca=iso8601] 0 4294967295
+new Temporal.Duration(0, 0, 0, 1.5);   // RangeError: Temporal error: Expected finite integer.</pre>
+
+    <h2 id="cards">17. «Карточки»: время занятий и интервалы</h2>
+
+    <p>Два новых вопроса к «Карточкам»: сколько ученик занимался за неделю и через сколько повторять каждое слово.
+    Время занятий приходит из журнала строками ISO 8601, интервалы повтора храним длительностями.</p>
+
+    <pre class="code js">const sessions = ["PT12M30S", "PT8M45S", "PT21M10S", "PT6M"].map((s) =&gt; Temporal.Duration.from(s));
+const sum = sessions.reduce((a, b) =&gt; a.add(b));
+const average = Temporal.Duration.from({ seconds: Math.round(sum.total("seconds") / sessions.length) }).round({ largestUnit: "minutes" });
+const cards = [
+  { word: "book", last: Temporal.PlainDate.from("2026-10-10"), interval: Temporal.Duration.from({ days: 2 }) },
+  { word: "water", last: Temporal.PlainDate.from("2026-10-12"), interval: Temporal.Duration.from({ weeks: 1 }) },
+  { word: "bread", last: Temporal.PlainDate.from("2026-09-28"), interval: Temporal.Duration.from({ weeks: 2 }) },
+];
+const today = Temporal.PlainDate.from("2026-10-13");
+const due = cards.filter((c) =&gt; Temporal.PlainDate.compare(c.last.add(c.interval), today) &lt;= 0).map((c) =&gt; c.word);
+console.log(sum.toString(), average.toString(), sum.round({ smallestUnit: "minutes" }).toString());
+console.log(JSON.stringify(cards[1]), due);</pre>
+
+    <div class="result-box">
+        PT48M25S PT12M6S PT48M<br>
+        {"word":"water","last":"2026-10-12","interval":"P1W"} (2) ['book', 'bread']
+    </div>
+
+    <p><strong>Строка 1 — время.</strong> <code>reduce</code> дня 20 Essentials сложил четыре длительности через
+    <code>add</code>: 48 минут 25 секунд. Среднее — через <code>total</code>: 2905 секунд на четыре, округлено и разложено
+    до минут, — 12 минут 6 секунд. С точностью до минут — 48 минут.</p>
+
+    <p><strong>Строка 2 — повтор.</strong> Интервал в JSON — короткая строка <code>P1W</code>. Карточка пора повторять,
+    если «последний повтор плюс интервал» уже наступил: у book — 12 октября, у bread — тоже 12-е (28 сентября плюс две
+    недели), у water — только 19-го.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Сложите сессии через <code>reduce((a, b) =&gt; a + b)</code>. Какая ошибка и какой метод
+        её бросил?
+        <br><br>
+        <strong>Второй.</strong> Выведите <code>cards[1].interval.total("days")</code>. Почему ошибка, хотя в неделе всегда
+        семь дней? Исправьте через <code>relativeTo</code>.
+        <br><br>
+        <strong>Третий.</strong> Поставьте bread интервал <code>{ months: 1 }</code>. Почему дату к месяцу прибавить можно,
+        а длительность к месяцу — нет? Попадёт ли bread в список?
+    </div>
+
+    <h2 id="next">18. Что дальше</h2>
+
+    <p>Сегодня закрыты все «плоские» классы <code>Temporal</code>: длительности, месяц года и день месяца. Дважды мы
+    упёрлись в пояса: сутки считались по 24 часа, а <code>relativeTo</code> бывает «с поясом». Это день 24:
+    <code>Instant</code>, <code>ZonedDateTime</code>, переход на летнее время и мост от <code>Date</code> —
+    <code>toTemporalInstant</code>.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration">Temporal.Duration</a></td><td>формат ISO 8601, календарные единицы, баланс, знак</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/Duration">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/from">from()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/with">with()</a></td><td>создать, заменить поля</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/round">round()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/total">total()</a></td><td>перенос и округление; число в одной единице; <code>relativeTo</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration/toString">toString()</a></td><td>строка ISO 8601; доли секунды</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth">Temporal.PlainYearMonth</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/PlainYearMonth">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/from">from()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainYearMonth/toPlainDate">toPlainDate()</a></td><td>месяц года; календарь месяца</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay">Temporal.PlainMonthDay</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/PlainMonthDay">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/from">from()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainMonthDay/toPlainDate">toPlainDate()</a></td><td>день месяца; дни рождения; 29 февраля</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td>поля и прочие методы <code>Duration</code> — 20 страниц</td><td>ссылки в таблице раздела 14</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>поля и методы <code>PlainYearMonth</code> — 21 страница</td><td>ссылки в таблице раздела 14</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>поля и методы <code>PlainMonthDay</code> — 9 страниц</td><td>ссылки в таблице раздела 14</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// Temporal.Duration.from({ hours: 1, minutes: 30 }), from("PT1H30M"), new Temporal.Duration(0, 0, 0, 0, 1, 30)
+// строка: P — период, Y M W D до T, H M S после T; P1M — месяц, PT1M — минута; ноль — PT0S
+// поля целые и одного знака; sign, blank, abs(), negated(), with({ … })
+// d.round({ largestUnit: "days" }) — перенос; d.round("hours") — округление; d.total("minutes") — число
+// годы, месяцы, недели — календарные единицы: total/round/compare просят relativeTo: дату-опору
+// a.add(b), a.subtract(b) — только без календарных единиц; Temporal.Duration.compare(a, b) для sort; a &gt; b — TypeError
+// Temporal.PlainYearMonth.from("2026-10"): year, month, daysInMonth; add/until — годы и месяцы; toPlainDate({ day: 1 })
+// Temporal.PlainMonthDay.from("02-29"): monthCode, day; только equals и with; toPlainDate({ year: 2027 }) → 2027-02-28</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чем <code>"P1M"</code> отличается от <code>"PT1M"</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    До <code>T</code> буква <code>M</code> означает месяцы, после — минуты. Первая строка — один месяц,
+                    вторая — одна минута.
+                </details>
+            </li>
+            <li>Почему <code>Temporal.Duration.from({ hours: 100, minutes: 100 })</code> печатается как <code>PT100H100M</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Длительность хранит поля как есть, без переноса. Перенос делает <code>round</code>, например
+                    <code>round({ largestUnit: "days" })</code>.
+                </details>
+            </li>
+            <li>Почему <code>Temporal.Duration.from({ months: 1 }).total("days")</code> — ошибка?
+                <details class="answer"><summary>Ответ</summary>
+                    В месяце 28–31 день, и длительность не знает, о каком месяце речь. Нужна дата-опора:
+                    <code>total({ unit: "days", relativeTo: "2026-02-01" })</code> даст 28.
+                </details>
+            </li>
+            <li>Как отсортировать массив длительностей по длине?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>list.sort(Temporal.Duration.compare)</code>. Сравнение строк или <code>&gt;</code> не годится:
+                    <code>"PT3S" &gt; "PT1M"</code> — <code>true</code>, а <code>&gt;</code> у длительностей бросает
+                    <code>TypeError</code>.
+                </details>
+            </li>
+            <li>Что вернёт <code>Temporal.PlainMonthDay.from("02-29").toPlainDate({ year: 2027 })</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    28 февраля 2027 года: 2027-й не високосный, и число подгоняется к последнему дню февраля.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

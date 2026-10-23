@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 20 — Unicode в строках и регулярных выражениях</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f43f5e; }
+        h2 { color: #be123c; background: #fff1f2; border-left-color: #f43f5e; }
+        h3 { color: #9f1239; }
+        .step-number { background: #f43f5e; }
+        .toc a { color: #be123c; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 20</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 20 &bull; урок 1</span>
+        <h1>Unicode в строках и регулярных выражениях</h1>
+        <p>Курс 2, Intermediate. Модуль «Строки и регулярные выражения» — четвёртый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>различать 16-битные части, кодовые точки и то, что человек видит как один знак;</li>
+            <li>считать и перебирать строку с эмодзи без поломок, находить половинки без пары;</li>
+            <li>писать шаблоны для букв любого алфавита: флаги <code>u</code> и <code>v</code>, классы <code>\p{…}</code>;</li>
+            <li>сравнивать и искать текст с диакритикой через <code>normalize</code>;</li>
+            <li>писать обратную косую без удвоения — <code>String.raw</code>.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Почему у смайлика длина 2</a></li>
+            <li><a href="#units">Кодовые точки и 16-битные части</a></li>
+            <li><a href="#who">Кто считает чем</a></li>
+            <li><a href="#lone">Половинка без пары: isWellFormed и toWellFormed</a></li>
+            <li><a href="#u">Флаг u: шаблон видит кодовые точки</a></li>
+            <li><a href="#p">Классы свойств \p{…}</a></li>
+            <li><a href="#v">Флаг v: операции над классами</a></li>
+            <li><a href="#normalize">«é» в двух записях: normalize</a></li>
+            <li><a href="#raw">Тегированные шаблоны и String.raw</a></li>
+            <li><a href="#errors">Ошибки дня: строгий режим для шаблонов</a></li>
+            <li><a href="#spec">Раздел 22.1 спецификации</a></li>
+            <li><a href="#cards">«Карточки»: слова на любом языке</a></li>
+            <li><a href="#module">Итоги модуля и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Почему у смайлика длина 2</h2>
+
+    <p>Этот день собирает долги со всего курса. День 10 Essentials предупреждал: цикл по номерам разрежет эмодзи пополам,
+    «подробный разбор — в курсе 2». День 16 Essentials показал, что у «🙂» длина 2, а <code>charCodeAt</code> даёт
+    «половину значка», и отложил «главу о кодировках». День 11 курса 2 перебрал смайлик целиком через
+    <code>[...str]</code> и пообещал: что такое кодовые точки — день 20. День 17 нашёл шаблоном <code>/../</code> два
+    символа в одном смайлике, день 19 — разрезал его через <code>split("")</code>. Вот всё это одной программой:</p>
+
+    <pre class="code js">const smile = "🙂";
+console.log(smile.length, [...smile].length, smile.charCodeAt(0), smile.codePointAt(0));       // 2 1 55357 128578
+console.log(smile.split("").map((c) =&gt; c.charCodeAt(0).toString(16)), /^..$/.test(smile));   // ['d83d', 'de42'] true</pre>
+
+    <p>Одна и та же строка — это и «два», и «один». Разница в том, <em>что</em> считать: 16-битные части, из которых
+    строка хранится, или символы Unicode, которые из этих частей складываются. Сегодня разберём оба уровня, третий —
+    то, что видит человек, — и научим регулярные выражения работать с символами, а не с частями.</p>
+
+    <h2 id="units">2. Кодовые точки и 16-битные части</h2>
+
+    <p>Unicode даёт каждому символу номер — <strong>кодовую точку</strong>, от U+0000 до U+10FFFF (номер пишут после
+    «U+» в шестнадцатеричной записи). «A» — U+0041, русская «а» — U+0430, туркменская «ý» — U+00FD, «🙂» — U+1F642.
+    Но строка JavaScript — не список кодовых точек. По спецификации (6.1.4) это последовательность
+    <strong>16-битных значений</strong> — единиц кодировки UTF-16, а <code>length</code> — их количество.</p>
+
+    <p>В одну 16-битную часть помещается 65 536 номеров. Это <em>базовая плоскость</em> (BMP): латиница, кириллица,
+    греческий, туркменские ä, ç, ň, ö, ş, ü, ý, ž и ү, ң, ө кириллицы — каждая буква одна часть. Всё, что дальше, —
+    эмодзи, редкие письменности — записывается <strong>суррогатной парой</strong>: старшая половинка из промежутка
+    D800–DBFF и младшая из DC00–DFFF. Эти номера ничем другим не заняты, поэтому пару нельзя спутать с буквой.</p>
+
+    <pre class="code js">const smile = "🙂";
+const [hi, lo] = [smile.charCodeAt(0), smile.charCodeAt(1)];
+console.log(hi.toString(16), lo.toString(16), (hi - 0xD800) * 0x400 + (lo - 0xDC00) + 0x10000);   // d83d de42 128578
+console.log("\u{1F642}" === smile, "\uD83D\uDE42" === smile, "ä".length, "ң".length, "ž".codePointAt(0).toString(16));   // true true 1 1 17e</pre>
+
+    <p>Формула из спецификации собирает номер из пары: 128578 — это и есть U+1F642. <code>0xD800</code> —
+    шестнадцатеричная запись числа, <code>toString(16)</code> — обратный перевод (день 16 Essentials). Запись
+    <code>\u{1F642}</code> задаёт символ по кодовой точке (от одной до шести цифр), а <code>\uD83D</code> дня 17 —
+    ровно четыре цифры, одну часть. Есть и третий уровень:</p>
+
+    <pre class="code js">const s = "Aý🙂👍🏽";
+console.log(s.length, [...s].length, [...s]);                                              // 8 5 ['A', 'ý', '🙂', '👍', '🏽']
+console.log([...s].map((c) =&gt; c.codePointAt(0).toString(16).toUpperCase()).join(" "));   // 41 FD 1F642 1F44D 1F3FD
+console.log("🇹🇲".length, [..."🇹🇲"].length, "👨‍👦".length, [..."👨‍👦"].length);              // 4 2 5 3</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 300" role="img" aria-label="Строка A, ý, смайлик, большой палец с оттенком кожи. Восемь 16-битных частей: 0041, 00FD, пара D83D DE42, пара D83D DC4D, пара D83C DFFD. Пять кодовых точек: A, ý, смайлик, палец, оттенок кожи. Четыре графемы: A, ý, смайлик, палец с оттенком">
+            <g font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">
+                <text x="33" y="20">16-битные части — length 8; s[2] и s[3] — две половинки 🙂</text>
+                <text x="33" y="104">кодовые точки — [...s], for...of, codePointAt, флаг u: 5</text>
+                <text x="33" y="188">графемы — что видит человек: 4 (Intl.Segmenter — курс 3)</text>
+            </g>
+            <g font-family="Consolas, monospace" font-size="12" text-anchor="middle">
+                <rect x="33" y="28" width="64" height="32" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="65" y="49" fill="#334155">0041</text>
+                <rect x="103" y="28" width="64" height="32" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="135" y="49" fill="#334155">00FD</text>
+                <rect x="173" y="28" width="64" height="32" rx="5" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/><text x="205" y="49" fill="#9f1239">D83D</text>
+                <rect x="243" y="28" width="64" height="32" rx="5" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/><text x="275" y="49" fill="#9f1239">DE42</text>
+                <rect x="313" y="28" width="64" height="32" rx="5" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.5"/><text x="345" y="49" fill="#0369a1">D83D</text>
+                <rect x="383" y="28" width="64" height="32" rx="5" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.5"/><text x="415" y="49" fill="#0369a1">DC4D</text>
+                <rect x="453" y="28" width="64" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/><text x="485" y="49" fill="#b45309">D83C</text>
+                <rect x="523" y="28" width="64" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/><text x="555" y="49" fill="#b45309">DFFD</text>
+
+                <rect x="33" y="112" width="64" height="32" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="65" y="133" fill="#334155">A · 41</text>
+                <rect x="103" y="112" width="64" height="32" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="135" y="133" fill="#334155">ý · FD</text>
+                <rect x="173" y="112" width="134" height="32" rx="5" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/><text x="240" y="133" fill="#9f1239">🙂 · 1F642</text>
+                <rect x="313" y="112" width="134" height="32" rx="5" fill="#e0f2fe" stroke="#0ea5e9" stroke-width="1.5"/><text x="380" y="133" fill="#0369a1">👍 · 1F44D</text>
+                <rect x="453" y="112" width="134" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/><text x="520" y="133" fill="#b45309">🏽 · 1F3FD</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="15" text-anchor="middle">
+                <rect x="33" y="196" width="64" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/><text x="65" y="218" fill="#15803d">A</text>
+                <rect x="103" y="196" width="64" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/><text x="135" y="218" fill="#15803d">ý</text>
+                <rect x="173" y="196" width="134" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/><text x="240" y="218">🙂</text>
+                <rect x="313" y="196" width="274" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/><text x="450" y="218">👍🏽</text>
+            </g>
+            <rect x="14" y="242" width="592" height="50" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#334155">
+                <text x="310" y="262" font-weight="700">length, индексы, slice и split("") считают части; [...s] и флаг u — точки.</text>
+                <text x="310" y="281">Кириллица и ä ç ň ö ş ü ý ž — одна часть; 🙂 — две; 👍🏽 — две точки, но один знак.</text>
+            </g>
+        </svg>
+        <figcaption>Три уровня одной строки: части, кодовые точки, графемы</figcaption>
+    </figure>
+
+    <p>«👍🏽» для человека — один знак, а для Unicode — две кодовые точки: рука и оттенок кожи. Флаг «🇹🇲» — две
+    буквы-указателя «T» и «M». В «👨‍👦» три точки: мужчина, невидимый соединитель U+200D и мальчик — родственник
+    невидимого <code>\u200B</code> дня 17. То, что человек видит как один знак, справочник MDN называет
+    <strong>графемой</strong>; делить на графемы умеет <code>Intl.Segmenter</code> — это курс 3.</p>
+
+    <h2 id="who">3. Кто считает чем</h2>
+
+    <table>
+        <thead><tr><th>Уровень</th><th>Кто на нём работает</th></tr></thead>
+        <tbody>
+            <tr><td>16-битные части</td><td><code>length</code>, <code>s[i]</code>, <code>at</code>, <code>charAt</code>, <code>charCodeAt</code>, <code>slice</code>, <code>substring</code>, <code>split("")</code>, регулярка без <code>u</code></td></tr>
+            <tr><td>кодовые точки</td><td><code>for...of</code>, <code>[...s]</code>, <code>Array.from(s)</code>, <code>codePointAt</code>, <code>String.fromCodePoint</code>, регулярка с <code>u</code> или <code>v</code></td></tr>
+            <tr><td>графемы</td><td><code>Intl.Segmenter</code> (курс 3); частично — <code>\p{RGI_Emoji}</code> с флагом <code>v</code> (раздел 7)</td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">const msg = "Привет 🙂!";
+console.log(msg.length, [...msg].length, msg.codePointAt(7), msg.codePointAt(8));   // 10 9 128578 56898
+console.log([...msg].reverse().join(""), msg.split("").reverse().join("").isWellFormed(), msg.slice(0, 8).isWellFormed());
+// !🙂 тевирП false false
+for (const ch of "a🙂") console.log(ch, ch.length);   // a 1, затем 🙂 2</pre>
+
+    <p>Практика плана — «длина строки с эмодзи»: частей 10, символов 9. <code>codePointAt(7)</code> на начале пары
+    вернул весь смайлик, а <code>codePointAt(8)</code> попал в середину и вернул младшую половинку. Строку можно
+    перевернуть через <code>[...msg]</code>; через <code>split("")</code> половинки меняются местами и пара
+    разваливается — <code>isWellFormed</code> (раздел 4) отвечает <code>false</code>. То же делает
+    <code>slice(0, 8)</code>, отрезав по середине пары, и цикл по номерам дня 10 Essentials. Правило: если в тексте
+    могут быть эмодзи, перебирайте его <code>for...of</code>, а «сколько символов» считайте через
+    <code>[...s].length</code>. Но помните про графемы: у «👍🏽» и так получится 2.</p>
+
+    <h2 id="lone">4. Половинка без пары: isWellFormed и toWellFormed</h2>
+
+    <p>Справочник MDN называет <strong>одиноким суррогатом</strong> старшую половинку, за которой не идёт младшая, или
+    младшую без старшей перед ней. Такая часть не означает никакого символа. Большинству методов JavaScript это не
+    мешает — они работают с частями, — но за пределами языка ломает: <code>encodeURI</code> дня 31 Essentials бросает
+    <code>URIError</code>. Строка без одиноких половинок называется <strong>правильно составленной</strong>
+    (well-formed).</p>
+
+    <pre class="code js">const cut = "Привет 🙂".slice(0, 8);
+console.log(cut.isWellFormed(), cut.toWellFormed(), "ab\uD83D\uDE04c".isWellFormed());   // false Привет � true
+console.log(["ab\uD800", "ab\uD800c", "\uDFFFab", "c\uDFFFab", "abc", "ab\uD83D\uDE04c"].map((x) =&gt; x.isWellFormed()));
+// [false, false, false, false, true, true]
+const illFormed = "https://example.com/search?q=\uD800";
+console.log(encodeURI(illFormed.toWellFormed()));   // https://example.com/search?q=%EF%BF%BD
+encodeURI(illFormed);
+// URIError: URI malformed</pre>
+
+    <p><code>isWellFormed()</code> отвечает, есть ли одинокие половинки. <code>toWellFormed()</code> возвращает новую
+    строку, где каждая такая половинка заменена знаком U+FFFD «�» — тем самым ромбом с вопросом, которым браузер
+    рисует сломанный текст. В адресе он стал <code>%EF%BF%BD</code>. Справочник отмечает: оба метода быстрее
+    самодельного цикла — движок знает, как строка хранится внутри. Примеры со строками — со страниц методов на MDN.</p>
+
+    <h2 id="u">5. Флаг u: шаблон видит кодовые точки</h2>
+
+    <pre class="code js">console.log(/^.$/.test("🙂"), /^.$/u.test("🙂"), /^..$/u.test("😄"), /[🙂]/.test("\uD83D"), /[🙂]/u.test("\uD83D"));   // false true false true false
+console.log(/\u{1F642}/u.test("🙂"), /\u{61}/u.test("a"), /\u{61}/.test("u".repeat(61)), "🙂🙂".match(/./gu));     // true true true ['🙂', '🙂']
+console.log("a🙂".split(/(?:)/).length, "a🙂".split(/(?:)/u), "🙂".replace(/(?:)/gu, "-"), "🙂".replace(/(?:)/g, "-").length);   // 3 ['a', '🙂'] -🙂- 5</pre>
+
+    <p>Флаг <code>u</code> (свойство <code>unicode</code>) включает, по справочнику MDN, четыре вещи:</p>
+
+    <ol>
+        <li><strong>Пара — один символ.</strong> Точка берёт смайлик целиком, <code>/../</code> дня 17 с флагом его уже не
+            находит. Класс <code>[🙂]</code> без флага — это класс из двух половинок, и он находит одинокую половинку;
+            с флагом — один символ.</li>
+        <li><strong><code>\u{…}</code> и <code>\p{…}</code> работают.</strong> Без флага <code>\u{61}</code> значит «буква
+            u 61 раз»: <code>\u</code> — просто «u», а <code>{61}</code> — квантификатор.</li>
+        <li><strong>Шаг после пустого совпадения — кодовая точка.</strong> Это AdvanceStringIndex дня 18: с флагом
+            <code>split</code> и <code>replace</code> не режут смайлик, без него — режут, и «🙂» с дефисами вышла длиной 5
+            из двух одиноких половинок.</li>
+        <li><strong>Строгий синтаксис.</strong> Старые вольности шаблонов становятся ошибками — раздел 10.</li>
+    </ol>
+
+    <p>Справочник говорит о «режиме Unicode», когда у шаблона есть флаг <code>u</code> или <code>v</code>. Спецификация
+    (22.2.2) делит шаблоны так же: шаблон BMP видит строку как 16-битные значения, Unicode-шаблон — как кодовые
+    точки.</p>
+
+    <h2 id="p">6. Классы свойств \p{…}</h2>
+
+    <p>У каждого символа Unicode есть свойства. Главное — общая категория (General_Category): <code>L</code> — буква,
+    <code>Lu</code> — заглавная, <code>Ll</code> — строчная, <code>N</code> — цифра, <code>P</code> — знак препинания,
+    <code>Sc</code> — знак валюты, <code>M</code> — знак-надстрочник. Ещё — письменность (Script): Latin, Cyrillic,
+    Greek. <code>\p{…}</code> — символ с этим свойством, <code>\P{…}</code> — без него. Работают только в режиме
+    Unicode.</p>
+
+    <pre class="code js">const text = "Salam, dünýä! Привет, мир! Hello, world! Гүлнар 2026";
+console.log(text.match(/\p{L}+/gu));   // ['Salam', 'dünýä', 'Привет', 'мир', 'Hello', 'world', 'Гүлнар']
+console.log(text.match(/\w+/g));       // ['Salam', 'd', 'n', 'Hello', 'world', '2026']
+console.log("aεЛ".match(/\p{Script=Latin}/u)[0], "aεЛ".match(/\p{Script=Grek}/u)[0], "aεЛ".match(/\p{sc=Cyrillic}/u)[0], "It's the Cheshire Cat".match(/\p{Lu}/gu));
+// a ε Л ['I', 'C', 'C']
+console.log("٢".match(/\p{Script=Thaana}/u), "٢".match(/\p{Script_Extensions=Thaana}/u)[0], /\p{N}/u.test("٢"), /\d/.test("٢"));   // null ٢ true false</pre>
+
+    <p>Вот практика плана «слова на любом языке» и обещание дня 17. <code>\p{L}+</code> взял туркменскую латиницу,
+    русский, английский и «Гүлнар» с кириллической «ү»; <code>\w</code> разорвал «dünýä» на «d» и «n» и не узнал ни
+    одного русского слова. Справочник MDN показывает три равные записи: <code>\p{General_Category=Letter}</code>,
+    <code>\p{Letter}</code> и <code>\p{L}</code>. Для письменности имя свойства обязательно: <code>Script</code> или
+    короче <code>sc</code>, значение — полное (Cyrillic) или код (Grek). Script_Extensions (<code>scx</code>) берёт и
+    те письменности, где символ встречается не главным: арабская цифра «٢» пишется и в мальдивской письменности
+    тана. <code>\p{N}</code>
+    находит цифры любой письменности, <code>\d</code> — только 0–9.</p>
+
+    <pre class="code js">function getPrices(str) {
+  return [...str.matchAll(/\p{Sc}\s*[\d.,]+/gu)].map((match) =&gt; match[0]);
+}
+console.log(getPrices("US store $19.99\nEurope store €18.99\nJapan store ¥2000"));   // ['$19.99', '€18.99', '¥2000']
+console.log("Мы, вы!".replace(/\P{L}+/gu, " ").trim(), /\p{L}/.test("p{L}"), /\p{L}/.test("a"));   // Мы вы true false</pre>
+
+    <p>Пример MDN «Matching prices» находит цены с любым знаком валюты. <code>\P{L}+</code> — «всё, что не буквы»: так
+    знаки препинания стали пробелами. А последние два ответа — главная ловушка дня: без флага <code>u</code> запись
+    <code>\p{L}</code> означает буквально «p{L}», и ошибки нет. Забытый флаг молча превращает класс в текст.</p>
+
+    <pre class="code js">const word = (w) =&gt; new RegExp(`(?&lt;!\\p{L})${RegExp.escape(w)}(?!\\p{L})`, "iu");
+console.log(/\bкот\b/u.test("кот"), word("кот").test("Кот спит"), word("кот").test("котлета"), word("jaý").test("Täze jaý!"));
+// false true false true</pre>
+
+    <p><code>\b</code> не учится кириллице и с флагом <code>u</code>: он по-прежнему смотрит на <code>\w</code>, а тот —
+    только ASCII. Своя граница дня 18 — <code>(?&lt;![а-яё])…(?![а-яё])</code> — теперь пишется для любого алфавита:
+    «слева и справа не буква». Слово экранирует <code>RegExp.escape</code> дня 19; удвоенную косую в шаблонной строке
+    уберём в разделе 9.</p>
+
+    <h2 id="v">7. Флаг v: операции над классами</h2>
+
+    <p>Флаг <code>v</code> (свойство <code>unicodeSets</code>) — «улучшенный <code>u</code>»: буква следующая по
+    алфавиту, всё из <code>u</code> плюс новое в классах. Вместе их ставить нельзя: <code>/a/uv</code> —
+    <code>SyntaxError</code> «Invalid regular expression flags», а конструктор пишет «Invalid flags supplied to RegExp
+    constructor 'uv'».</p>
+
+    <pre class="code js">console.log(/[\p{L}--[a-z]]/v.test("a"), /[\p{L}--[a-z]]/v.test("ä"), "Гүлнар Аманова".match(/[\p{sc=Cyrillic}&amp;&amp;\p{Lu}]/gv));   // false true ['Г', 'А']
+const TURKMEN = /^[[a-zäçňöşüýž]--[cqvx]]+$/iv;
+console.log(TURKMEN.test("çörek"), TURKMEN.test("ÇÖREK"), TURKMEN.test("cat"), TURKMEN.test("señor"), TURKMEN.test("mugallym"));   // true true false false true
+console.log("Ура 🇹🇲 👍🏽 🙂 👨‍👦!".match(/\p{RGI_Emoji}/gv), /^[\q{abc}x]$/v.test("abc"), /a/v.flags, /a/v.unicode);
+// ['🇹🇲', '👍🏽', '🙂', '👨‍👦'] true v false</pre>
+
+    <ul>
+        <li><strong>Вычитание <code>--</code></strong>: <code>[\p{L}--[a-z]]</code> — любая буква, кроме a–z.</li>
+        <li><strong>Пересечение <code>&amp;&amp;</code></strong>: <code>[\p{sc=Cyrillic}&amp;&amp;\p{Lu}]</code> — кириллица и
+            при этом заглавная.</li>
+        <li><strong>Вложенные классы</strong>: в туркменском алфавите 30 букв — латиница a–z без c, q, v, x и ещё ä, ç, ň,
+            ö, ş, ü, ý, ž. Шаблон <code>TURKMEN</code> так и записан; с флагом <code>i</code> он принял и заглавные.</li>
+        <li><strong>Строки в классе</strong>: <code>\q{abc}</code> — вариант из нескольких символов.</li>
+        <li><strong>Свойства строк</strong>: <code>\p{RGI_Emoji}</code> находит каждое эмодзи целиком — и «👍🏽», и флаг, и
+            «семью» с соединителем. Для эмодзи это почти графемы. Справочник оговаривает: в общем случае <code>v</code>
+            графемы одним символом не считает.</li>
+    </ul>
+
+    <p>Цена — строже синтаксис: некоторые символы в классе <code>v</code> надо экранировать, отрицание
+    <code>[^…]</code> не может содержать строк. Эти ошибки — в разделе 10.</p>
+
+    <h2 id="normalize">8. «é» в двух записях: normalize</h2>
+
+    <pre class="code js">const e1 = "\u00E9", e2 = "e\u0301";
+console.log(e1, e2, e1 === e2, e1.length, e2.length);   // é é false 1 2
+console.log(e1.normalize("NFD") === e2, e2.normalize() === e1, e2.includes(e1), e2.normalize().includes(e1));   // true true false true
+console.log("\uFB00".normalize("NFKD"), "①".normalize("NFKC"), "x²".normalize("NFKC"), "\uFB00".normalize() === "\uFB00");   // ff 1 x2 true</pre>
+
+    <p>Практика плана. Один и тот же символ можно записать двумя способами: готовой буквой U+00E9 или буквой «e» и
+    знаком ударения U+0301, который рисуется над предыдущей буквой (категория <code>M</code>). Текст из других программ
+    и клавиатур бывает в любой из записей. Строки сравниваются по частям, поэтому <code>===</code> отвечает
+    <code>false</code>, длины разные, <code>includes</code> не находит. Метод <code>normalize(form)</code> приводит
+    строку к одной форме:</p>
+
+    <ul>
+        <li><code>"NFC"</code> (по умолчанию) — собрать: где можно, одна кодовая точка;</li>
+        <li><code>"NFD"</code> — разложить: буква плюс знаки;</li>
+        <li><code>"NFKC"</code>, <code>"NFKD"</code> — то же и ещё «совместимые» знаки: лигатура «ﬀ» становится «ff»,
+            «①» — «1», «²» — «2». Справочник предупреждает: для поиска удобно, для показа — нет, вид меняется.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Слева é одной кодовой точкой U+00E9, длина 1. Справа e и знак ударения U+0301, длина 2. Стрелка NFD раскладывает, стрелка NFC собирает. Строгое равенство сравнивает части, поэтому false; после normalize — true. NFKC и NFKD ещё и упрощают совместимые знаки. Поиск без диакритики: разложить и удалить знаки, но й и ё тоже распадутся">
+            <rect x="40" y="24" width="200" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <rect x="380" y="24" width="200" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="26" text-anchor="middle" fill="#334155">
+                <text x="140" y="62">&#xE9;</text>
+                <text x="480" y="62">e&#x301;</text>
+            </g>
+            <g font-family="Consolas, monospace" font-size="11" text-anchor="middle" fill="#475569">
+                <text x="140" y="88">U+00E9 · length 1</text>
+                <text x="480" y="88">U+0065 U+0301 · length 2</text>
+            </g>
+            <path d="M 246 48 L 370 48" fill="none" stroke="#f43f5e" stroke-width="2"/>
+            <path d="M 378 48 L 368 43 L 368 53 Z" fill="#f43f5e"/>
+            <path d="M 374 78 L 250 78" fill="none" stroke="#16a34a" stroke-width="2"/>
+            <path d="M 242 78 L 252 73 L 252 83 Z" fill="#16a34a"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle">
+                <text x="310" y="40" fill="#9f1239">NFD — разложить</text>
+                <text x="310" y="96" fill="#15803d">NFC — собрать</text>
+            </g>
+            <text x="310" y="128" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#334155">"\u00E9" === "e\u0301" → false;  после normalize() → true</text>
+            <text x="310" y="154" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#334155">NFKC и NFKD приводят ещё и «совместимые» знаки: ﬀ → ff, ① → 1, x² → x2.</text>
+            <rect x="14" y="172" width="592" height="82" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#334155">
+                <text x="310" y="194">Поиск без диакритики: normalize("NFD"), затем replace(/\p{M}/gu, "").</text>
+                <text x="310" y="214">Gülnar → Gulnar, çörek → corek, dünýä → dunya.</text>
+                <text x="310" y="236" font-weight="700">Но «й» и «ё» тоже распадутся на букву и знак: «йод» → «иод».</text>
+            </g>
+        </svg>
+        <figcaption>Две записи одного символа и четыре формы <code>normalize</code></figcaption>
+    </figure>
+
+    <pre class="code js">const plain = (s) =&gt; s.normalize("NFD").replace(/\p{M}/gu, "");
+console.log(plain("Gülnar"), plain("dünýä"), plain("çörek"), plain("ñandú"));   // Gulnar dunya corek nandu
+console.log(plain("йод"), plain("ёлка"), "йод".normalize("NFD").length);        // иод елка 4</pre>
+
+    <p>Частый приём — поиск без диакритики: разложить и убрать все знаки <code>\p{M}</code>. Человек набирает
+    «Gulnar» и находит «Gülnar». Но Unicode раскладывает и русские «й» (и + кратка) и «ё» (е + две точки) — для
+    поиска это терпимо, если обе стороны приведены одинаково, а хранить так текст нельзя.</p>
+
+    <p>Спецификация (6.1.4) прямо говорит: сами строки нормализуют только <code>normalize</code> и
+    <code>localeCompare</code> (день 25); <code>===</code>, <code>includes</code>, ключи <code>Map</code> — нет. Поэтому
+    ввод приводят к NFC на входе — при сохранении и перед сравнением. Неизвестная форма — <code>RangeError</code>, и
+    регистр важен: <code>normalize("nfc")</code> тоже ошибка.</p>
+
+    <h2 id="raw">9. Тегированные шаблоны и String.raw</h2>
+
+    <p>Шаблонные строки с <code>${…}</code> знакомы с дня 16 Essentials. Если перед обратной кавычкой стоит имя функции,
+    это <strong>тегированный шаблон</strong>: функция-тег получает массив кусков текста и значения подстановок.</p>
+
+    <pre class="code js">function tag(strings, ...values) {
+  console.log(strings.length, strings.raw, values, Object.isFrozen(strings));
+  return values.join("+");
+}
+console.log(tag`a${1}b${2}c\n`);</pre>
+
+    <div class="result-box">
+        3 (3) ['a', 'b', 'c\n'] (2) [1, 2] true<br>
+        1+2
+    </div>
+
+    <p>Кусков всегда на один больше, чем значений; массив кусков заморожен (день 6). Вернуть тег может что угодно — здесь
+    «1+2». У массива есть свойство <code>raw</code> — те же куски «как написано»: <code>\n</code> там — две буквы,
+    обратная косая и «n», а в самих кусках — перенос строки.</p>
+
+    <pre class="code js">console.log(String.raw`Hi\n${2 + 3}!`, String.raw`Hi\n${2 + 3}!`.length, `Hi\n${2 + 3}!`.length);   // Hi\n5! 6 5
+console.log(String.raw`C:\Users\new`, String.raw`\d+\.\d+`, new RegExp("^\d+\.\d+$").source, new RegExp(String.raw`^\d+\.\d+$`).test("3.14"));
+// C:\Users\new \d+\.\d+ ^d+.d+$ true
+const wordRe = (w) =&gt; new RegExp(String.raw`(?&lt;!\p{L})${RegExp.escape(w)}(?!\p{L})`, "iu");
+console.log(wordRe("jaý").test("Täze jaý!"), wordRe("jaý").source);   // true (?&lt;!\p{L})\x6aaý(?!\p{L})</pre>
+
+    <p><code>String.raw</code> — единственный встроенный тег: склеивает <code>raw</code>-куски с подстановками. Путь
+    Windows в обычном шаблоне сломался бы: <code>\n</code> стал бы переносом. Строка <code>"^\d+\.\d+$"</code> дня 17
+    потеряла все косые и превратилась в <code>^d+.d+$</code>; с <code>String.raw</code> шаблон пишется как литерал, без
+    удвоения. Так и граница слова из раздела 6 стала читаемой — <code>\p{L}</code> без лишних косых.</p>
+
+    <pre class="code js">const html = (strings, ...values) =&gt; String.raw({ raw: strings }, ...values);
+console.log(html`&lt;p&gt;${"Аман"}\n&lt;/p&gt;`.length, String.raw`&lt;p&gt;${"Аман"}\n&lt;/p&gt;`.length, String.raw({ raw: "test" }, 0, 1, 2), String.raw`\unicode`);
+// 12 13 t0e1s2t \unicode</pre>
+
+    <p><code>String.raw</code> можно вызвать и как функцию — с объектом, у которого есть <code>raw</code>: подойдёт любой
+    похожий на массив, даже строка «test». Пример MDN — тег <code>html</code>, который ничего не меняет: он отдаёт
+    <code>String.raw</code> обычные куски вместо <code>raw</code>, и <code>\n</code> остаётся переносом (длина 12, а
+    не 13). И тонкость: в обычном шаблоне <code>`\unicode`</code> — <code>SyntaxError</code> «Invalid Unicode escape
+    sequence», а тегу такие куски разрешены: в <code>raw</code> — как написано, в обычном массиве —
+    <code>undefined</code>.</p>
+
+    <pre class="code js">String?.raw`Hello`;
+// SyntaxError: Invalid tagged template on optional chain</pre>
+
+    <p>Необязательная цепочка <code>?.</code> (день 22 Essentials) с тегом не сочетается: справочник объясняет, что
+    непонятно, чем такой вызов должен закончиться, если тега нет.</p>
+
+    <h2 id="errors">10. Ошибки дня: строгий режим для шаблонов</h2>
+
+    <p>Справочник сравнивает режим Unicode со строгим режимом дня 3: без флага старые вольности тихо значат «сам
+    символ», с флагом — <code>SyntaxError</code>. Отсюда и дефис <code>\x2d</code> у <code>RegExp.escape</code> вчера:
+    <code>\-</code> с флагом <code>u</code> — ошибка.</p>
+
+    <pre class="code js">console.log(/\-/.test("-"), /{/.test("{"), /1{/.test("1{"), /\q/.test("q"), /]/.test("]"), /[\s-1]/.test("-"), /\00/.test("\0" + "0"));
+// true true true true true true true
+new RegExp("\\-", "u");
+// SyntaxError: Invalid regular expression: /\-/u: Invalid escape</pre>
+
+    <table>
+        <thead><tr><th>Код</th><th>Текст Chrome (после «Invalid regular expression: /…/u:»)</th></tr></thead>
+        <tbody>
+            <tr><td><code>/\-/u</code>, <code>/\q/u</code>, <code>/\x1/u</code></td><td><code>Invalid escape</code></td></tr>
+            <tr><td><code>/{/u</code>, <code>/]/u</code>, <code>/}/u</code></td><td><code>Lone quantifier brackets</code></td></tr>
+            <tr><td><code>/1{/u</code></td><td><code>Incomplete quantifier</code></td></tr>
+            <tr><td><code>/\00/u</code></td><td><code>Invalid decimal escape</code></td></tr>
+            <tr><td><code>/[\s-1]/u</code></td><td><code>Invalid character class</code></td></tr>
+            <tr><td><code>/\u{123456}/u</code></td><td><code>Invalid Unicode escape</code></td></tr>
+            <tr><td><code>/\p{x}/u</code></td><td><code>Invalid property name</code></td></tr>
+            <tr><td><code>/[|]/v</code></td><td><code>Invalid character in character class</code></td></tr>
+            <tr><td><code>/[&amp;&amp;]/v</code></td><td><code>Invalid set operation in character class</code></td></tr>
+            <tr><td><code>/[^\p{RGI_Emoji_Flag_Sequence}]/v</code></td><td><code>Negated character class may contain strings</code></td></tr>
+            <tr><td><code>String?.raw`Hello`</code></td><td><code>SyntaxError: Invalid tagged template on optional chain</code></td></tr>
+            <tr><td><code>"a".normalize("NFX")</code></td><td><code>RangeError: The normalization form should be one of NFC, NFD, NFKC, NFKD.</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Первые десять — по странице MDN на каждую: лишняя косая перед буквой без смысла; одинокие скобки, которые без флага
+    — просто текст; незаконченный квантификатор; старый восьмеричный код <code>\00</code> (приложение B дня 17);
+    класс вроде <code>\s</code> на краю диапазона; номер больше 10FFFF; неизвестное свойство. В классах <code>v</code>
+    нельзя писать буквально <code>( ) [ ] { } / - |</code> — только с косой; <code>&amp;&amp;</code> и
+    <code>--</code> должны стоять между двумя частями; отрицание не может содержать строк — непонятно, сколько символов
+    забрать. Две последние ошибки — не регулярок: тег с <code>?.</code> и неизвестная форма <code>normalize</code>.
+    Заголовки страниц MDN — тексты Firefox; тексты Chrome собраны на них же рядом.</p>
+
+    <h2 id="spec">11. Раздел 22.1 спецификации</h2>
+
+    <p>Начнём с основания — <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-string-type">6.1.4 The
+    String Type</a>: строка — упорядоченная последовательность 16-битных значений длиной до 2<sup>53</sup> − 1,
+    <code>length</code> — их число. Когда операция читает строку как кодовые точки, действуют три правила: часть вне
+    D800–DFFF — сама точка; старшая половинка и сразу за ней младшая — пара, точка по формуле раздела 2; половинка без
+    пары — точка с тем же номером. Там же примечание: строки нормализуют только <code>normalize</code> и
+    <code>localeCompare</code>.</p>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-text-processing">Глава 22 Text Processing</a> состоит из двух частей:
+    22.1 — строки, 22.2 — регулярные выражения дней 17–20. Подробно —
+    <a href="https://tc39.es/ecma262/2026/#sec-string-objects">22.1 String Objects</a>:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-string-constructor">22.1.1</a> — конструктор
+            <code>String(value)</code>: символ превращает в строку вида «Symbol(описание)» (день 11);</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-string-constructor">22.1.2</a> — свойства
+            конструктора: <code>fromCharCode</code> (из частей), <code>fromCodePoint</code> (из точек), <code>raw</code>,
+            <code>prototype</code>;</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-string-prototype-object">22.1.3</a> — 36 пунктов
+            прототипа (методы и <code>constructor</code>), карта всех «строковых» дней: день 16 Essentials (<code>at</code>, <code>slice</code>,
+            <code>trim</code>…), дни 17–19 (<code>search</code>, <code>match</code>, <code>replace</code>,
+            <code>split</code>…), сегодня (<code>isWellFormed</code>, <code>normalize</code>, <code>toWellFormed</code>),
+            день 25 (<code>localeCompare</code>, <code>toLocale…</code>);</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-string-instances">22.1.4</a> — у объекта-строки
+            есть слот <code>[[StringData]]</code>, свойства-номера и <code>length</code>: только для чтения,
+            неперечисляемое, ненастраиваемое (день 5);</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-string-iterator-objects">22.1.5</a> — итератор строки.</li>
+    </ul>
+
+    <pre class="code js">console.log(Object.getOwnPropertyNames(new String("ab")), Object.getOwnPropertyDescriptor("ab", "length"));
+// ['0', '1', 'length'] {value: 2, writable: false, enumerable: false, configurable: false}
+const it = "a🙂"[Symbol.iterator]();
+console.log(String(it), Object.getPrototypeOf(Object.getPrototypeOf(it)) === Iterator.prototype, it.next(), it.next().value.length);
+// [object String Iterator] true {value: 'a', done: false} 2</pre>
+
+    <p>Всё, что работает «по кодовым точкам», стоит на одной операции —
+    <a href="https://tc39.es/ecma262/2026/#sec-codepointat">CodePointAt</a> (11.1.4). Пересказ: прочитать часть на
+    месте <code>position</code>; не половинка — вернуть точку и «1 часть»; младшая половинка или последняя часть
+    строки — «1 часть, без пары»; старшая и следом младшая — точку по формуле и «2 части»; иначе — «без пары».</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 280" role="img" aria-label="CodePointAt на строке a, смайлик, b: на месте 0 часть 0061 — точка a, одна часть; на месте 1 старшая D83D и следом младшая DE42 — пара, две части; на месте 3 часть 0062 — b. Итог: три точки, строка правильная. На строке из одинокой D83D и b: на месте 0 половинка без пары, isWellFormed даёт false, toWellFormed заменяет её знаком U+FFFD">
+            <text x="20" y="20" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">CodePointAt(s, k) — шаг итератора строки, isWellFormed и toWellFormed</text>
+            <g font-family="Consolas, monospace" font-size="12" text-anchor="middle">
+                <rect x="40" y="32" width="70" height="32" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="75" y="53" fill="#334155">0061</text>
+                <rect x="116" y="32" width="70" height="32" rx="5" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/><text x="151" y="53" fill="#9f1239">D83D</text>
+                <rect x="192" y="32" width="70" height="32" rx="5" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5"/><text x="227" y="53" fill="#9f1239">DE42</text>
+                <rect x="268" y="32" width="70" height="32" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="303" y="53" fill="#334155">0062</text>
+                <rect x="40" y="132" width="70" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/><text x="75" y="153" fill="#b45309">D83D</text>
+                <rect x="116" y="132" width="70" height="32" rx="5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/><text x="151" y="153" fill="#334155">0062</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" text-anchor="middle" fill="#94a3b8">
+                <text x="75" y="78">0</text><text x="151" y="78">1</text><text x="227" y="78">2</text><text x="303" y="78">3</text>
+                <text x="75" y="178">0</text><text x="151" y="178">1</text>
+            </g>
+            <g fill="none" stroke="#64748b" stroke-width="1.2">
+                <path d="M 42 86 L 42 92 L 108 92 L 108 86"/>
+                <path d="M 118 86 L 118 92 L 260 92 L 260 86"/>
+                <path d="M 270 86 L 270 92 L 336 92 L 336 86"/>
+                <path d="M 42 186 L 42 192 L 108 192 L 108 186"/>
+                <path d="M 118 186 L 118 192 L 184 192 L 184 186"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="11" text-anchor="middle" fill="#334155">
+                <text x="75" y="108">a · 1</text>
+                <text x="189" y="108">🙂 · 2 части</text>
+                <text x="303" y="108">b · 1</text>
+                <text x="75" y="208" fill="#b45309">без пары · 1</text>
+                <text x="151" y="208">b · 1</text>
+            </g>
+            <g font-family="Consolas, monospace" font-size="11.5" fill="#334155">
+                <text x="372" y="50">[...s] → ['a', '🙂', 'b']</text>
+                <text x="372" y="72">isWellFormed() → true</text>
+                <text x="372" y="150">isWellFormed() → false</text>
+                <text x="372" y="172">toWellFormed() → '&#xFFFD;b'</text>
+            </g>
+            <rect x="14" y="222" width="592" height="50" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#334155">
+                <text x="310" y="242">Старшая половинка (D800–DBFF) и сразу младшая (DC00–DFFF) — одна точка из двух частей.</text>
+                <text x="310" y="261" font-weight="700">Половинка без пары — «точка» с пометкой: её и ловят isWellFormed и toWellFormed.</text>
+            </g>
+        </svg>
+        <figcaption>Как CodePointAt идёт по строке и где находит половинку без пары</figcaption>
+    </figure>
+
+    <p>На этой операции стоят: <code>codePointAt</code> (22.1.3.4) — возвращает найденную точку, поэтому в середине пары
+    дал младшую половинку; <code>isWellFormed</code> (22.1.3.10) — через IsStringWellFormedUnicode (7.2.7) шагает по
+    строке на «число частей» и на первой половинке без пары отвечает <code>false</code>; <code>toWellFormed</code>
+    (22.1.3.31) — тот же обход, половинку меняет на U+FFFD. Итератор строки (22.1.3.36) — ещё один генератор
+    спецификации, как помощники дня 13: замыкание идёт тем же шагом и отдаёт кусок «от места до места + число частей»,
+    поэтому смайлик приходит целым.</p>
+
+    <p><code>String.raw</code> (22.1.2.4): взять у первого аргумента <code>raw</code> и его длину; длина 0 — пустая
+    строка; дальше по очереди кусок, подстановка, кусок… — если подстановок не хватило, места остаются пустыми.
+    Примечание: функция задумана как тег (13.3.11). <code>normalize</code> (22.1.3.15): форма не передана — «NFC»; не
+    одна из четырёх — <code>RangeError</code>; само приведение спецификация отдаёт стандарту Unicode.</p>
+
+    <h2 id="cards">12. «Карточки»: слова на любом языке</h2>
+
+    <p>У «Карточек» с дня 33 Essentials есть английская версия с туркменскими переводами — kitap, mugallym, çörek, suw,
+    jaý. Проверка перевода дня 17 (<code>[а-яё ]</code>) их бы отвергла, а поиск дня 19 не нашёл бы «çörek» по запросу
+    «corek». Сегодня — поиск без диакритики, проверка букв любого алфавита и короткая подпись, которая не режет
+    эмодзи.</p>
+
+    <pre class="code js">const cards = [
+  { id: 1, word: "book", translation: "kitap" },
+  { id: 2, word: "teacher", translation: "mugallym" },
+  { id: 3, word: "bread", translation: "çörek" },
+  { id: 4, word: "water", translation: "suw" },
+  { id: 5, word: "house", translation: "jaý" },
+];
+const fold = (s) =&gt; s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+function findCards(query) {
+  const q = fold(query);
+  return cards.filter((c) =&gt; fold(c.word).includes(q) || fold(c.translation).includes(q)).map((c) =&gt; c.word);
+}
+const WORDS = /^\p{L}+(?: \p{L}+)*$/u;
+const checkTranslation = (s) =&gt; WORDS.test(s.normalize());
+const short = (s, n) =&gt; ([...s].length &gt; n ? [...s].slice(0, n).join("") + "…" : s);
+
+console.log(findCards("corek"), findCards("JAY"), findCards("ö"));
+console.log(checkTranslation("çörek"), checkTranslation("хлеб"), checkTranslation("ak çörek"), checkTranslation("чай2"), checkTranslation("e\u0301clair"));
+console.log(short("🍞 çörek — хлеб", 7), short("🙂🙂🙂", 2), short("suw", 5));</pre>
+
+    <div class="result-box">
+        (1) ['bread'] (1) ['house'] (3) ['book', 'bread', 'house']<br>
+        true true true false true<br>
+        🍞 çörek… 🙂🙂… suw
+    </div>
+
+    <p><strong>Строка 1 — поиск.</strong> <code>fold</code> раскладывает, убирает знаки и опускает регистр — у
+    запроса и у карточки одинаково. «corek» нашёл «çörek», «JAY» — «jaý». Но «ö» нашёл и «book»: поиск без диакритики
+    не различает «o» и «ö» — это его цена.</p>
+
+    <p><strong>Строка 2 — проверка.</strong> <code>\p{L}</code> с флагом <code>u</code> пропускает слова любого
+    алфавита, по одному пробелу между ними; цифру — нет. Последний перевод пришёл в разложенном виде: буква «e» и знак
+    ударения. Без <code>normalize</code> знак (категория <code>M</code>, не <code>L</code>) провалил бы проверку.</p>
+
+    <p><strong>Строка 3 — подпись.</strong> <code>short</code> режет по кодовым точкам и ставит многоточие:
+    хлеб-эмодзи остался целым.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите из <code>fold</code> вызов <code>replace</code> и снова вызовите
+        <code>findCards("corek")</code>. Почему пусто?
+        <br><br>
+        <strong>Второй.</strong> Перепишите <code>short</code> через <code>s.length</code> и <code>s.slice(0, n)</code> и
+        вызовите <code>short("🙂🙂🙂", 3)</code>. Что покажет консоль и что ответит <code>isWellFormed</code>?
+        <br><br>
+        <strong>Третий.</strong> Уберите у <code>WORDS</code> флаг <code>u</code>. Пройдёт ли «çörek»? А строка «p{L}»?
+    </div>
+
+    <h2 id="module">13. Итоги модуля и что дальше</h2>
+
+    <p>Модуль «Строки и регулярные выражения» закончен. Четыре дня — от первого шаблона до букв любого алфавита:</p>
+
+    <table>
+        <thead><tr><th>День</th><th>Главная мысль</th><th>В спецификации</th></tr></thead>
+        <tbody>
+            <tr><td>17</td><td>шаблон, флаги, классы, квантификаторы; <code>test</code> и <code>search</code></td><td>22.2, 22.2.1</td></tr>
+            <tr><td>18</td><td>якоря, группы, проверки позиции; <code>exec</code>, <code>match</code>, <code>matchAll</code>, <code>lastIndex</code></td><td>22.2.7</td></tr>
+            <tr><td>19</td><td><code>replace</code>, <code>replaceAll</code>, <code>split</code>, шаблоны <code>$</code>, <code>RegExp.escape</code></td><td>22.2.5, 22.2.6</td></tr>
+            <tr><td>20</td><td>части и кодовые точки, флаги <code>u</code> и <code>v</code>, <code>\p{…}</code>, <code>normalize</code>, <code>String.raw</code></td><td>6.1.4, 22.1</td></tr>
+        </tbody>
+    </table>
+
+    <p>С дня 21 — модуль «Числа и даты: Date, Temporal, основы Intl». Первый день — <code>BigInt</code> для чисел
+    больше <code>Number.MAX_SAFE_INTEGER</code> и <code>Date</code> целиком: разбор строк, UTC, сеттеры.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/unicode">RegExp.prototype.unicode</a></td><td>флаг <code>u</code>, режим Unicode</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/unicodeSets">RegExp.prototype.unicodeSets</a></td><td>флаг <code>v</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Unicode_character_class_escape">Unicode character class escape</a></td><td><code>\p{…}</code>, <code>\P{…}</code>, категории, письменности</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/normalize">String.prototype.normalize()</a></td><td>NFC, NFD, NFKC, NFKD</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/raw">String.raw()</a></td><td>тег, косые без удвоения</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/isWellFormed">String.prototype.isWellFormed()</a></td><td>есть ли половинки без пары</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/toWellFormed">String.prototype.toWellFormed()</a></td><td>заменить их на U+FFFD</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-string-objects">ECMA-262, 22.1</a></td><td>строки: конструктор, методы, итератор</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String">String</a> (раздел «UTF-16 characters…»)</td><td>части, точки, графемы — повтор дня 16 Essentials</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_identity_escape">Ошибка: invalid identity escape</a></td><td><code>Invalid escape</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_raw_bracket">Ошибка: raw bracket</a></td><td><code>Lone quantifier brackets</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_incomplete_quantifier">Ошибка: incomplete quantifier</a></td><td><code>Incomplete quantifier</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_decimal_escape">Ошибка: invalid decimal escape</a></td><td><code>Invalid decimal escape</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_character_class_escape_in_class_range">Ошибка: character class escape in class range</a></td><td><code>Invalid character class</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_unicode_escape">Ошибка: invalid unicode escape</a></td><td><code>Invalid Unicode escape</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_property_name">Ошибка: invalid property name</a></td><td><code>Invalid property name</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_char_in_class">Ошибка: invalid character in class</a></td><td><code>Invalid character in character class</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_class_set_operation">Ошибка: invalid class set operation</a></td><td><code>Invalid set operation in character class</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_negated_char_class_with_strings">Ошибка: negated character class with strings</a></td><td><code>Negated character class may contain strings</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_optional_template">Ошибка: tagged template with optional chain</a></td><td><code>Invalid tagged template on optional chain</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Form_must_be_one_of">Ошибка: form must be one of NFC, NFD, NFKC, NFKD</a></td><td><code>RangeError</code> у <code>normalize</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-text-processing">ECMA-262, глава 22</a></td><td>строки и регулярные выражения</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-string-constructor">ECMA-262, 22.1.1</a></td><td><code>String(value)</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-string-constructor">ECMA-262, 22.1.2</a></td><td><code>fromCharCode</code>, <code>fromCodePoint</code>, <code>raw</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-string-prototype-object">ECMA-262, 22.1.3</a></td><td>36 пунктов прототипа</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-string-instances">ECMA-262, 22.1.4</a></td><td><code>length</code> и свойства-номера</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-string-iterator-objects">ECMA-262, 22.1.5</a></td><td>итератор строки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// строка — 16-битные части: length, s[i], slice, split("") считают их; 🙂 — две части (пара D83D DE42)
+// кодовые точки: for...of, [...s], Array.from, codePointAt, String.fromCodePoint, "\u{1F642}"
+// графемы (👍🏽 — две точки, один знак) — Intl.Segmenter, курс 3
+// s.isWellFormed() — нет половинок без пары; s.toWellFormed() — заменить их на U+FFFD
+// флаг u: пара — один символ, \u{…} и \p{…}, строгий синтаксис; без u \p{L} — это текст "p{L}"
+// \p{L} буква, \p{Lu} заглавная, \p{N} цифра, \p{M} знак, \p{Sc} валюта, \p{sc=Cyrillic}; \P{…} — не
+// флаг v: [\p{L}--[a-z]], [\p{sc=Cyrillic}&amp;&amp;\p{Lu}], \q{abc}, \p{RGI_Emoji}; u и v вместе нельзя
+// s.normalize() — NFC; "NFD" — разложить; без диакритики: normalize("NFD").replace(/\p{M}/gu, "")
+// String.raw`\d+\.\d+` — косые как написаны; тег: f`a${x}b` → f(['a', 'b'], x)</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>"🙂".length</code> — 2, а <code>[..."🙂"].length</code> — 1?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>length</code> считает 16-битные части, а смайлик вне базовой плоскости хранится парой половинок.
+                    Итератор строки идёт по кодовым точкам и отдаёт пару одним куском.
+                </details>
+            </li>
+            <li>Что ответит <code>/^\p{L}+$/.test("çörek")</code> без флага <code>u</code> и почему ошибки нет?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>false</code>. Без флага <code>\p</code> — просто буква «p», а <code>{L}</code> — текст, шаблон ищет
+                    «p{L}». Старый синтаксис такое разрешает; с <code>u</code> класс работает.
+                </details>
+            </li>
+            <li>Почему <code>"\u00E9" === "e\u0301"</code> — <code>false</code>, хотя на экране одно и то же?
+                <details class="answer"><summary>Ответ</summary>
+                    Это разные записи: одна точка против буквы и знака ударения. Строки сравниваются по частям. Перед
+                    сравнением обе приводят к одной форме — <code>normalize()</code>.
+                </details>
+            </li>
+            <li>Чем опасен <code>s.slice(0, n)</code> для строки с эмодзи?
+                <details class="answer"><summary>Ответ</summary>
+                    Он режет по частям и может отрезать половину пары. Получится строка с половинкой без пары —
+                    <code>isWellFormed()</code> даст <code>false</code>, на экране будет «�». Резать надо через
+                    <code>[...s].slice(0, n).join("")</code>.
+                </details>
+            </li>
+            <li>Зачем <code>String.raw</code> в <code>new RegExp(String.raw`\d+`)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    В обычной строке <code>"\d"</code> — это просто «d», косую пришлось бы удваивать. <code>String.raw</code>
+                    оставляет косые как написаны, и шаблон читается как литерал.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Unicode_character_class_escape">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 20 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f43f5e; }
+        h2 { color: #be123c; background: #fff1f2; border-left-color: #f43f5e; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 20</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 20. Unicode в строках и регулярных выражениях</h1>
+    <p class="subtitle">Выжимка лекции: три уровня строки, половинки без пары, флаги <code>u</code> и <code>v</code>,
+    классы <code>\p{…}</code>, <code>normalize</code> и <code>String.raw</code>.</p>
+
+    <h2>Главное</h2>
+
+    <pre class="code js">"🙂".length;                                // 2 — две 16-битные части
+[..."🙂"].length;                           // 1 — одна кодовая точка
+/^.$/u.test("🙂");                          // true — с флагом u пара — один символ
+"Gülnar dünýä".match(/\p{L}+/gu);           // ['Gülnar', 'dünýä'] — буквы любого алфавита
+"e\u0301".normalize() === "\u00E9";         // true — одна форма записи
+String.raw`\d+\.\d+`.length;                // 8 — косые остались в строке</pre>
+
+    <h2>Три уровня</h2>
+
+    <table>
+        <thead><tr><th>Уровень</th><th>Кто считает так</th></tr></thead>
+        <tbody>
+            <tr><td>16-битные части</td><td><code>length</code>, <code>s[i]</code>, <code>slice</code>, <code>split("")</code>, <code>charCodeAt</code>, шаблон без <code>u</code></td></tr>
+            <tr><td>кодовые точки</td><td><code>for...of</code>, <code>[...s]</code>, <code>codePointAt</code>, <code>String.fromCodePoint</code>, шаблон с <code>u</code>/<code>v</code></td></tr>
+            <tr><td>графемы</td><td>«👍🏽», «🇹🇲» — один знак, но две точки; <code>Intl.Segmenter</code> — курс 3</td></tr>
+        </tbody>
+    </table>
+
+    <div class="definition">
+        Символ вне базовой плоскости (эмодзи) хранится <strong>суррогатной парой</strong>: старшая половинка D800–DBFF и
+        младшая DC00–DFFF. Половинка без пары появляется, если резать строку по частям. <code>isWellFormed()</code>
+        находит такие половинки, <code>toWellFormed()</code> меняет их на «�» (U+FFFD); <code>encodeURI</code> на них
+        падает.
+    </div>
+
+    <h2>Шаблоны</h2>
+
+    <table>
+        <thead><tr><th>Запись</th><th>Что значит</th></tr></thead>
+        <tbody>
+            <tr><td><code>\p{L}</code>, <code>\p{Lu}</code>, <code>\p{Ll}</code></td><td>буква, заглавная, строчная — любого алфавита</td></tr>
+            <tr><td><code>\p{N}</code>, <code>\p{M}</code>, <code>\p{Sc}</code></td><td>цифра, знак над буквой, знак валюты</td></tr>
+            <tr><td><code>\p{sc=Cyrillic}</code>, <code>\p{Script=Latin}</code></td><td>письменность</td></tr>
+            <tr><td><code>\P{…}</code></td><td>всё, кроме</td></tr>
+            <tr><td><code>[\p{L}--[a-z]]</code>, <code>[A&amp;&amp;B]</code>, <code>\q{abc}</code></td><td>только с <code>v</code>: вычитание, пересечение, строка в классе</td></tr>
+        </tbody>
+    </table>
+
+    <div class="key-point">
+        Без флага <code>u</code> запись <code>\p{L}</code> — это текст «p{L}», и ошибки нет. С флагом старые вольности
+        (<code>\-</code>, одинокая <code>{</code>, <code>\00</code>) становятся <code>SyntaxError</code> — строгий режим для
+        шаблонов. <code>u</code> и <code>v</code> вместе нельзя. <code>\b</code> и <code>\w</code> и с флагом — только
+        ASCII; граница слова — <code>(?&lt;!\p{L})слово(?!\p{L})</code>.
+    </div>
+
+    <h2>Нормализация и String.raw</h2>
+
+    <div class="remember">
+        <code>"\u00E9"</code> и <code>"e\u0301"</code> выглядят одинаково, но <code>===</code> даёт <code>false</code>.
+        <code>normalize()</code> — форма NFC (собрать), <code>"NFD"</code> — разложить, <code>"NFKC"</code>/<code>"NFKD"</code>
+        — ещё и упростить «ﬀ», «①». Поиск без диакритики: <code>normalize("NFD").replace(/\p{M}/gu, "")</code>, но «й» и
+        «ё» тоже распадутся. Неизвестная форма — <code>RangeError</code>.
+    </div>
+
+    <div class="note-box">
+        Тег: <code>f`a${x}b`</code> вызывает <code>f(['a', 'b'], x)</code>; у массива кусков есть <code>raw</code> — текст как
+        написан. <code>String.raw</code> склеивает <code>raw</code> с подстановками: <code>new RegExp(String.raw`^\d+$`)</code>
+        без удвоения косых. Тег с <code>?.</code> — <code>SyntaxError</code>.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём коде места, где строка перебирается по номерам, и проверьте их на «Привет 🙂».</li>
+            <li>Перепишите одну проверку с <code>[а-яё]</code> или <code>[a-z]</code> через <code>\p{L}</code> и проверьте
+                туркменскими словами.</li>
+            <li>Прочитайте раздел «UTF-16 characters, Unicode code points, and grapheme clusters» на странице
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String">String</a>
+                и разберите пример с «👨‍👦».</li>
+            <li>Найдите в спецификации CodePointAt (11.1.4) и выпишите, в каких трёх случаях она отвечает «без пары».</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Unicode_character_class_escape">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

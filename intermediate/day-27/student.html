@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 27 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f59e0b; }
+        h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 27</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 27. Промисы целиком: all, allSettled, any, race, withResolvers, try</h1>
+    <p class="subtitle">Выжимка лекции: четыре способа ждать несколько промисов, AggregateError, таймаут, withResolvers и try.</p>
+
+    <h2>Главное</h2>
+
+    <pre class="code js">Promise.all([Promise.resolve(1), 2]);                                  // выполнится: [1, 2] — в порядке входа
+Promise.allSettled([Promise.reject(new Error("x"))]);                  // выполнится: [{ status: "rejected", reason }]
+Promise.any([Promise.reject(new Error("x")), Promise.resolve("ok")]);  // выполнится: "ok" — отказы пропущены
+Promise.race([new Promise(() =&gt; {}), "сразу"]);                         // выполнится: "сразу" — первый завершившийся
+Promise.any([]).catch((e) =&gt; e.name);                                  // "AggregateError" — все (ноль) отказали
+Promise.try(() =&gt; JSON.parse("{")).catch((e) =&gt; e.name);               // "SyntaxError" — промис, а не throw</pre>
+
+    <h2>Четыре способа ждать</h2>
+
+    <table>
+        <thead><tr><th>Метод</th><th>Выполняется</th><th>Отклоняется</th></tr></thead>
+        <tbody>
+            <tr><td><code>all</code></td><td>все выполнились — массив значений в порядке входа</td><td>первый же отказ</td></tr>
+            <tr><td><code>allSettled</code></td><td>все завершились — отчёты <code>{ status, value | reason }</code></td><td>никогда</td></tr>
+            <tr><td><code>any</code></td><td>первый успех</td><td>все отказали — <code>AggregateError</code></td></tr>
+            <tr><td><code>race</code></td><td colspan="2">как первый завершившийся, успехом или отказом</td></tr>
+        </tbody>
+    </table>
+
+    <div class="key-point">
+        Независимые загрузки запускают <strong>все сразу</strong>: <code>const [a, b] = await Promise.all([fa(), fb()])</code>
+        — время как у самой долгой. Три <code>await</code> подряд складывают времена. В <code>all</code> передают вызовы, а не
+        функции. Запущенные заранее промисы не ждут по одному: отказ второго, пока ждём первого, — «Uncaught (in promise)».
+    </div>
+
+    <div class="remember">
+        <code>AggregateError</code> — наследник <code>Error</code> для нескольких ошибок: <code>new AggregateError(errors,
+        message, { cause })</code>, причины — в неперечисляемом массиве <code>errors</code>, в порядке входа. От
+        <code>Promise.any</code> в Chrome текст — «All promises were rejected». Одна поломка с пояснением — <code>cause</code>,
+        несколько независимых — <code>AggregateError</code>.
+    </div>
+
+    <div class="note-box">
+        Таймаут: <code>Promise.race([задача, таймер]).finally(() =&gt; clearTimeout(timer))</code>. Ни один метод не
+        отменяет проигравших — они доработают сами. <code>Promise.withResolvers()</code> отдаёт <code>{ promise, resolve,
+        reject }</code> — выполнить промис можно из обработчика события. <code>Promise.try(f, ...args)</code> вызывает
+        <code>f</code> сразу и любой исход превращает в промис. <code>Promise.race([])</code> не завершится никогда.
+    </div>
+
+    <h2>Частые ошибки</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Что будет</th></tr></thead>
+        <tbody>
+            <tr><td><code>Promise.all(5)</code></td><td>не бросает, а отклоняет промис: <code>TypeError: number 5 is not iterable…</code></td></tr>
+            <tr><td><code>const { all } = Promise; all([])</code></td><td><code>TypeError: Promise.all called on non-object</code> — потерян <code>this</code></td></tr>
+            <tr><td><code>Promise.all([f, g])</code></td><td>функции вместо значений, без ошибки — нужны вызовы <code>f()</code>, <code>g()</code></td></tr>
+            <tr><td><code>Promise.any([])</code></td><td>отклонён: <code>AggregateError: All promises were rejected</code></td></tr>
+            <tr><td><code>new AggregateError()</code></td><td><code>TypeError</code>: список ошибок обязателен</td></tr>
+            <tr><td><code>Promise.try(5)</code></td><td>отклонён: <code>TypeError: number 5 is not a function</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём проекте два <code>await</code> подряд, которые не зависят друг от друга, и соедините их
+                через <code>Promise.all</code>; запишите, сколько времени выиграли.</li>
+            <li>Напишите <code>withTimeout</code> по памяти и проверьте на быстрой и медленной загрузке.</li>
+            <li>Прочитайте на странице
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all">Promise.all()</a>
+                раздел «Using Promise.all() with async functions» и выпишите три записи, которые там сравниваются.</li>
+            <li>Найдите в ECMA-262 раздел 27.2.4.1.2 PerformPromiseAll и выпишите, зачем счётчик начинается с 1.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

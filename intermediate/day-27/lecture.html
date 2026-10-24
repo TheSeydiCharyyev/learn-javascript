@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 27 — Промисы целиком: all, allSettled, any, race, withResolvers, try</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f59e0b; }
+        h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+        h3 { color: #92400e; }
+        .step-number { background: #f59e0b; }
+        .toc a { color: #b45309; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 27</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 27 &bull; урок 1</span>
+        <h1>Промисы целиком: all, allSettled, any, race, withResolvers, try</h1>
+        <p>Курс 2, Intermediate. Модуль «Ошибки и асинхронность» — второй день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>запускать несколько асинхронных задач сразу и ждать их одним из четырёх способов — <code>all</code>, <code>allSettled</code>, <code>any</code>, <code>race</code>;</li>
+            <li>понимать, чем ожидание «все сразу» быстрее ожидания «по очереди» и где при этом прячутся ошибки;</li>
+            <li>разбирать <code>AggregateError</code> и его <code>errors</code>;</li>
+            <li>ставить ограничение по времени через <code>race</code>, выносить <code>resolve</code> наружу через <code>withResolvers</code> и превращать в промис любой вызов через <code>try</code>;</li>
+            <li>читать алгоритмы раздела 27.2 спецификации: как <code>Promise.all</code> сохраняет порядок.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания, накопленные за курс</a></li>
+            <li><a href="#four">Четыре способа ждать</a></li>
+            <li><a href="#all">Promise.all. Практика: несколько загрузок сразу</a></li>
+            <li><a href="#await">Promise.all и await</a></li>
+            <li><a href="#allsettled">Promise.allSettled</a></li>
+            <li><a href="#any">Promise.any. Практика: первый ответивший сервер</a></li>
+            <li><a href="#aggregate">AggregateError</a></li>
+            <li><a href="#race">Promise.race. Практика: таймаут</a></li>
+            <li><a href="#resolvers">Promise.withResolvers</a></li>
+            <li><a href="#try">Promise.try</a></li>
+            <li><a href="#more">Не только промисы: thenable, подклассы, Symbol.species</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: колода с трёх серверов</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания, накопленные за курс</h2>
+
+    <p>День 30 Essentials ввёл промис, <code>then</code>, <code>catch</code>, <code>finally</code> и
+    <code>new Promise</code>; день 31 — <code>fetch</code> и <code>await</code>, день 32 — каталог с надписью
+    «Загрузка…». Но промис там всегда был один. Таблица дня 30 «Таймер и промис» записала: отменить промис нельзя. День
+    26 курса 2 отложил на сегодня <code>AggregateError</code> — ошибку со списком ошибок внутри. Сегодня промисов много, и
+    опыты снова на помощниках дня 30:</p>
+
+    <pre class="code js">// помощники дня 30 Essentials: держите их в начале app.js, дальше они не повторяются
+const wait = (ms) =&gt; new Promise((resolve) =&gt; setTimeout(resolve, ms));
+const later = (value, ms) =&gt; new Promise((resolve) =&gt; setTimeout(resolve, ms, value));
+const failLater = (text, ms) =&gt; new Promise((resolve, reject) =&gt; {
+  setTimeout(() =&gt; reject(new Error(text)), ms);
+});</pre>
+
+    <p><code>later</code> — «сервер», который через <code>ms</code> миллисекунд ответит значением, <code>failLater</code> —
+    сервер, который через столько же откажет. «Карточкам» при запуске нужны три вещи: слова, прогресс и настройки. Вот как
+    их загрузил бы код дня 31, по одной:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+async function loadOneByOne() {
+  const words = await later("слова", 300);
+  const progress = await later("прогресс", 200);
+  const settings = await later("настройки", 100);
+  console.log("по очереди:", words, progress, settings, since());
+}
+loadOneByOne();
+// по очереди: слова прогресс настройки 600 мс</pre>
+
+    <p>Каждый <code>await</code> ждёт, пока закончится предыдущий, и времена складываются: 300 + 200 + 100. Но настройки не
+    зависят от слов — их можно просить одновременно:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+Promise.all([later("слова", 300), later("прогресс", 200), later("настройки", 100)])
+  .then(([words, progress, settings]) =&gt; console.log("все сразу:", words, progress, settings, since()));
+// все сразу: слова прогресс настройки 300 мс</pre>
+
+    <p>Те же три загрузки идут разом, и всё готово за время самой долгой. Справочник MDN называет первую запись
+    «over-await» — лишним ожиданием.</p>
+
+    <h2 id="four">2. Четыре способа ждать</h2>
+
+    <p>Раздел «Promise concurrency» страницы
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise">Promise</a>
+    перечисляет четыре статических метода. Все берут перебираемое (день 11) — обычно массив промисов — и возвращают новый
+    промис. Различаются они тем, когда этот промис завершается:</p>
+
+    <table>
+        <thead><tr><th>Метод</th><th>Выполняется</th><th>Отклоняется</th><th>Значение</th></tr></thead>
+        <tbody>
+            <tr><td><code>Promise.all</code></td><td>когда выполнились <strong>все</strong></td><td>когда отклонился <strong>любой</strong></td><td>массив значений</td></tr>
+            <tr><td><code>Promise.allSettled</code></td><td>когда завершились <strong>все</strong></td><td>никогда</td><td>массив отчётов</td></tr>
+            <tr><td><code>Promise.any</code></td><td>когда выполнился <strong>любой</strong></td><td>когда отклонились <strong>все</strong></td><td>значение первого</td></tr>
+            <tr><td><code>Promise.race</code></td><td colspan="2">как <strong>первый завершившийся</strong> — успехом или отказом</td><td>его значение или ошибка</td></tr>
+        </tbody>
+    </table>
+
+    <p>Проверим на одних и тех же трёх промисах: A выполнится через 300 мс, B откажет через 100, C выполнится через 200.</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+const inputs = [later("A", 300), failLater("B", 100), later("C", 200)];
+Promise.all(inputs).then((v) =&gt; console.log("all:", v, since()), (e) =&gt; console.log("all: отклонён", e.message, since()));
+Promise.allSettled(inputs).then((r) =&gt; console.log("allSettled:", r.map((x) =&gt; x.status).join(", "), since()));
+Promise.any(inputs).then((v) =&gt; console.log("any:", v, since()));
+Promise.race(inputs).then((v) =&gt; console.log("race:", v, since()), (e) =&gt; console.log("race: отклонён", e.message, since()));</pre>
+
+    <div class="result-box">
+        all: отклонён B 100 мс<br>
+        race: отклонён B 100 мс<br>
+        any: C 200 мс<br>
+        allSettled: fulfilled, rejected, fulfilled 300 мс
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 252" role="img" aria-label="Одни и те же три промиса: A выполняется через 300 мс, B отклоняется через 100, C выполняется через 200. Promise.all и Promise.race отклоняются через 100 мс с ошибкой B, Promise.any выполняется через 200 мс значением C, Promise.allSettled выполняется через 300 мс тремя отчётами">
+            <g stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4 3">
+                <path d="M 250 18 L 250 96"/><path d="M 350 18 L 350 96"/><path d="M 450 18 L 450 96"/>
+                <path d="M 250 118 L 250 206"/><path d="M 350 118 L 350 206"/><path d="M 450 118 L 450 206"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" fill="#334155">
+                <text x="14" y="34">later("A", 300)</text><text x="14" y="58">failLater("B", 100)</text><text x="14" y="82">later("C", 200)</text>
+            </g>
+            <g stroke-width="4" stroke-linecap="round">
+                <path d="M 150 30 L 450 30" stroke="#86efac"/><path d="M 150 54 L 250 54" stroke="#fca5a5"/><path d="M 150 78 L 350 78" stroke="#86efac"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5">
+                <text x="460" y="34" fill="#15803d">A</text><text x="260" y="58" fill="#b91c1c">B — отказ</text><text x="360" y="82" fill="#15803d">C</text>
+            </g>
+            <path d="M 150 96 L 456 96" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b" text-anchor="middle">
+                <text x="150" y="110">0</text><text x="250" y="110">100 мс</text><text x="350" y="110">200 мс</text><text x="450" y="110">300 мс</text>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" fill="#92400e">
+                <text x="14" y="134">Promise.all</text><text x="14" y="158">Promise.race</text><text x="14" y="182">Promise.any</text><text x="14" y="206">Promise.allSettled</text>
+            </g>
+            <g stroke-width="2">
+                <path d="M 150 130 L 250 130" stroke="#f59e0b"/><path d="M 150 154 L 250 154" stroke="#f59e0b"/><path d="M 150 178 L 350 178" stroke="#f59e0b"/><path d="M 150 202 L 450 202" stroke="#f59e0b"/>
+            </g>
+            <g>
+                <circle cx="250" cy="130" r="5" fill="#dc2626"/><circle cx="250" cy="154" r="5" fill="#dc2626"/><circle cx="350" cy="178" r="5" fill="#16a34a"/><circle cx="450" cy="202" r="5" fill="#16a34a"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5">
+                <text x="262" y="134" fill="#b91c1c">отклонён: B</text><text x="262" y="158" fill="#b91c1c">отклонён: B</text>
+                <text x="362" y="182" fill="#15803d">выполнен: C</text><text x="462" y="206" fill="#15803d">три отчёта</text>
+            </g>
+            <rect x="14" y="218" width="592" height="28" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="237" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Одни и те же три промиса — четыре ответа на вопрос «когда хватит ждать».</text>
+        </svg>
+        <figcaption>Четыре метода на одних и тех же промисах</figcaption>
+    </figure>
+
+    <p>Справочник сравнивает <code>all</code> и <code>any</code> с методами массива <code>every</code> и <code>some</code>
+    дня 20 Essentials: «все удались» и «хоть один удался». Важно и то, чего у методов нет: однопоточный JavaScript
+    не выполняет задачи параллельно, он лишь не ждёт одну, прежде чем начать другую.</p>
+
+    <p>Устроены все четыре одинаково: каждому промису входа они вешают <code>then</code> и ждут вызовов. Справочник
+    предупреждает: эти обработчики не снимаются, даже когда результат уже получен. Если раз за разом отдавать в
+    <code>race</code> один и тот же долгий промис, обработчики на нём копятся, пока он не завершится.</p>
+
+    <h2 id="all">3. Promise.all. Практика: несколько загрузок сразу</h2>
+
+    <p>Практика плана. <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all"><code>Promise.all</code></a>
+    отдаёт массив значений <strong>в порядке входа</strong>, а не в порядке готовности, поэтому результат удобно сразу
+    разобрать деструктуризацией дня 22 Essentials:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+Promise.all([later("группа JS-1", 300), later("расписание", 100), later("оценки", 200)])
+  .then(([group, schedule, marks]) =&gt; console.log(group, "|", schedule, "|", marks, "|", since()));
+// группа JS-1 | расписание | оценки | 300 мс</pre>
+
+    <p>Расписание пришло первым, а стоит вторым — там, где его просили. Справочник предупреждает об обратной стороне:
+    перепутаете порядок переменных — получите тихую ошибку. С <code>fetch</code> дня 31 Essentials запись та же:
+    <code>Promise.all([fetch("group.json"), fetch("marks.json")])</code> отправляет оба запроса сразу, а каждый ответ
+    разбирают своим <code>.then((response) =&gt; response.json())</code> — это тоже промис, и <code>all</code> его
+    дождётся.</p>
+
+    <p>Второе свойство — «быстрый отказ» (fail-fast): первый же отказ отклоняет весь <code>Promise.all</code>, не дожидаясь
+    остальных. Но остальные при этом не останавливаются:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+const words = later("слова", 300).then((value) =&gt; {
+  console.log("слова всё равно пришли", since());
+  return value;
+});
+Promise.all([words, failLater("прогресс не пришёл", 100)])
+  .catch((e) =&gt; console.log("all отклонён:", e.message, since()));</pre>
+
+    <div class="result-box">
+        all отклонён: прогресс не пришёл 100 мс<br>
+        слова всё равно пришли 300 мс
+    </div>
+
+    <p>Отказ пришёл через 100 мс, а загрузка слов спокойно дошла до конца: промис — обещание результата, а не управление
+    задачей, и отменить его нельзя (таблица дня 30 Essentials). Ещё три правила со страницы метода:</p>
+
+    <pre class="code js">console.log(Promise.all([]));
+Promise.all([1, later(2, 100), "три"]).then((values) =&gt; console.log(values));
+Promise.all(new Set([later("из Set", 100)])).then((values) =&gt; console.log(values));</pre>
+
+    <div class="result-box">
+        Promise {&lt;fulfilled&gt;: Array(0)}<br>
+        (3) [1, 2, 'три']<br>
+        (1) ['из Set']
+    </div>
+
+    <p>Пустой массив даёт сразу выполненный промис — единственный случай, когда <code>all</code> завершается немедленно.
+    Значения, которые не промисы, проходят как есть. И вход — любое перебираемое: <code>Set</code> дня 15, генератор дня
+    12.</p>
+
+    <h2 id="await">4. Promise.all и await</h2>
+
+    <p><code>Promise.all</code> ждут не только через <code>then</code>, но и через <code>await</code> дня 31 Essentials:
+    <code>const [a, b] = await Promise.all([…])</code>. Справочник разбирает две ошибки при этом. Первая — передать
+    функции вместо промисов:</p>
+
+    <pre class="code js">const loadWords = () =&gt; later("слова", 100);
+Promise.all([loadWords, loadWords()]).then(([a, b]) =&gt; console.log(typeof a, b));
+// function слова</pre>
+
+    <p>Функция — не промис, и <code>all</code> отдал её как есть: загрузка начинается только при вызове. Вторая ошибка
+    коварнее. Можно запустить загрузки заранее и ждать их по очереди — это тоже «все сразу»:</p>
+
+    <pre class="code js">async function loadUpfront() {
+  const words = later("слова", 300);
+  const progress = failLater("прогресс не пришёл", 100);
+  try {
+    console.log(await words, await progress);
+  } catch (e) {
+    console.log("поймали:", e.message);
+  }
+}
+loadUpfront();</pre>
+
+    <div class="result-box">
+        Uncaught (in promise) Error: прогресс не пришёл<br>
+        поймали: прогресс не пришёл
+    </div>
+
+    <p>Ошибку поймали — но через 300 мс. А через 100 мс, когда <code>progress</code> отклонился, его никто не ждал: функция
+    стояла на <code>await words</code>. Для браузера это необработанный отказ, и в консоли появилась красная строка
+    «Uncaught (in promise)», как у цепочки без <code>catch</code> на дне 30 Essentials. Справочник называет такую запись
+    «склонной к ошибкам в обработке ошибок» и советует <code>Promise.all</code>: он подписывается на все промисы сразу, и
+    отказ не остаётся без хозяина ни на миг.</p>
+
+    <h2 id="allsettled">5. Promise.allSettled</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled"><code>Promise.allSettled</code></a>
+    ждёт <strong>всех</strong>, как бы они ни кончились, и никогда не отклоняется. Вместо значений он отдаёт отчёты:
+    <code>{ status: "fulfilled", value }</code> или <code>{ status: "rejected", reason }</code>. Справочник советует его,
+    когда задачи не зависят друг от друга и нужно знать судьбу каждой. Загрузим, что получится:</p>
+
+    <pre class="code js">const names = ["слова", "прогресс", "настройки"];
+Promise.allSettled([later(8, 200), failLater("сервер прогресса молчит", 100), later("тёмная тема", 300)])
+  .then((results) =&gt; {
+    results.forEach((r, i) =&gt; {
+      console.log(names[i], r.status, r.status === "fulfilled" ? r.value : r.reason.message);
+    });
+    console.log(results.map((r) =&gt; Object.keys(r).join("+")).join(" "));
+  });</pre>
+
+    <div class="result-box">
+        слова fulfilled 8<br>
+        прогресс rejected сервер прогресса молчит<br>
+        настройки fulfilled тёмная тема<br>
+        status+value status+reason status+value
+    </div>
+
+    <p>Отчёты стоят в порядке входа. У выполненного есть только <code>value</code>, у отклонённого — только
+    <code>reason</code>; проверять нужно <code>status</code>. Для <code>all</code> отказ прогресса был бы концом
+    загрузки, для <code>allSettled</code> это строчка в отчёте.</p>
+
+    <h2 id="any">6. Promise.any. Практика: первый ответивший сервер</h2>
+
+    <p>Практика плана. Колода лежит на трёх серверах: в Ашхабаде, Мары и Дашогузе. Кто первый ответит, у того и берём, а
+    отказы не важны, пока ответит хоть один. Это <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/any"><code>Promise.any</code></a>:</p>
+
+    <pre class="code js">const servers = [
+  failLater("Ашхабад: нет связи", 100),
+  later("колода с сервера «Мары»", 250),
+  later("колода с сервера «Дашогуз»", 150),
+];
+Promise.any(servers).then((deck) =&gt; console.log("загружена", deck));
+// загружена колода с сервера «Дашогуз»</pre>
+
+    <p>Ашхабад отказал первым, но <code>any</code> отказы пропускает и ждёт первого успеха — Дашогуз через 150 мс. Мары
+    ответит через 250, но его ответ уже никому не нужен. Если откажут все:</p>
+
+    <pre class="code js">Promise.any([failLater("Ашхабад: нет связи", 200), failLater("Мары: 503", 100), Promise.reject(new Error("Дашогуз: 404"))])
+  .catch((e) =&gt; console.log(e.name, "|", e.message, "|", e.errors.map((err) =&gt; err.message).join("; ")));
+// AggregateError | All promises were rejected | Ашхабад: нет связи; Мары: 503; Дашогуз: 404</pre>
+
+    <p>Причина отказа — <code>AggregateError</code>, а в его <code>errors</code> — все три причины <strong>в порядке
+    входа</strong>, хотя Дашогуз отказал сразу, а Ашхабад последним. Пустой массив <code>any</code> отклоняет сразу:
+    среди нуля промисов нет ни одного выполненного.</p>
+
+    <h2 id="aggregate">7. AggregateError</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AggregateError"><code>AggregateError</code></a>
+    — наследник <code>Error</code> дня 26 для нескольких ошибок сразу. День 26 провёл границу: <code>cause</code> — одна
+    поломка с пояснением сверху, а несколько независимых поломок — это <code>AggregateError</code>. Создать его можно и
+    самому — например, чтобы проверка формы сообщала обо всех ошибках сразу, а не только о первой:</p>
+
+    <pre class="code js">const report = new AggregateError([new RangeError("оценка 9"), new TypeError("имя не строка")], "в табеле 2 ошибки", { cause: "импорт" });
+console.log(String(report), "|", report.errors.length, report.cause, Object.keys(report), report instanceof Error, Error.isError(report));
+for (const e of report.errors) console.log(`— ${e.name}: ${e.message}`);</pre>
+
+    <div class="result-box">
+        AggregateError: в табеле 2 ошибки | 2 импорт (0) [] true true<br>
+        — RangeError: оценка 9<br>
+        — TypeError: имя не строка
+    </div>
+
+    <table>
+        <thead><tr><th>Что</th><th>Как устроено</th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AggregateError/AggregateError">конструктор</a></td><td><code>(errors, message, options)</code>, с <code>new</code> и без; <code>errors</code> — любое перебираемое, обязательно: <code>new AggregateError()</code> — <code>TypeError</code></td></tr>
+            <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AggregateError/errors"><code>errors</code></a></td><td>своё неперечисляемое свойство, всегда новый массив; ошибками его элементы быть не обязаны</td></tr>
+            <tr><td><code>name</code>, <code>message</code></td><td>как у видов дня 26: <code>name</code> в прототипе, <code>message</code> — своё, если передан</td></tr>
+            <tr><td>текст от <code>Promise.any</code></td><td>в Chrome — «All promises were rejected»; пример на странице <code>AggregateError</code> пишет «All Promises rejected» — так Chrome не говорит</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="race">8. Promise.race. Практика: таймаут</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race"><code>Promise.race</code></a>
+    завершается так же, как первый завершившийся промис, — успехом или отказом. Главное его применение — практика плана:
+    ограничение по времени. Загрузку пускают наперегонки с таймером, который через <code>ms</code> откажет:</p>
+
+    <pre class="code js">function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve, reject) =&gt; {
+    timer = setTimeout(() =&gt; reject(new Error(`нет ответа за ${ms} мс`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() =&gt; clearTimeout(timer));
+}
+withTimeout(later("данные", 100), 200).then(console.log, (e) =&gt; console.log(e.message));
+withTimeout(later("данные", 300), 200).then(console.log, (e) =&gt; console.log(e.message));</pre>
+
+    <div class="result-box">
+        данные<br>
+        нет ответа за 200 мс
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Таймаут через Promise.race. Слева загрузка за 100 мс обгоняет таймер на 200 мс, и race выполняется данными. Справа загрузка за 300 мс опаздывает, таймер отказывает первым, и race отклоняется ошибкой «нет ответа за 200 мс». В обоих случаях finally снимает таймер, а опоздавшая загрузка не отменяется">
+            <rect x="14" y="10" width="288" height="128" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <rect x="318" y="10" width="288" height="128" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#334155">
+                <text x="26" y="30">загрузка 100 мс, лимит 200</text><text x="330" y="30">загрузка 300 мс, лимит 200</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">
+                <text x="26" y="58">загрузка</text><text x="26" y="86">таймер</text><text x="330" y="58">загрузка</text><text x="330" y="86">таймер</text>
+            </g>
+            <g stroke-width="4" stroke-linecap="round">
+                <path d="M 90 54 L 156 54" stroke="#86efac"/><path d="M 90 82 L 222 82" stroke="#e2e8f0"/>
+                <path d="M 394 54 L 592 54" stroke="#e2e8f0"/><path d="M 394 82 L 526 82" stroke="#fca5a5"/>
+            </g>
+            <circle cx="156" cy="54" r="5" fill="#16a34a"/><circle cx="526" cy="82" r="5" fill="#dc2626"/>
+            <g font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b">
+                <text x="166" y="58">первая</text><text x="230" y="86">снят</text><text x="536" y="86">первый</text>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5">
+                <text x="26" y="122" fill="#15803d">race → "данные"</text><text x="330" y="122" fill="#b91c1c">race → Error: нет ответа за 200 мс</text>
+            </g>
+            <rect x="14" y="150" width="592" height="56" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#92400e">
+                <text x="310" y="172">Проигравший не отменяется: опоздавшая загрузка справа всё равно дойдёт до конца.</text>
+                <text x="310" y="192">finally(() =&gt; clearTimeout(timer)) снимает таймер, если победила загрузка.</text>
+            </g>
+        </svg>
+        <figcaption>Таймаут через <code>Promise.race</code></figcaption>
+    </figure>
+
+    <p>Справочник просит освобождать то, что проиграло: здесь <code>finally</code> снимает таймер через
+    <code>clearTimeout</code> дня 30, иначе он провисит до срока зря. Саму загрузку <code>race</code> не отменяет; чтобы
+    прервать <code>fetch</code>, есть отдельный механизм <code>AbortController</code> — курс 4. Чем <code>race</code>
+    отличается от <code>any</code>, показывает пример справочника:</p>
+
+    <pre class="code js">const slowSuccess = later("one", 300);
+const fastFailure = failLater("two", 100);
+Promise.race([slowSuccess, fastFailure]).then((v) =&gt; console.log("race:", v), (e) =&gt; console.log("race отклонён:", e.message));
+Promise.any([slowSuccess, fastFailure]).then((v) =&gt; console.log("any:", v));</pre>
+
+    <div class="result-box">
+        race отклонён: two<br>
+        any: one
+    </div>
+
+    <p><code>race</code> берёт первого завершившегося, даже если это отказ; <code>any</code> — первого выполненного. И ещё
+    одна крайность: <code>Promise.race([])</code> не завершится никогда — ни ошибки, ни значения.</p>
+
+    <h2 id="resolvers">9. Promise.withResolvers</h2>
+
+    <p>У <code>new Promise</code> дня 30 одно неудобство: <code>resolve</code> и <code>reject</code> живут только внутри
+    исполнителя. <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/withResolvers"><code>Promise.withResolvers()</code></a>
+    отдаёт их наружу вместе с промисом. Справочник показывает, что это ровно то же самое, что</p>
+
+    <pre class="code js">let resolve, reject;
+const promise = new Promise((res, rej) =&gt; {
+  resolve = res;
+  reject = rej;
+});
+resolve("готово");
+promise.then((value) =&gt; console.log(value));
+// готово</pre>
+
+    <p>— только короче и без <code>let</code>. Такой промис удобно выполнять из обработчика события, который в исполнитель
+    не поместить: например, ждать щелчка по кнопке. Слушатель с <code>{ once: true }</code> из дня 27 Essentials:</p>
+
+    <pre class="code js">document.body.innerHTML = "&lt;button&gt;Готово&lt;/button&gt;";
+const button = document.querySelector("button");
+function waitForClick(element) {
+  const { promise, resolve } = Promise.withResolvers();
+  element.addEventListener("click", resolve, { once: true });
+  return promise;
+}
+waitForClick(button).then((event) =&gt; console.log("нажата:", event.target.textContent));
+console.log("ждём щелчка");
+button.click();</pre>
+
+    <div class="result-box">
+        ждём щелчка<br>
+        нажата: Готово
+    </div>
+
+    <p>Объект — обычный, с тремя свойствами <code>promise</code>, <code>resolve</code>, <code>reject</code>. Правила дня 30
+    действуют и снаружи: считается только первый вызов <code>resolve</code> или <code>reject</code>, остальные молча
+    пропадают.</p>
+
+    <h2 id="try">10. Promise.try</h2>
+
+    <p>Бывает функция, про которую неизвестно, вернёт она значение, промис или бросит ошибку прямо сейчас.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/try"><code>Promise.try(func)</code></a>
+    вызывает её <strong>сразу</strong> и любой исход превращает в промис. Справочник сравнивает его с двумя записями,
+    которые пишут вместо него:</p>
+
+    <pre class="code js">const broken = () =&gt; { throw new Error("сломалось сразу"); };
+try {
+  Promise.resolve(broken()).catch(() =&gt; console.log("сюда не дойдём"));
+} catch (e) {
+  console.log("Promise.resolve(f()): ошибка вылетела мимо промиса —", e.message);
+}
+Promise.try(broken).catch((e) =&gt; console.log("Promise.try: промис отклонён —", e.message));
+const log = [];
+Promise.try(() =&gt; log.push("try: вызвана сразу"));
+Promise.resolve().then(() =&gt; log.push("then: вызвана потом"));
+log.push("код после них");
+setTimeout(() =&gt; console.log(log.join(" | ")), 0);</pre>
+
+    <div class="result-box">
+        Promise.resolve(f()): ошибка вылетела мимо промиса — сломалось сразу<br>
+        Promise.try: промис отклонён — сломалось сразу<br>
+        try: вызвана сразу | код после них | then: вызвана потом
+    </div>
+
+    <p><code>Promise.resolve(f())</code> сначала вызывает <code>f</code>, и брошенная ошибка улетает до всякого промиса.
+    <code>Promise.resolve().then(f)</code> ловит её, но вызывает <code>f</code> позже текущего кода (почему именно так —
+    день 28). <code>Promise.try</code> и вызывает сразу, и ловит. Пример справочника — одна цепочка для любого действия;
+    лишние аргументы передаются в функцию, как у <code>setTimeout</code>:</p>
+
+    <pre class="code js">function doSomething(action, ...args) {
+  return Promise.try(action, ...args)
+    .then((result) =&gt; console.log("результат:", result))
+    .catch((error) =&gt; console.log("ошибка:", error.message));
+}
+doSomething((a, b) =&gt; a + b, 2, 3)
+  .then(() =&gt; doSomething(() =&gt; { throw new Error("сразу"); }))
+  .then(() =&gt; doSomething(async () =&gt; "из async"))
+  .then(() =&gt; doSomething(() =&gt; failLater("потом", 100)));</pre>
+
+    <div class="result-box">
+        результат: 5<br>
+        ошибка: сразу<br>
+        результат: из async<br>
+        ошибка: потом
+    </div>
+
+    <p>В <code>async</code>-функции то же самое даёт <code>try { await action() }</code> дня 31 Essentials — справочник
+    приводит обе записи рядом.</p>
+
+    <h2 id="more">11. Не только промисы: thenable, подклассы, Symbol.species</h2>
+
+    <p>Четыре метода раздела 2 принимают не только промисы. Каждый элемент входа проходит через <code>Promise.resolve</code>:
+    промис остаётся собой, обычное значение становится выполненным промисом, а объект с методом <code>then</code> —
+    «thenable» — ждут, как промис:</p>
+
+    <pre class="code js">const thenable = { then(resolve) { resolve(42); } };
+Promise.all([thenable, Promise.resolve("промис"), "строка"]).then((values) =&gt; console.log(values));
+// (3) [42, 'промис', 'строка']</pre>
+
+    <p>Методы работают и с наследниками <code>Promise</code> (день 10): <code>MyPromise.all(…)</code> вернёт
+    <code>MyPromise</code>. Какой конструктор берут <code>then</code>, <code>catch</code> и <code>finally</code>, решает
+    статический геттер
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/Symbol.species"><code>Promise[Symbol.species]</code></a>
+    — тот же механизм, что у <code>Array</code>, <code>Map</code> и <code>RegExp</code> на днях 10, 14 и 19.</p>
+
+    <pre class="code js">class LoggedPromise extends Promise {}
+const lp = LoggedPromise.all([1, 2]);
+console.log(lp instanceof LoggedPromise, lp.then(() =&gt; {}) instanceof LoggedPromise, LoggedPromise[Symbol.species] === LoggedPromise, Promise.resolve(lp) === lp);
+// true true true false</pre>
+
+    <p>Последнее <code>false</code> — из спецификации (27.2.4.7.1): <code>Promise.resolve(x)</code> возвращает сам
+    <code>x</code>, только если его конструктор — тот же <code>Promise</code>. Справочник предупреждает, что
+    <code>Symbol.species</code> мешает оптимизациям и его, возможно, уберут, — полагаться на него не стоит.</p>
+
+    <p>На MDN есть ещё два метода — <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allKeyed"><code>Promise.allKeyed</code></a>
+    и <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettledKeyed"><code>Promise.allSettledKeyed</code></a>:
+    как <code>all</code> и <code>allSettled</code>, но вход и результат — объект с именами вместо массива, и путать
+    порядок нечего. Они экспериментальные, в Chrome 155 их нет, поэтому без примера.</p>
+
+    <h2 id="errors">12. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Что видно в Chrome</th><th>Что не так</th></tr></thead>
+        <tbody>
+            <tr><td><code>Promise.all(5)</code>, <code>Promise.all()</code></td><td>промис отклонён: <code>TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))</code></td><td>нужен массив; ошибка приходит отказом, а не бросается</td></tr>
+            <tr><td><code>const { all } = Promise; all([])</code></td><td><code>TypeError: Promise.all called on non-object</code></td><td>метод потерял <code>this</code> (день 2)</td></tr>
+            <tr><td><code>new Promise.all([])</code></td><td><code>TypeError: Promise.all is not a constructor</code></td><td>это не конструктор</td></tr>
+            <tr><td><code>Promise.any([])</code></td><td>промис отклонён: <code>AggregateError: All promises were rejected</code></td><td>пусто — нечему выполниться; страница справочника «No Promise in Promise.any was resolved»</td></tr>
+            <tr><td><code>new AggregateError()</code></td><td><code>TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))</code></td><td><code>errors</code> обязателен</td></tr>
+            <tr><td><code>Promise.try(5)</code></td><td>промис отклонён: <code>TypeError: number 5 is not a function</code></td><td>нужна функция</td></tr>
+            <tr><td><code>resolve(promise)</code> того же промиса</td><td>промис отклонён: <code>TypeError: Chaining cycle detected for promise #&lt;Promise&gt;</code></td><td>промис не может ждать сам себя</td></tr>
+            <tr><td><code>Promise.race([])</code></td><td>ничего, навсегда</td><td>пусто — гонки нет</td></tr>
+            <tr><td><code>Promise.all([f, g])</code></td><td>функции вместо значений, без ошибки</td><td>передать вызовы: <code>[f(), g()]</code></td></tr>
+            <tr><td><code>await a; await b;</code> для запущенных заранее</td><td><code>Uncaught (in promise)</code>, хотя ошибку потом поймали</td><td><code>await Promise.all([a, b])</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Страница справочника <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Promise_any_all_rejected">«AggregateError: No Promise in Promise.any was resolved»</a>
+    приводит в разделе Message и текст V8 — «All promises were rejected»: по шагам дня 26 её находит поиск по тексту из
+    Chrome. Две последние строки таблицы — тихие: без ошибки, но и без нужного результата.</p>
+
+    <h2 id="spec">13. Что говорит спецификация</h2>
+
+    <p>Промисы — раздел <a href="https://tc39.es/ecma262/2026/#sec-promise-objects">27.2 Promise Objects</a> главы
+    <a href="https://tc39.es/ecma262/2026/#sec-control-abstraction-objects">27 Control Abstraction Objects</a>. В этой главе
+    курс уже бывал: 27.1 — итераторы (дни 11–13), 27.3 и 27.5 — генераторы (день 12); впереди 27.7 —
+    <code>async</code>-функции (день 28), 27.4 и 27.6 — асинхронные генераторы (день 29). Подробно читаем начало 27.2 и
+    алгоритм <code>Promise.all</code>, кратко — остальные подразделы:</p>
+
+    <ul>
+        <li>Начало 27.2: три состояния — <em>fulfilled</em>, <em>rejected</em>, <em>pending</em>; завершённый
+            (<em>settled</em>) — не ожидающий. И четвёртое слово — <strong>resolved</strong>, «решённый»: промис, который
+            завершён <em>или</em> «привязан» к другому промису (<code>resolve(другойПромис)</code>). Решённый промис может
+            ещё ждать; решить его повторно нельзя.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-promise-instances">27.2.6</a> — пять внутренних слотов
+            экземпляра: <code>[[PromiseState]]</code> и <code>[[PromiseResult]]</code> (их DevTools показывает как
+            <code>Promise {&lt;fulfilled&gt;: …}</code>), два списка реакций для <code>then</code> и
+            <code>[[PromiseIsHandled]]</code> — был ли у промиса обработчик. По этому слоту браузер и пишет «Uncaught (in
+            promise)».</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-promise-abstract-operations">27.2.1</a>: PromiseCapability Record —
+            тройка <code>[[Promise]]</code>, <code>[[Resolve]]</code>, <code>[[Reject]]</code>.
+            <a href="https://tc39.es/ecma262/2026/#sec-promise.withResolvers">27.2.4.9 withResolvers</a> отдаёт её как
+            обычный объект. CreateResolvingFunctions (27.2.1.3) даёт <code>resolve</code> и <code>reject</code> общую
+            ячейку: первый вызов её очищает, остальные ничего не делают — правило «считается первый» дня 30. Там же
+            <code>resolve</code> самим промисом — <code>TypeError</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-promise-constructor">27.2.3</a> — конструктор: без
+            <code>new</code> — <code>TypeError</code>, исполнитель не функция — <code>TypeError</code>, исполнитель бросил
+            — промис отклонён.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-promise.all">27.2.4.1 Promise.all</a> и PerformPromiseAll — по
+            шагам, схема ниже. Список <code>values</code> растёт пустыми местами; каждому промису достаётся своя функция
+            выполнения с номером <code>[[Index]]</code> — она кладёт значение на своё место, отсюда порядок входа.
+            Счётчик <code>remainingElementsCount</code> начинается с 1, а не с 0: единицу снимают, только когда вход
+            закончился, — по примечанию спецификации, чтобы промис не выполнился раньше, даже если чужой <code>then</code>
+            позовёт функцию сразу. Для пустого входа счётчик сразу 0 — и промис выполнен немедленно. Отклонять же все промисы входа будет один
+            общий <code>[[Reject]]</code> — первый отказ решает всё.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-promise-constructor">27.2.4</a> — остальные
+            методы. PerformPromiseAny — зеркало <code>all</code>: список <code>errors</code>, общий <code>[[Resolve]]</code>,
+            в конце — новый <code>AggregateError</code> с неперечисляемым <code>errors</code>; текста сообщения
+            спецификация не задаёт, «All promises were rejected» — слова V8. PerformPromiseRace — пять строк: каждому промису
+            <code>then</code> с одними и теми же <code>resolve</code> и <code>reject</code>, а «первый победил» обеспечивает
+            общая ячейка 27.2.1.3. <code>try</code> (27.2.4.8) вызывает функцию сразу и передаёт исход в
+            <code>[[Resolve]]</code> или <code>[[Reject]]</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-promise-prototype-object">27.2.5</a> —
+            <code>then</code>, <code>catch</code>, <code>finally</code> (день 30 Essentials). 27.2.2 Promise Jobs — завтра:
+            почему <code>then</code> всегда идёт после текущего кода.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-aggregate-error-objects">20.5.7 AggregateError Objects</a> — как
+            <code>Error</code> дня 26 (<code>message</code>, InstallErrorCause), плюс шаг: перебрать <code>errors</code> в
+            список и записать неперечисляемым массивом.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 248" role="img" aria-label="PerformPromiseAll: для каждого из трёх промисов создаётся своя функция выполнения с номером Index; она кладёт значение на своё место в values и уменьшает счётчик; при нуле Promise.all выполняется массивом; отказ любого промиса идёт в общий reject">
+            <rect x="14" y="10" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="29" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#334155">Promise.all([pA, pB, pC]) — values = [ , , ], remainingElementsCount = 1</text>
+            <g fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5">
+                <rect x="14" y="56" width="188" height="58" rx="8"/><rect x="216" y="56" width="188" height="58" rx="8"/><rect x="418" y="56" width="188" height="58" rx="8"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#92400e">
+                <text x="108" y="76">pA.then(f0, reject)</text><text x="310" y="76">pB.then(f1, reject)</text><text x="512" y="76">pC.then(f2, reject)</text>
+                <text x="108" y="94">f0.[[Index]] = 0</text><text x="310" y="94">f1.[[Index]] = 1</text><text x="512" y="94">f2.[[Index]] = 2</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" text-anchor="middle" fill="#64748b">
+                <text x="108" y="108">счётчик + 1</text><text x="310" y="108">счётчик + 1</text><text x="512" y="108">счётчик + 1</text>
+            </g>
+            <g fill="none" stroke="#b45309" stroke-width="1.5">
+                <path d="M 108 114 L 108 136 L 66 136 L 66 146"/><path d="M 310 114 L 310 128 L 116 128 L 116 146"/><path d="M 512 114 L 512 132 L 166 132 L 166 146"/>
+            </g>
+            <rect x="14" y="146" width="290" height="50" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <g fill="#dcfce7" stroke="#16a34a" stroke-width="1.2">
+                <rect x="44" y="154" width="44" height="22" rx="4"/><rect x="94" y="154" width="44" height="22" rx="4"/><rect x="144" y="154" width="44" height="22" rx="4"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#15803d">
+                <text x="66" y="169">A</text><text x="116" y="169">B</text><text x="166" y="169">C</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="9.5" text-anchor="middle" fill="#64748b">
+                <text x="66" y="189">0</text><text x="116" y="189">1</text><text x="166" y="189">2</text>
+            </g>
+            <text x="200" y="169" font-family="Consolas, monospace" font-size="10.5" fill="#334155">values</text>
+            <rect x="318" y="146" width="288" height="50" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">
+                <text x="330" y="166">fi: values[i] = значение, счётчик − 1;</text><text x="330" y="184">при нуле — resolve(values) в порядке входа</text>
+            </g>
+            <rect x="14" y="208" width="592" height="32" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="228" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">reject у всех один: первый отказ отклоняет Promise.all; [[AlreadyCalled]] не даёт fi сработать дважды</text>
+        </svg>
+        <figcaption>PerformPromiseAll: номер у каждой функции — порядок у результата</figcaption>
+    </figure>
+
+    <h2 id="cards">14. «Карточки»: колода с трёх серверов</h2>
+
+    <p>Соберём всё в загрузку «Карточек». Колода — с того сервера, что ответит первым (<code>any</code>). Прогресс ученика
+    приходит медленно, ждём его не дольше 300 мс (<code>race</code> через <code>withTimeout</code>). Настройки быстрые. И
+    ни одна неудача не должна ломать запуск целиком (<code>allSettled</code>):</p>
+
+    <pre class="code js">function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve, reject) =&gt; {
+    timer = setTimeout(() =&gt; reject(new Error(`нет ответа за ${ms} мс`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() =&gt; clearTimeout(timer));
+}
+const deck = [{ id: 1, word: "cat" }, { id: 2, word: "kitap" }, { id: 3, word: "suw" }];
+const servers = [
+  failLater("Ашхабад: нет связи", 100),
+  later({ from: "Мары", deck }, 250),
+  later({ from: "Дашогуз", deck }, 150),
+];
+const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+Promise.allSettled([Promise.any(servers), withTimeout(later([2], 500), 300), later({ theme: "dark" }, 50)])
+  .then(([words, progress, settings]) =&gt; {
+    if (words.status === "rejected") {
+      console.log("слов нет:", words.reason.errors.map((e) =&gt; e.message).join("; "));
+      return;
+    }
+    const learned = new Set(progress.status === "fulfilled" ? progress.value : []);
+    console.log(`слова: ${words.value.deck.length}, сервер «${words.value.from}»`);
+    console.log(progress.status === "fulfilled" ? `выучено: ${learned.size}` : `прогресс: ${progress.reason.message} — начинаем с нуля`);
+    console.log(`тема: ${settings.status === "fulfilled" ? settings.value.theme : "светлая"}`);
+    console.log("к повторению:", words.value.deck.filter((c) =&gt; !learned.has(c.id)).map((c) =&gt; c.word).join(", "), "|", since());
+  });</pre>
+
+    <div class="result-box">
+        слова: 3, сервер «Дашогуз»<br>
+        прогресс: нет ответа за 300 мс — начинаем с нуля<br>
+        тема: dark<br>
+        к повторению: cat, kitap, suw | 300 мс
+    </div>
+
+    <p><strong>Строка 1.</strong> Ашхабад отказал, но <code>any</code> дождался Дашогуза. <strong>Строка 2.</strong>
+    Прогресс шёл бы 500 мс — таймер отказал на 300, и <code>allSettled</code> записал это в отчёт, не сорвав запуск.
+    <strong>Строка 4.</strong> Всё готово за 300 мс — по самому долгому из ожиданий, лимиту прогресса. Выученных нет, к
+    повторению вся колода.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Сделайте все три сервера отказывающими: Мары — <code>failLater("Мары: 503", 250)</code>,
+        Дашогуз — <code>failLater("Дашогуз: 404", 150)</code>. Что напечатается и в каком порядке будут причины?
+        <br><br>
+        <strong>Второй.</strong> Поднимите лимит прогресса до 600 мс. Что изменилось в строках 2 и 4?
+        <br><br>
+        <strong>Третий.</strong> Замените <code>Promise.any(servers)</code> на <code>Promise.race(servers)</code>. Почему
+        теперь в консоли красная ошибка <code>Cannot read properties of undefined (reading 'map')</code>?
+    </div>
+
+    <h2 id="next">15. Что дальше</h2>
+
+    <p>Сегодня не раз встречалось «потом»: <code>then</code> вызывается после текущего кода, даже у готового промиса. Почему
+    и в каком именно порядке идут <code>then</code>, <code>await</code> и <code>setTimeout</code> — день 28:
+    <code>async</code>-функции изнутри и очередь микрозадач, раздел 27.2.2 Promise Jobs.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all">Promise.all()</a></td><td>все сразу, порядок входа, быстрый отказ, лишнее ожидание</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled">Promise.allSettled()</a></td><td>отчёты о каждом</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/any">Promise.any()</a></td><td>первый успех; все отказали — AggregateError</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race">Promise.race()</a></td><td>первый завершившийся; таймаут</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/withResolvers">Promise.withResolvers()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/try">Promise.try()</a></td><td><code>resolve</code> снаружи; любой вызов — в промис</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AggregateError">AggregateError</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AggregateError/errors">errors</a></td><td>несколько ошибок в одной</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td>ECMA-262, 27.2</td><td>состояния, слоты, PromiseCapability, PerformPromiseAll</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AggregateError/AggregateError">AggregateError()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/Symbol.species">Promise[Symbol.species]</a></td><td>разделы 7 и 11</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allKeyed">Promise.allKeyed()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettledKeyed">Promise.allSettledKeyed()</a></td><td>экспериментальные, в Chrome 155 нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Promise_any_all_rejected">AggregateError: No Promise in Promise.any was resolved</a></td><td>ошибка дня, раздел 12</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>глава 27, подразделы 27.2, 20.5.7</td><td>раздел 13</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// Promise.all([...])        — все выполнились: массив в порядке входа; первый отказ — отказ всего
+// Promise.allSettled([...]) — все завершились: [{ status, value | reason }]; не отклоняется
+// Promise.any([...])        — первый успех; все отказали — AggregateError, причины в errors
+// Promise.race([...])       — как первый завершившийся; таймаут: race([задача, таймер]).finally(clearTimeout)
+// const [a, b] = await Promise.all([fa(), fb()]) — вызовы, а не функции; не await по одному
+// const { promise, resolve, reject } = Promise.withResolvers()
+// Promise.try(f, ...args)   — вызвать сразу, любой исход — в промис
+// проигравшие и опоздавшие не отменяются; Promise.race([]) не завершится никогда</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему три <code>await</code> подряд для независимых загрузок медленнее <code>Promise.all</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Каждый <code>await</code> ждёт свою загрузку, и следующая начинается только после неё — времена
+                    складываются. <code>Promise.all</code> получает уже запущенные загрузки, и время — как у самой долгой.
+                </details>
+            </li>
+            <li>Какой метод выбрать: «показать страницу, когда пришли и группа, и расписание»; «отчитаться о каждом из десяти
+                файлов»; «взять ответ самого быстрого зеркала»?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>all</code> — нужно всё, и без любой части страница бессмысленна; <code>allSettled</code> — нужна судьба
+                    каждого; <code>any</code> — нужен первый успех, отказы не важны.
+                </details>
+            </li>
+            <li>Чем <code>Promise.race</code> отличается от <code>Promise.any</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>race</code> берёт первый завершившийся промис, даже отказ; <code>any</code> пропускает отказы до
+                    первого успеха и отклоняется <code>AggregateError</code>, только если отказали все.
+                </details>
+            </li>
+            <li>Почему <code>Promise.all</code> отдаёт значения в порядке входа, а не готовности?
+                <details class="answer"><summary>Ответ</summary>
+                    PerformPromiseAll даёт каждому промису свою функцию с номером <code>[[Index]]</code>, и она кладёт значение
+                    на своё место в <code>values</code>.
+                </details>
+            </li>
+            <li>Что делает <code>Promise.try(f)</code> такого, чего не делают <code>Promise.resolve(f())</code> и
+                <code>Promise.resolve().then(f)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Вызывает <code>f</code> сразу (как первая запись) и ловит брошенную ошибку в промис (как вторая).
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

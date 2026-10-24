@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 26 — Ошибки: Error, его виды, cause и свои классы ошибок</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f59e0b; }
+        h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+        h3 { color: #92400e; }
+        .step-number { background: #f59e0b; }
+        .toc a { color: #b45309; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 26</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 26 &bull; урок 1</span>
+        <h1>Ошибки: Error, его виды, cause и свои классы ошибок</h1>
+        <p>Курс 2, Intermediate. Модуль «Ошибки и асинхронность» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>находить по тексту из консоли страницу справочника ошибок MDN и понимать, что она говорит;</li>
+            <li>знать устройство объекта <code>Error</code>: что у ошибки своё, что из прототипа и почему JSON видит «{}»;</li>
+            <li>выбирать вид ошибки — <code>TypeError</code>, <code>RangeError</code>, <code>SyntaxError</code>, <code>ReferenceError</code> — и знать, когда их бросает движок;</li>
+            <li>писать свои классы ошибок через <code>extends Error</code> и цепочки причин через <code>cause</code>;</li>
+            <li>отличать <code>Error.isError</code> от <code>instanceof</code> и читать стек в консоли Chrome.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания, накопленные за курс</a></li>
+            <li><a href="#reference">Справочник ошибок MDN</a></li>
+            <li><a href="#error">Объект Error: message и name</a></li>
+            <li><a href="#tostring">toString и почему JSON видит «{}»</a></li>
+            <li><a href="#kinds">TypeError и RangeError</a></li>
+            <li><a href="#syntax">SyntaxError и ReferenceError</a></li>
+            <li><a href="#rare">EvalError, URIError, InternalError</a></li>
+            <li><a href="#cause">cause: ошибка внутри ошибки</a></li>
+            <li><a href="#chain">Практика: цепочка причин</a></li>
+            <li><a href="#custom">Свой класс ошибки. Практика: ValidationError</a></li>
+            <li><a href="#family">Семья своих ошибок</a></li>
+            <li><a href="#iserror">Error.isError против instanceof</a></li>
+            <li><a href="#stack">stack. Практика: читаем стек в консоли Chrome</a></li>
+            <li><a href="#v8">stackTraceLimit и captureStackTrace</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: колода с проверкой</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания, накопленные за курс</h2>
+
+    <p>День 11 Essentials научил ловить ошибки <code>try...catch</code>, бросать <code>throw</code> и различать вид через
+    <code>instanceof</code>, который «сработает и для потомков типа»; там же к ошибке добавляли своё поле
+    (<code>error.mark = 9</code>) и запрещали бросать строку. День 10 курса 2 показал, что <code>RangeError</code> —
+    наследник <code>Error</code>, и отложил на сегодня свои классы ошибок:</p>
+
+    <pre class="code js">class ValidationError extends Error {
+  constructor(message, field) {
+    super(message);
+    this.name = "ValidationError";
+    this.field = field;
+  }
+}
+try {
+  throw new ValidationError("оценка 9 вне диапазона 2–5", "mark");
+} catch (e) {
+  console.log(e instanceof ValidationError, e instanceof Error, e.name, e.field, String(e));
+}
+// true true ValidationError mark ValidationError: оценка 9 вне диапазона 2–5</pre>
+
+    <p>Пять строк класса — и у ошибки своё имя, поле <code>field</code> и место в семье <code>Error</code>. Чтобы
+    писать такие классы без ловушек (забытый <code>super</code>, потерянная причина, «Error» вместо имени), разберём
+    <code>Error</code> целиком — от справочника MDN до раздела 20.5 спецификации.</p>
+
+    <h2 id="reference">2. Справочник ошибок MDN</h2>
+
+    <p>У MDN есть отдельный <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors">справочник
+    ошибок JavaScript</a> — 131 страница, по странице на ошибку. Заголовок страницы — <code>name</code> и
+    <code>message</code> ошибки, «отправная точка», как пишет справочник. Курс давно с ними работает: 53 страницы
+    разобраны в Essentials, 75 — в днях курса 2, где ошибка встретилась впервые, три оставлены курсу 3.</p>
+
+    <table>
+        <thead><tr><th>Вид</th><th>Страниц</th><th>Например</th></tr></thead>
+        <tbody>
+            <tr><td><code>SyntaxError</code></td><td>72</td><td>«Unexpected token», «missing ) after argument list»</td></tr>
+            <tr><td><code>TypeError</code></td><td>37</td><td>«'x' is not iterable», «invalid assignment to const "x"»</td></tr>
+            <tr><td><code>RangeError</code></td><td>11</td><td>«invalid array length», «BigInt division by zero»</td></tr>
+            <tr><td><code>ReferenceError</code></td><td>5</td><td>«"x" is not defined»</td></tr>
+            <tr><td>остальные</td><td>6</td><td><code>URIError</code>, <code>InternalError</code>, <code>AggregateError</code>, <code>Error</code> и два предупреждения</td></tr>
+        </tbody>
+    </table>
+
+    <p>Страница устроена всегда одинаково: <strong>Message</strong> — как сообщение пишут разные движки (пометки
+    «V8-based», «Firefox», «Safari»), <strong>Error type</strong> — вид, <strong>What went wrong?</strong> — что не так,
+    <strong>Examples</strong> — плохой код рядом с исправленным. Заголовок обычно в формулировке Firefox, поэтому текст
+    из Chrome ищут в разделе Message.</p>
+
+    <pre class="code js">const lessons = undefined;
+try {
+  lessons.length;
+} catch (e) {
+  console.log(e.name, "|", e.message);
+}
+// TypeError | Cannot read properties of undefined (reading 'length')</pre>
+
+    <p>Как найти страницу по такой строке:</p>
+
+    <ol>
+        <li>Вид — <code>TypeError</code> — сужает поиск до 37 страниц.</li>
+        <li>Уберите свои имена (<code>'length'</code> в справочнике — «x») и поищите текст поисковиком со словом MDN.
+            Этот текст стоит в разделе Message двух страниц: «TypeError: "x" is (not) "y"» и «TypeError: null/undefined has no
+            properties» — читайте обе.</li>
+        <li>Не нашлось — ищите по смыслу: страница «SyntaxError: JSON.parse: bad parsing» перечисляет 31 текст Firefox, а
+            V8 пишет своё — «Unexpected end of JSON input» (день 23 Essentials).</li>
+        <li>На найденной странице главное — What went wrong? и пары «плохо / хорошо» в Examples.</li>
+    </ol>
+
+    <p>Консоль, пишет справочник, может дать рядом с ошибкой ссылку на его страницу; нет ссылки — ищите по шагам выше. И
+    помните: <code>message</code> пишут для людей, в разных браузерах он разный, и программа на него не опирается
+    (раздел 8).</p>
+
+    <h2 id="error">3. Объект Error: message и name</h2>
+
+    <pre class="code js">const e = new Error("нет такой оценки");
+console.log(Object.getOwnPropertyNames(e), Object.hasOwn(e, "name"), e.name, Error.prototype.name);
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor(e, "message")));
+console.log(Error("без new") instanceof Error, Object.hasOwn(new Error(), "message"), new Error().message === "", typeof new Error(42).message);</pre>
+
+    <div class="result-box">
+        (2) ['stack', 'message'] false Error Error<br>
+        {"value":"нет такой оценки","writable":true,"enumerable":false,"configurable":true}<br>
+        true false true string
+    </div>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error"><code>Error</code></a>
+    работает и с <code>new</code>, и без: справочник
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/Error">конструктора</a>
+    и спецификация прямо пишут, что <code>Error(…)</code> равен <code>new Error(…)</code>. Первый аргумент —
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/message"><code>message</code></a>,
+    текст для человека. Конструктор переводит его в строку (42 → <code>"42"</code>) и кладёт в <strong>собственное
+    неперечисляемое</strong> свойство: в дескрипторе дня 5 только <code>enumerable</code> — <code>false</code>. Без
+    аргумента своего <code>message</code> нет, и чтение находит пустую строку в <code>Error.prototype</code>. Второе своё
+    свойство — <code>stack</code> (раздел 13).</p>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/name"><code>name</code></a>
+    — вид ошибки — лежит не в объекте, а в прототипе: у <code>Error.prototype</code> это <code>"Error"</code>, у каждого
+    вида — своё (день 10). Оба свойства можно переписать у объекта — пример справочника делает из обычной ошибки
+    «ParseError»:</p>
+
+    <pre class="code js">const e = new Error("Malformed input");
+e.name = "ParseError";
+console.log(e.toString(), Object.keys(e));
+// ParseError: Malformed input (1) ['name']</pre>
+
+    <p>Присваивание создало своё — и уже перечисляемое — свойство <code>name</code>: обычное присваивание дня 5 даёт все
+    три признака <code>true</code>. Это пригодится в разделе 10.</p>
+
+    <h2 id="tostring">4. toString и почему JSON видит «{}»</h2>
+
+    <p>Строкой ошибку делает
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/toString"><code>Error.prototype.toString</code></a>
+    — его зовут <code>String(e)</code>, шаблонная строка и сложение со строкой. Правило: <code>name</code>, двоеточие,
+    пробел, <code>message</code>; если одно из двух пусто — только другое; вместо <code>undefined</code> в имени —
+    «Error». Пять примеров со страницы метода:</p>
+
+    <pre class="code js">const e1 = new Error("fatal error");
+const e2 = new Error("fatal error"); e2.name = undefined;
+const e3 = new Error("fatal error"); e3.name = "";
+const e4 = new Error("fatal error"); e4.name = ""; e4.message = undefined;
+const e5 = new Error("fatal error"); e5.name = "hello"; e5.message = undefined;
+console.log([e1, e2, e3, e4, e5].map((x) =&gt; JSON.stringify(x.toString())).join(" "));
+// "Error: fatal error" "Error: fatal error" "fatal error" "" "hello"</pre>
+
+    <p>Неперечисляемые <code>message</code>, <code>stack</code> и <code>cause</code> — ловушка для журналов и
+    <code>localStorage</code>:</p>
+
+    <pre class="code js">const err = new Error("колода пуста", { cause: "no-cards" });
+err.deck = "animals";
+console.log(JSON.stringify(err), Object.keys(err), JSON.stringify({ ...err }), JSON.stringify(new Error("x")));
+const toData = (x) =&gt; ({ name: x.name, message: x.message, cause: x.cause });
+console.log(JSON.stringify(toData(err)));</pre>
+
+    <div class="result-box">
+        {"deck":"animals"} (1) ['deck'] {"deck":"animals"} {}<br>
+        {"name":"Error","message":"колода пуста","cause":"no-cards"}
+    </div>
+
+    <p><code>JSON.stringify</code>, <code>Object.keys</code> и spread видят только перечисляемое (таблица «кто что видит»
+    дня 5): от ошибки осталось поле <code>deck</code>, от обычной — <code>{}</code>. Сохраняют ошибку по полям, как
+    <code>toData</code>.</p>
+
+    <h2 id="kinds">5. TypeError и RangeError</h2>
+
+    <p>Встроенных видов шесть, и движок выбирает между ними сам. Два самых частых:</p>
+
+    <table>
+        <thead><tr><th>Вид</th><th>Когда, по справочнику</th><th>Тексты V8 из курса</th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError"><code>TypeError</code></a></td>
+                <td>операцию нельзя выполнить — обычно значение не того типа; ещё — попытка изменить неизменяемое и значение не по назначению</td>
+                <td><code>Cannot read properties of null (reading 'f')</code>, <code>Assignment to constant variable.</code>, <code>5 is not iterable</code>, <code>Cannot mix BigInt and other types, use explicit conversions</code></td></tr>
+            <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError"><code>RangeError</code></a></td>
+                <td>значение не из допустимого набора или диапазона</td>
+                <td><code>Invalid array length</code>, <code>toFixed() digits argument must be between 0 and 100</code>, <code>The normalization form should be one of NFC, NFD, NFKC, NFKD.</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Своя проверка выбирает так же: тип не тот — <code>TypeError</code>; тип тот, но значение не из допустимых —
+    <code>RangeError</code>. И «допустимые» — не только числа: второй пример справочника бросает <code>RangeError</code>, когда вместо «apple», «banana» или «carrot» пришла «cabbage». Так же поступал
+    <code>Intl</code> на дне 25: нет <code>currency</code> — <code>TypeError</code>, стиль «money» —
+    <code>RangeError</code>.</p>
+
+    <pre class="code js">function checkMark(mark) {
+  if (typeof mark !== "number") throw new TypeError(`оценка должна быть числом, а не ${typeof mark}`);
+  if (![2, 3, 4, 5].includes(mark)) throw new RangeError(`оценка ${mark} не из набора 2, 3, 4, 5`);
+  return mark;
+}
+for (const mark of [5, "5", 9, 4.5]) {
+  try {
+    console.log(checkMark(mark));
+  } catch (e) {
+    console.log(`${e.name}: ${e.message}`);
+  }
+}</pre>
+
+    <div class="result-box">
+        5<br>
+        TypeError: оценка должна быть числом, а не string<br>
+        RangeError: оценка 9 не из набора 2, 3, 4, 5<br>
+        RangeError: оценка 4.5 не из набора 2, 3, 4, 5
+    </div>
+
+    <h2 id="syntax">6. SyntaxError и ReferenceError</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError"><code>SyntaxError</code></a>
+    — текст, который нельзя разобрать. Важно, когда это случается: движок разбирает скрипт <strong>целиком до
+    запуска</strong>, поэтому ошибку в тексте скрипта его же <code>try</code> не поймает — скрипт не начался:</p>
+
+    <pre class="code js">console.log("до ошибки");
+try {
+  let x = ;
+} catch (e) {
+  console.log("поймали");
+}
+// SyntaxError: Unexpected token ';'</pre>
+
+    <p>Не вывелось даже «до ошибки». Ловится <code>SyntaxError</code>, только когда разбор идёт во время работы: <code>JSON.parse</code> (день 23 Essentials), <code>new RegExp</code> (день 17),
+    <code>new Function</code> (день 4) и <code>eval</code> (день 3):</p>
+
+    <pre class="code js">for (const text of ['{"word": "book"}', "{word: 'book'}", ""]) {
+  try {
+    console.log(JSON.parse(text).word);
+  } catch (e) {
+    console.log(e.name, "|", e.message);
+  }
+}
+try { new RegExp("("); } catch (e) { console.log(e.name, "|", e.message); }</pre>
+
+    <div class="result-box">
+        book<br>
+        SyntaxError | Expected property name or '}' in JSON at position 1 (line 1 column 2)<br>
+        SyntaxError | Unexpected end of JSON input<br>
+        SyntaxError | Invalid regular expression: /(/: Unterminated group
+    </div>
+
+    <p>Самому <code>SyntaxError</code> бросают в своём разборщике текста, как <code>JSON.parse</code>. Но единого правила
+    нет: <code>Temporal.PlainDate.from("abc")</code> бросает <code>RangeError</code> (день 22). Выберите одно для всей
+    программы.</p>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError"><code>ReferenceError</code></a>
+    — имени нет: не объявлено (день 5 Essentials), ещё в мёртвой зоне (день 4), присваивание необъявленному в строгом
+    режиме (день 3 курса 2), <code>this</code> до <code>super()</code> (день 10). Сами его почти не бросают.
+    <code>typeof</code> — исключение: необъявленное имя он молча называет <code>"undefined"</code>.</p>
+
+    <pre class="code js">try { lessonCount; } catch (e) { console.log(e.name, "|", e.message); }
+try { total; let total = 0; } catch (e) { console.log(e.name, "|", e.message); }
+console.log(typeof lessonCount);</pre>
+
+    <div class="result-box">
+        ReferenceError | lessonCount is not defined<br>
+        ReferenceError | Cannot access 'total' before initialization<br>
+        undefined
+    </div>
+
+    <p>Ловушка из соседнего мира: методы страницы бросают ошибки DOM со своими именами, и одно совпадает:</p>
+
+    <pre class="code js">try {
+  document.querySelector("[");
+} catch (e) {
+  console.log(e.name, e instanceof SyntaxError, e.constructor.name, e instanceof Error);
+}
+// SyntaxError false DOMException true</pre>
+
+    <p>По имени это <code>SyntaxError</code>, по классу — нет. День 11 Essentials различал <code>name</code> и
+    <code>instanceof</code> только «потомками»; вот вторая разница — одно имя у разных классов.</p>
+
+    <h2 id="rare">7. EvalError, URIError, InternalError</h2>
+
+    <pre class="code js">console.log(typeof InternalError, typeof EvalError, new EvalError("x").name, URIError.length, Object.getPrototypeOf(URIError) === Error);
+try { decodeURIComponent("%"); } catch (e) { console.log(e.name, "|", e.message); }
+try { (function deep() { deep(); })(); } catch (e) { console.log(e.name, "|", e.message); }</pre>
+
+    <div class="result-box">
+        undefined function EvalError 1 true<br>
+        URIError | URI malformed<br>
+        RangeError | Maximum call stack size exceeded
+    </div>
+
+    <table>
+        <thead><tr><th>Вид</th><th>Когда</th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError"><code>EvalError</code></a></td>
+                <td>спецификация его больше не бросает (20.5.5.1), он остался ради старого кода; ошибки внутри <code>eval</code> — обычные <code>SyntaxError</code>, <code>ReferenceError</code>…</td></tr>
+            <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError"><code>URIError</code></a></td>
+                <td><code>decodeURIComponent</code>, <code>decodeURI</code>, <code>encodeURI</code> с неправильной строкой (день 31 Essentials, одинокая половинка дня 20)</td></tr>
+            <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError"><code>InternalError</code></a></td>
+                <td>только Firefox: «too much recursion». В Chrome конструктора нет, рекурсия даёт <code>RangeError</code> — так и в разделе Message страницы справочника</td></tr>
+            <tr><td><code>AggregateError</code></td><td>несколько ошибок сразу — день 27</td></tr>
+        </tbody>
+    </table>
+
+    <p>Конструкторы видов устроены одинаково — раздел 20.5.6 называет их общим именем NativeError:
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError/TypeError"><code>TypeError()</code></a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError/RangeError"><code>RangeError()</code></a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError/SyntaxError"><code>SyntaxError()</code></a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError/ReferenceError"><code>ReferenceError()</code></a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError/EvalError"><code>EvalError()</code></a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError/URIError"><code>URIError()</code></a>
+    и <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError/InternalError"><code>InternalError()</code></a> из Firefox.
+    У всех аргументы <code>(message, options)</code>, работа с <code>new</code> и без, <code>length</code> 1, а прототип
+    каждого конструктора — сам <code>Error</code>.</p>
+
+    <h2 id="cause">8. cause: ошибка внутри ошибки</h2>
+
+    <p>Внизу бросили ошибку с техническим текстом, а наверху нужен смысл — «колода не прочитана». Новая ошибка без связи
+    потеряет старую вместе с её стеком; справочник советует передать старую в настройке <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause"><code>cause</code></a>:</p>
+
+    <pre class="code js">function readDeck(text) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error("колода не прочитана", { cause: err });
+  }
+}
+try {
+  readDeck("{word: 'book'}");
+} catch (e) {
+  console.log(String(e), "←", e.cause.name, e.cause instanceof SyntaxError);
+}
+// Error: колода не прочитана ← SyntaxError true</pre>
+
+    <p>Правила <code>cause</code> (InstallErrorCause, 20.5.8.1): свойство появляется, только если второй аргумент —
+    объект, в котором <strong>есть</strong> ключ <code>cause</code>, даже равный <code>undefined</code>; оно своё и
+    неперечисляемое, значение — любое. Строка вторым аргументом ничего не даёт — справочник объясняет это старой
+    нестандартной записью <code>Error(message, fileName)</code> из Firefox.</p>
+
+    <pre class="code js">console.log("cause" in new Error("x"), "cause" in new Error("x", "строка"), "cause" in new Error("x", { details: 1 }), "cause" in new Error("x", { cause: undefined }), new Error("x", { cause: 0 }).cause);
+// false false false true 0</pre>
+
+    <p>Раз значение любое, причиной может быть не ошибка, а данные для программы. Справочник показывает это на
+    генераторе ключей RSA; у нас — табель:</p>
+
+    <pre class="code js">function checkMarks(marks) {
+  const bad = marks.filter((m) =&gt; ![2, 3, 4, 5].includes(m));
+  if (bad.length &gt; 0) {
+    throw new RangeError("в табеле есть оценки вне 2–5", { cause: { code: "BadMark", values: bad } });
+  }
+}
+try {
+  checkMarks([5, 9, 4, 0]);
+} catch (e) {
+  console.log(e.message, "|", e.cause.code, e.cause.values);
+}
+// в табеле есть оценки вне 2–5 | BadMark (2) [9, 0]</pre>
+
+    <p>Совет справочника для библиотек: различайте ошибки по <code>cause</code> или по классу, а не по
+    <code>message</code> — текст переформулируют, и чужая проверка <code>err.message === "…"</code> сломается. И
+    граница: <code>cause</code> — одна поломка с пояснением сверху; несколько независимых — это
+    <code>AggregateError</code> (день 27).</p>
+
+    <h2 id="chain">9. Практика: цепочка причин</h2>
+
+    <p>Практика плана: «Карточки» читают колоду в два слоя, каждый добавляет свой смысл; третий слой — ошибка
+    <code>JSON.parse</code>:</p>
+
+    <pre class="code js">function parseDeck(text) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error("файл колоды повреждён", { cause: err });
+  }
+}
+function loadDeck(text) {
+  try {
+    return parseDeck(text);
+  } catch (err) {
+    throw new Error("колода «animals» не загружена", { cause: err });
+  }
+}
+function* causes(err) {
+  yield err;
+  if (err instanceof Error &amp;&amp; "cause" in err) yield* causes(err.cause);
+}
+try {
+  loadDeck('[{"word": "cat"},');
+} catch (e) {
+  console.log([...causes(e)].map(String).join(" ← "));
+  console.log([...causes(e)].length, e.stack.includes("повреждён"));
+}</pre>
+
+    <div class="result-box">
+        Error: колода «animals» не загружена ← Error: файл колоды повреждён ← SyntaxError: Unexpected end of JSON input<br>
+        3 false
+    </div>
+
+    <p>Поймана одна ошибка, но по ссылкам <code>cause</code> видна вся история: что сказать человеку (верхний текст), где
+    искать (средний) и что сломалось на самом деле (нижний). Генератор <code>causes</code> идёт по цепочке через
+    <code>yield*</code> дня 12, пока есть причина. <code>String(e)</code> и <code>e.stack</code> причин не показывают,
+    отсюда <code>false</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Цепочка причин: поймана ошибка «колода animals не загружена», её cause — «файл колоды повреждён», а её cause — SyntaxError от JSON.parse. String и stack показывают только верхнюю ошибку">
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#475569">
+                <text x="98" y="26">e</text><text x="310" y="26">e.cause</text><text x="522" y="26">e.cause.cause</text>
+            </g>
+            <rect x="14" y="36" width="168" height="82" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <rect x="226" y="36" width="168" height="82" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <rect x="438" y="36" width="168" height="82" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <g font-family="Consolas, monospace" font-size="11.5" font-weight="700" text-anchor="middle">
+                <text x="98" y="56" fill="#b45309">Error</text><text x="310" y="56" fill="#b45309">Error</text><text x="522" y="56" fill="#991b1b">SyntaxError</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#334155">
+                <text x="98" y="74">колода «animals»</text><text x="98" y="90">не загружена</text>
+                <text x="310" y="74">файл колоды</text><text x="310" y="90">повреждён</text>
+                <text x="522" y="74">Unexpected end</text><text x="522" y="90">of JSON input</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" text-anchor="middle" fill="#64748b">
+                <text x="98" y="108">создана в loadDeck</text><text x="310" y="108">создана в parseDeck</text><text x="522" y="108">бросил JSON.parse</text>
+            </g>
+            <g fill="none" stroke="#b45309" stroke-width="1.8">
+                <path d="M 182 77 L 217 77"/><path d="M 394 77 L 429 77"/>
+            </g>
+            <g fill="#b45309">
+                <path d="M 226 77 L 216 72 L 216 82 Z"/><path d="M 438 77 L 428 72 L 428 82 Z"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10" text-anchor="middle" fill="#b45309">
+                <text x="204" y="68">cause</text><text x="416" y="68">cause</text>
+            </g>
+            <rect x="14" y="134" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="153" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">String(e) и e.stack — только про верхнюю ошибку; остальное видно по ссылкам cause</text>
+            <rect x="14" y="174" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="193" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Каждый слой добавляет свой смысл, но не теряет того, что было ниже.</text>
+        </svg>
+        <figcaption>Цепочка причин: одна поймана, три видны</figcaption>
+    </figure>
+
+    <h2 id="custom">10. Свой класс ошибки. Практика: ValidationError</h2>
+
+    <p>Практика плана и долг дня 10. Своё поле из дня 11 Essentials (<code>error.mark = 9</code>) работало, но вид такой
+    ошибки — обычный <code>Error</code>, и в <code>catch</code> её не отличить от чужой. Свой класс решает это: проверка
+    формы ученика бросает <code>ValidationError</code> с полем и значением, а ловящий код берёт только её.</p>
+
+    <pre class="code js">class ValidationError extends Error {
+  constructor(message, field, value) {
+    super(message);
+    this.name = "ValidationError";
+    this.field = field;
+    this.value = value;
+  }
+}
+function checkStudent(data) {
+  if (typeof data.name !== "string" || data.name.trim() === "") throw new ValidationError("нужно имя", "name", data.name);
+  if (!Number.isInteger(data.mark) || data.mark &lt; 2 || data.mark &gt; 5) throw new ValidationError(`оценка ${data.mark} вне диапазона 2–5`, "mark", data.mark);
+  return data;
+}
+for (const data of [{ name: "Аман", mark: 5 }, { name: " ", mark: 4 }, { name: "Мерет", mark: 7 }]) {
+  try {
+    console.log("принят:", checkStudent(data).name);
+  } catch (e) {
+    if (!(e instanceof ValidationError)) throw e;
+    console.log(`поле ${e.field}: ${e.message}`, JSON.stringify(e));
+  }
+}</pre>
+
+    <div class="result-box">
+        принят: Аман<br>
+        поле name: нужно имя {"name":"ValidationError","field":"name","value":" "}<br>
+        поле mark: оценка 7 вне диапазона 2–5 {"name":"ValidationError","field":"mark","value":7}
+    </div>
+
+    <p>Три правила такого класса. <strong>Первое</strong> — <code>super(message)</code> до любого <code>this</code>.
+    Объект ошибки создаёт конструктор <code>Error</code>, и только он даёт ему внутренний слот <code>[[ErrorData]]</code>
+    (раздел 16); без <code>super</code> — <code>ReferenceError</code> дня 10. <strong>Второе</strong> — имя: класс сам
+    его не задаёт.</p>
+
+    <pre class="code js">class NoName extends Error {}
+const e = new NoName("x");
+console.log(e.name, String(e), e.constructor.name, e instanceof NoName);
+// Error Error: x NoName true</pre>
+
+    <p><code>constructor.name</code> — «NoName», а <code>name</code> по-прежнему «Error» из <code>Error.prototype</code>:
+    так ошибка и выглядит в консоли и в <code>String(e)</code>. Задать имя можно тремя способами:</p>
+
+    <table>
+        <thead><tr><th>Способ</th><th>Где лежит <code>name</code></th><th>В JSON и <code>Object.keys</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>this.name = "ValidationError"</code> в конструкторе</td><td>своё у каждого объекта</td><td>видно</td></tr>
+            <tr><td>поле класса <code>name = "ValidationError"</code> (день 8)</td><td>своё у каждого объекта</td><td>видно</td></tr>
+            <tr><td><code>static { this.prototype.name = "ValidationError"; }</code> (день 9)</td><td>в прототипе, как у встроенных</td><td>не видно</td></tr>
+        </tbody>
+    </table>
+
+    <p>Справочник берёт первый способ, и мы тоже — поэтому в JSON выше есть <code>name</code>, но нет
+    <code>message</code>. <strong>Третье</strong> — в <code>catch</code> свою ошибку обрабатываем, а чужую
+    (<code>TypeError</code> из опечатки) пробрасываем через <code>throw e</code>, как учил день 11 Essentials.</p>
+
+    <h2 id="family">11. Семья своих ошибок</h2>
+
+    <p>Ошибок в программе обычно несколько. Удобно завести базовый класс программы, а от него — частные:</p>
+
+    <pre class="code js">class AppError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+class ValidationError extends AppError {
+  constructor(message, field, options) {
+    super(message, options);
+    this.field = field;
+  }
+}
+class NotFoundError extends AppError {}
+function describe(e) {
+  if (e instanceof ValidationError) return `проверка: поле ${e.field}`;
+  if (e instanceof NotFoundError) return `не найдено: ${e.message}`;
+  if (e instanceof AppError) return `ошибка программы: ${e.message}`;
+  throw e;
+}
+const errors = [new ValidationError("нет перевода", "translation"), new NotFoundError("слово «kitap»"), new AppError("колода пуста", { cause: { size: 0 } })];
+for (const e of errors) console.log(e.name, "|", describe(e), "|", e instanceof AppError, e.cause);
+try {
+  describe(new TypeError("чужая"));
+} catch (e) {
+  console.log("проброшена:", String(e));
+}</pre>
+
+    <div class="result-box">
+        ValidationError | проверка: поле translation | true undefined<br>
+        NotFoundError | не найдено: слово «kitap» | true undefined<br>
+        AppError | ошибка программы: колода пуста | true {size: 0}<br>
+        проброшена: TypeError: чужая
+    </div>
+
+    <p>Имя задаёт базовый класс через <code>new.target.name</code> (день 10): при <code>new NotFoundError</code> это
+    «NotFoundError», и наследникам не нужно повторять строку. <code>options</code> передаётся в <code>super</code>, как в
+    примере справочника <code>MyError</code>, — иначе <code>cause</code> пропадёт: <code>Error</code> читает его только из
+    своих аргументов. Проверки — от частного к общему: поставьте <code>instanceof AppError</code> первым — и до других
+    веток дело не дойдёт, ведь вся семья — тоже <code>AppError</code>.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 252" role="img" aria-label="Семья ошибок: от Error наследуют шесть встроенных видов — TypeError, RangeError, SyntaxError, ReferenceError, EvalError, URIError — и свой класс AppError, от которого наследуют ValidationError и NotFoundError">
+            <rect x="250" y="12" width="120" height="34" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="310" y="34" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#b45309">Error</text>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">
+                <text x="382" y="26">в Error.prototype:</text><text x="382" y="40">name «Error», message «», toString</text>
+            </g>
+            <g fill="none" stroke="#94a3b8" stroke-width="1.8">
+                <path d="M 310 46 L 310 64"/><path d="M 179 64 L 485 64"/><path d="M 179 64 L 179 84"/><path d="M 485 64 L 485 110"/>
+                <path d="M 485 136 L 485 143 L 435 143 L 435 150"/><path d="M 485 143 L 549 143 L 549 150"/>
+            </g>
+            <rect x="14" y="84" width="330" height="104" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="24" y="102" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">встроенные виды (20.5.5), name — в их прототипах</text>
+            <g fill="#ffffff" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="26" y="112" width="96" height="26" rx="6"/><rect x="130" y="112" width="96" height="26" rx="6"/><rect x="234" y="112" width="96" height="26" rx="6"/>
+                <rect x="26" y="148" width="96" height="26" rx="6"/><rect x="130" y="148" width="96" height="26" rx="6"/><rect x="234" y="148" width="96" height="26" rx="6"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="74" y="129">TypeError</text><text x="178" y="129">RangeError</text><text x="282" y="129">SyntaxError</text>
+                <text x="74" y="165">ReferenceError</text><text x="178" y="165">EvalError</text><text x="282" y="165">URIError</text>
+            </g>
+            <rect x="364" y="84" width="242" height="104" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+            <text x="374" y="102" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#92400e">свои классы</text>
+            <g fill="#ffffff" stroke="#f59e0b" stroke-width="1.5">
+                <rect x="430" y="110" width="110" height="26" rx="6"/><rect x="376" y="150" width="118" height="26" rx="6"/><rect x="500" y="150" width="98" height="26" rx="6"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#92400e">
+                <text x="485" y="127">AppError</text><text x="435" y="167">ValidationError</text><text x="549" y="167">NotFoundError</text>
+            </g>
+            <rect x="14" y="200" width="592" height="46" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="310" y="219">name: у встроенного вида — в прототипе, у своего класса — в объекте (this.name = new.target.name)</text>
+                <text x="310" y="236">instanceof Error — true для всей семьи; Error.isError — для всего, что создал конструктор Error</text>
+            </g>
+        </svg>
+        <figcaption>Семья Error: встроенные виды и свои классы</figcaption>
+    </figure>
+
+    <h2 id="iserror">12. Error.isError против instanceof</h2>
+
+    <pre class="code js">const fake = Object.create(Error.prototype);
+document.body.innerHTML = "&lt;iframe&gt;&lt;/iframe&gt;";
+const FrameError = document.querySelector("iframe").contentWindow.Error;
+const frameError = new FrameError("из рамки");
+console.log(fake instanceof Error, Error.isError(fake), frameError instanceof Error, Error.isError(frameError));
+console.log(Object.prototype.toString.call(frameError), Object.prototype.toString.call({ [Symbol.toStringTag]: "Error" }), Error.isError(Error.prototype));</pre>
+
+    <div class="result-box">
+        true false false true<br>
+        [object Error] [object Error] false
+    </div>
+
+    <p><code>instanceof</code> смотрит на цепочку прототипов (день 7) и ошибается в обе стороны: объект с
+    <code>Error.prototype</code> в цепочке считает ошибкой, хотя её никто не создавал, а ошибку из рамки
+    <code>iframe</code> не признаёт — у каждого окна свой <code>Error</code>.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/isError"><code>Error.isError</code></a>
+    проверяет не цепочку, а <strong>клеймо</strong> — слот <code>[[ErrorData]]</code>, который ставит только
+    конструктор <code>Error</code>, как у <code>Array.isArray</code> и <code>#x in obj</code> дня 9.
+    <code>Object.prototype.toString</code> тоже смотрит на слот, но его обманывает <code>Symbol.toStringTag</code> (день
+    11). У самого <code>Error.prototype</code> клейма нет (20.5.3). В Node 22 метода ещё нет.</p>
+
+    <p>Отсюда совет справочника: <code>catch</code> ловит всё, что бросили, хоть строку, — пойманное приводят к ошибке
+    через <code>Error.isError</code>:</p>
+
+    <pre class="code js">function toError(value) {
+  return Error.isError(value) ? value : new Error(String(value), { cause: value });
+}
+for (const thrown of [new RangeError("оценка 9"), "что-то не так", 404]) {
+  try {
+    throw thrown;
+  } catch (e) {
+    const err = toError(e);
+    console.log(err.name, "|", err.message, "|", err === e, err.cause === e);
+  }
+}</pre>
+
+    <div class="result-box">
+        RangeError | оценка 9 | true false<br>
+        Error | что-то не так | false true<br>
+        Error | 404 | false true
+    </div>
+
+    <p>В <code>causes</code> из раздела 9 надёжнее тоже <code>Error.isError(err)</code> вместо
+    <code>instanceof Error</code>: тогда цепочка не оборвётся на ошибке из другого окна.</p>
+
+    <h2 id="stack">13. stack. Практика: читаем стек в консоли Chrome</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stack"><code>stack</code></a>
+    — путь вызовов до места, где ошибку <strong>создали</strong>; читать его научил день 11 Essentials. В стандарте
+    свойства нет (комитет только собирается его описать, пишет справочник), но оно есть во всех браузерах, у каждого
+    движка в своём формате. В Chrome это своё неперечисляемое свойство ошибки; справочник называет его
+    свойством-значением, а в Chrome 155 это аксессор — пара <code>get</code> и <code>set</code> дня 5.</p>
+
+    <pre class="code js">const d = Object.getOwnPropertyDescriptor(new Error("x"), "stack");
+console.log(typeof d.get, typeof d.set, d.enumerable, "stack" in Error.prototype);
+// function function false false</pre>
+
+    <p>Практика плана. Страница с файлом <code>app.js</code> открыта через Live Server (день 2 Essentials); кнопка
+    «Показать» выводит переводы колоды, и у одной карточки перевода нет:</p>
+
+    <pre class="code js">// app.js
+const deck = [{ word: "cat", translation: "кошка" }, { word: "suw" }];
+function translationOf(card) {
+  return card.translation.toUpperCase();
+}
+function render(cards) {
+  return cards.map((card) =&gt; translationOf(card));
+}
+document.body.innerHTML = "&lt;button&gt;Показать&lt;/button&gt;";
+document.querySelector("button").addEventListener("click", function onShow() {
+  try {
+    render(deck);
+  } catch (e) {
+    console.log(e.stack);
+  }
+});
+document.querySelector("button").click();</pre>
+
+    <pre class="plain-out">TypeError: Cannot read properties of undefined (reading 'toUpperCase')
+    at translationOf (http://127.0.0.1:5500/app.js:4:27)
+    at http://127.0.0.1:5500/app.js:7:30
+    at Array.map (&lt;anonymous&gt;)
+    at render (http://127.0.0.1:5500/app.js:7:16)
+    at HTMLButtonElement.onShow (http://127.0.0.1:5500/app.js:12:5)
+    at http://127.0.0.1:5500/app.js:17:34</pre>
+
+    <p>Читаем сверху вниз. Первая строка — вид и текст: у <code>undefined</code> прочитали <code>toUpperCase</code>.
+    Дальше кадры «at имя (адрес:строка:столбец)»: упало в <code>translationOf</code>, строка 4; её вызвала безымянная
+    стрелка из строки 7 — колбэк <code>map</code>; у встроенного <code>Array.map</code> адреса нет —
+    <code>&lt;anonymous&gt;</code>. Выше — <code>render</code> и обработчик <code>onShow</code> с объектом, на котором он
+    сработал, <code>HTMLButtonElement</code>, а внизу — вызов <code>click()</code> в строке 17. Щёлкните кнопку мышью —
+    этой строки не будет: событие от человека начинает новую цепочку вызовов. Так же свою цепочку начинают таймеры и, по
+    справочнику, обработчики промисов.</p>
+
+    <p>В консоли стек стоит под красной строкой ошибки, адреса в нём кликаются (день 3 Essentials), а непойманная ошибка
+    начинается словом «Uncaught». Другие подписи кадров:</p>
+
+    <table>
+        <thead><tr><th>Кадр</th><th>Что это</th></tr></thead>
+        <tbody>
+            <tr><td><code>at new Journal (…)</code></td><td>конструктор класса <code>Journal</code></td></tr>
+            <tr><td><code>at Object.show (…)</code></td><td>метод <code>show</code> объекта-литерала</td></tr>
+            <tr><td><code>at get average (…)</code></td><td>геттер <code>average</code></td></tr>
+            <tr><td><code>at gen.next (&lt;anonymous&gt;)</code></td><td>шаг генератора <code>gen</code> (день 12)</td></tr>
+            <tr><td><code>at eval (eval at …)</code></td><td>код из <code>eval</code> или <code>new Function</code></td></tr>
+            <tr><td><code>at HTMLButtonElement.&lt;anonymous&gt;</code></td><td>безымянный обработчик события</td></tr>
+        </tbody>
+    </table>
+
+    <p>И о времени. Стек собирают при <strong>создании</strong> ошибки, а не при броске: <code>new Error().stack</code>
+    без всякого <code>throw</code> показывает, кто вызвал текущую функцию. А строку стека Chrome складывает при первом
+    чтении: <code>name</code> из конструктора своего класса в неё попадает («ValidationError: …»), а сменённый после
+    чтения — уже нет.</p>
+
+    <h2 id="v8">14. stackTraceLimit и captureStackTrace</h2>
+
+    <p>У V8 для стека свой нестандартный набор. <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stackTraceLimit"><code>Error.stackTraceLimit</code></a>
+    — сколько кадров собирать, по умолчанию 10: больше — удобнее с глубокой рекурсией, меньше — дешевле. Упрощённый
+    пример справочника:</p>
+
+    <pre class="code js">function down(n) {
+  if (n === 0) throw new Error("дно");
+  down(n - 1);
+}
+const frames = [];
+for (const limit of [10, 3, 0]) {
+  Error.stackTraceLimit = limit;
+  try { down(20); } catch (e) { frames.push((e.stack.match(/ at /g) ?? []).length); }
+}
+Error.stackTraceLimit = 10;
+console.log(frames);
+// (3) [10, 3, 0]</pre>
+
+    <p>При нуле остаётся только строка «Error: дно». Лимит общий для всей страницы — его меняют на время и
+    возвращают.</p>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/captureStackTrace"><code>Error.captureStackTrace(obj, fn)</code></a>
+    кладёт <code>stack</code> на любой объект, выбрасывая кадры от <code>fn</code> и выше. Пример справочника — функция
+    «где я»:</p>
+
+    <pre class="code js">// app.js
+function getStack() {
+  const obj = {};
+  Error.captureStackTrace(obj, getStack);
+  return obj.stack;
+}
+function showLesson() {
+  console.log(getStack());
+}
+showLesson();</pre>
+
+    <pre class="plain-out">Error
+    at showLesson (http://127.0.0.1:5500/app.js:8:15)
+    at http://127.0.0.1:5500/app.js:10:1</pre>
+
+    <p>Кадра <code>getStack</code> нет — его вырезал второй аргумент. Справочник ставит такой вызов и в конструктор
+    своего класса ошибки, чтобы скрыть кадр конструктора, но в Chrome это лишнее: кадр <code>new ValidationError</code> у
+    наследника <code>Error</code> V8 не показывает сам.</p>
+
+    <p>Свойства <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/fileName"><code>fileName</code></a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/lineNumber"><code>lineNumber</code></a> и
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/columnNumber"><code>columnNumber</code></a>
+    есть только в Firefox; в Chrome все три — <code>undefined</code>, место ищут в <code>stack</code>.</p>
+
+    <h2 id="errors">15. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Что видно в Chrome</th><th>Что не так</th></tr></thead>
+        <tbody>
+            <tr><td><code>constructor(m) { this.x = 1; super(m); }</code></td><td><code>ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor</code></td><td><code>super</code> — первым</td></tr>
+            <tr><td><code>try { … }</code> без <code>catch</code> и <code>finally</code></td><td><code>SyntaxError: Missing catch or finally after try</code></td><td>нужен хотя бы один</td></tr>
+            <tr><td><code>throw</code>, перенос строки, <code>new Error()</code></td><td><code>SyntaxError: Illegal newline after throw</code></td><td>выражение — на той же строке</td></tr>
+            <tr><td><code>catch (e) { let e = 2; }</code></td><td><code>SyntaxError: Identifier 'e' has already been declared</code></td><td>имя уже занято параметром</td></tr>
+            <tr><td><code>new Error(Symbol("s"))</code></td><td><code>TypeError: Cannot convert a Symbol value to a string</code></td><td><code>message</code> переводится в строку</td></tr>
+            <tr><td><code>Error.prototype.toString.call(5)</code></td><td><code>TypeError: Method Error.prototype.toString called on incompatible receiver 5</code></td><td>нужен объект</td></tr>
+            <tr><td><code>Error.captureStackTrace(5)</code></td><td><code>TypeError: invalid_argument</code></td><td>нужен объект; текст без пояснений</td></tr>
+            <tr><td><code>class A extends Error.prototype {}</code></td><td><code>TypeError: Class extends value Error is not a constructor or null</code></td><td>прототип вместо класса, напечатан как «Error»</td></tr>
+            <tr><td><code>JSON.stringify(e)</code></td><td><code>"{}"</code>, без ошибки</td><td>свойства неперечисляемые (раздел 4)</td></tr>
+            <tr><td><code>super(message)</code> без <code>options</code></td><td>у ошибки нет <code>cause</code>, без ошибки</td><td>передать <code>options</code> (раздел 11)</td></tr>
+            <tr><td><code>throw</code> в <code>finally</code></td><td>первая ошибка пропала, без следа</td><td><code>finally</code> только прибирает (день 11 Essentials)</td></tr>
+        </tbody>
+    </table>
+
+    <p>Три последние строки — тихие: ошибки нет, а данные потеряны. Их ловят только проверкой результата.</p>
+
+    <h2 id="spec">16. Что говорит спецификация</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-error-objects">20.5 Error Objects</a> начинается так:
+    экземпляры <code>Error</code> бросают при ошибках времени выполнения, они же — база для своих классов; сам движок
+    бросает только встроенные виды и <code>AggregateError</code>. Подробно — конструктор, кратко — остальное:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-error-constructor">20.5.1 The Error Constructor</a> и
+            <a href="https://tc39.es/ecma262/2026/#sec-error-message">20.5.1.1 Error ( message [ , options ] )</a>. Без
+            <code>new</code> NewTarget — сама функция, поэтому <code>Error()</code> работает. OrdinaryCreateFromConstructor
+            создаёт объект со слотом <code>[[ErrorData]]</code> и прототипом из NewTarget — при <code>new
+            ValidationError</code> это <code>ValidationError.prototype</code>. Потом <code>message</code> (если не
+            <code>undefined</code>) — ToString и неперечисляемое свойство, и InstallErrorCause. Наследник, сказано в 20.5.1,
+            должен вызвать <code>super</code>, чтобы получить слот.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-error-constructor">20.5.2</a>:
+            <a href="https://tc39.es/ecma262/2026/#sec-error.iserror">20.5.2.1 Error.isError</a> — три шага: не объект —
+            <code>false</code>; нет слота <code>[[ErrorData]]</code> — <code>false</code>; иначе <code>true</code>.
+            <code>Error.prototype</code> нельзя переписать.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-error-prototype-object">20.5.3</a> — прототип
+            сам не ошибка, слота нет; <code>message</code> — пустая строка, <code>name</code> — «Error»;
+            <a href="https://tc39.es/ecma262/2026/#sec-error.prototype.tostring">20.5.3.4 toString</a> — правило раздела 4.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-error-instances">20.5.4</a> — слот
+            <code>[[ErrorData]]</code> нужен только <code>Object.prototype.toString</code> и <code>Error.isError</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-native-error-types-used-in-this-standard">20.5.5</a> — шесть видов
+            по строке описания: <code>EvalError</code> «сейчас не используется», <code>TypeError</code> — «когда ни один
+            другой вид не подходит».</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-nativeerror-object-structure">20.5.6 NativeError Object Structure</a>
+            — один шаблон на шесть видов: прототип конструктора — <code>%Error%</code>, у каждого свой прототип со своим
+            <code>name</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-abstract-operations-for-error-objects">20.5.8</a>:
+            <a href="https://tc39.es/ecma262/2026/#sec-installerrorcause">20.5.8.1 InstallErrorCause</a> — если
+            <code>options</code> — объект и HasProperty находит в нём <code>"cause"</code>, значение копируется в
+            неперечисляемое свойство. HasProperty, а не проверка на <code>undefined</code> — отсюда
+            <code>{ cause: undefined }</code> раздела 8.</li>
+    </ul>
+
+    <p>Раздел 20.5.7 (<code>AggregateError</code>) — день 27. А <code>stack</code> в тексте нет: его описывает отдельное
+    предложение комитета, на которое ссылается справочник.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 246" role="img" aria-label="Шаги new ValidationError: NewTarget равен ValidationError; super передаёт вызов через AppError конструктору Error; он создаёт объект со слотом ErrorData и прототипом ValidationError.prototype, записывает message и cause; V8 добавляет stack; затем наследники задают name и field">
+            <rect x="14" y="12" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="24" y="31" font-family="Consolas, monospace" font-size="10.5" fill="#334155">new ValidationError("нет перевода", "translation", { cause: err })</text>
+            <text x="596" y="31" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">NewTarget = ValidationError</text>
+            <rect x="14" y="56" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="75" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">super(message, options) — через AppError до конструктора Error (20.5.1.1)</text>
+            <rect x="14" y="100" width="592" height="92" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" fill="#92400e">
+                <text x="28" y="120">1. объект со слотом [[ErrorData]] и прототипом NewTarget.prototype — ValidationError.prototype</text>
+                <text x="28" y="140">2. message не undefined → ToString → своё неперечисляемое свойство message</text>
+                <text x="28" y="160">3. InstallErrorCause: в options есть ключ cause → своё неперечисляемое cause</text>
+            </g>
+            <text x="28" y="180" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">сверх стандарта, V8: свойство stack — кадры собраны сейчас, строка сложится при первом чтении</text>
+            <rect x="14" y="206" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="225" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">назад в наследники: AppError — this.name = new.target.name, ValidationError — this.field</text>
+            <g fill="none" stroke="#b45309" stroke-width="1.8">
+                <path d="M 310 42 L 310 49"/><path d="M 310 86 L 310 93"/><path d="M 310 192 L 310 199"/>
+            </g>
+            <g fill="#b45309">
+                <path d="M 310 56 L 305 48 L 315 48 Z"/><path d="M 310 100 L 305 92 L 315 92 Z"/><path d="M 310 206 L 305 198 L 315 198 Z"/>
+            </g>
+        </svg>
+        <figcaption>Что происходит при <code>new ValidationError</code>: шаги 20.5.1.1 и InstallErrorCause</figcaption>
+    </figure>
+
+    <h2 id="cards">17. «Карточки»: колода с проверкой</h2>
+
+    <p>Колода «Карточек» приходит текстом — из <code>words.json</code> (день 33 Essentials) или
+    <code>localStorage</code>. Ошибки трёх родов: файл не разбирается, в нём не список, у карточки нет поля. Человеку
+    нужен понятный текст, программисту — причина:</p>
+
+    <pre class="code js">class CardsError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+class DeckFormatError extends CardsError {}
+class CardError extends CardsError {
+  constructor(message, index, options) {
+    super(message, options);
+    this.index = index;
+  }
+}
+function parseDeck(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    throw new DeckFormatError("файл колоды повреждён", { cause: err });
+  }
+  if (!Array.isArray(data)) throw new DeckFormatError("в файле не список карточек");
+  data.forEach((card, i) =&gt; {
+    if (typeof card.word !== "string") throw new CardError("нет слова", i);
+    if (typeof card.translation !== "string") throw new CardError(`у «${card.word}» нет перевода`, i);
+  });
+  return data;
+}
+function start(text) {
+  try {
+    return `колода: ${parseDeck(text).length} карточки`;
+  } catch (e) {
+    if (e instanceof CardError) return `карточка ${e.index + 1}: ${e.message}`;
+    if (e instanceof DeckFormatError) return "cause" in e ? `${e.message}: ${e.cause.message}` : e.message;
+    throw e;
+  }
+}
+const texts = ['[{"word": "cat", "translation": "кошка"}, {"word": "kitap", "translation": "книга"}]', '[{"word": "cat", "translation": "кошка"}, {"word": "suw"}]', '[{"word": "cat"},', '{"word": "cat"}', "[null]"];
+for (const text of texts) {
+  try {
+    console.log(start(text));
+  } catch (e) {
+    console.log("не наша ошибка:", String(e));
+  }
+}</pre>
+
+    <div class="result-box">
+        колода: 2 карточки<br>
+        карточка 2: у «suw» нет перевода<br>
+        файл колоды повреждён: Unexpected end of JSON input<br>
+        в файле не список карточек<br>
+        не наша ошибка: TypeError: Cannot read properties of null (reading 'word')
+    </div>
+
+    <p><strong>Строки 1–4.</strong> Каждая своя ошибка дошла до <code>start</code> и стала текстом для человека; у
+    повреждённого файла добавлена причина из <code>cause</code>. <strong>Строка 5.</strong> <code>[null]</code> проверка
+    не предусмотрела: <code>card.word</code> у <code>null</code> — чужой для <code>start</code> <code>TypeError</code>, и
+    она пробросила его наверх. Проброс показал дыру в проверке, а не спрятал её.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите <code>options</code> из <code>super(message, options)</code> в
+        <code>CardsError</code>. Что стало с третьей строкой и почему <code>"cause" in e</code> дал <code>false</code>?
+        <br><br>
+        <strong>Второй.</strong> Добавьте в <code>start</code> первой веткой
+        <code>if (e instanceof CardsError) return e.message;</code>. Какие строки изменились и почему?
+        <br><br>
+        <strong>Третий.</strong> Закройте дыру: в начале <code>forEach</code> бросьте <code>CardError("не карточка", i)</code>,
+        если <code>card</code> — не объект или <code>null</code>. Что теперь в пятой строке?
+    </div>
+
+    <h2 id="next">18. Что дальше</h2>
+
+    <p>Модуль «Ошибки и асинхронность» начат с ошибок не случайно: дальше они будут приходить не сразу, а потом. День 27 —
+    промисы целиком и <code>AggregateError</code>, ошибка со списком ошибок внутри; день 28 — <code>async</code>-функции
+    изнутри.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors">JavaScript error reference</a></td><td>131 страница ошибок и как ими пользоваться</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error">Error</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/Error">конструктор</a></td><td>виды, свои классы, <code>cause</code> в наследнике</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/message">message</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/name">name</a></td><td>текст — своё свойство, имя — в прототипе</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause">cause</a></td><td>причина, данные вместо текста</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/isError">Error.isError()</a></td><td>клеймо против <code>instanceof</code>, приведение пойманного</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError">TypeError</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError">RangeError</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError">SyntaxError</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError">ReferenceError</a></td><td>когда бросает движок и когда — мы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td>ECMA-262, 20.5</td><td>конструктор, <code>isError</code>, прототип, InstallErrorCause</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stack">stack</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/captureStackTrace">captureStackTrace()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stackTraceLimit">stackTraceLimit</a></td><td>нестандартное, есть в V8: разделы 13 и 14</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/toString">toString()</a></td><td>правило «name: message», раздел 4</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError">EvalError</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError">URIError</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError">InternalError</a> и конструкторы семи видов</td><td>раздел 7</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/fileName">fileName</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/lineNumber">lineNumber</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/columnNumber">columnNumber</a></td><td>только Firefox, раздел 14</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>подразделы 20.5.1–20.5.6, 20.5.8</td><td>раздел 16</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// new Error(message, { cause }) — с new и без; message и cause свои, неперечисляемые; name — в прототипе
+// String(e) — "name: message"; JSON.stringify(e) — только перечисляемое, у обычной ошибки "{}"
+// тип не тот — TypeError; значение не из допустимых — RangeError; SyntaxError в тексте скрипта не ловится
+// class MyError extends Error { constructor(m, o) { super(m, o); this.name = new.target.name; } }
+// catch: свои — по instanceof от частного к общему, чужие — throw e
+// Error.isError(x) — клеймо [[ErrorData]]: не обмануть цепочкой прототипов, работает между окнами
+// e.stack — кадры на момент создания (не стандарт); Error.stackTraceLimit = 10; Error.captureStackTrace(obj, fn)</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>JSON.stringify(new Error("x"))</code> — <code>"{}"</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>message</code> и <code>stack</code> — свои, но неперечисляемые, <code>name</code> — в прототипе,
+                    а <code>JSON.stringify</code> берёт только свои перечисляемые.
+                </details>
+            </li>
+            <li>Чем <code>new Error("x", { cause: undefined })</code> отличается от <code>new Error("x")</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    У первой есть своё <code>cause</code>, равное <code>undefined</code>: InstallErrorCause проверяет
+                    наличие ключа (HasProperty), а не значение.
+                </details>
+            </li>
+            <li>Почему <code>try { let x = ; } catch {}</code> не ловит ошибку?
+                <details class="answer"><summary>Ответ</summary>
+                    Это <code>SyntaxError</code> разбора: скрипт разбирают целиком до запуска, и с ошибкой он не
+                    запускается вовсе.
+                </details>
+            </li>
+            <li>Что покажет <code>String(e)</code> для <code>class MyError extends Error {}</code> и почему?
+                <details class="answer"><summary>Ответ</summary>
+                    «Error: …» — класс не задаёт <code>name</code>, он читается из <code>Error.prototype</code>. Имя задают в
+                    конструкторе: <code>this.name = new.target.name</code>.
+                </details>
+            </li>
+            <li>Когда <code>instanceof Error</code> и <code>Error.isError</code> отвечают по-разному?
+                <details class="answer"><summary>Ответ</summary>
+                    Ошибка из <code>iframe</code> — <code>false</code> и <code>true</code>,
+                    <code>Object.create(Error.prototype)</code> — <code>true</code> и <code>false</code>: первый смотрит на
+                    цепочку прототипов, второй — на слот <code>[[ErrorData]]</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 28 — async-функции изнутри и очередь микрозадач</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f59e0b; }
+        h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+        h3 { color: #92400e; }
+        .step-number { background: #f59e0b; }
+        .toc a { color: #b45309; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 28</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 28 &bull; урок 1</span>
+        <h1>async-функции изнутри и очередь микрозадач</h1>
+        <p>Курс 2, Intermediate. Модуль «Ошибки и асинхронность» — третий день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>знать, в каком порядке выполняются синхронный код, <code>then</code>, продолжение после <code>await</code> и <code>setTimeout</code>, — и уметь предсказать вывод;</li>
+            <li>понимать, почему <code>then</code> никогда не срабатывает посреди текущего кода (раздел 27.2.2 спецификации);</li>
+            <li>видеть async-функцию как тело, разрезанное <code>await</code> на куски, и знать, что она возвращает и как бросает;</li>
+            <li>писать выражения <code>async function</code>, в том числе сразу вызванные, и знать, где <code>await</code> разрешён;</li>
+            <li>выбирать между ожиданием по очереди и всем сразу и не попадаться на <code>forEach</code> с <code>async</code>.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания, накопленные за курс</a></li>
+            <li><a href="#queues">Один поток и две очереди</a></li>
+            <li><a href="#then">Почему then — после текущего кода</a></li>
+            <li><a href="#split">Тело, разрезанное await</a></li>
+            <li><a href="#await">await ждёт всегда</a></li>
+            <li><a href="#return">Что возвращает async-функция</a></li>
+            <li><a href="#expression">Выражение async function</a></li>
+            <li><a href="#predict">Практика: предскажите порядок</a></li>
+            <li><a href="#sequence">Практика: по очереди и все сразу</a></li>
+            <li><a href="#where">Где можно писать await</a></li>
+            <li><a href="#asyncfunction">AsyncFunction</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: сохранить всю колоду</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания, накопленные за курс</h2>
+
+    <p>День 30 Essentials записал правило «функция таймера — всегда после текущего кода» и пообещал: «как устроена эта
+    очередь, подробно разбирается в курсе 2». Там же было сказано, что <code>then</code> «никогда не срабатывает посреди
+    вашего кода», даже у готового промиса. День 31 добавил, что <code>async</code>-функция выполняется сразу — до первого
+    <code>await</code>, а потом отдаёт управление. День 27 курса 2 дважды отложил на сегодня вопрос «почему именно в таком
+    порядке». Начнём с задачи — какие номера напечатаются по порядку?</p>
+
+    <pre class="code js">console.log("1: скрипт");
+setTimeout(() =&gt; console.log("6: таймер"), 0);
+Promise.resolve().then(() =&gt; console.log("4: then"));
+(async () =&gt; {
+  console.log("2: async до await");
+  await null;
+  console.log("5: async после await");
+})();
+console.log("3: скрипт, конец");</pre>
+
+    <div class="result-box">
+        1: скрипт<br>
+        2: async до await<br>
+        3: скрипт, конец<br>
+        4: then<br>
+        5: async после await<br>
+        6: таймер
+    </div>
+
+    <p>Номера идут подряд, хотя строки в коде — нет. Таймер с задержкой 0 оказался последним, <code>then</code> обогнал
+    его, а продолжение после <code>await</code> встало между ними. Чтобы такие ответы получались не угадыванием, нужно
+    знать, где каждая строка ждёт своей очереди. Помощники дня 30 Essentials (<code>wait</code>, <code>later</code>,
+    <code>failLater</code>) стоят в начале <code>app.js</code>, как на дне 27.</p>
+
+    <h2 id="queues">2. Один поток и две очереди</h2>
+
+    <p>У страницы один поток: в каждый момент выполняется что-то одно (день 30 Essentials). Работа приходит порциями —
+    <strong>задачами</strong>: весь скрипт целиком, сработавший таймер, щелчок. Задача выполняется до конца, никто её не
+    прерывает. А между задачами браузер выполняет <strong>микрозадачи</strong> — так справочник MDN на странице
+    <code>await</code> называет продолжения промисов. Правило одно:</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 240" role="img" aria-label="Цикл событий: из очереди задач берётся одна задача — скрипт, таймер или щелчок — и выполняется до конца; затем выполняется вся очередь микрозадач — then и продолжения после await, включая добавленные по ходу; потом берётся следующая задача">
+            <rect x="14" y="14" width="170" height="150" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="99" y="36" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">очередь задач</text>
+            <g fill="#ffffff" stroke="#94a3b8" stroke-width="1.2">
+                <rect x="30" y="48" width="138" height="28" rx="6"/><rect x="30" y="84" width="138" height="28" rx="6"/><rect x="30" y="120" width="138" height="28" rx="6"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#334155">
+                <text x="99" y="66">скрипт целиком</text><text x="99" y="102">таймер, 0 мс</text><text x="99" y="138">щелчок по кнопке</text>
+            </g>
+            <rect x="226" y="40" width="168" height="98" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" text-anchor="middle">
+                <text x="310" y="64" font-size="11.5" font-weight="700" fill="#92400e">один поток</text>
+                <text x="310" y="86" font-size="11" fill="#92400e">задача выполняется</text>
+                <text x="310" y="104" font-size="11" fill="#92400e">до конца, стек пуст —</text>
+                <text x="310" y="122" font-size="11" fill="#92400e">тогда микрозадачи</text>
+            </g>
+            <rect x="436" y="14" width="170" height="150" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+            <text x="521" y="36" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#166534">очередь микрозадач</text>
+            <g fill="#ffffff" stroke="#16a34a" stroke-width="1.2">
+                <rect x="452" y="48" width="138" height="28" rx="6"/><rect x="452" y="84" width="138" height="28" rx="6"/><rect x="452" y="120" width="138" height="28" rx="6"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#166534">
+                <text x="521" y="66">then(…)</text><text x="521" y="102">после await</text><text x="521" y="138">новый then по ходу</text>
+            </g>
+            <g fill="none" stroke-width="1.8">
+                <path d="M 184 70 L 218 70" stroke="#64748b"/><path d="M 394 70 L 428 70" stroke="#16a34a"/><path d="M 436 120 L 402 120" stroke="#16a34a"/>
+            </g>
+            <g>
+                <path d="M 226 70 L 217 65 L 217 75 Z" fill="#64748b"/><path d="M 436 70 L 427 65 L 427 75 Z" fill="#16a34a"/><path d="M 394 120 L 403 115 L 403 125 Z" fill="#16a34a"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" fill="#475569">
+                <text x="188" y="62">1</text><text x="410" y="62">2</text><text x="410" y="136">3</text>
+            </g>
+            <rect x="14" y="178" width="592" height="54" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#334155">
+                <text x="310" y="199">1 — взять одну задачу и выполнить до конца; 2 — выполнить все микрозадачи,</text>
+                <text x="310" y="219">3 — и те, что добавились по ходу, пока очередь не опустеет; потом снова 1.</text>
+            </g>
+        </svg>
+        <figcaption>Цикл событий: одна задача — потом все микрозадачи</figcaption>
+    </figure>
+
+    <p>Отсюда ответ задачи раздела 1: строки 1–3 — сам скрипт, первая задача; 4 и 5 — микрозадачи, они идут сразу после
+    скрипта; 6 — таймер, следующая задача. «Все микрозадачи» означает буквально все, даже появившиеся только что:</p>
+
+    <pre class="code js">setTimeout(() =&gt; console.log("таймер"), 0);
+let n = 0;
+function step() {
+  n++;
+  if (n &lt; 1000) return Promise.resolve().then(step);
+  console.log("микрозадач подряд:", n);
+}
+Promise.resolve().then(step);</pre>
+
+    <div class="result-box">
+        микрозадач подряд: 1000<br>
+        таймер
+    </div>
+
+    <p>Каждый шаг добавлял новую микрозадачу, и таймер ждал, пока не пройдут все тысяча. Бесконечная цепочка микрозадач
+    повесила бы страницу, как бесконечный цикл. Устройство цикла событий целиком описывает страница MDN «Execution model»
+    — это курс 3.</p>
+
+    <h2 id="then">3. Почему then — после текущего кода</h2>
+
+    <p>Ответ даёт спецификация (раздел 13): <code>then</code> никогда не вызывает функцию сам. Он лишь ставит её в
+    очередь — как задание промиса. Если промис уже выполнен, задание встаёт в очередь сразу; если ждёт — в момент
+    выполнения. А задания начинаются, только когда текущий код закончен, и идут в том порядке, в каком их поставили:</p>
+
+    <pre class="code js">const p = Promise.resolve("готово");
+p.then(() =&gt; console.log("первый then"));
+p.then(() =&gt; console.log("второй then"));
+console.log("синхронный код");</pre>
+
+    <div class="result-box">
+        синхронный код<br>
+        первый then<br>
+        второй then
+    </div>
+
+    <p>То же касается <code>catch</code> и <code>finally</code> дня 30 Essentials — это тоже <code>then</code>, только с
+    другой функцией. А <code>then</code> вовсе без функции ничего не делает с значением и передаёт его дальше — но тоже
+    через задание:</p>
+
+    <pre class="code js">Promise.resolve(1).then().then((v) =&gt; console.log("then() без функции пропустил:", v));
+Promise.reject(new Error("x")).then(() =&gt; console.log("не будет")).catch((e) =&gt; console.log("catch:", e.message)).finally(() =&gt; console.log("finally"));
+console.log("сначала скрипт");</pre>
+
+    <div class="result-box">
+        сначала скрипт<br>
+        then() без функции пропустил: 1<br>
+        catch: x<br>
+        finally
+    </div>
+
+    <p>Каждый следующий <code>then</code> цепочки ставится в очередь, только когда выполнился предыдущий. Поэтому две
+    цепочки, начатые рядом, идут вперемешку, по шагу, — справочник называет это «переплетением» (intertwined):</p>
+
+    <pre class="code js">Promise.resolve().then(() =&gt; console.log("A1")).then(() =&gt; console.log("A2"));
+Promise.resolve().then(() =&gt; console.log("B1")).then(() =&gt; console.log("B2"));</pre>
+
+    <div class="result-box">
+        A1<br>
+        B1<br>
+        A2<br>
+        B2
+    </div>
+
+    <p>Отсюда и порядок строк дня 27, когда <code>all</code> и <code>race</code> отклонились в одну миллисекунду: кто
+    подписался раньше, тот и напечатал раньше. Но есть тонкость, на которой строить программу нельзя. Если шаг возвращает
+    промис, цепочка ждёт его через два лишних задания (раздел 13 объяснит почему):</p>
+
+    <pre class="code js">Promise.resolve().then(() =&gt; { console.log("A1"); return Promise.resolve(); }).then(() =&gt; console.log("A2"));
+Promise.resolve().then(() =&gt; console.log("B1")).then(() =&gt; console.log("B2")).then(() =&gt; console.log("B3")).then(() =&gt; console.log("B4"));</pre>
+
+    <div class="result-box">
+        A1<br>
+        B1<br>
+        B2<br>
+        B3<br>
+        A2<br>
+        B4
+    </div>
+
+    <p>Порядок внутри одной цепочки гарантирован всегда. Порядок между независимыми цепочками зависит от числа шагов в
+    каждой — если он важен, свяжите их явно: <code>then</code>, <code>await</code> или <code>Promise.all</code>.</p>
+
+    <h2 id="split">4. Тело, разрезанное await</h2>
+
+    <p>Справочник предлагает смотреть на тело <code>async</code>-функции как на куски между <code>await</code>. Код до
+    первого <code>await</code> выполняется сразу, синхронно. Код после каждого <code>await</code> — как будто внутри
+    <code>then</code>: микрозадача. Без <code>await</code> функция работает синхронно целиком. Пример справочника — два
+    вызова одной функции:</p>
+
+    <pre class="code js">async function foo(name) {
+  console.log(name, "start");
+  console.log(name, "middle");
+  console.log(name, "end");
+}
+foo("First");
+foo("Second");</pre>
+
+    <div class="result-box">
+        First start<br>
+        First middle<br>
+        First end<br>
+        Second start<br>
+        Second middle<br>
+        Second end
+    </div>
+
+    <p>Один <code>await</code> всё меняет: первый вызов доходит до него и уступает место второму, а «end» обоих откладывается
+    в микрозадачи.</p>
+
+    <pre class="code js">async function foo(name) {
+  console.log(name, "start");
+  await console.log(name, "middle");
+  console.log(name, "end");
+}
+foo("First");
+foo("Second");</pre>
+
+    <div class="result-box">
+        First start<br>
+        First middle<br>
+        Second start<br>
+        Second middle<br>
+        First end<br>
+        Second end
+    </div>
+
+    <p>Справочник переписывает вторую версию на промисы — так видно, где проходит разрез:</p>
+
+    <pre class="code js">function foo(name) {
+  return new Promise((resolve) =&gt; {
+    console.log(name, "start");
+    resolve(console.log(name, "middle"));
+  }).then(() =&gt; {
+    console.log(name, "end");
+  });
+}
+foo("First");
+foo("Second");</pre>
+
+    <div class="result-box">
+        First start<br>
+        First middle<br>
+        Second start<br>
+        Second middle<br>
+        First end<br>
+        Second end
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Вызовы foo First и foo Second с одним await. В первой задаче — скрипте — печатаются First start, First middle, Second start, Second middle, и каждый вызов ставит продолжение в очередь микрозадач. Затем микрозадачи по порядку печатают First end и Second end">
+            <rect x="14" y="14" width="360" height="148" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="194" y="36" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#92400e">задача: скрипт</text>
+            <g font-family="Consolas, monospace" font-size="10.5" fill="#334155">
+                <text x="30" y="62">foo("First")</text><text x="30" y="80">  First start</text><text x="30" y="98">  First middle</text>
+                <text x="30" y="116">  await → продолжение в очередь</text>
+                <text x="210" y="62">foo("Second")</text><text x="210" y="80">  Second start</text><text x="210" y="98">  Second middle</text>
+            </g>
+            <text x="30" y="146" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">каждый вызов дошёл до await и вернул промис</text>
+            <rect x="406" y="14" width="200" height="148" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+            <text x="506" y="36" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#166534">микрозадачи</text>
+            <g fill="#ffffff" stroke="#16a34a" stroke-width="1.2">
+                <rect x="422" y="50" width="168" height="28" rx="6"/><rect x="422" y="88" width="168" height="28" rx="6"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#166534">
+                <text x="506" y="68">1. First end</text><text x="506" y="106">2. Second end</text>
+            </g>
+            <text x="506" y="146" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">в порядке постановки</text>
+            <path d="M 374 88 L 398 88" fill="none" stroke="#16a34a" stroke-width="1.8"/><path d="M 406 88 L 397 83 L 397 93 Z" fill="#16a34a"/>
+            <rect x="14" y="176" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="196" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">До await — сразу, в текущей задаче; после await — микрозадача, после всего текущего кода.</text>
+        </svg>
+        <figcaption>Где <code>await</code> режет тело функции</figcaption>
+    </figure>
+
+    <p>Совет справочника отсюда: пишите <code>await</code> там, где нужно значение промиса, и только там. Каждый лишний
+    <code>await</code> — ещё один разрез, ещё одна микрозадача и лишняя возможность для гонки между функциями.</p>
+
+    <h2 id="await">5. await ждёт всегда</h2>
+
+    <p>Даже если ждать нечего. <code>await 5</code> или <code>await</code> уже выполненного промиса всё равно отдаёт
+    управление и продолжает функцию микрозадачей — справочник: «выполнение не вернётся в функцию, пока не будут обработаны
+    все уже поставленные микрозадачи».</p>
+
+    <pre class="code js">async function g() {
+  console.log("g: до await");
+  await 5;
+  console.log("g: после await");
+}
+Promise.resolve().then(() =&gt; console.log("then 1")).then(() =&gt; console.log("then 2"));
+g();
+console.log("скрипт");</pre>
+
+    <div class="result-box">
+        g: до await<br>
+        скрипт<br>
+        then 1<br>
+        g: после await<br>
+        then 2
+    </div>
+
+    <p>Продолжение <code>g</code> встало в очередь после «then 1» — его поставили раньше — и перед «then 2», который
+    поставят, только когда выполнится «then 1». <code>await</code> ждёт и любой «thenable» дня 27: его <code>then</code>
+    вызывается тоже не сразу, а отдельным заданием:</p>
+
+    <pre class="code js">const thenable = { then(resolve) { console.log("then вызван"); resolve(7); } };
+(async () =&gt; {
+  console.log("ждём thenable");
+  console.log("получили", await thenable);
+})();
+console.log("скрипт");</pre>
+
+    <div class="result-box">
+        ждём thenable<br>
+        скрипт<br>
+        then вызван<br>
+        получили 7
+    </div>
+
+    <h2 id="return">6. Что возвращает async-функция</h2>
+
+    <p>Всегда новый промис — день 31 Essentials. <code>return</code> его выполняет, брошенная ошибка — отклоняет. Важное
+    следствие: ошибка в <code>async</code>-функции <strong>не вылетает из вызова</strong>, даже брошенная до первого
+    <code>await</code>. Её увидит только тот, кто ждёт промис:</p>
+
+    <pre class="code js">async function broken() {
+  throw new Error("сразу");
+}
+let thrown = "нет";
+let result;
+try {
+  result = broken();
+} catch {
+  thrown = "да";
+}
+console.log("бросила при вызове:", thrown, "| вернула промис:", result instanceof Promise);
+result.catch((e) =&gt; console.log("промис отклонён:", e.message));</pre>
+
+    <div class="result-box">
+        бросила при вызове: нет | вернула промис: true<br>
+        промис отклонён: сразу
+    </div>
+
+    <p>Без <code>catch</code> такая ошибка станет красным «Uncaught (in promise)» дня 27, и только. Справочник
+    сравнивает <code>async function foo() { return 1; }</code> с <code>Promise.resolve(1)</code>, но предупреждает, что
+    это не одно и то же: <code>Promise.resolve(p)</code> возвращает сам <code>p</code> (день 27), а <code>async</code>-функция
+    — всегда новый промис.</p>
+
+    <pre class="code js">const p = Promise.resolve(1);
+async function asyncReturn() { return p; }
+function basicReturn() { return Promise.resolve(p); }
+console.log(p === basicReturn(), p === asyncReturn());
+// true false</pre>
+
+    <p>И самая частая ловушка — <code>return</code> промиса внутри <code>try</code>. Функция возвращает его, не дожидаясь,
+    и <code>try</code> уже закончен, когда промис откажет. Чтобы <code>catch</code> поймал отказ, его нужно дождаться
+    здесь же — <code>return await</code>:</p>
+
+    <pre class="code js">async function withoutAwait() {
+  try {
+    return failLater("нет связи", 100);
+  } catch {
+    return "запасной ответ";
+  }
+}
+async function withAwait() {
+  try {
+    return await failLater("нет связи", 100);
+  } catch {
+    return "запасной ответ";
+  }
+}
+withoutAwait().then((v) =&gt; console.log("return:", v), (e) =&gt; console.log("return: отклонён —", e.message));
+withAwait().then((v) =&gt; console.log("return await:", v));</pre>
+
+    <div class="result-box">
+        return: отклонён — нет связи<br>
+        return await: запасной ответ
+    </div>
+
+    <p>Справочник добавляет второй довод за <code>return await</code> — стек дня 26. Без <code>await</code> промис
+    отклоняется, когда внешняя функция уже вернулась, и в стеке её нет. С <code>await</code> ошибка проходит через неё, и
+    V8 пишет в стеке строку «at async» с её именем:</p>
+
+    <pre class="code js">async function lastAsyncTask() {
+  await null;
+  throw new Error("failed");
+}
+async function noAwait() {
+  return lastAsyncTask();
+}
+async function withAwait() {
+  return await lastAsyncTask();
+}
+const frames = (e) =&gt; e.stack.split("\n").slice(1).map((line) =&gt; line.trim().split(" (")[0]).join(" | ");
+noAwait().catch((e) =&gt; console.log("return:", frames(e)));
+withAwait().catch((e) =&gt; console.log("return await:", frames(e)));</pre>
+
+    <div class="result-box">
+        return: at lastAsyncTask<br>
+        return await: at lastAsyncTask | at async withAwait
+    </div>
+
+    <p>Вопреки распространённому мнению, пишет справочник, <code>return await</code> не медленнее <code>return</code>, и, кроме
+    соображений стиля, он почти всегда предпочтительнее.</p>
+
+    <h2 id="expression">7. Выражение async function</h2>
+
+    <p>День 31 Essentials писал <code>async</code> перед объявлением функции и стрелкой. Есть и третья запись —
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function">выражение
+    <code>async function</code></a>, как функция-выражение дня 13 Essentials. Имя у выражения необязательно, а если есть,
+    видно только внутри — для рекурсии:</p>
+
+    <pre class="code js">const load = async function loadDeck(attempt) {
+  return attempt &lt; 3 ? loadDeck(attempt + 1) : `попытка ${attempt}`;
+};
+load(1).then((text) =&gt; console.log(text, "|", load.name, "|", typeof loadDeck));
+// попытка 3 | loadDeck | undefined</pre>
+
+    <p>Главное применение выражения — сразу вызванная функция (IIFE), как в задаче раздела 1. В обычном скрипте
+    <code>await</code> на верхнем уровне нельзя (раздел 10), а внутри <code>(async () =&gt; { … })()</code> — можно.
+    Пример справочника показывает и цену лишнего ожидания из дня 27: функция <code>add</code> ждёт два числа по очереди,
+    а сразу вызванная — запускает оба ожидания до первого <code>await</code>:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+const add = async function (x) {
+  const a = await later(20, 200);
+  const b = await later(30, 200);
+  return x + a + b;
+};
+add(10).then((v) =&gt; console.log("add:", v, since()));
+(async function (x) {
+  const p1 = later(20, 200);
+  const p2 = later(30, 200);
+  return x + (await p1) + (await p2);
+})(10).then((v) =&gt; console.log("IIFE:", v, since()));</pre>
+
+    <div class="result-box">
+        IIFE: 60 200 мс<br>
+        add: 60 400 мс
+    </div>
+
+    <p>Одно правило записи: строка кода не может <em>начинаться</em> со слов <code>async function</code> без имени — движок
+    примет их за объявление и потребует имя. Поэтому сразу вызванную функцию берут в скобки. Кроме трёх записей, бывают
+    <code>async</code>-методы объекта и класса (день 8): <code>async load() { … }</code>, <code>static async
+    create() { … }</code>.</p>
+
+    <h2 id="predict">8. Практика: предскажите порядок</h2>
+
+    <p>Практика плана. Запишите буквы по порядку, прежде чем читать разбор под кодом:</p>
+
+    <pre class="code js">console.log("A");
+setTimeout(() =&gt; console.log("B"), 0);
+const p = new Promise((resolve) =&gt; {
+  console.log("C");
+  resolve();
+});
+p.then(() =&gt; console.log("D"));
+(async () =&gt; {
+  console.log("E");
+  await p;
+  console.log("F");
+  setTimeout(() =&gt; console.log("G"), 0);
+  await null;
+  console.log("H");
+})();
+Promise.resolve().then(() =&gt; console.log("I")).then(() =&gt; console.log("J"));
+console.log("K");</pre>
+
+    <table>
+        <thead><tr><th>Когда</th><th>Буквы</th><th>Почему</th></tr></thead>
+        <tbody>
+            <tr><td>задача «скрипт»</td><td>A, C, E, K</td><td>синхронный код; исполнитель промиса (C) и начало async-функции (E) — тоже синхронно (день 30 Essentials, раздел 4)</td></tr>
+            <tr><td>микрозадачи</td><td>D, F, I</td><td>в порядке постановки: <code>p.then</code>, потом <code>await p</code>, потом <code>then</code> с I — <code>p</code> уже выполнен, поэтому все три встали в очередь ещё во время скрипта</td></tr>
+            <tr><td>микрозадачи, добавленные по ходу</td><td>H, J</td><td>H поставил <code>await null</code> внутри F, J — выполненный I; F был раньше I, значит, и H раньше J</td></tr>
+            <tr><td>задачи-таймеры</td><td>B, G</td><td>B поставлен в начале скрипта, G — внутри F, позже</td></tr>
+        </tbody>
+    </table>
+
+    <p>Итог: A C E K D F I H J B G. Алгоритм на любой такой задаче: сначала выпишите весь синхронный код, включая начала
+    async-функций до первого <code>await</code> и исполнители <code>new Promise</code>; затем микрозадачи в порядке
+    постановки, дописывая новые в конец; таймеры — в самом конце, по времени, а при равном — по порядку
+    <code>setTimeout</code>.</p>
+
+    <h3>Щелчок мышью и click()</h3>
+
+    <p>Вторая задача — со слушателями дня 27 Essentials. У кнопки два слушателя, и каждый ставит микрозадачу:</p>
+
+    <pre class="code js">document.body.innerHTML = "&lt;button&gt;Ответить&lt;/button&gt;";
+const button = document.querySelector("button");
+button.addEventListener("click", () =&gt; {
+  Promise.resolve().then(() =&gt; console.log("микрозадача 1"));
+  console.log("слушатель 1");
+});
+button.addEventListener("click", () =&gt; {
+  Promise.resolve().then(() =&gt; console.log("микрозадача 2"));
+  console.log("слушатель 2");
+});
+button.click();
+console.log("после click()");</pre>
+
+    <div class="result-box">
+        слушатель 1<br>
+        слушатель 2<br>
+        после click()<br>
+        микрозадача 1<br>
+        микрозадача 2
+    </div>
+
+    <p><code>button.click()</code> вызывает слушателей прямо внутри скрипта, как обычные функции, — микрозадачи ждут, пока
+    скрипт закончится. Уберите две последние строки и щёлкните кнопку мышью: порядок станет «слушатель 1, микрозадача 1,
+    слушатель 2, микрозадача 2». Щелчок человека — своя задача (день 26: стек кончается на обработчике), и после каждого
+    слушателя стек пуст — а при пустом стеке браузер сразу выполняет микрозадачи. Один и тот же код, два порядка: программа,
+    которая на это опирается, будет вести себя по-разному в проверке и в жизни.</p>
+
+    <h2 id="sequence">9. Практика: по очереди и все сразу</h2>
+
+    <p>Практика плана. День 27 сравнил время: три <code>await</code> подряд — 600 мс, <code>Promise.all</code> — 300. Взгляд
+    со стороны очереди объясняет почему: важно, <strong>когда начинается</strong> каждая загрузка.</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+function load(name, ms) {
+  console.log(`начали «${name}»`, since());
+  return later(name, ms);
+}
+async function oneByOne() {
+  const slow = await load("медленное", 200);
+  const fast = await load("быстрое", 100);
+  console.log("по очереди:", slow, fast, since());
+}
+oneByOne();</pre>
+
+    <div class="result-box">
+        начали «медленное» 0 мс<br>
+        начали «быстрое» 200 мс<br>
+        по очереди: медленное быстрое 300 мс
+    </div>
+
+    <p>Второй вызов <code>load</code> стоит в коде после <code>await</code> — значит, в куске, который выполнится микрозадачей,
+    когда первая загрузка закончится. Пока она шла, вторая даже не начиналась.</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+function load(name, ms) {
+  console.log(`начали «${name}»`, since());
+  return later(name, ms);
+}
+async function allAtOnce() {
+  const [slow, fast] = await Promise.all([load("медленное", 200), load("быстрое", 100)]);
+  console.log("все сразу:", slow, fast, since());
+}
+allAtOnce();</pre>
+
+    <div class="result-box">
+        начали «медленное» 0 мс<br>
+        начали «быстрое» 0 мс<br>
+        все сразу: медленное быстрое 200 мс
+    </div>
+
+    <p>Оба вызова — в одном куске до <code>await</code>, оба начались сразу. Правило выбора то же, что на дне 27: если вторая
+    загрузка зависит от результата первой (например, по номеру группы — её расписание), — по очереди; если нет — все сразу.</p>
+
+    <h2 id="where">10. Где можно писать await</h2>
+
+    <p>Страница справочника
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_await">«await is only valid in async
+    functions, async generators and modules»</a> объясняет запрет: <code>await</code> никогда не блокирует программу, он
+    приостанавливает только свою асинхронную задачу. Поэтому в синхронной функции и на верхнем уровне скрипта ему нечего
+    приостанавливать.</p>
+
+    <table>
+        <thead><tr><th>Где</th><th><code>await</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>async</code>-функция в любой записи: объявление, выражение, стрелка, метод</td><td>можно</td></tr>
+            <tr><td>асинхронный генератор <code>async function*</code></td><td>можно — день 29</td></tr>
+            <tr><td>верхний уровень модуля <code>&lt;script type="module"&gt;</code></td><td>можно — день 30</td></tr>
+            <tr><td>консоль Chrome</td><td>можно — поблажка консоли (день 31 Essentials)</td></tr>
+            <tr><td>обычная функция, генератор, верхний уровень обычного скрипта</td><td><code>SyntaxError</code></td></tr>
+            <tr><td>обычный колбэк внутри <code>async</code>-функции: <code>items.forEach((x) =&gt; { await … })</code></td><td><code>SyntaxError</code>: колбэк — своя функция</td></tr>
+        </tbody>
+    </table>
+
+    <p>Текст V8 — «await is only valid in async functions and the top level bodies of modules». Ошибка синтаксиса, а значит,
+    по дню 26 не выполнится весь скрипт. Последняя строка таблицы — самая коварная: «починить» её словом
+    <code>async</code> у колбэка легко, а работать правильно это не будет (раздел 14).</p>
+
+    <h2 id="asyncfunction">11. AsyncFunction</h2>
+
+    <p>Каждая <code>async</code>-функция — объект
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction"><code>AsyncFunction</code></a>,
+    наследника <code>Function</code>. Глобального имени у него нет — конструктор достают из любой <code>async</code>-функции:</p>
+
+    <pre class="code js">const AsyncFunction = async function () {}.constructor;
+const sum = new AsyncFunction("a", "b", "return a + b;");
+sum(2, 3).then((v) =&gt; console.log("sum:", v));
+console.log(AsyncFunction.name, Object.getPrototypeOf(AsyncFunction) === Function, Object.prototype.toString.call(sum), "prototype" in sum, sum.name);
+try {
+  new sum(1, 2);
+} catch (e) {
+  console.log(e.name, e.message);
+}</pre>
+
+    <div class="result-box">
+        AsyncFunction true [object AsyncFunction] false anonymous<br>
+        TypeError sum is not a constructor<br>
+        sum: 5
+    </div>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction/AsyncFunction">Конструктор</a>
+    устроен как <code>Function()</code> дня 4: строки становятся кодом, окружения функция не видит, и справочник
+    предупреждает о той же опасности — <code>new AsyncFunction</code> в обычном коде не пишут. У <code>async</code>-функций
+    нет свойства <code>prototype</code>, и с <code>new</code> их не вызвать: спецификация прямо говорит, что они не
+    конструкторы. А «[object AsyncFunction]» — работа <code>Symbol.toStringTag</code> (день 11) у
+    <code>AsyncFunction.prototype</code>.</p>
+
+    <h2 id="errors">12. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Что видно в Chrome</th><th>Что не так</th></tr></thead>
+        <tbody>
+            <tr><td><code>function f() { await x; }</code></td><td><code>SyntaxError: await is only valid in async functions and the top level bodies of modules</code></td><td>нужно <code>async</code></td></tr>
+            <tr><td><code>items.forEach((x) =&gt; { await save(x); })</code></td><td>та же <code>SyntaxError</code></td><td>колбэк — не <code>async</code></td></tr>
+            <tr><td><code>items.forEach((x) =&gt; { list.push(await save(x)); })</code></td><td><code>SyntaxError: missing ) after argument list</code></td><td>то же, но V8 прочитал <code>await</code> как имя — текст сбивает с толку</td></tr>
+            <tr><td><code>await</code> на верхнем уровне скрипта</td><td>та же <code>SyntaxError</code></td><td>IIFE или модуль (день 30)</td></tr>
+            <tr><td><code>async function () {}</code> в начале строки</td><td><code>SyntaxError: Function statements require a function name</code></td><td>скобки вокруг выражения</td></tr>
+            <tr><td><code>const load = async function () {}; new load()</code></td><td><code>TypeError: load is not a constructor</code></td><td><code>async</code>-функции не конструкторы</td></tr>
+            <tr><td><code>AsyncFunction</code> без объявления</td><td><code>ReferenceError: AsyncFunction is not defined</code></td><td>не глобальный: <code>async function () {}.constructor</code></td></tr>
+            <tr><td>отказ без <code>catch</code> после <code>await</code></td><td><code>Uncaught (in promise) Error: …</code></td><td>ждать результат или <code>catch</code></td></tr>
+            <tr><td><code>try { return promise }</code></td><td>отказ мимо <code>catch</code>, без ошибки</td><td><code>return await promise</code></td></tr>
+            <tr><td><code>await items.forEach(async …)</code></td><td>ничего не дождался, без ошибки</td><td><code>for...of</code> или <code>Promise.all(items.map(…))</code></td></tr>
+            <tr><td>бесконечная цепочка микрозадач</td><td>страница зависла</td><td>таймеры и щелчки ждут, пока очередь опустеет</td></tr>
+        </tbody>
+    </table>
+
+    <p>Половина строк — тихие: без сообщения об ошибке, но с неверной программой. Их ловят только предсказанием порядка и
+    проверкой результата.</p>
+
+    <h2 id="spec">13. Что говорит спецификация</h2>
+
+    <p>Подробно — раздел <a href="https://tc39.es/ecma262/2026/#sec-promise-jobs">27.2.2 Promise Jobs</a>, ради которого
+    этот день и стоит в плане. Задание (Job) — в спецификации то, что браузер выполняет как микрозадачу.</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-performpromisethen">PerformPromiseThen</a> (27.2.5.4.1) —
+            шаги <code>then</code>. Промис ждёт — реакция дописывается в его список. Промис уже выполнен или отклонён —
+            сразу NewPromiseReactionJob и HostEnqueuePromiseJob. Ветки «вызвать сейчас» нет вовсе — это и есть ответ на
+            вопрос дня. Когда ожидающий промис выполнится,
+            <a href="https://tc39.es/ecma262/2026/#sec-triggerpromisereactions">TriggerPromiseReactions</a> (27.2.1.8)
+            ставит задания для всех его реакций по списку — в порядке, в каком вызывали <code>then</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-newpromisereactionjob">27.2.2.1 NewPromiseReactionJob</a> — задание,
+            которое вызывает функцию <code>then</code> со значением, а её результат передаёт в <code>resolve</code> (или
+            ошибку — в <code>reject</code>) промиса, который вернул <code>then</code>. Нет функции — значение просто проходит
+            дальше.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-newpromiseresolvethenablejob">27.2.2.2 NewPromiseResolveThenableJob</a>
+            — когда промис решают объектом с <code>then</code>, этот <code>then</code> зовут отдельным заданием; примечание
+            объясняет: чтобы он выполнился после окружающего кода. Отсюда «then вызван» после «скрипт» в разделе 5 и два
+            лишних задания в разделе 3: одно — вызвать <code>then</code> возвращённого промиса, второе — его реакция.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-jobs">9.5 Jobs</a> и
+            <a href="https://tc39.es/ecma262/2026/#sec-hostenqueuepromisejob">9.5.5 HostEnqueuePromiseJob</a>: задание
+            начинается, только когда стек выполнения пуст; выполняется одно за раз и до конца; задания промисов идут в том
+            порядке, в каком их ставили. Как именно встраивать их между прочей работой, решает «хозяин» — примечание
+            говорит, что браузеры и Node.js ставят задания промисов выше остального. Это и есть «все микрозадачи — до
+            следующей задачи».</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-async-functions-abstract-operations">27.7.5</a>: AsyncFunctionStart
+            и AsyncBlockStart запускают тело и по его концу вызывают <code>resolve</code> (обычный конец или
+            <code>return</code>) или <code>reject</code> (брошенная ошибка) — поэтому ошибка не вылетает из вызова (раздел
+            6). Await (27.7.5.3) — схема ниже.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-async-function-objects">27.7 AsyncFunction Objects</a> кратко:
+            <a href="https://tc39.es/ecma262/2026/#sec-async-function-constructor">27.7.1</a> — конструктор
+            <code>%AsyncFunction%</code>, работает как <code>Function</code>;
+            <a href="https://tc39.es/ecma262/2026/#sec-async-function-constructor-properties">27.7.2</a> и
+            <a href="https://tc39.es/ecma262/2026/#sec-async-function-prototype-properties">27.7.3</a> — его свойства и
+            прототип с <code>Symbol.toStringTag</code>;
+            <a href="https://tc39.es/ecma262/2026/#sec-async-function-instances">27.7.4</a> — экземпляры не конструкторы и
+            без <code>prototype</code>.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 236" role="img" aria-label="Шаги Await: значение превращается в промис через PromiseResolve; PerformPromiseThen подписывает на него продолжение функции и бросок в функцию; функция приостанавливается, управление возвращается вызвавшему; когда промис выполнится, задание NewPromiseReactionJob встаёт в очередь и возвращает функцию на стек со значением">
+            <rect x="14" y="12" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="31" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">const words = await value;</text>
+            <g fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5">
+                <rect x="14" y="58" width="188" height="64" rx="8"/><rect x="216" y="58" width="188" height="64" rx="8"/><rect x="418" y="58" width="188" height="64" rx="8"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#92400e">
+                <text x="108" y="80" font-weight="700">1. PromiseResolve</text><text x="108" y="98">value → промис;</text><text x="108" y="114">промис остаётся собой</text>
+                <text x="310" y="80" font-weight="700">2. PerformPromiseThen</text><text x="310" y="98">продолжить функцию /</text><text x="310" y="114">бросить в функцию</text>
+                <text x="512" y="80" font-weight="700">3. приостановка</text><text x="512" y="98">функция снята со стека,</text><text x="512" y="114">вызвавший идёт дальше</text>
+            </g>
+            <g fill="none" stroke="#b45309" stroke-width="1.8">
+                <path d="M 202 90 L 208 90"/><path d="M 404 90 L 410 90"/><path d="M 512 122 L 512 142"/>
+            </g>
+            <g fill="#b45309">
+                <path d="M 216 90 L 207 85 L 207 95 Z"/><path d="M 418 90 L 409 85 L 409 95 Z"/><path d="M 512 150 L 507 141 L 517 141 Z"/>
+            </g>
+            <rect x="216" y="150" width="390" height="40" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+            <text x="411" y="166" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#166534">промис выполнен → NewPromiseReactionJob в очередь →</text>
+            <text x="411" y="182" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#166534">функция снова на стеке, await вернул значение</text>
+            <rect x="14" y="150" width="188" height="40" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="108" y="174" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#475569">отклонён — ошибка из await</text>
+            <rect x="14" y="200" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="219" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Шаг 2 — тот же then, что у промисов: поэтому продолжение после await всегда микрозадача.</text>
+        </svg>
+        <figcaption>Await (27.7.5.3): <code>await</code> — это <code>then</code> с продолжением функции</figcaption>
+    </figure>
+
+    <h2 id="cards">14. «Карточки»: сохранить всю колоду</h2>
+
+    <p>Ученик закончил занятие, и «Карточки» сохраняют прогресс каждой карточки на сервер. Сохранение одной —
+    <code>later</code> с её временем. Первая мысль — <code>forEach</code> с <code>async</code>-колбэком, раз
+    <code>await</code> в обычном колбэке запрещён:</p>
+
+    <pre class="code js">const cards = [{ word: "cat", ms: 100 }, { word: "kitap", ms: 200 }, { word: "suw", ms: 100 }];
+const saveCard = (card) =&gt; later(card.word, card.ms);
+async function saveWithForEach() {
+  const saved = [];
+  cards.forEach(async (card) =&gt; {
+    saved.push(await saveCard(card));
+  });
+  console.log("forEach: сохранено", saved.length);
+}
+async function saveOneByOne() {
+  const start = Date.now();
+  const saved = [];
+  for (const card of cards) saved.push(await saveCard(card));
+  console.log("for...of: сохранено", saved.length, "за", Math.round((Date.now() - start) / 100) * 100, "мс");
+}
+async function saveAllAtOnce() {
+  const start = Date.now();
+  const saved = await Promise.all(cards.map(saveCard));
+  console.log("Promise.all: сохранено", saved.length, "за", Math.round((Date.now() - start) / 100) * 100, "мс");
+}
+(async () =&gt; {
+  await saveWithForEach();
+  await saveOneByOne();
+  await saveAllAtOnce();
+})();</pre>
+
+    <div class="result-box">
+        forEach: сохранено 0<br>
+        for...of: сохранено 3 за 400 мс<br>
+        Promise.all: сохранено 3 за 200 мс
+    </div>
+
+    <p><strong>Строка 1.</strong> <code>forEach</code> вызвал три колбэка; каждый дошёл до своего <code>await</code> и вернул
+    промис, а <code>forEach</code> эти промисы выбросил — он не умеет ждать. «Сохранено 0» напечатано раньше, чем
+    закончилось первое сохранение. <strong>Строка 2.</strong> <code>for...of</code> с <code>await</code> внутри — по очереди:
+    100 + 200 + 100. <strong>Строка 3.</strong> <code>map</code> запускает все сохранения сразу и отдаёт массив промисов, а
+    <code>Promise.all</code> ждёт их: время самого долгого. Выбор между двумя последними — правило раздела 9: по очереди,
+    если важен порядок или сервер не любит одновременных запросов.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите <code>async</code> у колбэка <code>forEach</code>. Что напечатается и почему не
+        выполнилась даже строка про <code>for...of</code>?
+        <br><br>
+        <strong>Второй.</strong> Поставьте <code>await</code> перед <code>cards.forEach(…)</code>. Стало ли «сохранено 3»?
+        Что вернул <code>forEach</code> и чего дождался <code>await</code>?
+        <br><br>
+        <strong>Третий.</strong> Сделайте сохранение «kitap» неудачным: <code>saveCard</code> для неё —
+        <code>failLater("kitap: нет связи", 200)</code>. Какие слова успеет сохранить <code>for...of</code> и что увидит
+        консоль?
+    </div>
+
+    <h2 id="next">15. Что дальше</h2>
+
+    <p>Сегодня <code>await</code> стоял внутри <code>for...of</code> и ждал по одному элементу. День 29 делает следующий шаг:
+    асинхронные итераторы и генераторы — <code>async function*</code>, которые отдают значения «потом», и цикл
+    <code>for await...of</code>, который ждёт каждое.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function">async function expression</a></td><td>выражение, имя внутри, IIFE</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td>ECMA-262, 27.2.2 Promise Jobs</td><td>задания промисов; почему <code>then</code> после текущего кода</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction">AsyncFunction</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction/AsyncFunction">AsyncFunction()</a></td><td>не глобальный; конструктор опасен, как <code>Function</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_await">SyntaxError: await is only valid…</a></td><td>где можно <code>await</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>27.7 с подразделами</td><td>раздел 13</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// порядок: синхронный код (с началами async-функций и исполнителями) → все микрозадачи → следующая задача (таймер, событие)
+// микрозадачи: then/catch/finally, продолжение после await; идут в порядке постановки, новые — в конец
+// then не вызывает функцию сразу даже у готового промиса; await ждёт всегда, даже await 5
+// async-функция: до первого await — сразу; return → выполнен, throw → отклонён (из вызова не вылетает)
+// try { return await p } — чтобы catch поймал отказ p
+// const f = async function name() {}; (async () =&gt; { await … })(); async-методы: async m() {}
+// await — только в async-функциях, async-генераторах и модулях; не в forEach-колбэке
+// по очереди: for...of + await; все сразу: await Promise.all(items.map(f)); forEach не ждёт</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>setTimeout(f, 0)</code> срабатывает позже <code>Promise.resolve().then(g)</code>, написанного ниже?
+                <details class="answer"><summary>Ответ</summary>
+                    Таймер — следующая задача, а <code>then</code> — микрозадача. Все микрозадачи выполняются сразу после
+                    текущей задачи, раньше следующей.
+                </details>
+            </li>
+            <li>Что напечатает <code>async function f() { console.log(1); await null; console.log(3); } f(); console.log(2);</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    1, 2, 3: до <code>await</code> — синхронно, после — микрозадачей, когда скрипт закончится.
+                </details>
+            </li>
+            <li>Вылетит ли ошибка из вызова <code>broken()</code>, если <code>async function broken() { throw new Error() }</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Нет. AsyncBlockStart превращает брошенную ошибку в отказ промиса; её увидит только тот, кто ждёт промис.
+                </details>
+            </li>
+            <li>Чем <code>try { return p }</code> отличается от <code>try { return await p }</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Первый возвращает промис не дожидаясь, и его отказ проходит мимо <code>catch</code>. Второй ждёт
+                    <code>p</code> внутри <code>try</code>, и отказ попадает в <code>catch</code>.
+                </details>
+            </li>
+            <li>Почему <code>items.forEach(async (x) =&gt; await save(x))</code> не ждёт сохранений?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>forEach</code> вызывает колбэки и выбрасывает их промисы. Ждать нужно в <code>for...of</code> или через
+                    <code>Promise.all(items.map(save))</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

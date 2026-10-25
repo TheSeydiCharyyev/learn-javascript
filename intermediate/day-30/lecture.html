@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 30 — модули: import и export</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #64748b; }
+        h2 { color: #334155; background: #f8fafc; border-left-color: #64748b; }
+        h3 { color: #1e293b; }
+        .step-number { background: #64748b; }
+        .toc a { color: #334155; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 30</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 30 &bull; урок 1</span>
+        <h1>Модули: import и export</h1>
+        <p>Курс 2, Intermediate. Модуль «Модули и JSON» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>делить программу на файлы-модули и подключать их через <code>&lt;script type="module"&gt;</code> и Live
+                Server;</li>
+            <li>отдавать значения именованным экспортом и экспортом по умолчанию, принимать их четырьмя формами
+                <code>import</code>;</li>
+            <li>понимать живые привязки: импорт — не копия, а окно в переменную другого модуля;</li>
+            <li>знать, чем модуль отличается от обычного скрипта, и в каком порядке выполняются модули;</li>
+            <li>узнавать ошибки загрузки, связывания и выполнения модулей — и понимать их по спецификации (16.2).</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания, накопленные за курс</a></li>
+            <li><a href="#first">Первый модуль</a></li>
+            <li><a href="#server">Путь к модулю и сервер</a></li>
+            <li><a href="#export">export: что отдать</a></li>
+            <li><a href="#import">import: четыре формы</a></li>
+            <li><a href="#default">Экспорт по умолчанию</a></li>
+            <li><a href="#live">Живые привязки</a></li>
+            <li><a href="#namespace">Объект модуля</a></li>
+            <li><a href="#aggregate">Сборка: export … from</a></li>
+            <li><a href="#differences">Модуль и обычный скрипт</a></li>
+            <li><a href="#order">Порядок выполнения и циклы</a></li>
+            <li><a href="#practice">Практика: журнал из трёх модулей</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки» на модулях</a></li>
+            <li><a href="#next">Что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания, накопленные за курс</h2>
+
+    <p>День 3 Essentials показал две строки с <code>import</code> и <code>export</code> и пообещал: «модули — курс 2».
+    День 2 Essentials предупредил, что страница <code>file:///</code> не может загружать модули. День 4 Essentials
+    рассказал про чужую библиотеку со своим <code>var config</code>, а день 3 курса 2 добавил: «правильное решение этой
+    задачи — модули, день 30». Ещё обещали дни 1 (область модуля), 11 (общий символ для двух модулей), 28 и 29
+    (<code>await</code> и <code>for await</code> на верхнем уровне). Начнём с беды. Два обычных скрипта одной страницы:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script src="cards.js"&gt;&lt;/script&gt;
+&lt;script src="stats.js"&gt;&lt;/script&gt;</pre>
+
+    <pre class="code js">// cards.js
+const total = 8;
+console.log("cards.js: слов", total);</pre>
+
+    <pre class="code js">// stats.js
+const total = 3;
+console.log("stats.js: выучено", total);</pre>
+
+    <div class="result-box">
+        cards.js: слов 8<br>
+        Uncaught SyntaxError: Identifier 'total' has already been declared
+    </div>
+
+    <p>Верхний уровень всех обычных скриптов страницы — одна глобальная область (день 3), и второй <code>total</code>
+    столкнулся с первым. Добавим к тегам одно слово:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script type="module" src="cards.js"&gt;&lt;/script&gt;
+&lt;script type="module" src="stats.js"&gt;&lt;/script&gt;</pre>
+
+    <div class="result-box">
+        cards.js: слов 8<br>
+        stats.js: выучено 3
+    </div>
+
+    <p>Теперь каждый файл — <strong>модуль</strong> со своей областью видимости. Его переменные не видны ни другим
+    файлам, ни глобальному объекту, пока модуль сам их не отдаст.</p>
+
+    <h2 id="first">2. Первый модуль</h2>
+
+    <p>Учебник MDN начинает так: модуль отдаёт значения словом
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/export"><code>export</code></a>,
+    другой модуль берёт их словом
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import"><code>import</code></a>.
+    Страница подключает только главный модуль — остальные он позовёт сам. Три файла в одной папке:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script type="module" src="main.js"&gt;&lt;/script&gt;</pre>
+
+    <pre class="code js">// words.js
+export const words = ["book", "water", "bread"];
+export function count() {
+  return words.length;
+}
+const secret = "только для words.js";</pre>
+
+    <pre class="code js">// main.js
+import { words, count } from "./words.js";
+console.log(words.join(", "), "|", count(), "|", typeof secret);</pre>
+
+    <div class="result-box">
+        book, water, bread | 3 | undefined
+    </div>
+
+    <p>В фигурных скобках — имена, которые <code>words.js</code> экспортировал; после <code>from</code> — строка-путь,
+    справочник называет её <strong>module specifier</strong>. <code>secret</code> без <code>export</code> остался внутри
+    своего файла. Импортированными именами пользуются, как своими, — только переприсвоить их нельзя (раздел 7).</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 240" role="img" aria-label="Граф модулей: index.html подключает main.js как модуль; main.js импортирует words и count из words.js. У каждого файла своя область: secret остаётся внутри words.js, а наружу выходит только экспортированное">
+            <rect x="14" y="14" width="150" height="56" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Consolas, monospace" font-size="11" text-anchor="middle" fill="#334155">
+                <text x="89" y="38">index.html</text><text x="89" y="56">type="module"</text>
+            </g>
+            <rect x="14" y="100" width="250" height="90" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+            <text x="139" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#1e293b">main.js</text>
+            <g font-family="Consolas, monospace" font-size="10.5" fill="#334155">
+                <text x="30" y="146">import { words, count }</text><text x="30" y="164">  from "./words.js";</text><text x="30" y="182">console.log(…)</text>
+            </g>
+            <rect x="356" y="100" width="250" height="90" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+            <text x="481" y="122" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#1e293b">words.js</text>
+            <g font-family="Consolas, monospace" font-size="10.5" fill="#334155">
+                <text x="372" y="146">export const words</text><text x="372" y="164">export function count</text>
+            </g>
+            <text x="372" y="182" font-family="Consolas, monospace" font-size="10.5" fill="#94a3b8">const secret — внутри</text>
+            <g fill="none" stroke-width="1.8">
+                <path d="M 89 70 L 89 92" stroke="#94a3b8"/><path d="M 264 145 L 348 145" stroke="#64748b"/>
+            </g>
+            <g>
+                <path d="M 89 100 L 84 91 L 94 91 Z" fill="#94a3b8"/><path d="M 356 145 L 347 140 L 347 150 Z" fill="#64748b"/>
+            </g>
+            <text x="310" y="137" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">import</text>
+            <rect x="14" y="204" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="223" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">У каждого модуля своя область; наружу выходит только то, что помечено export.</text>
+        </svg>
+        <figcaption>Страница подключает главный модуль, он — остальные</figcaption>
+    </figure>
+
+    <h2 id="server">3. Путь к модулю и сервер</h2>
+
+    <p>Путь в <code>from</code> браузер превращает в адрес файла. Справочник различает три вида путей:</p>
+
+    <table>
+        <thead><tr><th>Путь</th><th>Пример</th><th>Как найдётся</th></tr></thead>
+        <tbody>
+            <tr><td>относительный</td><td><code>"./words.js"</code>, <code>"../lib/stats.js"</code>, <code>"/js/main.js"</code></td><td>от адреса модуля, в котором написан <code>import</code></td></tr>
+            <tr><td>абсолютный</td><td><code>"https://example.com/words.js"</code></td><td>как есть</td></tr>
+            <tr><td>«голый»</td><td><code>"words.js"</code>, <code>"lodash"</code></td><td>только через карту импорта, иначе <code>TypeError</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Начало <code>./</code> обязательно: <code>"words.js"</code> без него — «голое» имя, и Chrome ответит
+    <code>Failed to resolve module specifier "words.js". Relative references must start with either "/", "./", or
+    "../".</code> Расширение тоже обязательно: <code>"./words"</code> браузер запросит буквально, получит 404 — и не
+    выполнит ни одного модуля. «Голые» имена работают через <strong>карту импорта</strong> — тег
+    <code>&lt;script type="importmap"&gt;</code> перед модулями:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script type="importmap"&gt;
+  { "imports": { "words": "./lib/words.js" } }
+&lt;/script&gt;
+&lt;script type="module" src="main.js"&gt;&lt;/script&gt;</pre>
+
+    <pre class="code js">// lib/words.js
+export const words = ["book", "water"];</pre>
+
+    <pre class="code js">// main.js
+import { words } from "words";
+console.log("слов:", words.length);</pre>
+
+    <div class="result-box">
+        слов: 2
+    </div>
+
+    <p>И главное ограничение — сервер. Откройте <code>index.html</code> двойным щелчком, и консоль покажет:
+    <code>Access to script at 'file:///…/main.js' from origin 'null' has been blocked by CORS policy</code>. Учебник
+    объясняет: модули подчиняются правилам безопасности, и с адреса <code>file://</code> их не загрузить. Поэтому
+    страницу с модулями открывают через Live Server дня 2 Essentials. Сервер должен отдавать <code>.js</code> с типом
+    JavaScript — Live Server так и делает; файл с другим типом Chrome не выполнит: <code>Failed to load module script:
+    Expected a JavaScript-or-Wasm module script…</code></p>
+
+    <h2 id="export">4. export: что отдать</h2>
+
+    <p>Экспортировать можно <code>const</code>, <code>let</code>, <code>var</code>, функции, генераторы и классы — словом
+    перед объявлением или списком в конце файла. Слово <code>as</code> меняет имя, под которым значение уйдёт
+    наружу:</p>
+
+    <pre class="code js">// stats.js
+export const subject = "английский";
+export let lessons = 36;
+export function percent(part, whole) {
+  return Math.round((part / whole) * 100);
+}
+export class Mark {
+  constructor(value) {
+    this.value = value;
+  }
+}
+function round1(x) {
+  return Math.round(x * 10) / 10;
+}
+const secret = "не экспортируется";
+export { round1 as round };</pre>
+
+    <pre class="code js">// main.js
+import { subject, lessons, percent, Mark, round } from "./stats.js";
+console.log(subject, lessons, percent(27, 36), new Mark(5).value, round(4.25));</pre>
+
+    <div class="result-box">
+        английский 36 75 5 4.3
+    </div>
+
+    <p>Три правила справочника. <code>export</code> стоит только на верхнем уровне модуля — внутри функции или блока
+    это <code>SyntaxError</code>. Имена экспорта не повторяются: второй <code>x</code> даст <code>Duplicate export of
+    'x'</code>. И <code>export { x }</code> можно написать раньше, чем объявлен <code>x</code>: это лишь объявление
+    «что отдать», значение оно не читает.</p>
+
+    <h2 id="import">5. import: четыре формы</h2>
+
+    <table>
+        <thead><tr><th>Форма</th><th>Запись</th><th>Что даёт</th></tr></thead>
+        <tbody>
+            <tr><td>именованный</td><td><code>import { a, b as c } from "./m.js"</code></td><td>переменные с именами экспорта, <code>as</code> — своё имя</td></tr>
+            <tr><td>по умолчанию</td><td><code>import x from "./m.js"</code></td><td>экспорт по умолчанию под любым именем (раздел 6)</td></tr>
+            <tr><td>объект модуля</td><td><code>import * as m from "./m.js"</code></td><td>все экспорты свойствами одного объекта (раздел 8)</td></tr>
+            <tr><td>ради побочного эффекта</td><td><code>import "./m.js"</code></td><td>ничего: модуль только выполняется</td></tr>
+        </tbody>
+    </table>
+
+    <p>Учебник разбирает частую беду: два модуля отдают одинаковые имена. Импортировать оба <code>name</code> в один файл
+    нельзя — <code>SyntaxError: Identifier 'name' has already been declared</code>. Выходов два: переименовать через
+    <code>as</code> или взять модуль целиком объектом.</p>
+
+    <pre class="code js">// english.js
+export const name = "английский";
+export function count() {
+  return 8;
+}</pre>
+
+    <pre class="code js">// turkmen.js
+export const name = "туркменский";
+export function count() {
+  return 5;
+}</pre>
+
+    <pre class="code js">// hello.js
+console.log("hello.js: только побочный эффект");</pre>
+
+    <pre class="code js">// main.js
+import { name as enName, count as enCount } from "./english.js";
+import * as tk from "./turkmen.js";
+import "./hello.js";
+console.log(enName, enCount(), "|", tk.name, tk.count());</pre>
+
+    <div class="result-box">
+        hello.js: только побочный эффект<br>
+        английский 8 | туркменский 5
+    </div>
+
+    <p><code>hello.js</code> напечатал первым: все импортированные модули выполняются до кода того, кто их импортировал.
+    Справочник называет это подъёмом (hoisting) — как у <code>function</code> дня 12 Essentials. <code>import</code>,
+    написанный в середине файла, всё равно сработает первым, но держать импорты сверху — хороший тон.</p>
+
+    <h2 id="default">6. Экспорт по умолчанию</h2>
+
+    <p>Кроме именованных экспортов, у модуля может быть один <strong>экспорт по умолчанию</strong> —
+    <code>export default</code>. Его импортируют без фигурных скобок и под любым именем. Пример справочника:</p>
+
+    <pre class="code js">// cube.js
+export default function cube(x) {
+  return x * x * x;
+}
+export const name = "куб";</pre>
+
+    <pre class="code js">// main.js
+import cube from "./cube.js";
+import kub, { name } from "./cube.js";
+import { default as third } from "./cube.js";
+console.log(cube(3), kub(2), third(1), name, cube === kub);</pre>
+
+    <div class="result-box">
+        27 8 1 куб true
+    </div>
+
+    <p>Три записи импорта — одна и та же функция: <code>import x from</code> — сокращение для <code>import { default as x }
+    from</code>. После <code>export default</code> может стоять любое выражение (<code>export default 1 + 1;</code>) или
+    объявление функции и класса, даже без имени, — тогда их <code>name</code> будет <code>"default"</code>. Справочник
+    предупреждает: <code>import { book } from</code> — не деструктуризация объекта по умолчанию. Если модуль отдаёт
+    <code>export default { book: "книга" }</code>, Chrome ответит <code>does not provide an export named 'book'</code>.
+    Когда что брать, справочник отвечает так: экспорт по умолчанию — для одного значения, которое представляет весь
+    модуль; именованные — когда значений несколько.</p>
+
+    <h2 id="live">7. Живые привязки</h2>
+
+    <p>Справочник называет импорт <strong>живой привязкой</strong> (live binding) только для чтения. Модуль-владелец
+    может менять свою переменную, и все импортёры увидят новое значение; сами импортёры переприсвоить её не могут.
+    Пример справочника:</p>
+
+    <pre class="code js">// my-module.js
+export let myValue = 1;
+setTimeout(() =&gt; {
+  myValue = 2;
+}, 500);</pre>
+
+    <pre class="code js">// main.js
+import { myValue } from "./my-module.js";
+import * as myModule from "./my-module.js";
+console.log(myValue);
+console.log(myModule.myValue);
+setTimeout(() =&gt; {
+  console.log(myValue);
+  console.log(myModule.myValue);
+  try {
+    myValue = 3;
+  } catch (e) {
+    console.log(e.name, e.message);
+  }
+}, 1000);</pre>
+
+    <div class="result-box">
+        1<br>
+        1<br>
+        2<br>
+        2<br>
+        TypeError Assignment to constant variable.
+    </div>
+
+    <p>Практика плана — счётчик, который читают два модуля:</p>
+
+    <pre class="code js">// counter.js
+export let count = 0;
+export function increment() {
+  count++;
+}</pre>
+
+    <pre class="code js">// report.js
+import { count } from "./counter.js";
+export function report() {
+  return `report.js видит ${count}`;
+}</pre>
+
+    <pre class="code js">// main.js
+import { count, increment } from "./counter.js";
+import { report } from "./report.js";
+increment();
+increment();
+console.log("main.js видит", count, "|", report());</pre>
+
+    <div class="result-box">
+        main.js видит 2 | report.js видит 2
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Живая привязка: в counter.js живёт переменная count со значением 2. Импорт count в main.js и в report.js — не копия, а ссылка на эту переменную. increment в counter.js меняет её, оба импортёра видят 2. Присваивание count в main.js — TypeError">
+            <rect x="218" y="14" width="186" height="96" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+            <text x="311" y="36" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#1e293b">counter.js</text>
+            <rect x="250" y="48" width="122" height="28" rx="6" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+            <text x="311" y="66" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#1e293b">count: 2</text>
+            <text x="311" y="98" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#475569">increment() пишет сюда</text>
+            <rect x="14" y="126" width="170" height="52" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="99" y="148">main.js: count → 2</text><text x="99" y="166" fill="#b91c1c">count = 10 → TypeError</text>
+            </g>
+            <rect x="436" y="126" width="170" height="52" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="521" y="148">report.js: count → 2</text><text x="521" y="166">только читает</text>
+            </g>
+            <g fill="none" stroke="#64748b" stroke-width="1.8" stroke-dasharray="5 4">
+                <path d="M 140 126 L 250 76"/><path d="M 480 126 L 372 76"/>
+            </g>
+            <g fill="#64748b">
+                <path d="M 250 76 L 238 77 L 243 86 Z"/><path d="M 372 76 L 379 86 L 384 77 Z"/>
+            </g>
+            <rect x="14" y="190" width="592" height="20" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="204" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">Импорт — не копия, а окно в переменную модуля-владельца (CreateImportBinding, 9.1.1.5.5).</text>
+        </svg>
+        <figcaption>Живая привязка: два импорта смотрят в одну переменную</figcaption>
+    </figure>
+
+    <p>Обе строки видят 2: <code>count</code> в <code>main.js</code> и в <code>report.js</code> — не копии числа, а одна
+    переменная <code>counter.js</code>. Менять её может только сам <code>counter.js</code> — поэтому наружу отдают функцию
+    <code>increment</code>. Объект, отданный через <code>export const</code>, импортёр менять может: справочник
+    подчёркивает, что свойства объекта изменяемы, и изменение увидят все модули.</p>
+
+    <h2 id="namespace">8. Объект модуля</h2>
+
+    <p><code>import * as имя</code> собирает все экспорты в <strong>объект пространства имён</strong> модуля. Справочник
+    описывает его так: запечатанный (день 6), с прототипом <code>null</code> (день 7), экспорт по умолчанию — под ключом
+    <code>default</code>.</p>
+
+    <pre class="code js">// lesson.js
+export const title = "Модули";
+export const day = 30;
+export default "урок дня 30";</pre>
+
+    <pre class="code js">// main.js
+import * as lesson from "./lesson.js";
+console.log(Object.keys(lesson), lesson.default, lesson.day);
+console.log(Object.getPrototypeOf(lesson), Object.isSealed(lesson), Object.prototype.toString.call(lesson));
+try {
+  lesson.day = 31;
+} catch (e) {
+  console.log(e.name, e.message);
+}</pre>
+
+    <div class="result-box">
+        (3) ['day', 'default', 'title'] урок дня 30 30<br>
+        null true [object Module]<br>
+        TypeError Cannot assign to property 'day' of [object Module]
+    </div>
+
+    <p>Ключи идут по алфавиту, а не в порядке файла, — так требует спецификация (раздел 14). Свойство <code>day</code>
+    живое, как в разделе 7, но записать в него нельзя: модуль строгий, и неудачная запись бросает <code>TypeError</code>
+    (день 3). Подстановки <code>import * from</code> без имени в языке нет — справочник объясняет: слишком велик риск
+    столкновения имён.</p>
+
+    <h2 id="aggregate">9. Сборка: export … from</h2>
+
+    <p>Большие программы собирают несколько модулей в один «собирающий» (barrel), чтобы снаружи хватало одного
+    импорта. Для этого <code>export</code> умеет брать значения прямо из другого модуля:</p>
+
+    <pre class="code js">// words.js
+export const words = ["book", "water"];
+export default "слова";</pre>
+
+    <pre class="code js">// stats.js
+export function percent(part, whole) {
+  return Math.round((part / whole) * 100);
+}</pre>
+
+    <pre class="code js">// cards.js
+export * from "./words.js";
+export { percent as pct } from "./stats.js";
+export { default as title } from "./words.js";
+export * as Stats from "./stats.js";</pre>
+
+    <pre class="code js">// main.js
+import * as cards from "./cards.js";
+console.log(Object.keys(cards), cards.title, cards.pct(1, 4), cards.Stats.percent(3, 4), "default" in cards);</pre>
+
+    <div class="result-box">
+        (4) ['Stats', 'pct', 'title', 'words'] слова 25 75 false
+    </div>
+
+    <p><code>export * from</code> передаёт все <strong>именованные</strong> экспорты, но не экспорт по умолчанию — поэтому
+    <code>default</code> в <code>cards</code> нет, а <code>title</code> пришлось передать отдельно. Сам
+    <code>cards.js</code> пересылаемых имён не видит: учебник подчёркивает, что они проходят «насквозь». Если два
+    <code>export *</code> принесут одно имя, справочник обещает, что не передастся ни одно: в объекте модуля его нет, а
+    прямой импорт даёт <code>SyntaxError: The requested module './cards.js' contains conflicting star exports for name
+    …</code></p>
+
+    <h2 id="differences">10. Модуль и обычный скрипт</h2>
+
+    <p>Учебник перечисляет отличия модуля от обычного скрипта. Почти все курс уже встречал:</p>
+
+    <table>
+        <thead><tr><th>Что</th><th>Обычный скрипт</th><th>Модуль</th></tr></thead>
+        <tbody>
+            <tr><td>строгий режим</td><td>только с <code>"use strict"</code></td><td>всегда (день 3)</td></tr>
+            <tr><td><code>this</code> на верхнем уровне</td><td>глобальный объект</td><td><code>undefined</code> (день 3)</td></tr>
+            <tr><td>переменные верхнего уровня</td><td>общие для страницы</td><td>только в этом файле (день 1)</td></tr>
+            <tr><td><code>await</code>, <code>for await</code> на верхнем уровне</td><td><code>SyntaxError</code></td><td>можно (дни 28–29)</td></tr>
+            <tr><td>когда выполняется</td><td>сразу, где стоит тег</td><td>после разбора страницы, как с <code>defer</code></td></tr>
+            <tr><td>подключён дважды</td><td>выполнится дважды</td><td>выполнится один раз</td></tr>
+            <tr><td>адрес <code>file://</code></td><td>работает</td><td>не загрузится — нужен сервер</td></tr>
+            <tr><td>переменные в консоли DevTools</td><td>видны</td><td>не видны — только то, что модуль положил в <code>globalThis</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Проверим три первые строки. Обычный скрипт перед модулем объявляет <code>var greeting</code> — глобальные имена
+    модулю видны, а его собственные наружу не выходят:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script&gt;var greeting = "привет из обычного скрипта";&lt;/script&gt;
+&lt;script type="module" src="main.js"&gt;&lt;/script&gt;</pre>
+
+    <pre class="code js">// main.js
+const secret = 42;
+var alsoSecret = 1;
+console.log(this, typeof window.secret, typeof window.alsoSecret, greeting);
+try {
+  undeclared = 5;
+} catch (e) {
+  console.log(e.name, e.message);
+}</pre>
+
+    <div class="result-box">
+        undefined undefined undefined привет из обычного скрипта<br>
+        ReferenceError undeclared is not defined
+    </div>
+
+    <p>Даже <code>var</code> не попал в <code>window</code> — в отличие от дня 3, где <code>var name = 5</code> переписывал
+    имя окна. Опечатка в присваивании — ошибка, как в строгом режиме. Отсюда ответ дню 11: два модуля, каждый со своим
+    <code>Symbol("learned")</code>, получат разные символы, а <code>Symbol.for("cards.learned")</code> — один из общего
+    реестра:</p>
+
+    <pre class="code js">// deck.js
+export const LEARNED = Symbol("learned");
+export const SHARED = Symbol.for("cards.learned");</pre>
+
+    <pre class="code js">// stats.js
+export const LEARNED = Symbol("learned");
+export const SHARED = Symbol.for("cards.learned");</pre>
+
+    <pre class="code js">// main.js
+import * as deck from "./deck.js";
+import * as stats from "./stats.js";
+console.log(deck.LEARNED === stats.LEARNED, deck.SHARED === stats.SHARED);</pre>
+
+    <div class="result-box">
+        false true
+    </div>
+
+    <p>И обещание дней 28–29: в модуле <code>await</code> разрешён на верхнем уровне. Помощники дня 30 Essentials теперь
+    сами станут модулем — положите <code>helpers.js</code> в папку дня, дальше он не повторяется:</p>
+
+    <pre class="code js">// helpers.js
+export const wait = (ms) =&gt; new Promise((resolve) =&gt; setTimeout(resolve, ms));
+export const later = (value, ms) =&gt; new Promise((resolve) =&gt; setTimeout(resolve, ms, value));
+export const failLater = (text, ms) =&gt; new Promise((resolve, reject) =&gt; {
+  setTimeout(() =&gt; reject(new Error(text)), ms);
+});</pre>
+
+    <pre class="code js">// colors.js
+import { later } from "./helpers.js";
+console.log("colors.js: начал загрузку");
+const colors = await later({ blue: "#5499C7" }, 300);
+console.log("colors.js: загрузил");
+export default colors;</pre>
+
+    <pre class="code js">// canvas.js
+console.log("canvas.js");
+export const size = 480;</pre>
+
+    <pre class="code js">// main.js
+import colors from "./colors.js";
+import { size } from "./canvas.js";
+console.log("main.js:", colors.blue, size);
+for await (const word of ["book", "water"]) console.log("for await:", word);</pre>
+
+    <div class="result-box">
+        colors.js: начал загрузку<br>
+        canvas.js<br>
+        colors.js: загрузил<br>
+        main.js: #5499C7 480<br>
+        for await: book<br>
+        for await: water
+    </div>
+
+    <p>Пример учебника: модуль с <code>await</code> ведёт себя как большая <code>async</code>-функция. <code>main.js</code>
+    ждёт, пока <code>colors.js</code> дочитает данные, но соседний <code>canvas.js</code> не ждёт и выполняется
+    раньше.</p>
+
+    <h2 id="order">11. Порядок выполнения и циклы</h2>
+
+    <p>Модули образуют граф зависимостей. Учебник: если в графе нет циклов, он выполняется обходом в глубину — сначала
+    зависимости, потом тот, кто их импортировал, и каждый модуль один раз:</p>
+
+    <pre class="code js">// a.js
+console.log("a.js");
+export const a = "A";</pre>
+
+    <pre class="code js">// c.js
+console.log("c.js");</pre>
+
+    <pre class="code js">// b.js
+import "./c.js";
+console.log("b.js");
+export const b = "B";</pre>
+
+    <pre class="code js">// main.js
+import { a } from "./a.js";
+import { b } from "./b.js";
+import "./c.js";
+console.log("main.js:", a, b);</pre>
+
+    <div class="result-box">
+        a.js<br>
+        c.js<br>
+        b.js<br>
+        main.js: A B
+    </div>
+
+    <p><code>c.js</code> импортирован дважды, а выполнился один раз — при первой встрече, внутри <code>b.js</code>.
+    Цикл — когда <code>a.js</code> импортирует <code>b.js</code>, а тот, прямо или через других, — <code>a.js</code>.
+    Учебник показывает: цикл не всегда ошибка, ведь живая привязка читается в момент использования. Ошибка будет, если
+    прочитать переменную до её объявления:</p>
+
+    <pre class="code js">// first.js
+import { second } from "./second.js";
+export const first = 1;</pre>
+
+    <pre class="code js">// second.js
+import { first } from "./first.js";
+console.log(first);
+export const second = 2;</pre>
+
+    <pre class="code js">// main.js
+import "./first.js";</pre>
+
+    <div class="result-box">
+        Uncaught ReferenceError: Cannot access 'first' before initialization
+    </div>
+
+    <p><code>first.js</code> сначала выполняет свою зависимость <code>second.js</code>, а та читает <code>first</code>,
+    который ещё в мёртвой зоне (день 4 Essentials). Если бы <code>second.js</code> читал <code>first</code> позже — в
+    таймере или функции, — ошибки бы не было. Учебник советует циклов избегать: слить модули, вынести общее в третий или
+    перенести код из одного в другой.</p>
+
+    <h2 id="practice">12. Практика: журнал из трёх модулей</h2>
+
+    <p>Практика плана: данные, расчёты и вывод — в трёх модулях, и с именованными экспортами, и с экспортом по
+    умолчанию.</p>
+
+    <pre class="code js">// data.js
+export const group = "JS-1";
+export default [
+  { name: "Аман", marks: [5, 4, 5] },
+  { name: "Мерет", marks: [3, 4, 4] },
+  { name: "Айна", marks: [5, 5, 5] },
+];</pre>
+
+    <pre class="code js">// calc.js
+export function average(marks) {
+  return marks.reduce((sum, mark) =&gt; sum + mark, 0) / marks.length;
+}
+export function best(students) {
+  return students.reduce((a, b) =&gt; (average(b.marks) &gt; average(a.marks) ? b : a));
+}</pre>
+
+    <pre class="code js">// view.js
+import { average } from "./calc.js";
+export default function row(student) {
+  return `${student.name}: ${average(student.marks).toFixed(2)}`;
+}</pre>
+
+    <pre class="code js">// main.js
+import students, { group } from "./data.js";
+import { best } from "./calc.js";
+import row from "./view.js";
+console.log(`Группа ${group}`);
+for (const student of students) console.log(row(student));
+console.log("лучший:", best(students).name);</pre>
+
+    <div class="result-box">
+        Группа JS-1<br>
+        Аман: 4.67<br>
+        Мерет: 3.67<br>
+        Айна: 5.00<br>
+        лучший: Айна
+    </div>
+
+    <p>У каждого файла одна задача: <code>data.js</code> ничего не считает, <code>calc.js</code> ничего не печатает,
+    <code>view.js</code> только превращает ученика в строку. <code>calc.js</code> импортируют двое — <code>view.js</code> и
+    <code>main.js</code>, — но выполнится он один раз. Чтобы поменять вид строки, правят один файл; чтобы взять расчёты
+    в другую программу — копируют один файл.</p>
+
+    <h2 id="errors">13. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Что случилось</th><th>Что видно в Chrome</th><th>Что делать</th></tr></thead>
+        <tbody>
+            <tr><td><code>import</code> в обычном скрипте</td><td><code>SyntaxError: Cannot use import statement outside a module</code></td><td><code>type="module"</code> у тега</td></tr>
+            <tr><td><code>export</code> в обычном скрипте или внутри функции</td><td><code>SyntaxError: Unexpected token 'export'</code></td><td>модуль, верхний уровень</td></tr>
+            <tr><td><code>import { … }</code> внутри функции или <code>if</code> в модуле</td><td><code>SyntaxError: Unexpected token '{'</code></td><td>наверх; загрузка по условию — <code>import()</code>, день 31</td></tr>
+            <tr><td>нет такого экспорта</td><td><code>SyntaxError: The requested module './words.js' does not provide an export named 'count'</code></td><td>проверить <code>export</code> и имя</td></tr>
+            <tr><td>одно имя импортировано дважды</td><td><code>SyntaxError: Identifier 'name' has already been declared</code></td><td><code>as</code> или <code>import * as</code></td></tr>
+            <tr><td>два экспорта с одним именем</td><td><code>SyntaxError: Duplicate export of 'x'</code></td><td>разные имена</td></tr>
+            <tr><td>два <code>export default</code></td><td><code>SyntaxError: Identifier '.default' has already been declared</code></td><td>один на модуль</td></tr>
+            <tr><td>присвоить импорт</td><td><code>TypeError: Assignment to constant variable.</code></td><td>менять в модуле-владельце</td></tr>
+            <tr><td>записать в объект модуля</td><td><code>TypeError: Cannot assign to property 'day' of [object Module]</code></td><td>то же</td></tr>
+            <tr><td>два <code>export *</code> с одним именем</td><td><code>SyntaxError: … contains conflicting star exports for name 'a'</code></td><td>передать имя явно</td></tr>
+            <tr><td>путь без <code>./</code></td><td><code>TypeError: Failed to resolve module specifier "words.js"…</code></td><td><code>"./words.js"</code> или карта импорта</td></tr>
+            <tr><td>неверный путь, нет расширения</td><td>404 при загрузке, ни один модуль не выполнился</td><td>путь и <code>.js</code></td></tr>
+            <tr><td>страница открыта как <code>file://</code></td><td><code>… has been blocked by CORS policy</code></td><td>Live Server</td></tr>
+            <tr><td>сервер отдал не JavaScript</td><td><code>Failed to load module script: Expected a JavaScript-or-Wasm module script…</code></td><td>расширение <code>.js</code>, настройки сервера</td></tr>
+            <tr><td>цикл, переменная прочитана до объявления</td><td><code>ReferenceError: Cannot access 'first' before initialization</code></td><td>читать позже или разорвать цикл</td></tr>
+        </tbody>
+    </table>
+
+    <p>Текст V8 для <code>import</code> внутри функции сбивает с толку: Chrome принимает слово за начало
+    <code>import(…)</code> дня 31 и спотыкается о скобку. А <code>'.default'</code> — внутреннее имя, под которым V8
+    хранит экспорт по умолчанию. Заголовок страницы справочника об этой ошибке
+    (<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/import_decl_module_top_level">import
+    declarations may only appear at top level of a module</a>) — текст Firefox. V8 пишет «Cannot use import statement
+    outside a module» только для обычного скрипта, а <code>import</code> не на верхнем уровне модуля — «Unexpected
+    token».</p>
+
+    <h2 id="spec">14. Что говорит спецификация</h2>
+
+    <p>Своих разделов спецификации у дня нет, модули — глава
+    <a href="https://tc39.es/ecma262/2026/#sec-modules">16.2 Modules</a>. Пересказ того, что объясняет сегодняшние
+    опыты:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-strict-mode-code">11.2.2</a>: код модуля — всегда строгий.
+            <a href="https://tc39.es/ecma262/2026/#sec-module-environment-records">9.1.1.5 Module Environment Records</a> —
+            область модуля, частный случай декларативной записи дня 1. Её GetThisBinding (9.1.1.5.4) возвращает
+            <code>undefined</code> — отсюда <code>this</code> раздела 10.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-createimportbinding">CreateImportBinding</a> (9.1.1.5.5) создаёт
+            для импорта <strong>косвенную</strong> неизменяемую привязку: она ничего не хранит, а при чтении берёт значение
+            из записи модуля-владельца. Это и есть живая привязка; неизменяемая — поэтому присваивание бросает
+            <code>TypeError</code>. GetBindingValue (9.1.1.5.1): если целевая переменная ещё не инициализирована —
+            <code>ReferenceError</code>, ошибка цикла раздела 11.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-module-semantics-static-semantics-early-errors">16.2.1.1</a> — ранние
+            ошибки: повтор имён экспорта (примечание прямо говорит, что отсюда запрет на два <code>export default</code>),
+            экспорт необъявленного имени, <code>super</code> и <code>new.target</code> на верхнем уровне;
+            <a href="https://tc39.es/ecma262/2026/#sec-imports-static-semantics-early-errors">16.2.2.1</a> — повтор имён
+            импорта.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-source-text-module-records">16.2.1.7 Source Text Module Records</a>:
+            при разборе модуль раскладывает свои <code>import</code> и <code>export</code> в четыре списка — импорты,
+            свои экспорты, пересылаемые (<code>export { x } from</code>, <code>export * as</code>) и «звёздочные»
+            (<code>export *</code>), — таблица 52.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-cyclic-module-records">16.2.1.6 Cyclic Module Records</a> — жизнь
+            модуля: <code>[[Status]]</code> проходит new, unlinked, linking, linked, evaluating, evaluating-async (если
+            есть <code>await</code>), evaluated. Два главных метода — Link и Evaluate; схема ниже.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-HostLoadImportedModule">16.2.1.10 HostLoadImportedModule</a> —
+            загрузку спецификация отдаёт «хозяину». Как путь превращается в адрес, какой нужен тип файла, почему не
+            работает <code>file://</code> — правила HTML и браузера, а не ECMAScript. Требование: на тот же запрос из
+            того же модуля — та же запись модуля, а разные запросы хозяин может свести к одной записи. Браузер сводит
+            все запросы одного адреса к одной — поэтому модуль выполняется один раз.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-module-namespace-exotic-objects">10.4.6 Module Namespace Exotic
+            Objects</a> — объект модуля раздела 8: прототип <code>null</code>, нерасширяемый, ключи — список
+            <code>[[Exports]]</code>, отсортированный по кодам символов. Свойства числятся записываемыми, но [[Set]] всегда
+            отвечает «нет» — в строгом коде это <code>TypeError</code>.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 226" role="img" aria-label="Три этапа модулей. Загрузка: хозяин находит и загружает все файлы графа и разбирает их; ошибки — 404, CORS, тип файла, синтаксис. Связывание Link: создаются области модулей и привязки импортов к экспортам; ошибки — нет такого экспорта, конфликт звёздочек. Выполнение Evaluate: обход в глубину, зависимости первыми, каждый модуль один раз; ошибки — обычные, во время работы. Ошибка на первых двух этапах — не выполнится ни один модуль">
+            <g fill="#f8fafc" stroke="#64748b" stroke-width="1.8">
+                <rect x="14" y="14" width="188" height="112" rx="10"/><rect x="216" y="14" width="188" height="112" rx="10"/><rect x="418" y="14" width="188" height="112" rx="10"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" text-anchor="middle" fill="#1e293b">
+                <text x="108" y="38">1. Загрузка и разбор</text><text x="310" y="38">2. Связывание (Link)</text><text x="512" y="38">3. Выполнение</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="108" y="62">хозяин грузит все файлы</text><text x="108" y="80">графа и разбирает их</text>
+                <text x="310" y="62">области модулей,</text><text x="310" y="80">импорт → экспорт</text>
+                <text x="512" y="62">в глубину: зависимости</text><text x="512" y="80">первыми, каждый один раз</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" text-anchor="middle" fill="#b91c1c">
+                <text x="108" y="104">404, CORS, тип файла,</text><text x="108" y="118">SyntaxError</text>
+                <text x="310" y="104">«does not provide an export»,</text><text x="310" y="118">conflicting star exports</text>
+                <text x="512" y="104">ошибки кода во время</text><text x="512" y="118">работы, ReferenceError цикла</text>
+            </g>
+            <g fill="none" stroke="#64748b" stroke-width="1.8">
+                <path d="M 202 70 L 208 70"/><path d="M 404 70 L 410 70"/>
+            </g>
+            <g fill="#64748b">
+                <path d="M 216 70 L 207 65 L 207 75 Z"/><path d="M 418 70 L 409 65 L 409 75 Z"/>
+            </g>
+            <rect x="14" y="140" width="592" height="34" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="161" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" fill="#334155">[[Status]]: new → unlinked → linking → linked → evaluating → evaluated</text>
+            <rect x="14" y="186" width="592" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="207" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Ошибка на этапах 1–2 — не выполнится ни один модуль графа, даже без ошибок в нём.</text>
+        </svg>
+        <figcaption>16.2.1.6: загрузка, связывание, выполнение</figcaption>
+    </figure>
+
+    <p>Последняя строка схемы проверяется в Chrome: если <code>main.js</code> импортирует несуществующее имя, не напечатает
+    ничего ни он, ни модули, которые он успел загрузить, — связывание проходит до выполнения.</p>
+
+    <h2 id="cards">15. «Карточки» на модулях</h2>
+
+    <p>Разложим «Карточки» по файлам: слова — экспортом по умолчанию, прогресс — модулем с живой привязкой
+    <code>learned</code> и меткой из общего реестра символов дня 11:</p>
+
+    <pre class="code js">// words.js
+export default [
+  { id: 1, word: "book", ru: "книга" },
+  { id: 2, word: "water", ru: "вода" },
+  { id: 3, word: "bread", ru: "хлеб" },
+  { id: 4, word: "apple", ru: "яблоко" },
+];</pre>
+
+    <pre class="code js">// progress.js
+const LEARNED = Symbol.for("cards.learned");
+export let learned = 0;
+export function markLearned(card) {
+  if (card[LEARNED]) return;
+  card[LEARNED] = true;
+  learned++;
+}
+export function isLearned(card) {
+  return card[LEARNED] === true;
+}</pre>
+
+    <pre class="code js">// main.js
+import words from "./words.js";
+import { learned, markLearned, isLearned } from "./progress.js";
+console.log("выучено:", learned);
+markLearned(words[0]);
+markLearned(words[2]);
+markLearned(words[2]);
+console.log("выучено:", learned, "из", words.length);
+console.log("повторить:", words.filter((card) =&gt; !isLearned(card)).map((card) =&gt; card.word).join(", "));
+console.log(JSON.stringify(words[0]));</pre>
+
+    <div class="result-box">
+        выучено: 0<br>
+        выучено: 2 из 4<br>
+        повторить: water, apple<br>
+        {"id":1,"word":"book","ru":"книга"}
+    </div>
+
+    <p><code>learned</code> в <code>main.js</code> сам вырос с 0 до 2: это живая привязка, менять её может только
+    <code>progress.js</code>. Повторная отметка «хлеба» не засчиталась. Метка-символ не попала в JSON (день 11), а любой
+    другой модуль, взяв <code>Symbol.for("cards.learned")</code>, прочитает её без импорта.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Откройте <code>index.html</code> двойным щелчком, а не через Live Server. Что покажет
+        консоль и выполнится ли хоть одна строка?
+        <br><br>
+        <strong>Второй.</strong> Допишите в конец <code>main.js</code> строку <code>learned = 0;</code>. Какая ошибка
+        появится и почему <code>progress.js</code> менять <code>learned</code> может?
+        <br><br>
+        <strong>Третий.</strong> Уберите <code>export</code> перед <code>isLearned</code>. Напечатается ли хотя бы
+        «выучено: 0»? Почему — по схеме раздела 14?
+    </div>
+
+    <h2 id="next">16. Что дальше</h2>
+
+    <p>Сегодня все модули загружались сразу, при открытии страницы. День 31 — динамический <code>import()</code>, который
+    грузит модуль по требованию, например по кнопке; <code>import.meta</code> — сведения о самом модуле; и JSON как
+    модуль через <code>with { type: "json" }</code>, вместе с <code>JSON.parse</code> и <code>JSON.stringify</code>
+    изнутри.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules">JavaScript modules</a></td><td>учебник: структура, экспорт и импорт, карта импорта, отличия от скриптов, по умолчанию, переименование, объект модуля, сборка, <code>await</code>, подъём, циклы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/export">export</a></td><td>все формы, по умолчанию, <code>export … from</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import">import</a></td><td>четыре формы, подъём, пути, живые привязки</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/import_decl_module_top_level">SyntaxError: import declarations may only appear at top level of a module</a></td><td><code>import</code> вне модуля и не на верхнем уровне</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>ECMA-262: 16.2, 9.1.1.5, 10.4.6, 11.2.2</td><td>раздел 14, пересказ</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// &lt;script type="module" src="main.js"&gt;&lt;/script&gt; — и страница только через сервер (Live Server)
+// export const a = 1; export function f() {}; export { x as y }; export default выражение;
+// import { a, f as g } from "./m.js"; import x from "./m.js"; import * as m from "./m.js"; import "./m.js";
+// путь: "./", "../" или "/" и обязательно ".js"; «голое» имя — только через &lt;script type="importmap"&gt;
+// импорт — живая привязка только для чтения: владелец меняет, импортёр видит; присвоить — TypeError
+// export * from "./m.js" — все именованные, без default; export { default as x } from "./m.js"
+// модуль: строгий, свой верхний уровень, this === undefined, await наверху, выполняется один раз, после разбора страницы
+// порядок: зависимости первыми, в глубину; ошибка загрузки или связывания — не выполнится ни один модуль</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему два обычных скрипта с <code>const total</code> ссорятся, а два модуля — нет?
+                <details class="answer"><summary>Ответ</summary>
+                    Верхний уровень обычных скриптов — одна глобальная область страницы. У каждого модуля своя запись
+                    окружения модуля (9.1.1.5), и его переменные не выходят наружу без <code>export</code>.
+                </details>
+            </li>
+            <li>Чем <code>import x from "./m.js"</code> отличается от <code>import { x } from "./m.js"</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Первый берёт экспорт по умолчанию под любым именем — это <code>import { default as x }</code>. Второй
+                    — именованный экспорт <code>x</code>; если такого нет, связывание падает с «does not provide an export
+                    named 'x'».
+                </details>
+            </li>
+            <li>Модуль отдал <code>export let count = 0</code> и функцию <code>increment</code>. Что увидит импортёр после
+                двух вызовов <code>increment()</code> и можно ли ему написать <code>count = 0</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Увидит 2: импорт — живая привязка к переменной модуля. Присвоить нельзя: привязка неизменяемая,
+                    <code>TypeError: Assignment to constant variable.</code>
+                </details>
+            </li>
+            <li>Почему страница с модулями не работает, открытая двойным щелчком?
+                <details class="answer"><summary>Ответ</summary>
+                    С адреса <code>file://</code> браузер не загружает модули: ошибка CORS. Нужен сервер — Live Server.
+                </details>
+            </li>
+            <li><code>main.js</code> импортирует <code>a.js</code> и <code>b.js</code>, оба импортируют <code>c.js</code>. В
+                каком порядке они выполнятся и сколько раз выполнится <code>c.js</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>c.js</code>, <code>a.js</code>, <code>b.js</code>, <code>main.js</code>: обход в глубину,
+                    зависимости первыми. <code>c.js</code> — один раз, при первой встрече.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

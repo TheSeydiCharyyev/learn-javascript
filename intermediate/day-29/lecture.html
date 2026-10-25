@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 29 — асинхронные итераторы и генераторы, for await...of</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f59e0b; }
+        h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+        h3 { color: #92400e; }
+        .step-number { background: #f59e0b; }
+        .toc a { color: #b45309; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 29</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 29 &bull; урок 1</span>
+        <h1>Асинхронные итераторы и генераторы, for await...of</h1>
+        <p>Курс 2, Intermediate. Модуль «Ошибки и асинхронность» — четвёртый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>писать асинхронные генераторы <code>async function*</code> — объявление, выражение, метод — и знать, что
+                возвращают <code>next</code>, <code>return</code> и <code>throw</code>;</li>
+            <li>перебирать асинхронные и обычные итерируемые циклом <code>for await...of</code> и понимать, когда он
+                закрывает источник;</li>
+            <li>делать объект асинхронно перебираемым через <code>Symbol.asyncIterator</code>;</li>
+            <li>собирать массив из асинхронного источника через <code>Array.fromAsync</code> и выбирать между ним, циклом и
+                <code>Promise.all</code>;</li>
+            <li>знать, почему вызовы асинхронного генератора встают в очередь (раздел 27.6 спецификации).</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания, накопленные за курс</a></li>
+            <li><a href="#kinds">Четыре вида функций</a></li>
+            <li><a href="#declare">async function*: объявление и выражение</a></li>
+            <li><a href="#forawait">for await...of</a></li>
+            <li><a href="#yield">yield и return ждут сами</a></li>
+            <li><a href="#methods">next, return, throw и очередь вызовов</a></li>
+            <li><a href="#protocol">Symbol.asyncIterator: свой асинхронный перебор</a></li>
+            <li><a href="#sync">for await и обычные итерируемые</a></li>
+            <li><a href="#pages">Практика: постраничная загрузка</a></li>
+            <li><a href="#ticker">Практика: генератор «раз в секунду»</a></li>
+            <li><a href="#fromasync">Практика: Array.fromAsync против цикла</a></li>
+            <li><a href="#objects">AsyncIterator и AsyncGeneratorFunction</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: колода по страницам</a></li>
+            <li><a href="#next">Итоги модуля I8 и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания, накопленные за курс</h2>
+
+    <p>День 12 закончился словами «асинхронные генераторы <code>async function*</code> ждут нас на дне 29». День 11 отложил
+    на сегодня <code>Symbol.asyncIterator</code>, <code>for await...of</code> и асинхронные интерфейсы спецификации
+    27.1.1.3–27.1.1.4. День 28 ждал элементы по одному — <code>await</code> внутри <code>for...of</code>. Не хватало
+    источника, который сам выдаёт значения «потом», по одному. Обычный генератор ждать не умеет:</p>
+
+    <pre class="code js">function* pages() {
+  yield await later(["book", "water"], 100);
+}
+// Uncaught SyntaxError: await is only valid in async functions and the top level bodies of modules</pre>
+
+    <p>А <code>async</code>-функция отдаёт один результат — второго <code>return</code> у неё не бывает. Соединим оба
+    слова: звёздочку генератора и <code>async</code>.</p>
+
+    <pre class="code js">async function* pages() {
+  yield await later(["book", "water", "bread"], 100);
+  yield await later(["apple", "house"], 100);
+}
+(async () =&gt; {
+  for await (const page of pages()) console.log("страница:", page.join(", "));
+  console.log("страниц больше нет");
+})();</pre>
+
+    <div class="result-box">
+        страница: book, water, bread<br>
+        страница: apple, house<br>
+        страниц больше нет
+    </div>
+
+    <p>Страницы пришли по очереди, каждая через 100 мс, и цикл ждал каждую. Помощники дня 30 Essentials
+    (<code>wait</code>, <code>later</code>, <code>failLater</code>) стоят в начале <code>app.js</code>, как на днях 27 и 28.</p>
+
+    <h2 id="kinds">2. Четыре вида функций</h2>
+
+    <p>Сегодняшний генератор закрывает таблицу, которую курс строил с первых дней. Вопросов два: сколько значений отдаёт
+    функция и когда.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 262" role="img" aria-label="Четыре вида функций. Одно значение сразу — обычная функция, f() возвращает 1. Много значений сразу — генератор function*, next() возвращает объект value и done. Одно значение потом — async function, вызов возвращает промис. Много значений потом — async function*, next() возвращает промис объекта value и done">
+            <g font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155" text-anchor="middle">
+                <text x="254" y="32">одно значение</text><text x="492" y="32">много значений</text>
+                <text x="69" y="84">сразу</text><text x="69" y="172">потом</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" fill="#64748b" text-anchor="middle">
+                <text x="69" y="102">значение</text><text x="69" y="190">через промис</text>
+            </g>
+            <g fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="140" y="48" width="228" height="80" rx="10"/><rect x="378" y="48" width="228" height="80" rx="10"/>
+                <rect x="140" y="136" width="228" height="80" rx="10"/>
+            </g>
+            <rect x="378" y="136" width="228" height="80" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <g font-family="Consolas, monospace" font-size="11.5" font-weight="700" text-anchor="middle" fill="#334155">
+                <text x="254" y="72">function</text><text x="492" y="72">function*</text><text x="254" y="160">async function</text>
+            </g>
+            <text x="492" y="160" font-family="Consolas, monospace" font-size="11.5" font-weight="700" text-anchor="middle" fill="#92400e">async function*</text>
+            <g font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="254" y="94">f() → 1</text><text x="492" y="94">g().next() → {value, done}</text><text x="254" y="182">f() → Promise</text>
+            </g>
+            <text x="492" y="182" font-family="Consolas, monospace" font-size="10.5" text-anchor="middle" fill="#92400e">g().next() → Promise {value, done}</text>
+            <g font-family="Segoe UI, sans-serif" font-size="10" text-anchor="middle" fill="#64748b">
+                <text x="254" y="114">день 12 Essentials</text><text x="492" y="114">день 12</text><text x="254" y="202">день 31 Essentials, день 28</text>
+            </g>
+            <text x="492" y="202" font-family="Segoe UI, sans-serif" font-size="10" text-anchor="middle" fill="#92400e">сегодня</text>
+            <rect x="14" y="226" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="245" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Асинхронный генератор — генератор, у которого каждый next() возвращает промис.</text>
+        </svg>
+        <figcaption>Сколько значений и когда: четыре вида функций</figcaption>
+    </figure>
+
+    <pre class="code js">function one() { return 1; }
+function* many() { yield 1; yield 2; }
+async function oneLater() { return 1; }
+async function* manyLater() { yield 1; yield 2; }
+console.log(one(), many().next(), oneLater(), manyLater().next());
+// 1 {value: 1, done: false} Promise {&lt;fulfilled&gt;: 1} Promise {&lt;pending&gt;}</pre>
+
+    <p>Справочник MDN описывает <code>async function*</code> как соединение <code>async</code>-функции и генератора: в теле
+    можно и <code>await</code>, и <code>yield</code>. Последний промис в выводе ещё ждёт, хотя <code>yield 1</code> стоит
+    первой строкой: <code>yield</code> здесь сначала дожидается своего значения (раздел 5), а ожидание — микрозадача
+    (день 28). Стрелочной записи нет, как и у обычного генератора (день 12).</p>
+
+    <h2 id="declare">3. async function*: объявление и выражение</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function*">Объявление</a>
+    поднимается, как <code>function</code> дня 12 Essentials. Вызов тело не выполняет, а возвращает объект
+    <code>AsyncGenerator</code>; тело начинается на первом <code>next()</code>, как у генератора дня 12. Пример
+    справочника показывает, что <code>next()</code> возвращает промис, даже когда <code>yield</code> отдаёт обычное
+    число:</p>
+
+    <pre class="code js">async function* myGenerator(step) {
+  await wait(10);
+  yield 0;
+  yield step;
+  yield step * 2;
+}
+const gen = myGenerator(2);
+console.log("вызов вернул:", Object.prototype.toString.call(gen));
+(async () =&gt; {
+  console.log(await gen.next());
+  console.log(await gen.next());
+  console.log(await gen.next());
+  console.log(await gen.next());
+})();</pre>
+
+    <div class="result-box">
+        вызов вернул: [object AsyncGenerator]<br>
+        {value: 0, done: false}<br>
+        {value: 2, done: false}<br>
+        {value: 4, done: false}<br>
+        {value: undefined, done: true}
+    </div>
+
+    <p>Когда тело кончилось, каждый следующий вызов даёт <code>{ value: undefined, done: true }</code> — по-прежнему
+    промисом.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function*">Выражение
+    <code>async function*</code></a> устроено, как выражение дня 28: имя необязательно и видно только внутри, строка не
+    может начинаться со слов <code>async function</code>. Справочник берёт выражение там, где асинхронный источник нужен
+    один раз, — например, передать его в функцию:</p>
+
+    <pre class="code js">async function joinAll(generator) {
+  let str = "";
+  for await (const val of generator()) str += val;
+  return str;
+}
+joinAll(async function* () {
+  yield await Promise.resolve("a");
+  yield await Promise.resolve("b");
+  yield await Promise.resolve("c");
+}).then((str) =&gt; console.log(str));
+// abc</pre>
+
+    <p>Третья запись — метод <code>async *name() { … }</code> (раздел 7). И предупреждение справочника: перенос строки
+    между <code>async</code> и <code>function</code> делает <code>async</code> просто именем, а остаток — обычным
+    <code>function*</code>.</p>
+
+    <h2 id="forawait">4. for await...of</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for-await...of">Цикл
+    <code>for await...of</code></a> устроен как <code>for...of</code> дня 11, только каждое значение ждёт. Он берёт у
+    источника метод <code>[Symbol.asyncIterator]()</code> и получает асинхронный итератор. Потом снова и снова вызывает
+    <code>next()</code>, ждёт промис через <code>await</code>, кладёт значение в переменную и выполняет тело. На
+    <code>done: true</code> цикл кончается. Писать его можно там же, где <code>await</code>: в <code>async</code>-функции,
+    в асинхронном генераторе и в модуле (день 30).</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 252" role="img" aria-label="Шаги for await...of. Сначала цикл ищет у источника Symbol.asyncIterator; если его нет — Symbol.iterator и оборачивает обычный итератор в асинхронный; если нет обоих — TypeError is not async iterable. Затем повторяет: await next(); при done false — значение в переменную и тело цикла; при done true — конец. При break, ошибке или return — await return() и выход">
+            <rect x="14" y="12" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="31" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#334155">for await (const x of source) { тело }</text>
+            <g fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5">
+                <rect x="14" y="62" width="188" height="56" rx="8"/><rect x="216" y="62" width="188" height="56" rx="8"/>
+            </g>
+            <rect x="418" y="62" width="188" height="56" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle">
+                <text x="108" y="84" font-weight="700" fill="#92400e">1. [Symbol.asyncIterator]</text><text x="108" y="104" fill="#92400e">есть — берём его итератор</text>
+                <text x="310" y="84" font-weight="700" fill="#92400e">2. нет — [Symbol.iterator]</text><text x="310" y="104" fill="#92400e">и обёртка Async-from-Sync</text>
+                <text x="512" y="84" font-weight="700" fill="#991b1b">3. нет обоих</text><text x="512" y="104" fill="#991b1b">TypeError: … is not async iterable</text>
+            </g>
+            <g fill="none" stroke="#b45309" stroke-width="1.8">
+                <path d="M 202 90 L 208 90"/><path d="M 404 90 L 410 90"/><path d="M 108 118 L 108 140"/><path d="M 310 118 L 310 129 L 120 129 L 120 140"/>
+            </g>
+            <g fill="#b45309">
+                <path d="M 216 90 L 207 85 L 207 95 Z"/><path d="M 418 90 L 409 85 L 409 95 Z"/><path d="M 108 148 L 103 139 L 113 139 Z"/><path d="M 120 148 L 115 139 L 125 139 Z"/>
+            </g>
+            <rect x="14" y="148" width="290" height="50" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#166534">
+                <text x="159" y="168" font-weight="700">4. await iterator.next()</text><text x="159" y="188">done: false → x = value, тело, снова 4</text>
+            </g>
+            <rect x="318" y="148" width="288" height="50" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#334155">
+                <text x="462" y="168">done: true → цикл окончен;</text><text x="462" y="188">break, ошибка, return → await return()</text>
+            </g>
+            <path d="M 304 173 L 310 173" fill="none" stroke="#64748b" stroke-width="1.8"/><path d="M 318 173 L 309 168 L 309 178 Z" fill="#64748b"/>
+            <rect x="14" y="214" width="592" height="30" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="233" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Шаг 4 — await: следующее значение не запрашивается, пока тело цикла не закончено.</text>
+        </svg>
+        <figcaption>Шаги <code>for await...of</code></figcaption>
+    </figure>
+
+    <p>Порядок хорошо виден, если генератор и цикл пишут в консоль по очереди:</p>
+
+    <pre class="code js">async function* lessons() {
+  try {
+    console.log("генератор: загружаю урок 1");
+    yield await later("урок 1", 100);
+    console.log("генератор: загружаю урок 2");
+    yield await later("урок 2", 100);
+    console.log("генератор: загружаю урок 3");
+    yield await later("урок 3", 100);
+  } finally {
+    console.log("генератор: закрыт");
+  }
+}
+(async () =&gt; {
+  for await (const lesson of lessons()) {
+    console.log("цикл:", lesson);
+    if (lesson === "урок 2") break;
+  }
+  console.log("после цикла");
+})();</pre>
+
+    <div class="result-box">
+        генератор: загружаю урок 1<br>
+        цикл: урок 1<br>
+        генератор: загружаю урок 2<br>
+        цикл: урок 2<br>
+        генератор: закрыт<br>
+        после цикла
+    </div>
+
+    <p>Генератор и цикл работают по очереди, как на схеме дня 12, только с ожиданием. Урок 3 не загружался вовсе: справочник
+    пишет, что при досрочном выходе — <code>break</code>, брошенная ошибка, <code>return</code> — цикл вызывает
+    <code>return()</code> итератора и <strong>дожидается</strong> его промиса, прежде чем выйти. Поэтому «закрыт» стоит
+    раньше, чем «после цикла». Асинхронный генератор не делает работы, которую никто не просил.</p>
+
+    <h2 id="yield">5. yield и return ждут сами</h2>
+
+    <p>В асинхронном генераторе <code>yield промис</code> работает так же, как <code>yield await промис</code>: справочник
+    обещает, что <code>value</code> в результате никогда не бывает промисом. То же с <code>return</code>:</p>
+
+    <pre class="code js">async function* g() {
+  yield later("без await", 100);
+  yield await later("с await", 100);
+  return later("итог", 100);
+}
+(async () =&gt; {
+  const it = g();
+  console.log(await it.next());
+  console.log(await it.next());
+  console.log(await it.next());
+  for await (const v of g()) console.log("for await:", v);
+})();</pre>
+
+    <div class="result-box">
+        {value: 'без await', done: false}<br>
+        {value: 'с await', done: false}<br>
+        {value: 'итог', done: true}<br>
+        for await: без await<br>
+        for await: с await
+    </div>
+
+    <p>Значение <code>return</code> видно только через <code>next()</code>: <code>for await</code>, как
+    <code>for...of</code> дня 12, его не показывает. Если отданный промис отклонится, ошибка придёт в генератор на место
+    <code>yield</code>, а из него — в цикл:</p>
+
+    <pre class="code js">async function* risky() {
+  try {
+    yield "первое";
+    yield failLater("нет связи", 100);
+    yield "третье";
+  } finally {
+    console.log("risky закрыт");
+  }
+}
+(async () =&gt; {
+  try {
+    for await (const v of risky()) console.log(v);
+  } catch (e) {
+    console.log("поймали:", e.message);
+  }
+})();</pre>
+
+    <div class="result-box">
+        первое<br>
+        risky закрыт<br>
+        поймали: нет связи
+    </div>
+
+    <p>Генератор получил ошибку на месте второго <code>yield</code>, <code>finally</code> выполнился, и цикл бросил ту же
+    ошибку дальше — её поймал <code>try...catch</code> вокруг цикла. «Третье» не напечаталось: закрытый генератор больше
+    ничего не отдаёт. Поймать ошибку мог бы и сам генератор — своим <code>try...catch</code> вокруг <code>yield</code>.</p>
+
+    <h2 id="methods">6. next, return, throw и очередь вызовов</h2>
+
+    <p>Методы те же, что у генератора дня 12, только каждый возвращает промис.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator/next"><code>next(value)</code></a>
+    передаёт ответ в <code>yield</code>, и первый аргумент так же теряется: справочник объясняет, что генератор ещё
+    ничего не отдавал. Викторина дня 12, только вопросы приходят с сервера:</p>
+
+    <pre class="code js">async function* quiz() {
+  let score = 0;
+  for (const [word, ru] of [["book", "книга"], ["water", "вода"]]) {
+    const answer = yield await later(`Перевод слова ${word}?`, 100);
+    if (answer === ru) score++;
+  }
+  return `верно ${score} из 2`;
+}
+(async () =&gt; {
+  const session = quiz();
+  console.log((await session.next("пропадёт")).value);
+  console.log((await session.next("книга")).value);
+  console.log((await session.next("хлеб")).value);
+})();</pre>
+
+    <div class="result-box">
+        Перевод слова book?<br>
+        Перевод слова water?<br>
+        верно 1 из 2
+    </div>
+
+    <p>Новое — что будет, если звать <code>next()</code>, не дожидаясь ответа. Пример справочника: четыре вызова подряд, у
+    каждого значения задержка 300 мс.</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+async function* createAsyncGenerator() {
+  yield later(1, 300);
+  yield later(2, 300);
+  yield later(3, 300);
+}
+const asyncGen = createAsyncGenerator();
+asyncGen.next().then((res) =&gt; console.log(res, since()));
+asyncGen.next().then((res) =&gt; console.log(res, since()));
+asyncGen.next().then((res) =&gt; console.log(res, since()));
+asyncGen.next().then((res) =&gt; console.log(res, since()));</pre>
+
+    <div class="result-box">
+        {value: 1, done: false} 300 мс<br>
+        {value: 2, done: false} 600 мс<br>
+        {value: 3, done: false} 900 мс<br>
+        {value: undefined, done: true} 900 мс
+    </div>
+
+    <p>Генератор не запустился четыре раза одновременно: вызовы встали в <strong>очередь</strong>, и каждый
+    <code>yield</code> ответил на первый вызов в ней. Отсюда 300, 600 и 900 мс, а не трижды по 300. Так же встаёт в
+    очередь <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator/return"><code>return()</code></a>,
+    вызванный, пока генератор занят. Он сработает на ближайшем <code>yield</code> — как <code>return</code> в этом месте
+    тела, — и <code>finally</code> успеет выполниться:</p>
+
+    <pre class="code js">async function* createAsyncGenerator() {
+  try {
+    yield later(1, 300);
+    yield later(2, 300);
+  } finally {
+    console.log("finally");
+  }
+}
+const asyncGen = createAsyncGenerator();
+asyncGen.next().then((res) =&gt; console.log(res));
+asyncGen.return("foo").then((res) =&gt; console.log(res));
+asyncGen.next().then((res) =&gt; console.log(res));</pre>
+
+    <div class="result-box">
+        {value: 1, done: false}<br>
+        finally<br>
+        {value: 'foo', done: true}<br>
+        {value: undefined, done: true}
+    </div>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator/throw"><code>throw(ошибка)</code></a>
+    работает так же: ошибка приходит на место <code>yield</code>. Генератор может поймать её своим <code>try...catch</code>
+    и продолжить — тогда промис выполнится следующим значением; не поймает — промис отклонится. Сводка:</p>
+
+    <table>
+        <thead><tr><th>Вызов</th><th>Генератор ждёт на <code>yield</code></th><th>До первого <code>next()</code></th><th>Тело кончилось</th></tr></thead>
+        <tbody>
+            <tr><td><code>next(v)</code></td><td>продолжает, <code>v</code> — результат <code>yield</code></td><td>начинает тело, <code>v</code> теряется</td><td><code>{ value: undefined, done: true }</code></td></tr>
+            <tr><td><code>return(v)</code></td><td><code>return v</code> на месте <code>yield</code>, <code>finally</code> выполняется</td><td>закрывает: <code>{ value: v, done: true }</code></td><td><code>{ value: v, done: true }</code></td></tr>
+            <tr><td><code>throw(e)</code></td><td><code>throw e</code> на месте <code>yield</code></td><td>закрывает, промис отклонён с <code>e</code></td><td>промис отклонён с <code>e</code></td></tr>
+            <tr><td>любой, пока генератор работает</td><td colspan="3">встаёт в очередь и выполнится в свой черёд</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="protocol">7. Symbol.asyncIterator: свой асинхронный перебор</h2>
+
+    <p><code>for await</code> ищет у источника метод
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/asyncIterator"><code>[Symbol.asyncIterator]</code></a>
+    — встроенный символ дня 11. Договор тот же, что у обычного итератора, но <code>next()</code> возвращает промис
+    результата. Пример справочника написан руками, без генератора (строку в <code>return()</code> мы добавили):</p>
+
+    <pre class="code js">const LIMIT = 3;
+const asyncIterable = {
+  [Symbol.asyncIterator]() {
+    let i = 0;
+    return {
+      next() {
+        const done = i === LIMIT;
+        const value = done ? undefined : i++;
+        return Promise.resolve({ value, done });
+      },
+      return() {
+        console.log("return() вызван");
+        return { done: true };
+      },
+    };
+  },
+};
+(async () =&gt; {
+  for await (const num of asyncIterable) console.log(num);
+  for await (const num of asyncIterable) {
+    console.log("break на", num);
+    break;
+  }
+})();</pre>
+
+    <div class="result-box">
+        0<br>
+        1<br>
+        2<br>
+        break на 0<br>
+        return() вызван
+    </div>
+
+    <p><code>return()</code> необязателен: цикл зовёт его только при досрочном выходе, проверив, что метод есть.
+    Справочник возвращает из него обычный объект — цикл всё равно его дождётся: <code>await</code> обычного значения
+    просто отдаёт его (день 28). Каждый цикл вызывает <code>[Symbol.asyncIterator]()</code> заново, поэтому второй проход
+    снова начался с 0. Короче то же пишется асинхронным генератором-методом. Пример справочника, задержки уменьшены:</p>
+
+    <pre class="code js">const delayedResponses = {
+  delays: [200, 100],
+  async *[Symbol.asyncIterator]() {
+    for (const delay of this.delays) {
+      await wait(delay);
+      yield `ответ через ${delay} мс`;
+    }
+  },
+};
+(async () =&gt; {
+  for await (const response of delayedResponses) console.log(response);
+})();</pre>
+
+    <div class="result-box">
+        ответ через 200 мс<br>
+        ответ через 100 мс
+    </div>
+
+    <p>Справочник предупреждает: асинхронно перебираемыми делают списки и потоки данных, а не замену слушателям событий
+    дня 27 Essentials. Из встроенных объектов языка так перебираются только объекты асинхронных генераторов, в браузере —
+    ещё поток <code>ReadableStream</code>.</p>
+
+    <h2 id="sync">8. for await и обычные итерируемые</h2>
+
+    <p>Если <code>[Symbol.asyncIterator]</code> нет, цикл берёт <code>[Symbol.iterator]</code> и оборачивает обычный
+    итератор в асинхронный: каждое значение ждётся через <code>await</code>. Пример справочника — генератор, который
+    отдаёт вперемешку числа и промисы:</p>
+
+    <pre class="code js">function* generator() {
+  yield 0;
+  yield Promise.resolve(1);
+  yield 2;
+}
+(async () =&gt; {
+  for await (const num of generator()) console.log("for await:", num);
+})();
+for (const numOrPromise of generator()) console.log("for...of:", numOrPromise);</pre>
+
+    <div class="result-box">
+        for...of: 0<br>
+        for...of: Promise {&lt;fulfilled&gt;: 1}<br>
+        for...of: 2<br>
+        for await: 0<br>
+        for await: 1<br>
+        for await: 2
+    </div>
+
+    <p><code>for...of</code> отдал промис как есть, <code>for await</code> его дождался — и напечатал всё позже, хотя стоит
+    выше: каждый его шаг — микрозадача. Поэтому, предупреждает справочник, по обычному итерируемому <code>for await</code>
+    медленнее. Самый частый случай — массив промисов, и здесь важно, когда начинается работа:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+(async () =&gt; {
+  for await (const x of [later("медленное", 300), later("быстрое", 100)]) console.log(x, since());
+})();</pre>
+
+    <div class="result-box">
+        медленное 300 мс<br>
+        быстрое 300 мс
+    </div>
+
+    <p>Оба промиса созданы в момент записи массива, обе загрузки шли одновременно, а цикл лишь забирает результаты по
+    порядку. Ловушка — отказ, который случился раньше своей очереди:</p>
+
+    <pre class="code js">(async () =&gt; {
+  try {
+    for await (const x of [later("первое", 300), failLater("второе: нет связи", 100)]) console.log(x);
+  } catch (e) {
+    console.log("поймали:", e.message);
+  }
+})();</pre>
+
+    <div class="result-box">
+        Uncaught (in promise) Error: второе: нет связи<br>
+        первое<br>
+        поймали: второе: нет связи
+    </div>
+
+    <p>Второй промис отклонился на 100-й миллисекунде, когда обработчика у него ещё нет: цикл ждёт первый. Chrome сообщает
+    «Uncaught (in promise)», а через 200 мс, когда <code>catch</code> всё-таки ловит ошибку, отзывает сообщение.
+    Независимые загрузки ждут через <code>Promise.all</code> дня 27, ленивый перебор пишут асинхронным генератором.</p>
+
+    <h2 id="pages">9. Практика: постраничная загрузка</h2>
+
+    <p>Практика плана. Сервер отдаёт журнал по две записи на страницу, и в каждом ответе — номер следующей страницы
+    (<code>null</code> у последней). Найдём первого отличника:</p>
+
+    <pre class="code js">const pagesOnServer = [
+  [{ name: "Аман", mark: 4 }, { name: "Мерет", mark: 3 }],
+  [{ name: "Сапар", mark: 4 }, { name: "Айна", mark: 5 }],
+  [{ name: "Гульнар", mark: 5 }, { name: "Ильяс", mark: 4 }],
+];
+let requests = 0;
+function loadPage(n) {
+  requests++;
+  console.log(`запрос страницы ${n}`);
+  return later({ students: pagesOnServer[n - 1], next: n &lt; pagesOnServer.length ? n + 1 : null }, 100);
+}
+async function* allStudents() {
+  let page = 1;
+  while (page) {
+    const { students, next } = await loadPage(page);
+    yield* students;
+    page = next;
+  }
+}
+(async () =&gt; {
+  for await (const student of allStudents()) {
+    if (student.mark === 5) {
+      console.log("первый отличник:", student.name, "| запросов:", requests);
+      break;
+    }
+  }
+})();</pre>
+
+    <div class="result-box">
+        запрос страницы 1<br>
+        запрос страницы 2<br>
+        первый отличник: Айна | запросов: 2
+    </div>
+
+    <p><code>allStudents</code> прячет страницы: снаружи это просто поток учеников. <code>yield*</code> дня 12 в
+    асинхронном генераторе принимает и обычный массив, оборачивая его, как <code>for await</code>. Третья страница не
+    запрашивалась: <code>break</code> закрыл генератор на Айне, и <code>while</code> до следующего <code>loadPage</code> не
+    дошёл. «Сначала скачать весь журнал, потом искать» — три запроса, и чем длиннее журнал, тем больше лишних.</p>
+
+    <h2 id="ticker">10. Практика: генератор «раз в секунду»</h2>
+
+    <p>Практика плана. Бесконечный генератор, который раз в секунду отдаёт номер тика, — асинхронный родственник
+    <code>counter</code> дня 13:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+async function* every(ms) {
+  let tick = 0;
+  try {
+    while (true) {
+      await wait(ms);
+      yield ++tick;
+    }
+  } finally {
+    console.log("таймер остановлен");
+  }
+}
+(async () =&gt; {
+  for await (const tick of every(1000)) {
+    console.log("тик", tick, since());
+    if (tick === 3) break;
+  }
+})();</pre>
+
+    <div class="result-box">
+        тик 1 1000 мс<br>
+        тик 2 2000 мс<br>
+        тик 3 3000 мс<br>
+        таймер остановлен
+    </div>
+
+    <p>Бесконечный <code>while (true)</code> безопасен: между тиками генератор стоит на паузе, а <code>break</code>
+    закрывает его, и <code>finally</code> сообщает об остановке. Чем это отличается от <code>setInterval</code> дня 30
+    Essentials? Генератор не тикает, пока его не спросили. Пусть тик — каждые 300 мс, а тело цикла занято 600 мс:</p>
+
+    <pre class="code js">const start = Date.now();
+const since = () =&gt; `${Math.round((Date.now() - start) / 100) * 100} мс`;
+async function* every(ms) {
+  let tick = 0;
+  while (true) {
+    await wait(ms);
+    yield ++tick;
+  }
+}
+(async () =&gt; {
+  for await (const tick of every(300)) {
+    console.log("тик", tick, since());
+    if (tick === 3) break;
+    await wait(600);
+  }
+})();</pre>
+
+    <div class="result-box">
+        тик 1 300 мс<br>
+        тик 2 1200 мс<br>
+        тик 3 2100 мс
+    </div>
+
+    <p>Между тиками 900 мс, а не 300: пока цикл занят, генератор стоит на <code>yield</code>, и отсчёт начинается, только
+    когда цикл попросит значение. <code>setInterval</code> с тем же шагом за 2,1 секунды сработал бы 7 раз — его вызовы
+    приходят сами, нужны они или нет. Значения генератора «вытягивают», события «приходят» — поэтому справочник и не
+    советует заменять события асинхронными итераторами.</p>
+
+    <h2 id="fromasync">11. Практика: Array.fromAsync против цикла</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fromAsync"><code>Array.fromAsync(items)</code></a>
+    собирает асинхронный поток в массив и возвращает промис. Справочник даёт ему эквивалент — цикл с
+    <code>push</code>:</p>
+
+    <pre class="code js">async function* threeWords() {
+  yield "book";
+  yield await later("water", 100);
+  yield "bread";
+}
+(async () =&gt; {
+  const result = [];
+  for await (const element of threeWords()) result.push(element);
+  console.log(result, await Array.fromAsync(threeWords()));
+})();
+// (3) ['book', 'water', 'bread'] (3) ['book', 'water', 'bread']</pre>
+
+    <p>Принимает он то же, что <code>Array.from</code> дня 19 Essentials, и ещё асинхронно перебираемое. Порядок поиска:
+    асинхронный перебор, потом обычный, потом «похожий на массив» объект с <code>length</code>. Значения обычного
+    перебора и похожего на массив ждутся, а результат второго аргумента <code>mapFn</code> ждётся всегда:</p>
+
+    <pre class="code js">Array.fromAsync(new Set([Promise.resolve(1), later(2, 100)])).then((a) =&gt; console.log(a));
+Array.fromAsync({ length: 2, 0: later("a", 100), 1: "b" }).then((a) =&gt; console.log(a));
+Array.fromAsync([1, 2], (x) =&gt; later(x * 10, 100)).then((a) =&gt; console.log(a));</pre>
+
+    <div class="result-box">
+        (2) [1, 2]<br>
+        (2) ['a', 'b']<br>
+        (2) [10, 20]
+    </div>
+
+    <p>Против <code>Promise.all</code> справочник ставит два отличия. <code>Array.fromAsync</code> ждёт значения по одному
+    и берёт следующее, только когда готово текущее, — лениво. <code>Promise.all</code> забирает всё сразу и ждёт
+    одновременно:</p>
+
+    <pre class="code js">function* makeIterableOfPromises() {
+  for (let i = 0; i &lt; 3; i++) yield later(i, 100);
+}
+(async () =&gt; {
+  let start = Date.now();
+  const a = await Array.fromAsync(makeIterableOfPromises());
+  console.log("Array.fromAsync:", a, Math.round((Date.now() - start) / 100) * 100, "мс");
+  start = Date.now();
+  const b = await Promise.all(makeIterableOfPromises());
+  console.log("Promise.all:", b, Math.round((Date.now() - start) / 100) * 100, "мс");
+})();</pre>
+
+    <div class="result-box">
+        Array.fromAsync: (3) [0, 1, 2] 300 мс<br>
+        Promise.all: (3) [0, 1, 2] 100 мс
+    </div>
+
+    <p>Генератор создаёт промис, только когда его просят: у <code>Array.fromAsync</code> таймеры шли друг за другом, у
+    <code>Promise.all</code> — вместе. С массивом готовых промисов разницы во времени не было бы, как в разделе 8.
+    Бесконечный поток <code>Array.fromAsync</code> не соберёт никогда, а метода <code>take</code> дня 13 у асинхронных
+    итераторов нет: <code>every(100).take</code> — <code>undefined</code>. Свой <code>take</code> пишется асинхронным
+    генератором:</p>
+
+    <pre class="code js">async function* every(ms) {
+  let tick = 0;
+  try {
+    while (true) {
+      await wait(ms);
+      yield ++tick;
+    }
+  } finally {
+    console.log("таймер остановлен");
+  }
+}
+async function* take(source, n) {
+  for await (const value of source) {
+    yield value;
+    if (--n === 0) return;
+  }
+}
+const start = Date.now();
+Array.fromAsync(take(every(100), 3), (tick) =&gt; `тик ${tick}`).then((ticks) =&gt; console.log(ticks, `${Math.round((Date.now() - start) / 100) * 100} мс`));</pre>
+
+    <div class="result-box">
+        таймер остановлен<br>
+        (3) ['тик 1', 'тик 2', 'тик 3'] 300 мс
+    </div>
+
+    <p><code>return</code> внутри <code>for await</code> — тоже досрочный выход: цикл закрыл <code>every</code>, и его
+    <code>finally</code> напечатал строку раньше результата. Что когда брать:</p>
+
+    <table>
+        <thead><tr><th>Задача</th><th>Чем</th></tr></thead>
+        <tbody>
+            <tr><td>нужен весь результат массивом</td><td><code>await Array.fromAsync(source)</code></td></tr>
+            <tr><td>обработка по одному, ранний выход, показ хода работы</td><td><code>for await (const x of source)</code></td></tr>
+            <tr><td>независимые промисы, все известны заранее</td><td><code>await Promise.all(promises)</code> — день 27</td></tr>
+        </tbody>
+    </table>
+
+    <h2 id="objects">12. AsyncIterator и AsyncGeneratorFunction</h2>
+
+    <p>Цепочка прототипов — как у генератора дня 12, только со словом Async:</p>
+
+    <pre class="code js">async function* lessons() { yield 1; }
+const gen = lessons();
+const proto = Object.getPrototypeOf;
+const AsyncIteratorPrototype = proto(proto(proto(gen)));
+console.log(proto(gen) === lessons.prototype, Object.prototype.toString.call(gen), typeof AsyncIterator);
+console.log(Object.getOwnPropertySymbols(AsyncIteratorPrototype), gen[Symbol.asyncIterator]() === gen);
+// true [object AsyncGenerator] undefined
+// (2) [Symbol(Symbol.asyncIterator), Symbol(Symbol.asyncDispose)] true</pre>
+
+    <p>Путь такой: <code>gen</code> → <code>lessons.prototype</code> (своё у каждой функции, пустое) →
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator"><code>AsyncGenerator.prototype</code></a>
+    с методами <code>next</code>, <code>return</code>, <code>throw</code> →
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncIterator"><code>AsyncIterator.prototype</code></a>
+    → <code>Object.prototype</code>. Справочник пишет «AsyncGenerator.prototype» для наглядности, а точнее это
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGeneratorFunction/prototype"><code>AsyncGeneratorFunction.prototype.prototype</code></a>:
+    глобальных имён <code>AsyncGenerator</code> и <code>AsyncIterator</code> нет.</p>
+
+    <p>У <code>AsyncIterator.prototype</code> два метода-символа.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncIterator/Symbol.asyncIterator"><code>[Symbol.asyncIterator]()</code></a>
+    возвращает сам объект — поэтому объект генератора годится для <code>for await</code>.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncIterator/Symbol.asyncDispose"><code>[Symbol.asyncDispose]()</code></a>
+    вызывает и ждёт <code>return()</code> для объявления <code>await using</code> — курс 3. <code>[Symbol.iterator]</code>
+    нет: <code>for...of</code> даёт <code>TypeError</code>. Нет и методов <code>map</code>, <code>take</code> дня 13 —
+    справочник обещает их вместе с глобальным <code>AsyncIterator</code>.</p>
+
+    <pre class="code js">const AsyncGeneratorFunction = async function* () {}.constructor;
+const double = new AsyncGeneratorFunction("a", "yield a * 2;");
+double(10).next().then((r) =&gt; console.log(r.value));
+console.log(AsyncGeneratorFunction.name, typeof globalThis.AsyncGeneratorFunction, double.name, Object.hasOwn(double, "prototype"), Object.hasOwn(double.prototype, "constructor"));
+try {
+  new double(1);
+} catch (e) {
+  console.log(e.name, e.message);
+}</pre>
+
+    <div class="result-box">
+        AsyncGeneratorFunction undefined anonymous true false<br>
+        TypeError double is not a constructor<br>
+        20
+    </div>
+
+    <p>Каждый асинхронный генератор — объект
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGeneratorFunction"><code>AsyncGeneratorFunction</code></a>,
+    наследника <code>Function</code>. Как <code>AsyncFunction</code> дня 28, он не глобальный;
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGeneratorFunction/AsyncGeneratorFunction">конструктор</a>
+    работает и без <code>new</code>, и на него распространяются все предупреждения о <code>Function()</code> дня 4. Свой
+    <code>prototype</code> у функции есть, но без <code>constructor</code>; с <code>new</code> её не вызвать.</p>
+
+    <h2 id="errors">13. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Что видно в Chrome</th><th>Что не так</th></tr></thead>
+        <tbody>
+            <tr><td><code>function f() { for await (…) }</code></td><td><code>SyntaxError: Unexpected reserved word</code></td><td>цикл — только в <code>async</code>-функции или модуле</td></tr>
+            <tr><td><code>const g = async *() =&gt; {}</code></td><td><code>SyntaxError: Malformed arrow function parameter list</code></td><td>стрелочного асинхронного генератора нет</td></tr>
+            <tr><td><code>async function* g(x = await 1) {}</code></td><td><code>SyntaxError: Illegal await-expression in formal parameters of async function</code></td><td><code>await</code> в параметрах запрещён</td></tr>
+            <tr><td><code>yield</code> в колбэке <code>forEach</code> внутри генератора</td><td><code>SyntaxError: Unexpected identifier 'x'</code></td><td>колбэк — своя функция, как на дне 12</td></tr>
+            <tr><td><code>for (const x of gen)</code></td><td><code>TypeError: gen is not iterable</code></td><td>нужен <code>for await</code></td></tr>
+            <tr><td><code>for await (const x of 5)</code></td><td><code>TypeError: 5 is not async iterable</code></td><td>нет ни одного из двух методов-символов</td></tr>
+            <tr><td><code>next()</code> выполняет промис числом</td><td><code>TypeError: Iterator result 5 is not an object</code></td><td>нужен объект <code>{ value, done }</code></td></tr>
+            <tr><td><code>new gen()</code></td><td><code>TypeError: gen is not a constructor</code></td><td>асинхронные генераторы не конструкторы</td></tr>
+            <tr><td><code>gen.map(…)</code></td><td><code>TypeError: gen.map is not a function</code></td><td>методов дня 13 нет — свой генератор</td></tr>
+            <tr><td><code>gen.next.call({})</code></td><td>отклонённый промис: <code>Method [AsyncGenerator].prototype.next called on incompatible receiver #&lt;Object&gt;</code></td><td>чужой объект; ошибка не бросается, а отклоняет промис</td></tr>
+            <tr><td><code>AsyncGeneratorFunction</code> без объявления</td><td><code>ReferenceError: AsyncGeneratorFunction is not defined</code></td><td>не глобальный</td></tr>
+            <tr><td><code>Array.fromAsync(null)</code></td><td>отклонённый промис: <code>Cannot read properties of null (reading 'Symbol(Symbol.asyncIterator)')</code></td><td>нужен перебираемый или похожий на массив</td></tr>
+            <tr><td><code>for await</code> по массиву промисов, поздний отказ раньше</td><td><code>Uncaught (in promise)</code>, потом отзыв</td><td>независимые — <code>Promise.all</code></td></tr>
+            <tr><td><code>Array.fromAsync</code> бесконечного генератора</td><td>промис не выполнится никогда</td><td>ограничить своим <code>take</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Методы асинхронного генератора и <code>Array.fromAsync</code> не бросают ошибку, а отклоняют свой промис. Последняя
+    строка — тихая: ни сообщения, ни результата.</p>
+
+    <h2 id="spec">14. Что говорит спецификация</h2>
+
+    <p>Подробно — раздел <a href="https://tc39.es/ecma262/2026/#sec-asyncgenerator-objects">27.6 AsyncGenerator
+    Objects</a>. Он отвечает на вопрос раздела 6: откуда очередь.</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-asyncgenerator-intances">27.6.2</a>, таблица 90 —
+            слоты. У <code>[[AsyncGeneratorState]]</code> пять значений: к четырём состояниям генератора дня 12
+            (suspended-start, suspended-yield, executing, completed) добавилось draining-queue — «разбирает очередь».
+            <code>[[AsyncGeneratorQueue]]</code> — список запросов
+            <a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratorrequest-records">AsyncGeneratorRequest</a> (27.6.3.1):
+            чем возобновить генератор (значение, <code>return</code> или <code>throw</code>) и промис с его
+            <code>resolve</code>/<code>reject</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-asyncgenerator-prototype-next">27.6.1.2 next</a> по шагам: создать
+            промис; если <code>this</code> не асинхронный генератор — <strong>отклонить</strong> промис (IfAbruptRejectPromise),
+            а не бросить ошибку; если генератор completed — выполнить промис с <code>{ value: undefined, done: true }</code>;
+            иначе дописать запрос в очередь
+            (<a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratorenqueue">AsyncGeneratorEnqueue</a>, 27.6.3.4) и, если
+            генератор на паузе, возобновить его. Если он executing — запрос просто ждёт в очереди.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-yield">Yield</a> (27.5.3.7): в асинхронном генераторе значение
+            сначала проходит через Await, потом
+            <a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratoryield">AsyncGeneratorYield</a> (27.6.3.8) выполняет
+            промис первого запроса и убирает его из очереди. Если в очереди есть ещё запрос, примечание говорит: выполнение
+            продолжается <em>без приостановки</em> генератора. Это и есть ответ на 300, 600, 900 мс.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-asyncgenerator-prototype-return">27.6.1.3 return</a>: на паузе у
+            <code>yield</code> — возобновить с <code>return</code>-завершением (поэтому выполняется <code>finally</code>); до
+            старта или после конца —
+            <a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratorawaitreturn">AsyncGeneratorAwaitReturn</a> (27.6.3.9):
+            дождаться значения и выполнить промис с <code>done: true</code>. <code>return</code> в теле тоже ждёт свой
+            операнд — <a href="https://tc39.es/ecma262/2026/#sec-return-statement-runtime-semantics-evaluation">14.10.1</a>.
+            <a href="https://tc39.es/ecma262/2026/#sec-asyncgenerator-prototype-throw">27.6.1.4 throw</a> до старта
+            переводит генератор в completed и отклоняет промис.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratorstart">AsyncGeneratorStart</a> (27.6.3.2): когда тело
+            кончилось, генератор переходит в draining-queue, выполняет промис первого запроса с <code>done: true</code>, и
+            <a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratordrainqueue">AsyncGeneratorDrainQueue</a> (27.6.3.10)
+            отвечает остальным тем же — четвёртый вызов раздела 6.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 230" role="img" aria-label="Очередь запросов асинхронного генератора. Вызывающий код трижды вызывает методы: next, next, return. Каждый вызов создаёт промис и дописывает запрос в очередь AsyncGeneratorQueue. Генератор в состоянии executing берёт первый запрос: yield выполняет его промис и, если очередь не пуста, продолжает без паузы. Когда очередь пуста, генератор встаёт на паузу suspended-yield">
+            <rect x="14" y="14" width="170" height="146" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="99" y="36" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">вызывающий код</text>
+            <g font-family="Consolas, monospace" font-size="11" fill="#334155">
+                <text x="30" y="66">g.next()</text><text x="30" y="92">g.next()</text><text x="30" y="118">g.return("стоп")</text>
+            </g>
+            <text x="30" y="146" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">не дожидаясь ответов</text>
+            <rect x="218" y="14" width="186" height="146" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="311" y="36" text-anchor="middle" font-family="Consolas, monospace" font-size="10.5" font-weight="700" fill="#92400e">[[AsyncGeneratorQueue]]</text>
+            <g fill="#ffffff" stroke="#f59e0b" stroke-width="1.2">
+                <rect x="232" y="48" width="158" height="26" rx="6"/><rect x="232" y="80" width="158" height="26" rx="6"/><rect x="232" y="112" width="158" height="26" rx="6"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#92400e">
+                <text x="311" y="65">1. next → промис 1</text><text x="311" y="97">2. next → промис 2</text><text x="311" y="129">3. return → промис 3</text>
+            </g>
+            <rect x="438" y="14" width="168" height="146" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+            <text x="522" y="36" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#166534">генератор: executing</text>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#166534">
+                <text x="522" y="64">yield выполняет промис</text><text x="522" y="82">первого запроса;</text>
+                <text x="522" y="106">очередь не пуста —</text><text x="522" y="124">дальше без паузы;</text><text x="522" y="148">пуста — suspended-yield</text>
+            </g>
+            <g fill="none" stroke-width="1.8">
+                <path d="M 184 87 L 210 87" stroke="#b45309"/><path d="M 404 61 L 430 61" stroke="#16a34a"/>
+            </g>
+            <g>
+                <path d="M 218 87 L 209 82 L 209 92 Z" fill="#b45309"/><path d="M 438 61 L 429 56 L 429 66 Z" fill="#16a34a"/>
+            </g>
+            <rect x="14" y="176" width="592" height="46" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="11.5" text-anchor="middle" fill="#334155">
+                <text x="310" y="195">Пока генератор занят, next, return и throw только встают в очередь (27.6.3.4);</text>
+                <text x="310" y="213">каждый yield отвечает на первый запрос, и ответы идут в порядке вызовов.</text>
+            </g>
+        </svg>
+        <figcaption>27.6: очередь запросов асинхронного генератора</figcaption>
+    </figure>
+
+    <p>Кратко — остальное:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-properties-of-asyncgenerator-prototype">27.6.1</a> — объект
+            %AsyncGeneratorPrototype%: прототип — %AsyncIteratorPrototype%, <code>constructor</code> —
+            <code>AsyncGeneratorFunction.prototype</code>, <code>Symbol.toStringTag</code> — «AsyncGenerator»;
+            <a href="https://tc39.es/ecma262/2026/#sec-asyncgenerator-abstract-operations">27.6.3</a> — запись запроса и
+            девять внутренних операций, пять из них прочитаны выше.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratorfunction-objects">27.4 AsyncGeneratorFunction
+            Objects</a>: <a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratorfunction-constructor">27.4.1</a> —
+            конструктор, вызов без <code>new</code> равен вызову с <code>new</code>;
+            <a href="https://tc39.es/ecma262/2026/#sec-properties-of-asyncgeneratorfunction">27.4.2</a> — его
+            <code>length</code> 1 и имя;
+            <a href="https://tc39.es/ecma262/2026/#sec-properties-of-asyncgeneratorfunction-prototype">27.4.3</a> — его
+            прототип, сам не функция;
+            <a href="https://tc39.es/ecma262/2026/#sec-asyncgeneratorfunction-instances">27.4.4</a> — у каждой функции свой
+            <code>prototype</code>, и примечание: в нём нет <code>constructor</code>, в отличие от обычных функций.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-asynciteratorprototype">27.1.4</a> — %AsyncIteratorPrototype%: в
+            стандарте у него один метод, <code>[Symbol.asyncIterator]</code>, «вернуть this»; примечание называет объект
+            местом для будущих общих методов. <code>[Symbol.asyncDispose]</code> в текст 2026 года ещё не вошёл, хотя в
+            Chrome есть — как <code>[Symbol.dispose]</code> дня 13.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-async-from-sync-iterator-objects">27.1.5</a> — объекты
+            Async-from-Sync, недоступные коду: обёртка обычного итератора (CreateAsyncFromSyncIterator, 27.1.5.1). Её
+            <code>next</code> ждёт <code>value</code> через PromiseResolve, а если промис отклонён — закрывает обычный
+            итератор (closeOnRejection). Поэтому в примере справочника с отклонённым промисом в обычном генераторе
+            успевает выполниться его <code>finally</code>.</li>
+        <li>Цикл: <a href="https://tc39.es/ecma262/2026/#sec-getiterator">GetIterator</a> (7.4.4) с видом async ищет
+            сначала <code>%Symbol.asyncIterator%</code>, потом <code>%Symbol.iterator%</code> с обёрткой;
+            <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset">14.7.5.7</a>
+            добавляет к шагу <code>next</code> одно слово — Await; досрочный выход идёт через
+            <a href="https://tc39.es/ecma262/2026/#sec-asynciteratorclose">AsyncIteratorClose</a> (7.4.14), который ждёт
+            результат <code>return()</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-array.fromasync">23.1.2.2 Array.fromAsync</a> начинается словами
+            «This async function»: это <code>async</code>-функция спецификации, поэтому любая ошибка отклоняет промис.
+            Внутри — тот же цикл с Await, а у похожего на массив ждётся каждый элемент.</li>
+        <li>Интерфейсы <a href="https://tc39.es/ecma262/2026/#sec-asynciterable-interface">27.1.1.3</a> и
+            <a href="https://tc39.es/ecma262/2026/#sec-asynciterator-interface">27.1.1.4</a> (таблицы 81–83) повторяют
+            договор дня 11 с промисами и добавляют требование: <code>value</code> не должно быть промисом — «однако это
+            требование не проверяется».</li>
+    </ul>
+
+    <h2 id="cards">15. «Карточки»: колода по страницам</h2>
+
+    <p>Колода «Карточек» выросла и хранится на сервере по страницам: восемь слов дня 1 — три страницы. Занятию нужны только
+    первые четыре карточки, и загружать остальное незачем:</p>
+
+    <pre class="code js">const server = [
+  [{ word: "book", ru: "книга" }, { word: "water", ru: "вода" }, { word: "bread", ru: "хлеб" }],
+  [{ word: "apple", ru: "яблоко" }, { word: "house", ru: "дом" }, { word: "window", ru: "окно" }],
+  [{ word: "teacher", ru: "учитель" }, { word: "lesson", ru: "урок" }],
+];
+let requests = 0;
+function fetchPage(n) {
+  requests++;
+  return later({ cards: server[n - 1], next: n &lt; server.length ? n + 1 : null }, 100);
+}
+async function* loadDeck() {
+  let page = 1;
+  try {
+    while (page) {
+      const { cards, next } = await fetchPage(page);
+      yield* cards;
+      page = next;
+    }
+  } finally {
+    console.log(`загрузка остановлена, запросов: ${requests}`);
+  }
+}
+async function* take(source, n) {
+  for await (const card of source) {
+    yield card;
+    if (--n === 0) return;
+  }
+}
+(async () =&gt; {
+  const lesson = await Array.fromAsync(take(loadDeck(), 4), (card) =&gt; `${card.word} — ${card.ru}`);
+  console.log("урок:", lesson.join(", "));
+})();</pre>
+
+    <div class="result-box">
+        загрузка остановлена, запросов: 2<br>
+        урок: book — книга, water — вода, bread — хлеб, apple — яблоко
+    </div>
+
+    <p>Три куска собраны в цепочку, как помощники дня 13: <code>loadDeck</code> прячет страницы, <code>take</code>
+    ограничивает поток, <code>Array.fromAsync</code> собирает массив строк. Четвёртая карточка — первая на второй
+    странице; получив её, <code>take</code> вышел из цикла, цикл закрыл <code>loadDeck</code>, и <code>finally</code>
+    сообщил: запросов два.</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Замените <code>take(loadDeck(), 4)</code> на <code>loadDeck()</code>. Сколько стало
+        запросов и карточек? Почему строка «загрузка остановлена» всё равно напечаталась?
+        <br><br>
+        <strong>Второй.</strong> Уберите <code>async</code> у <code>take</code>. Что увидит консоль и почему не выполнилась
+        ни одна строка программы?
+        <br><br>
+        <strong>Третий.</strong> Сделайте вторую страницу неудачной: для <code>n === 2</code> <code>fetchPage</code>
+        возвращает <code>failLater("страница 2: нет связи", 100)</code>. Что получит урок — три карточки первой страницы или
+        ничего? Чем здесь отличался бы <code>for await</code> с выводом каждой карточки?
+    </div>
+
+    <h2 id="next">16. Итоги модуля I8 и что дальше</h2>
+
+    <table>
+        <thead><tr><th>День</th><th>Тема</th><th>Главное</th></tr></thead>
+        <tbody>
+            <tr><td>26</td><td>Ошибки</td><td>виды <code>Error</code>, <code>cause</code>, свои классы ошибок, справочник ошибок MDN</td></tr>
+            <tr><td>27</td><td>Промисы целиком</td><td><code>all</code>, <code>allSettled</code>, <code>any</code>, <code>race</code>; <code>withResolvers</code>, <code>try</code></td></tr>
+            <tr><td>28</td><td>async изнутри</td><td>задачи и микрозадачи; тело, разрезанное <code>await</code>; <code>return await</code></td></tr>
+            <tr><td>29</td><td>Асинхронные итераторы</td><td><code>async function*</code>, <code>for await</code>, очередь вызовов, <code>Array.fromAsync</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Модуль «Ошибки и асинхронность» закончен. Дальше — модуль I9 «Модули и JSON». День 30 разбирает <code>import</code>
+    и <code>export</code>; там же <code>await</code> и <code>for await</code> заработают на верхнем уровне — в модуле они
+    разрешены без <code>async</code>-обёртки.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function*">async function*</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function*">async function* expression</a></td><td>объявление и выражение, <code>yield</code> промиса</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for-await...of">for await...of</a></td><td>шаги цикла, досрочный выход, обычные итерируемые</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator">AsyncGenerator</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator/next">next()</a></td><td>объект генератора, очередь вызовов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncIterator">AsyncIterator</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/asyncIterator">Symbol.asyncIterator</a></td><td>свой асинхронный перебор, цепочка прототипов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fromAsync">Array.fromAsync()</a></td><td>массив из потока; против <code>Promise.all</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td>ECMA-262, 27.6 AsyncGenerator Objects</td><td>слоты, очередь запросов, шаги <code>next</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator/return">return()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGenerator/throw">throw()</a></td><td>закрыть генератор, бросить в него ошибку</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncIterator/Symbol.asyncIterator">[Symbol.asyncIterator]()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncIterator/Symbol.asyncDispose">[Symbol.asyncDispose]()</a></td><td>вернуть себя; закрыть для <code>await using</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGeneratorFunction">AsyncGeneratorFunction</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGeneratorFunction/AsyncGeneratorFunction">конструктор</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncGeneratorFunction/prototype">prototype</a></td><td>не глобальный; конструктор опасен, как <code>Function</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>27.6.1–27.6.3, 27.4 с подразделами, 27.1.4, 27.1.5</td><td>раздел 14</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// async function* g() { … } — в теле можно и await, и yield; вызов вернёт AsyncGenerator, тело — с первого next()
+// g().next() → Promise {value, done}; yield промис = yield await промис; return тоже ждёт
+// for await (const x of source) { … } — только в async-функции и модуле; ждёт каждое значение
+// источник: [Symbol.asyncIterator]() или обычный [Symbol.iterator]() — его значения ждутся
+// break, ошибка, return в цикле → await source.return() → finally генератора
+// next/return/throw, пока генератор занят, встают в очередь; ответы — в порядке вызовов
+// { async *[Symbol.asyncIterator]() { … } } — свой асинхронный перебор
+// await Array.fromAsync(source, mapFn) — массив; по одному, лениво; Promise.all — все сразу
+// методов map/take у асинхронных итераторов нет — свои async function*</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Что вернёт <code>gen.next()</code> асинхронного генератора, если <code>yield</code> отдаёт обычное число?
+                <details class="answer"><summary>Ответ</summary>
+                    Промис, который выполнится объектом <code>{ value, done }</code>. У асинхронного генератора
+                    <code>next()</code> всегда возвращает промис.
+                </details>
+            </li>
+            <li>Когда выполнится <code>finally</code> генератора, если цикл <code>for await</code> вышел через <code>break</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    До выхода из цикла: цикл вызывает <code>return()</code> генератора и ждёт его промис. Поэтому строка из
+                    <code>finally</code> печатается раньше кода после цикла.
+                </details>
+            </li>
+            <li>Два <code>later</code> в массиве под <code>for await</code> и те же два <code>later</code> в асинхронном
+                генераторе — в чём разница во времени?
+                <details class="answer"><summary>Ответ</summary>
+                    Промисы массива созданы сразу, и загрузки идут одновременно. Генератор создаёт следующий промис, только
+                    когда цикл просит значение, — загрузки идут друг за другом.
+                </details>
+            </li>
+            <li>Что будет, если вызвать <code>next()</code> три раза подряд, не дожидаясь ответов?
+                <details class="answer"><summary>Ответ</summary>
+                    Вызовы встанут в очередь <code>[[AsyncGeneratorQueue]]</code>. Каждый <code>yield</code> ответит на первый
+                    вызов в ней, и промисы выполнятся по порядку.
+                </details>
+            </li>
+            <li>Чем <code>Array.fromAsync(source)</code> отличается от <code>Promise.all(source)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>Array.fromAsync</code> берёт значения по одному и следующее — только когда готово текущее; понимает
+                    асинхронные потоки. <code>Promise.all</code> забирает все значения сразу и ждёт их одновременно.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for-await...of">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

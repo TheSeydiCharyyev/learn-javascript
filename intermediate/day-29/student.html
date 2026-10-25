@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 29 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #f59e0b; }
+        h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 29</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 29. Асинхронные итераторы и генераторы, for await...of</h1>
+    <p class="subtitle">Выжимка лекции: async function*, for await...of, очередь вызовов, Symbol.asyncIterator, Array.fromAsync.</p>
+
+    <h2>Главное</h2>
+
+    <pre class="code js">async function* pages() {
+  try {
+    yield await later(["book", "water"], 100);
+    yield later(["apple"], 100);          // yield ждёт промис сам
+    yield ["teacher"];
+  } finally {
+    console.log("закрыт");                // после break — до выхода из цикла
+  }
+}
+(async () =&gt; {
+  for await (const page of pages()) {
+    console.log(page.join(", "));
+    if (page.includes("apple")) break;
+  }
+  console.log(await Array.fromAsync(pages()));
+})();</pre>
+
+    <h2>Четыре вида функций</h2>
+
+    <table>
+        <thead><tr><th></th><th>одно значение</th><th>много значений</th></tr></thead>
+        <tbody>
+            <tr><td>сразу</td><td><code>function</code> → значение</td><td><code>function*</code> → <code>next()</code> даёт <code>{ value, done }</code></td></tr>
+            <tr><td>потом</td><td><code>async function</code> → промис</td><td><code>async function*</code> → <code>next()</code> даёт промис <code>{ value, done }</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="definition">
+        <strong>Асинхронный генератор</strong> — функция <code>async function*</code>: в теле можно и <code>await</code>, и
+        <code>yield</code>. Вызов возвращает объект <code>AsyncGenerator</code>, тело начинается на первом
+        <code>next()</code>. Записи: объявление, выражение, метод <code>async *name() {}</code>; стрелочной нет.
+        <code>yield промис</code> и <code>return промис</code> ждут промис сами — <code>value</code> промисом не бывает.
+    </div>
+
+    <h2>for await...of</h2>
+
+    <table>
+        <thead><tr><th>Что</th><th>Как</th></tr></thead>
+        <tbody>
+            <tr><td>где писать</td><td>в <code>async</code>-функции, асинхронном генераторе, модуле</td></tr>
+            <tr><td>что перебирает</td><td><code>[Symbol.asyncIterator]()</code>, а если его нет — обычный <code>[Symbol.iterator]()</code>, ожидая каждое значение</td></tr>
+            <tr><td>досрочный выход</td><td><code>break</code>, ошибка, <code>return</code> → цикл зовёт и ждёт <code>return()</code> источника</td></tr>
+            <tr><td>массив промисов</td><td>загрузки уже идут одновременно; поздний отказ раньше своей очереди — «Uncaught (in promise)»</td></tr>
+            <tr><td>значение <code>return</code></td><td>цикл его не видит, только <code>next()</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="note-box">
+        Частые ошибки: <code>for await</code> вне <code>async</code>-функции — <code>SyntaxError: Unexpected reserved
+        word</code>; <code>for...of</code> по асинхронному генератору — <code>TypeError: gen is not iterable</code>;
+        <code>for await</code> по числу — <code>5 is not async iterable</code>. Методы генератора и
+        <code>Array.fromAsync</code> ошибку не бросают, а отклоняют свой промис.
+    </div>
+
+    <div class="key-point">
+        Асинхронный генератор ленив: следующее значение он готовит, только когда его попросили. Постраничная загрузка
+        останавливается на нужной странице, а тики «раз в секунду» не копятся, пока цикл занят, — в отличие от
+        <code>setInterval</code>.
+    </div>
+
+    <div class="remember">
+        <code>next</code>, <code>return</code> и <code>throw</code> возвращают промисы. Вызовы, сделанные, пока генератор
+        занят, встают в очередь и выполняются по порядку. <code>return(v)</code> на <code>yield</code> работает как
+        <code>return v</code> в этом месте — <code>finally</code> выполнится. Свой перебор:
+        <code>{ async *[Symbol.asyncIterator]() { … } }</code>.
+    </div>
+
+    <div class="note-box">
+        <code>await Array.fromAsync(source, mapFn)</code> — массив из асинхронного, обычного или похожего на массив
+        источника; значения берёт по одному. <code>Promise.all</code> ждёт все сразу. Методов <code>map</code> и
+        <code>take</code> у асинхронных итераторов нет — их пишут сами, асинхронными генераторами.
+        <code>AsyncGeneratorFunction</code> не глобальный, у объекта генератора есть <code>[Symbol.asyncIterator]()</code>
+        и <code>[Symbol.asyncDispose]()</code>, но нет <code>[Symbol.iterator]</code>. Спецификация: очередь
+        <code>[[AsyncGeneratorQueue]]</code> и пять состояний — раздел 27.6.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Перепишите один свой цикл с <code>await</code> внутри <code>for...of</code> через асинхронный генератор и
+                <code>for await</code>.</li>
+            <li>Проверьте в Chrome: сколько раз сработает <code>setInterval</code> на 300 мс, пока цикл из лекции получает три
+                тика.</li>
+            <li>Прочитайте на странице
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fromAsync">Array.fromAsync()</a>
+                раздел «Closing sync iterables on rejection» и запустите пример.</li>
+            <li>Найдите в ECMA-262 раздел 27.6.3.8 AsyncGeneratorYield и выпишите, что делает <code>yield</code>, если в очереди
+                ещё есть запросы.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for-await...of">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

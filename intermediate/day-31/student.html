@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 31 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #64748b; }
+        h2 { color: #334155; background: #f8fafc; border-left-color: #64748b; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 31</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 31. Динамический импорт, import.meta и JSON</h1>
+    <p class="subtitle">Выжимка лекции: import(), import.meta, JSON-модули, порядок reviver и replacer, context.source, JSON.rawJSON.</p>
+
+    <h2>Главное</h2>
+
+    <pre class="code js">// ask.js
+export default (word) =&gt; `Как перевести «${word}»?`;</pre>
+
+    <pre class="code js">// main.js
+import words from "./words.json" with { type: "json" };
+console.log(import.meta.url);                              // http://127.0.0.1:5500/main.js
+const { default: ask } = await import("./ask.js");         // модуль по требованию
+console.log(ask(words[0].word));
+const text = '{"id": 12345678901234567890}';
+const exact = JSON.parse(text, (key, value, context) =&gt; (key === "id" ? BigInt(context.source) : value));
+console.log(JSON.stringify(exact, (key, value) =&gt; (typeof value === "bigint" ? JSON.rawJSON(String(value)) : value)));</pre>
+
+    <pre class="code js" data-file="words.json">[{ "id": 1, "word": "book" }]</pre>
+
+    <h2>Модули по требованию</h2>
+
+    <table>
+        <thead><tr><th>Что</th><th>Как работает</th></tr></thead>
+        <tbody>
+            <tr><td><code>await import("./m.js")</code></td><td>промис объекта модуля; грузит, когда дошло выполнение; один раз; путь — любое выражение; работает и в обычном скрипте</td></tr>
+            <tr><td>неудача <code>import()</code></td><td>всегда отклонённый промис: 404 — <code>Failed to fetch dynamically imported module</code></td></tr>
+            <tr><td><code>import.meta.url</code></td><td>адрес текущего модуля; объект без прототипа; вне модуля — <code>SyntaxError</code></td></tr>
+            <tr><td><code>import.meta.resolve("./x.js")</code></td><td>адрес без загрузки, знает карту импорта</td></tr>
+            <tr><td><code>import d from "./d.json" with { type: "json" }</code></td><td>только экспорт по умолчанию; файл обязан прийти как <code>application/json</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="definition">
+        <strong>Reviver</strong> (<code>JSON.parse</code>) обходит данные снизу вверх: сначала вложенное, корень с ключом
+        <code>""</code> — последним. <strong>Replacer</strong> (<code>JSON.stringify</code>) — сверху вниз, корень первым.
+        У обоих <code>this</code> — объект-хозяин свойства, поэтому пишут обычную функцию, а не стрелку. Вернуть
+        <code>undefined</code> — убрать свойство.
+    </div>
+
+    <div class="key-point">
+        <code>toJSON</code> срабатывает раньше replacer: дату replacer видит строкой, а настоящая лежит в
+        <code>this[key]</code>. Третий аргумент reviver — <code>context</code>: у нетронутого примитива
+        <code>context.source</code> — его исходный текст, отсюда точный <code>BigInt</code>. Обратно —
+        <code>JSON.rawJSON(текст)</code>: его <code>stringify</code> вставляет дословно.
+    </div>
+
+    <div class="remember">
+        <code>Map</code> и <code>Set</code> в JSON — пустые объекты, даты <code>Temporal</code> — строки. Записывают их
+        помеченными объектами (<code>{ $map: [...map] }</code>, <code>{ $date: value }</code>), а reviver оживляет: он идёт
+        снизу вверх, и внутренности к этому моменту уже готовы. В JSON повтор ключа — побеждает последний, а
+        <code>"__proto__"</code> — обычное свойство. Отступ — не больше 10.
+    </div>
+
+    <div class="note-box">
+        Ошибки: <code>const f = import;</code> — <code>Unexpected token ';'</code>; JSON без <code>with</code> —
+        <code>Expected a JavaScript-or-Wasm module script…</code>; <code>import { x } from "./d.json"</code> — «does not
+        provide an export named»; <code>JSON.rawJSON("[1]")</code> — <code>SyntaxError</code>. Спецификация: 25.5.2
+        (InternalizeJSONProperty), 25.5.4 (SerializeJSONProperty), 13.3.10 (<code>import()</code> только отклоняет промис),
+        16.2.1.8.2 (JSON-модуль — один экспорт по умолчанию).
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Найдите в своём проекте тяжёлый модуль, который нужен не сразу, и загрузите его по кнопке.</li>
+            <li>Вынесите данные проекта в <code>.json</code> и импортируйте их атрибутом <code>with</code>.</li>
+            <li>Прочитайте на странице
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import">import()</a>
+                раздел «Module namespace object» и проверьте пример с <code>then</code>.</li>
+            <li>Найдите в ECMA-262 раздел 25.5.2.4 InternalizeJSONProperty и выпишите, когда в <code>context</code> есть
+                <code>source</code>.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

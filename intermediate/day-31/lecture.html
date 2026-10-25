@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 31 — динамический импорт, import.meta и JSON</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #64748b; }
+        h2 { color: #334155; background: #f8fafc; border-left-color: #64748b; }
+        h3 { color: #1e293b; }
+        .step-number { background: #64748b; }
+        .toc a { color: #334155; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Intermediate, день 31</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 31 &bull; урок 1</span>
+        <h1>Динамический импорт, import.meta и JSON</h1>
+        <p>Курс 2, Intermediate. Модуль «Модули и JSON» — второй день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>загружать модуль по требованию через <code>import()</code> — по кнопке, по условию, по вычисленному пути;</li>
+            <li>узнавать адрес модуля через <code>import.meta</code> и разрешать пути через <code>import.meta.resolve</code>;</li>
+            <li>импортировать JSON модулем с атрибутом <code>with { type: "json" }</code>;</li>
+            <li>знать порядок работы <code>JSON.parse</code> и <code>JSON.stringify</code> по спецификации (25.5.2 и 25.5.4) —
+                reviver, replacer, <code>toJSON</code>, <code>context.source</code>;</li>
+            <li>сохранять в JSON <code>Map</code>, даты <code>Temporal</code> и большие числа без потерь.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#debts">Обещания, накопленные за курс</a></li>
+            <li><a href="#button">Практика: модуль по кнопке</a></li>
+            <li><a href="#promise">Что возвращает import()</a></li>
+            <li><a href="#when">Статический или динамический</a></li>
+            <li><a href="#meta">import.meta</a></li>
+            <li><a href="#with">Практика: данные из JSON-модуля</a></li>
+            <li><a href="#parse">JSON.parse изнутри</a></li>
+            <li><a href="#stringify">JSON.stringify изнутри</a></li>
+            <li><a href="#raw">JSON.rawJSON и большие числа</a></li>
+            <li><a href="#practice">Практика: Map и даты Temporal в JSON</a></li>
+            <li><a href="#errors">Ошибки дня</a></li>
+            <li><a href="#spec">Что говорит спецификация</a></li>
+            <li><a href="#cards">«Карточки»: колода из JSON, урок по кнопке</a></li>
+            <li><a href="#next">Итоги модуля I9 и что дальше</a></li>
+        </ol>
+    </div>
+
+    <h2 id="debts">1. Обещания, накопленные за курс</h2>
+
+    <p>День 30 оставил три долга: загрузку модуля по условию (<code>import</code> внутри <code>if</code> давал
+    <code>SyntaxError</code>), сведения о самом модуле — <code>import.meta</code> — и JSON модулем. День 21 записал, что
+    большое число в JSON округляется, а дни 14, 15 и 22 сохраняли <code>Map</code>, <code>Set</code> и даты
+    <code>Temporal</code> обходными путями. День 23 Essentials дал основы: что теряет <code>JSON.stringify</code>, отступы,
+    список полей, reviver. Сегодня — то же изнутри. Начнём с первого долга. В скобках слово <code>import</code> работает
+    как вызов:</p>
+
+    <pre class="code js">// quiz.js
+console.log("quiz.js выполняется");
+export const questions = ["book", "water", "bread"];</pre>
+
+    <pre class="code js">// main.js
+const wantQuiz = true;
+if (wantQuiz) {
+  const quiz = await import("./quiz.js");
+  console.log("вопросов:", quiz.questions.length);
+}</pre>
+
+    <div class="result-box">
+        quiz.js выполняется<br>
+        вопросов: 3
+    </div>
+
+    <p>Это <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import"><code>import()</code></a>
+    — динамический импорт. Справочник подчёркивает: он похож на вызов функции, но <code>import</code> — ключевое слово, а
+    не функция. Модуль грузится, только когда до этой строки дошло выполнение.</p>
+
+    <h2 id="button">2. Практика: модуль по кнопке</h2>
+
+    <p>Практика плана, по примеру справочника «загрузка в ответ на действие пользователя». Викторина нужна не каждому
+    ученику — пусть её код грузится, только когда нажали кнопку. Нажмём её дважды:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;button id="start"&gt;Начать викторину&lt;/button&gt;
+&lt;script type="module" src="main.js"&gt;&lt;/script&gt;</pre>
+
+    <pre class="code js">// quiz.js
+console.log("quiz.js выполняется");
+export const questions = ["book", "water", "bread"];
+export default function start() {
+  return `викторина: ${questions.length} вопроса`;
+}</pre>
+
+    <pre class="code js">// main.js
+console.log("main.js: страница готова");
+document.querySelector("#start").addEventListener("click", async () =&gt; {
+  const quiz = await import("./quiz.js");
+  console.log(quiz.default(), Object.keys(quiz));
+});</pre>
+
+    <div class="result-box">
+        main.js: страница готова<br>
+        quiz.js выполняется<br>
+        викторина: 3 вопроса (2) ['default', 'questions']<br>
+        викторина: 3 вопроса (2) ['default', 'questions']
+    </div>
+
+    <p>До щелчка браузер даже не запрашивал <code>quiz.js</code>. Первый щелчок загрузил и выполнил модуль, второй взял
+    его из кеша: модуль выполняется один раз (день 30), и справочник подчёркивает, что повторный импорт не делает даже
+    сетевого запроса. <code>await import()</code> отдал <strong>объект модуля</strong> раздела 8 дня 30 — экспорт по
+    умолчанию в нём лежит под ключом <code>default</code>. Справочник показывает и деструктуризацию:
+    <code>const { default: start, questions } = await import("./quiz.js")</code> — <code>default</code> приходится
+    переименовать, это зарезервированное слово.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 214" role="img" aria-label="Статический и динамический импорт на шкале времени. Статический import: модули графа грузятся и выполняются при открытии страницы, до кода main.js. Динамический import: quiz.js запрашивается только при первом щелчке, выполняется один раз; второй щелчок берёт тот же объект модуля из кеша без запроса">
+            <path d="M 30 186 L 600 186" stroke="#94a3b8" stroke-width="1.5"/>
+            <path d="M 608 186 L 598 181 L 598 191 Z" fill="#94a3b8"/>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">
+                <text x="30" y="204">открытие страницы</text><text x="300" y="204">1-й щелчок</text><text x="470" y="204">2-й щелчок</text>
+            </g>
+            <rect x="30" y="20" width="230" height="64" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+            <text x="145" y="42" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1e293b">статический import</text>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="145" y="60">весь граф — до кода main.js,</text><text x="145" y="76">нужен он или нет</text>
+            </g>
+            <rect x="290" y="100" width="150" height="64" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#92400e">
+                <text x="365" y="122" font-weight="700">import("./quiz.js")</text><text x="365" y="140">запрос, разбор,</text><text x="365" y="156">выполнение</text>
+            </g>
+            <rect x="460" y="100" width="140" height="64" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="530" y="122" font-weight="700">import("./quiz.js")</text><text x="530" y="140">тот же объект модуля,</text><text x="530" y="156">без запроса</text>
+            </g>
+            <g fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 4">
+                <path d="M 145 84 L 145 180"/><path d="M 365 164 L 365 180"/><path d="M 530 164 L 530 180"/>
+            </g>
+        </svg>
+        <figcaption>Статический импорт — при открытии, динамический — когда дошло выполнение</figcaption>
+    </figure>
+
+    <h2 id="promise">3. Что возвращает import()</h2>
+
+    <p>Всегда промис — того же объекта модуля, что дал бы <code>import * as</code>. Справочник обещает, что
+    <code>import()</code> <strong>никогда не бросает синхронно</strong>: любая неудача — отклонённый промис. Модуль,
+    упавший при выполнении, запоминается с ошибкой; модуль, который не загрузился, браузер может попробовать загрузить
+    снова:</p>
+
+    <pre class="code js">// broken.js
+console.log("broken.js выполняется");
+throw new Error("модуль сломан");</pre>
+
+    <pre class="code js">// main.js
+for (const path of ["./broken.js", "./broken.js", "./missing.js"]) {
+  try {
+    await import(path);
+  } catch (e) {
+    console.log(path, "—", e.name, e.message);
+  }
+}</pre>
+
+    <div class="result-box">
+        broken.js выполняется<br>
+        ./broken.js — Error модуль сломан<br>
+        ./broken.js — Error модуль сломан<br>
+        ./missing.js — TypeError Failed to fetch dynamically imported module: http://127.0.0.1:5500/missing.js
+    </div>
+
+    <p><code>broken.js</code> выполнился один раз, а ошибка пришла дважды — вторая из записи модуля, без повторного
+    выполнения. Для <code>missing.js</code> консоль покажет ещё и сетевое сообщение о 404. И предупреждение справочника:
+    не экспортируйте функцию с именем <code>then</code>. Объект модуля с ней станет «thenable» дня 27, и
+    <code>await import()</code> вызовет её вместо того, чтобы отдать сам модуль.</p>
+
+    <p>Путь может быть любым выражением, а сам <code>import()</code> работает даже в обычном скрипте без
+    <code>type="module"</code>. Пример справочника со строкой-шаблоном и <code>Promise.all</code> дня 27 — языки
+    интерфейса по выбору:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script src="classic.js"&gt;&lt;/script&gt;</pre>
+
+    <pre class="code js">// lang/ru.js
+export default { hello: "Привет" };</pre>
+
+    <pre class="code js">// lang/tk.js
+export default { hello: "Salam" };</pre>
+
+    <pre class="code js">// classic.js
+const code = "tk";
+import(`./lang/${code}.js`).then((module) =&gt; console.log("обычный скрипт:", module.default.hello));
+Promise.all(["ru", "tk"].map((c) =&gt; import(`./lang/${c}.js`))).then((modules) =&gt; console.log(modules.map((m) =&gt; m.default.hello).join(", ")));</pre>
+
+    <div class="result-box">
+        обычный скрипт: Salam<br>
+        Привет, Salam
+    </div>
+
+    <h2 id="when">4. Статический или динамический</h2>
+
+    <p>Справочник перечисляет, когда нужен <code>import()</code>, и советует брать его, только если без него не
+    обойтись:</p>
+
+    <table>
+        <thead><tr><th>Задача</th><th>Чем</th></tr></thead>
+        <tbody>
+            <tr><td>модули, без которых программа не работает</td><td><code>import … from</code> — его видят инструменты сборки</td></tr>
+            <tr><td>тяжёлый код, который нужен редко или потом</td><td><code>import()</code> по требованию</td></tr>
+            <tr><td>путь вычисляется (язык, тема, номер урока)</td><td><code>import(`./lang/${code}.js`)</code></td></tr>
+            <tr><td>побочный эффект нужен только при условии</td><td><code>if (…) await import("./m.js")</code></td></tr>
+            <tr><td>обычный скрипт без <code>type="module"</code></td><td>только <code>import()</code></td></tr>
+            <tr><td>данные, которые меняются (новости, баллы)</td><td>не модуль, а <code>fetch</code> дня 31 Essentials — модуль закешируется</td></tr>
+        </tbody>
+    </table>
+
+    <p>Кеш нельзя очистить. Справочник показывает обходной приём — параметр в адресе:
+    <code>import(`./quiz.js?t=${Date.now()}`)</code>. Для браузера это другой адрес, а значит, другой модуль: он
+    загрузится и выполнится заново. Но старые модули из памяти уже не уйдут, поэтому в долгоживущей программе так делать
+    не стоит.</p>
+
+    <h2 id="meta">5. import.meta</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta"><code>import.meta</code></a>
+    — объект со сведениями о текущем модуле. Справочник: его создаёт «хозяин», у браузера в нём два свойства —
+    <code>url</code>, полный адрес модуля, и
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta/resolve"><code>resolve</code></a>,
+    который превращает путь в адрес так же, как <code>import</code>, но ничего не загружает:</p>
+
+    <pre class="code js">// lib/words.js
+export const here = import.meta.url;
+export const dataPath = import.meta.resolve("./data/cards.json");</pre>
+
+    <pre class="code js">// main.js
+import { here, dataPath } from "./lib/words.js";
+console.log(import.meta.url);
+console.log(here);
+console.log(dataPath);
+console.log(Object.getPrototypeOf(import.meta), Object.keys(import.meta));</pre>
+
+    <div class="result-box">
+        http://127.0.0.1:5500/main.js<br>
+        http://127.0.0.1:5500/lib/words.js<br>
+        http://127.0.0.1:5500/lib/data/cards.json<br>
+        null (2) ['url', 'resolve']
+    </div>
+
+    <p>У каждого модуля свой <code>import.meta</code>: путь <code>./data/cards.json</code> из <code>lib/words.js</code>
+    разрешился относительно <code>lib/</code>. Файла <code>cards.json</code> нет, но <code>resolve</code> это не
+    проверяет — справочник поэтому и называет его синхронным. Прототип <code>null</code>, свойства можно добавлять. Вне
+    модуля <code>import.meta</code> — <code>SyntaxError: Cannot use 'import.meta' outside a module</code>; во встроенном
+    <code>&lt;script type="module"&gt;</code> <code>url</code> — адрес самой страницы. Справочник отмечает:
+    <code>resolve</code> не входит в ECMAScript, его определяет стандарт HTML, а <code>new URL("./x.js",
+    import.meta.url)</code> даёт похожий адрес, но карту импорта не знает.</p>
+
+    <h2 id="with">6. Практика: данные из JSON-модуля</h2>
+
+    <p>Практика плана. Данные в отдельном файле <code>words.json</code> — комментария в первой строке у него нет, JSON
+    комментариев не знает:</p>
+
+    <pre class="code js" data-file="words.json">[
+  { "id": 1, "word": "book", "ru": "книга" },
+  { "id": 2, "word": "water", "ru": "вода" },
+  { "id": 3, "word": "bread", "ru": "хлеб" }
+]</pre>
+
+    <pre class="code js">// main.js
+import words from "./words.json" with { type: "json" };
+import * as all from "./words.json" with { type: "json" };
+console.log(words.length, words[1].word, Object.keys(all), Array.isArray(words));
+const again = await import("./words.json", { with: { type: "json" } });
+console.log(again.default === words);</pre>
+
+    <div class="result-box">
+        3 water (1) ['default'] true<br>
+        true
+    </div>
+
+    <p><code>with { type: "json" }</code> — <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/with">атрибут
+    импорта</a>. Справочник объясняет, зачем он: браузер узнаёт тип файла по ответу сервера, а не по расширению. Без
+    атрибута сервер, отдавший «JSON» с типом JavaScript, заставил бы выполнить чужой код. С атрибутом файл обязан прийти
+    как <code>application/json</code>. У JSON-модуля только экспорт по умолчанию — разобранное значение. Это один и тот же
+    массив для всех импортёров, и он не заморожен: изменение увидят все.</p>
+
+    <table>
+        <thead><tr><th>Что не так</th><th>Что видно в Chrome</th></tr></thead>
+        <tbody>
+            <tr><td>нет <code>with { type: "json" }</code></td><td><code>Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of "application/json"…</code></td></tr>
+            <tr><td><code>import { book } from "./words.json" with …</code></td><td><code>SyntaxError: The requested module './words.json' does not provide an export named 'book'</code></td></tr>
+            <tr><td><code>with { kind: "json" }</code></td><td><code>SyntaxError: Invalid attribute key "kind".</code></td></tr>
+            <tr><td><code>with { type: "jsn" }</code></td><td><code>TypeError: "jsn" is not a valid module type.</code></td></tr>
+            <tr><td><code>type: "json"</code> у файла <code>.js</code></td><td><code>Failed to load module script: Expected a JSON module script but the server responded with a MIME type of "text/javascript"…</code></td></tr>
+            <tr><td>в файле не JSON: <code>{ book: "книга" }</code></td><td><code>SyntaxError: Expected property name or '}' in JSON at position 2…</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Стандарт HTML знает ещё <code>type: "css"</code> — он даёт объект таблицы стилей, это курс 4. Справочник
+    упоминает и <code>type: "text"</code>, но Chrome 155 его не принимает: <code>"text" is not a valid module type.</code></p>
+
+    <h2 id="parse">7. JSON.parse изнутри</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-json.parse">25.5.2</a> начинается с проверки: текст должен
+    точно соответствовать стандарту JSON (ECMA-404), расширять его запрещено. Потом текст выполняется как выражение
+    JavaScript — JSON его подмножество. Два следствия, которые видно сразу:</p>
+
+    <pre class="code js">// main.js
+console.log(JSON.parse('{"a": "первое", "a": "второе"}').a);
+const fromJSON = JSON.parse('{"__proto__": {"admin": true}}');
+const literal = { "__proto__": { admin: true } };
+console.log(Object.keys(fromJSON), fromJSON.admin, "|", Object.keys(literal), literal.admin);</pre>
+
+    <div class="result-box">
+        второе<br>
+        (1) ['__proto__'] undefined | (0) [] true
+    </div>
+
+    <p>Повтор ключа не ошибка — побеждает последний (примечание 2 раздела). А ключ <code>"__proto__"</code> в литерале
+    объекта меняет прототип (день 7), но в JSON становится обычным собственным свойством: спецификация отключает
+    особое правило для разбора JSON. Чужие данные не подменят прототип. Проверка по ECMA-404 идёт первой, поэтому всё,
+    чего нет в JSON, отвергается, даже если это верный JavaScript: <code>JSON.parse("[1, 2,]")</code> — <code>SyntaxError:
+    Unexpected token ']'</code>, хотя <code>[1, 2,]</code> в коде — обычный массив из двух элементов (висячая запятая дня
+    23 Essentials).</p>
+
+    <p>Теперь reviver дня 23 Essentials. Спецификация оборачивает результат в объект <code>{ "": значение }</code> и обходит
+    его так: сначала внутренности, потом сам объект; корень с ключом <code>""</code> — последним:</p>
+
+    <pre class="code js">// main.js
+const order = [];
+const text = '{"name": "Аман", "marks": [5, 4], "group": {"title": "JS-1"}}';
+JSON.parse(text, function (key, value) {
+  order.push(key === "" ? '""' : key);
+  return value;
+});
+console.log(order.join(" → "));</pre>
+
+    <div class="result-box">
+        name → 0 → 1 → marks → title → group → ""
+    </div>
+
+    <p>Когда reviver видит <code>marks</code>, обе оценки уже прошли через него, — поэтому можно «оживлять» снизу вверх.
+    <code>this</code> в нём — объект-хозяин свойства (у стрелочной функции своего <code>this</code> нет, день 2).
+    Вернуть <code>undefined</code> — удалить свойство; в массиве останется дырка дня 11. А в редакции 2026 года у reviver
+    есть и третий аргумент — <code>context</code>. У примитива, которого reviver ещё не трогал, в нём есть
+    <code>source</code> — исходный текст значения:</p>
+
+    <pre class="code js">// main.js
+const text = '{"id": 12345678901234567890, "score": 4.50}';
+console.log(JSON.parse(text).id);
+const exact = JSON.parse(text, (key, value, context) =&gt; (key === "id" ? BigInt(context.source) : value));
+console.log(exact.id, exact.score);
+JSON.parse(text, (key, value, context) =&gt; {
+  console.log(JSON.stringify(key), JSON.stringify(context));
+  return value;
+});</pre>
+
+    <div class="result-box">
+        12345678901234567000<br>
+        12345678901234567890n 4.5<br>
+        "id" {"source":"12345678901234567890"}<br>
+        "score" {"source":"4.50"}<br>
+        "" {}
+    </div>
+
+    <p>Это ответ дню 21: число 12345678901234567890 в JSON не помещается в <code>Number</code> и округляется ещё при
+    разборе, а <code>context.source</code> хранит его цифры как текст — <code>BigInt</code> получается точным. У объектов
+    и массивов <code>source</code> нет.</p>
+
+    <h2 id="stringify">8. JSON.stringify изнутри</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-json.stringify">25.5.4</a> тоже оборачивает значение в
+    <code>{ "": значение }</code>, но обходит его в обратном порядке: сначала объект, потом то, что внутри. И у каждого
+    свойства сначала зовёт <code>toJSON</code>, а уже потом replacer:</p>
+
+    <pre class="code js">// main.js
+const lesson = { day: 31, when: new Date(Date.UTC(2026, 9, 26)), marks: [5, 4] };
+const calls = [];
+JSON.stringify(lesson, function (key, value) {
+  calls.push(key === "" ? '""' : key);
+  if (key === "when") console.log("replacer видит:", typeof value, "| в объекте:", this[key] instanceof Date);
+  return value;
+});
+console.log(calls.join(" → "));</pre>
+
+    <div class="result-box">
+        replacer видит: string | в объекте: true<br>
+        "" → day → when → marks → 0 → 1
+    </div>
+
+    <p>Это объясняет наблюдение дня 21: replacer получает дату уже строкой — <code>toJSON</code> даты сработал раньше. Узнать
+    исходное значение можно через <code>this[key]</code>: <code>this</code> — объект-хозяин, а в нём ещё лежит настоящая
+    дата. Остальные правила раздела:</p>
+
+    <pre class="code js">// main.js
+console.log(JSON.stringify([new Number(5), new String("x"), new Boolean(false)]));
+console.log(JSON.stringify({ a: 1, b: 2, c: 3 }, ["c", "a", "c"]));
+console.log(JSON.stringify({ a: 1 }, null, 20).split("\n")[1].length, JSON.stringify({ a: 1 }, null, "--------------->").split("\n")[1]);
+console.log(JSON.stringify("🙂"[0]), JSON.stringify("🙂"));
+const group = { title: "JS-1", students: [] };
+group.students.push({ name: "Аман", group });
+try {
+  JSON.stringify(group);
+} catch (e) {
+  const lines = e.message.split("\n");
+  console.log(e.name, lines[0], "/", lines.at(-1).trim());
+}</pre>
+
+    <div class="result-box">
+        [5,"x",false]<br>
+        {"c":3,"a":1}<br>
+        16 ----------"a": 1<br>
+        "\ud83d" "🙂"<br>
+        TypeError Converting circular structure to JSON / --- property 'group' closes the circle
+    </div>
+
+    <p>По строкам. Объекты-обёртки дня 5 Essentials разворачиваются в примитивы. Список полей задаёт и порядок, повторы
+    отбрасываются. Отступ — не больше 10: число 20 дало 10 пробелов (плюс 6 символов <code>"a": 1</code>), строка
+    обрезалась до 10 символов. Одинокая половинка суррогатной пары дня 20 записывается кодом <code>\ud83d</code>, а
+    целый смайлик — как есть. Для цикла Chrome пишет путь до свойства, которое замыкает круг. Порядок шагов — на
+    схеме:</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 244" role="img" aria-label="Шаги SerializeJSONProperty для одного свойства: 1 взять значение; 2 если есть toJSON — вызвать его с ключом; 3 если есть replacer — вызвать его, this — объект-хозяин; 4 объект из JSON.rawJSON — его текст как есть; обёртки Number, String, Boolean, BigInt — развернуть; 5 null, true, false, строка, конечное число — записать, NaN и Infinity — null, BigInt — TypeError, объект и массив — по свойствам с проверкой цикла; функция, undefined, символ — ничего">
+            <g fill="#f8fafc" stroke="#64748b" stroke-width="1.5">
+                <rect x="14" y="14" width="140" height="62" rx="8"/><rect x="168" y="14" width="140" height="62" rx="8"/>
+                <rect x="322" y="14" width="140" height="62" rx="8"/><rect x="476" y="14" width="130" height="62" rx="8"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" text-anchor="middle" fill="#1e293b">
+                <text x="84" y="38">1. Get(holder, key)</text><text x="238" y="38">2. toJSON(key)</text>
+                <text x="392" y="38">3. replacer</text><text x="541" y="38">4. rawJSON?</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" text-anchor="middle" fill="#1e293b">
+                <text x="84" y="58">значение свойства</text><text x="238" y="58">если есть: дата, Temporal</text>
+                <text x="392" y="58">this — хозяин, (key, value)</text><text x="541" y="58">текст как есть</text>
+            </g>
+            <g fill="none" stroke="#64748b" stroke-width="1.8">
+                <path d="M 154 45 L 160 45"/><path d="M 308 45 L 314 45"/><path d="M 462 45 L 468 45"/><path d="M 541 76 L 541 92"/>
+            </g>
+            <g fill="#64748b">
+                <path d="M 168 45 L 159 40 L 159 50 Z"/><path d="M 322 45 L 313 40 L 313 50 Z"/><path d="M 476 45 L 467 40 L 467 50 Z"/><path d="M 541 100 L 536 91 L 541 91 L 546 91 Z"/>
+            </g>
+            <rect x="14" y="100" width="592" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="310" y="119" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">обёртки new Number, new String, new Boolean, Object(1n) — развернуть в примитив</text>
+            <g fill="#ffffff" stroke="#94a3b8" stroke-width="1.5">
+                <rect x="14" y="142" width="188" height="56" rx="8"/><rect x="216" y="142" width="188" height="56" rx="8"/><rect x="418" y="142" width="188" height="56" rx="8"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10.5" text-anchor="middle" fill="#334155">
+                <text x="108" y="164">null, true, false, строка,</text><text x="108" y="182">конечное число; NaN → null</text>
+                <text x="310" y="164">объект, массив — по свойствам,</text><text x="310" y="182">цикл → TypeError</text>
+                <text x="512" y="164">BigInt → TypeError;</text><text x="512" y="182">функция, undefined, символ → нет</text>
+            </g>
+            <rect x="14" y="210" width="592" height="28" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="228" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">«Нет» в объекте — свойство пропущено, в массиве — null (25.5.4.5–25.5.4.6).</text>
+        </svg>
+        <figcaption>25.5.4.2 SerializeJSONProperty: что происходит с каждым свойством</figcaption>
+    </figure>
+
+    <h2 id="raw">9. JSON.rawJSON и большие числа</h2>
+
+    <p>Раздел 7 точно прочитал большое число. Записать его обратно помогает
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/rawJSON"><code>JSON.rawJSON(текст)</code></a>
+    — «сырой JSON»: объект, который <code>stringify</code> вставит в результат дословно. Тот же приём предлагает страница
+    ошибки <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/BigInt_not_serializable">«BigInt
+    value can't be serialized in JSON»</a> — replacer, который превращает <code>BigInt</code> в сырой JSON:</p>
+
+    <pre class="code js">// main.js
+const raw = JSON.rawJSON("12345678901234567890");
+console.log(JSON.stringify({ id: raw }), JSON.stringify({ id: 12345678901234567890 }));
+console.log(raw.rawJSON, Object.getPrototypeOf(raw), Object.isFrozen(raw), JSON.isRawJSON(raw), JSON.isRawJSON({ rawJSON: "1" }));
+const big = { id: 12345678901234567890n };
+const text = JSON.stringify(big, (key, value) =&gt; (typeof value === "bigint" ? JSON.rawJSON(String(value)) : value));
+const back = JSON.parse(text, (key, value, context) =&gt; (key === "id" ? BigInt(context.source) : value));
+console.log(text, back.id === big.id);
+try {
+  JSON.rawJSON("[1, 2]");
+} catch (e) {
+  console.log(e.name, e.message);
+}</pre>
+
+    <div class="result-box">
+        {"id":12345678901234567890} {"id":12345678901234567000}<br>
+        12345678901234567890 null true true false<br>
+        {"id":12345678901234567890} true<br>
+        SyntaxError Unexpected token '[', "[1, 2]" is not valid JSON
+    </div>
+
+    <p>Круг замкнулся без потерь: <code>BigInt</code> → сырой JSON → текст → <code>context.source</code> →
+    <code>BigInt</code>. Справочник объясняет устройство: прототип <code>null</code>, объект заморожен, у него одно
+    свойство <code>rawJSON</code> и внутренняя метка. По метке его и узнаёт
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/isRawJSON"><code>JSON.isRawJSON</code></a>,
+    поэтому подделка с таким же свойством — <code>false</code>. Сырым бывает только примитив: строка в кавычках, число,
+    <code>true</code>, <code>false</code>, <code>null</code>. Объекты и массивы — <code>SyntaxError</code>, пробел по
+    краям — тоже.</p>
+
+    <h2 id="practice">10. Практика: Map и даты Temporal в JSON</h2>
+
+    <p>Практика плана. <code>Map</code> в JSON становится пустым объектом: собственных перечисляемых свойств у неё нет.
+    Дата <code>Temporal</code> — строкой через свой <code>toJSON</code> (день 22), и обратно её не узнать. Модуль
+    <code>storage.js</code> записывает их помеченными объектами и оживляет при разборе:</p>
+
+    <pre class="code js">// storage.js
+export function save(data) {
+  return JSON.stringify(data, function (key, value) {
+    const original = this[key];
+    if (original instanceof Map) return { $map: [...original] };
+    if (original instanceof Temporal.PlainDate) return { $date: value };
+    return value;
+  });
+}
+export function load(text) {
+  return JSON.parse(text, (key, value) =&gt; {
+    if (value !== null &amp;&amp; typeof value === "object" &amp;&amp; "$map" in value) return new Map(value.$map);
+    if (value !== null &amp;&amp; typeof value === "object" &amp;&amp; "$date" in value) return Temporal.PlainDate.from(value.$date);
+    return value;
+  });
+}</pre>
+
+    <pre class="code js">// main.js
+import { save, load } from "./storage.js";
+const journal = {
+  group: "JS-1",
+  lastLesson: new Map([
+    ["Аман", Temporal.PlainDate.from("2026-10-23")],
+    ["Мерет", Temporal.PlainDate.from("2026-10-26")],
+  ]),
+};
+console.log(JSON.stringify(journal));
+const text = save(journal);
+console.log(text);
+const back = load(text);
+console.log(back.lastLesson instanceof Map, back.lastLesson.get("Мерет").dayOfWeek, back.lastLesson.get("Аман").until(back.lastLesson.get("Мерет")).toString());</pre>
+
+    <div class="result-box">
+        {"group":"JS-1","lastLesson":{}}<br>
+        {"group":"JS-1","lastLesson":{"$map":[["Аман",{"$date":"2026-10-23"}],["Мерет",{"$date":"2026-10-26"}]]}}<br>
+        true 1 P3D
+    </div>
+
+    <p>Здесь работают оба порядка разделов 7–8. replacer — обычная функция, а не стрелка, чтобы <code>this[key]</code>
+    дал хозяина: <code>value</code> даты уже стал строкой. Reviver идёт снизу вверх, поэтому к моменту, когда он видит
+    <code>$map</code>, даты внутри уже оживлены, и <code>new Map</code> получает настоящие <code>PlainDate</code>. Метки
+    <code>$map</code> и <code>$date</code> — договор, как <code>$bigint</code> дня 21: обычные данные с такими ключами
+    разбор примет за свои.</p>
+
+    <h2 id="errors">11. Ошибки дня</h2>
+
+    <table>
+        <thead><tr><th>Код</th><th>Что видно в Chrome</th><th>Что не так</th></tr></thead>
+        <tbody>
+            <tr><td><code>await import("./missing.js")</code></td><td><code>TypeError: Failed to fetch dynamically imported module: http://…/missing.js</code></td><td>путь; отказ, а не бросок</td></tr>
+            <tr><td><code>const load = import;</code></td><td><code>SyntaxError: Unexpected token ';'</code></td><td><code>import</code> — не функция</td></tr>
+            <tr><td><code>import("./m.js", 5)</code></td><td><code>TypeError: The second argument to import() must be an object</code></td><td>второй аргумент — <code>{ with: { … } }</code></td></tr>
+            <tr><td><code>import("./m.js", { with: { foo: "bar" } })</code></td><td><code>TypeError: Invalid attribute key "foo".</code></td><td>Chrome знает только <code>type</code></td></tr>
+            <tr><td><code>import.meta</code> в обычном скрипте</td><td><code>SyntaxError: Cannot use 'import.meta' outside a module</code></td><td>только в модуле</td></tr>
+            <tr><td><code>import.meta.resolve("cards")</code> без карты</td><td><code>TypeError: Failed to resolve module specifier cards: …</code></td><td>«голое» имя (день 30)</td></tr>
+            <tr><td>JSON-модуль без <code>with</code></td><td><code>Failed to load module script: … MIME type of "application/json"</code></td><td><code>with { type: "json" }</code></td></tr>
+            <tr><td>именованный импорт из JSON</td><td><code>does not provide an export named …</code></td><td>только по умолчанию</td></tr>
+            <tr><td><code>JSON.rawJSON("[1, 2]")</code>, <code>JSON.rawJSON("")</code></td><td><code>SyntaxError: Unexpected token '['…</code>, <code>Invalid value for JSON.rawJSON</code></td><td>только примитив без пробелов</td></tr>
+            <tr><td><code>JSON.stringify({ a: 1n })</code></td><td><code>TypeError: Do not know how to serialize a BigInt</code></td><td>replacer с <code>JSON.rawJSON</code></td></tr>
+            <tr><td>объект с циклом</td><td><code>TypeError: Converting circular structure to JSON …</code></td><td>разорвать цикл или replacer</td></tr>
+            <tr><td><code>new JSON()</code></td><td><code>TypeError: JSON is not a constructor</code></td><td>пространство имён, как <code>Math</code></td></tr>
+            <tr><td>replacer-стрелка с <code>this[key]</code> в модуле</td><td><code>TypeError: Cannot read properties of undefined (reading '')</code></td><td>обычная функция</td></tr>
+            <tr><td><code>export function then</code> в модуле</td><td>без ошибки: <code>import()</code> отдаёт не модуль</td><td>не называть экспорт <code>then</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Страница справочника про <code>BigInt</code> приводит три текста — V8, Firefox и Safari; заголовок у неё — текст
+    Firefox, а Chrome пишет «Do not know how to serialize a BigInt», как на дне 21.</p>
+
+    <h2 id="spec">12. Что говорит спецификация</h2>
+
+    <p>Подробно — <code>JSON.parse</code> и <code>JSON.stringify</code>; оба алгоритма разобраны в разделах 7–8, здесь —
+    шаги одной строкой каждый.</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-json.parse">25.5.2 JSON.parse</a>: ToString(text) — отсюда
+            «"undefined" is not valid JSON» дня 23 Essentials; ParseJSON (25.5.2.1) — проверка по ECMA-404 и выполнение как
+            выражения; если reviver — функция, корень кладётся в объект под ключом <code>""</code>, CreateJSONParseRecord
+            (25.5.2.3) запоминает исходный текст каждого значения, InternalizeJSONProperty (25.5.2.4) идёт рекурсией:
+            сначала свойства, потом Call(reviver, holder, «name, val, context»); <code>undefined</code> — удалить, иначе
+            CreateDataProperty. <code>context.source</code> дают, только если значение — примитив и всё ещё то же
+            (SameValue), что разобрано.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-json.stringify">25.5.4 JSON.stringify</a>: replacer-функция или
+            список (строки и числа, повторы отброшены); <code>space</code> — min(10, число) пробелов или первые 10 символов
+            строки; корень в обёртке; JSON Serialization Record (таблица 76) с полем <code>[[Stack]]</code> для поиска
+            циклов; SerializeJSONProperty (25.5.4.2) — схема раздела 8; QuoteJSONString (25.5.4.3) экранирует кавычку,
+            обратную черту, управляющие символы и одинокие половинки пар.</li>
+        <li>Кратко: <a href="https://tc39.es/ecma262/2026/#sec-json-object">25.5</a> — объект JSON обычный, ни
+            конструктор, ни функция, формат — ровно ECMA-404 без расширений;
+            <a href="https://tc39.es/ecma262/2026/#sec-json.israwjson">25.5.1 isRawJSON</a> — проверка внутреннего слота
+            <code>[[IsRawJSON]]</code>; <a href="https://tc39.es/ecma262/2026/#sec-json.rawjson">25.5.3 rawJSON</a> —
+            пустая строка и неподходящий первый или последний символ сразу <code>SyntaxError</code>, затем ParseJSON, объект
+            с прототипом <code>null</code> заморожен (SetIntegrityLevel дня 6);
+            <a href="https://tc39.es/ecma262/2026/#sec-json-%symbol.tostringtag%">25.5.5</a> — <code>[object JSON]</code>.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-import-calls">13.3.10 Import Calls</a>: EvaluateImportCall (13.3.10.2)
+            сразу создаёт промис, и каждая неудача — неверный второй аргумент, атрибут не строкой, неизвестный ключ
+            (<a href="https://tc39.es/ecma262/2026/#sec-AllImportAttributesSupported">16.2.1.12</a>), ошибка ToString пути
+            — отклоняет его (IfAbruptRejectPromise дня 29). Поэтому <code>import()</code> не бросает.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-meta-properties">13.3.12 Meta Properties</a>:
+            <code>import.meta</code> создаётся при первом обращении — объект без прототипа, свойства даёт хозяин
+            (HostGetImportMetaProperties, 13.3.12.1.1; по умолчанию — ни одного), — и запоминается в записи модуля.</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-parse-json-module">16.2.1.8.2 ParseJSONModule</a>: JSON-модуль —
+            синтетическая запись модуля с одним экспортом по умолчанию — значением ParseJSON. Спецификация требует от
+            хозяина поддержать <code>type: "json"</code>; <code>"text"</code> в тексте 2026 года нет.</li>
+    </ul>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 620 226" role="img" aria-label="Порядок вызовов на объекте name, marks из двух оценок, group с title. replacer в stringify идёт сверху вниз: корень, name, marks, 0, 1, group, title. reviver в parse идёт снизу вверх: name, 0, 1, marks, title, group, корень последним">
+            <g fill="#f8fafc" stroke="#64748b" stroke-width="1.5">
+                <rect x="250" y="12" width="120" height="30" rx="8"/>
+                <rect x="40" y="76" width="120" height="30" rx="8"/><rect x="250" y="76" width="120" height="30" rx="8"/><rect x="460" y="76" width="120" height="30" rx="8"/>
+                <rect x="200" y="140" width="80" height="30" rx="8"/><rect x="340" y="140" width="80" height="30" rx="8"/><rect x="480" y="140" width="80" height="30" rx="8"/>
+            </g>
+            <g font-family="Consolas, monospace" font-size="11" text-anchor="middle" fill="#1e293b">
+                <text x="310" y="31">"" (корень)</text>
+                <text x="100" y="95">name</text><text x="310" y="95">marks</text><text x="520" y="95">group</text>
+                <text x="240" y="159">0</text><text x="380" y="159">1</text><text x="520" y="159">title</text>
+            </g>
+            <g fill="none" stroke="#94a3b8" stroke-width="1.5">
+                <path d="M 280 42 L 120 76"/><path d="M 310 42 L 310 76"/><path d="M 340 42 L 500 76"/>
+                <path d="M 290 106 L 250 140"/><path d="M 330 106 L 370 140"/><path d="M 520 106 L 520 140"/>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" fill="#b45309">
+                <text x="374" y="30">replacer 1</text><text x="164" y="94">2</text><text x="374" y="94">3</text><text x="584" y="94">6</text>
+                <text x="284" y="158">4</text><text x="424" y="158">5</text><text x="564" y="158">7</text>
+            </g>
+            <g font-family="Segoe UI, sans-serif" font-size="10" fill="#15803d">
+                <text x="198" y="30">reviver 7</text><text x="22" y="94">1</text><text x="232" y="94">4</text><text x="442" y="94">6</text>
+                <text x="188" y="158">2</text><text x="328" y="158">3</text><text x="468" y="158">5</text>
+            </g>
+            <rect x="14" y="186" width="592" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="310" y="207" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">replacer (stringify) — сверху вниз, корень первым; reviver (parse) — снизу вверх, корень последним.</text>
+        </svg>
+        <figcaption>Два обхода одного дерева: оранжевые номера — replacer, зелёные — reviver</figcaption>
+    </figure>
+
+    <h2 id="cards">13. «Карточки»: колода из JSON, урок по кнопке</h2>
+
+    <p>Соберём всё вместе. Колода — JSON-модуль <code>words.json</code>, прогресс — <code>Map</code> «номер карточки → дата
+    повторения» через <code>storage.js</code> раздела 10, вопросы урока — модуль, который грузится по кнопке. Файл
+    <code>words.json</code>:</p>
+
+    <pre class="code js" data-file="words.json">[
+  { "id": 1, "word": "book", "ru": "книга" },
+  { "id": 2, "word": "water", "ru": "вода" },
+  { "id": 3, "word": "bread", "ru": "хлеб" },
+  { "id": 4, "word": "apple", "ru": "яблоко" }
+]</pre>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;button id="lesson"&gt;Урок&lt;/button&gt;
+&lt;script type="module" src="main.js"&gt;&lt;/script&gt;</pre>
+
+    <pre class="code js">// ask.js
+console.log("ask.js загружен");
+export default function ask(card) {
+  return `Как перевести «${card.word}»?`;
+}</pre>
+
+    <pre class="code js">// main.js
+import words from "./words.json" with { type: "json" };
+import { save, load } from "./storage.js";
+const today = Temporal.PlainDate.from("2026-10-26");
+const next = new Map(words.map((card) =&gt; [card.id, today.add({ days: card.id })]));
+const stored = save({ next });
+console.log(stored);
+const progress = load(stored);
+const limit = today.add({ days: 2 });
+const due = words.filter((card) =&gt; Temporal.PlainDate.compare(progress.next.get(card.id), limit) &lt;= 0);
+console.log(`к повторению до ${limit}:`, due.map((card) =&gt; card.word).join(", "));
+document.querySelector("#lesson").addEventListener("click", async () =&gt; {
+  const { default: ask } = await import("./ask.js");
+  console.log(ask(due[0]));
+});</pre>
+
+    <div class="result-box">
+        {"next":{"$map":[[1,{"$date":"2026-10-27"}],[2,{"$date":"2026-10-28"}],[3,{"$date":"2026-10-29"}],[4,{"$date":"2026-10-30"}]]}}<br>
+        к повторению до 2026-10-28: book, water<br>
+        ask.js загружен<br>
+        Как перевести «book»?
+    </div>
+
+    <p>Строка из первой строки вывода — то, что легло бы в <code>localStorage</code> дня 31 Essentials. Номера карточек в
+    ней — ключи <code>Map</code>, числа, и после <code>load</code> они остаются числами: <code>progress.next.get(card.id)</code>
+    находит дату. <code>ask.js</code> загрузился только после щелчка по «Уроку».</p>
+
+    <div class="try-it">
+        Три опыта.
+        <br><br>
+        <strong>Первый.</strong> Уберите <code>with { type: "json" }</code> у импорта колоды. Что скажет консоль и
+        выполнится ли хоть одна строка?
+        <br><br>
+        <strong>Второй.</strong> В <code>storage.js</code> замените <code>function (key, value)</code> у replacer на
+        стрелку. Какая ошибка появится и почему — по разделу 8 и дню 30 (<code>this</code> в модуле)?
+        <br><br>
+        <strong>Третий.</strong> Нажмите «Урок» три раза. Сколько раз напечатается «ask.js загружен»?
+    </div>
+
+    <h2 id="next">14. Итоги модуля I9 и что дальше</h2>
+
+    <table>
+        <thead><tr><th>День</th><th>Тема</th><th>Главное</th></tr></thead>
+        <tbody>
+            <tr><td>30</td><td>Модули: import и export</td><td>своя область у файла; формы экспорта и импорта; живые привязки; загрузка, связывание, выполнение</td></tr>
+            <tr><td>31</td><td>import(), import.meta, JSON</td><td>модуль по требованию; JSON-модуль; reviver снизу вверх, replacer сверху вниз; <code>context.source</code> и <code>JSON.rawJSON</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Модуль «Модули и JSON» закончен, а с ним — все темы курса, модули I1–I9. День 32 — мини-проект «Расписание
+    занятий на модулях», проектный день по образцу дня 16.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import">import()</a></td><td>модуль по требованию, промис объекта модуля, кеш, ловушка <code>then</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta">import.meta</a></td><td><code>url</code>, объект без прототипа</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/with">Import attributes</a></td><td><code>with { type: "json" }</code>, зачем он, ошибки</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td>ECMA-262, 25.5.2 и 25.5.4</td><td><code>JSON.parse</code> и <code>JSON.stringify</code> по шагам</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta/resolve">import.meta.resolve()</a></td><td>путь в адрес без загрузки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/rawJSON">JSON.rawJSON()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/isRawJSON">JSON.isRawJSON()</a></td><td>сырой JSON для точных чисел</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/BigInt_not_serializable">TypeError: BigInt value can't be serialized in JSON</a></td><td>четыре выхода, среди них <code>JSON.rawJSON</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td>25.5, 25.5.1, 25.5.3, 25.5.5</td><td>раздел 12</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// const mod = await import("./m.js"); — промис объекта модуля; default — mod.default; выполняется один раз
+// путь — любое выражение: import(`./lang/${code}.js`); работает и в обычном скрипте; неудача — отклонённый промис
+// import.meta.url — адрес модуля; import.meta.resolve("./x.js") — адрес без загрузки; только в модуле
+// import data from "./data.json" with { type: "json" }; — только экспорт по умолчанию, кешируется, не заморожен
+// JSON.parse(text, function (key, value, context) {}) — снизу вверх, корень "" последним, this — хозяин, undefined — удалить
+// context.source — исходный текст примитива: BigInt(context.source) без потерь
+// JSON.stringify(v, function (key, value) {}, 2) — сверху вниз; toJSON раньше replacer; исходное — this[key]
+// JSON.rawJSON("12345678901234567890") — текст как есть, только примитив; JSON.isRawJSON(x)
+// Map → { $map: [...map] }, Temporal → { $date: value }; обратно — reviver</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чем <code>import("./m.js")</code> отличается от <code>import * as m from "./m.js"</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Статический импорт грузит модуль при открытии страницы и только на верхнем уровне модуля. <code>import()</code>
+                    — выражение: грузит, когда до него дошло выполнение, путь может вычисляться, работает и в обычном
+                    скрипте, возвращает промис того же объекта модуля.
+                </details>
+            </li>
+            <li>Почему без <code>with { type: "json" }</code> JSON-файл не импортируется?
+                <details class="answer"><summary>Ответ</summary>
+                    Браузер по умолчанию ждёт JavaScript и проверяет тип ответа сервера. Атрибут говорит: здесь JSON — и
+                    файл обязан прийти как <code>application/json</code>, так что выполнить чужой код под видом данных
+                    нельзя.
+                </details>
+            </li>
+            <li>В каком порядке reviver видит ключи <code>{"a": {"b": 1}}</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>b</code>, <code>a</code>, <code>""</code>: снизу вверх, корень последним (InternalizeJSONProperty).
+                </details>
+            </li>
+            <li>Replacer получил дату строкой. Как узнать, что это была дата?
+                <details class="answer"><summary>Ответ</summary>
+                    Посмотреть <code>this[key]</code>: <code>this</code> — объект-хозяин, в нём лежит исходная дата.
+                    <code>toJSON</code> сработал раньше replacer. Replacer должен быть обычной функцией.
+                </details>
+            </li>
+            <li>Как прочитать и записать число 12345678901234567890 из JSON без потерь?
+                <details class="answer"><summary>Ответ</summary>
+                    Читать — reviver с <code>BigInt(context.source)</code>, записывать — replacer, который превращает
+                    <code>BigInt</code> в <code>JSON.rawJSON(String(value))</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

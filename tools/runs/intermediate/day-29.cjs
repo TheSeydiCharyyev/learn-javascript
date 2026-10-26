@@ -96,6 +96,14 @@ const WAIT = {
   let bad = 0, checked = 0;
   const check = (ok, text) => { checked++; if (!ok) bad++; if (!ok || !quiet) console.log(`${ok ? 'OK  ' : 'BAD '} ${text}`); };
   const same = (a, x) => JSON.stringify(a) === JSON.stringify(x);
+  // the ticker blocks of section 10: a timer never fires early but may be late, and the lateness of several waits adds
+  // up (the lecture says so after the second box) — a time in ms may be 0 to 100 ms later than written, never earlier
+  const TICKERS = 'for await (const tick of every(';
+  const lateOk = (out, want) => out.length === want.length && out.every((l, i) => {
+    if (l === want[i]) return true;
+    const a = l.match(/^(.*\D)(\d+) мс$/), w = want[i].match(/^(.*\D)(\d+) мс$/);
+    return !!a && !!w && a[1] === w[1] && Number(a[2]) - Number(w[2]) >= 0 && Number(a[2]) - Number(w[2]) <= 100;
+  });
 
   // every number of two to four digits in the code added up (delays are written as later(x, 100), wait(300)), plus a
   // margin; a WAIT line in the code overrides it
@@ -156,7 +164,8 @@ const WAIT = {
         const comment = blk.code.split(LF).filter((l) => l.startsWith('// ')).map((l) => l.slice(3));
         check(comment.length > 0 && same(out, comment), `${name} #${i} ${first.trim().slice(0, 50)}: output = the closing comment ${JSON.stringify(out)} vs ${JSON.stringify(comment)}`);
       }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output (${out.length} lines)${same(out, blk.box) ? '' : ` ${JSON.stringify(out)} vs ${JSON.stringify(blk.box)}`}`);
+      const fits = blk.box && (blk.code.includes(TICKERS) ? lateOk(out, blk.box) : same(out, blk.box));
+      if (blk.box) check(fits, `${name} #${i}: result-box = output (${out.length} lines)${fits ? '' : ` ${JSON.stringify(out)} vs ${JSON.stringify(blk.box)}`}`);
       if (name === 'student') check(!out.some((l) => l.startsWith('Uncaught')), `student #${i} runs without an error: ${JSON.stringify(out)}`);
     }
   }
@@ -172,7 +181,7 @@ const WAIT = {
   const find = (page, line) => all[page].find((x) => x.code.includes(line)).code;
   const extra = async (code, want, text, opts) => {
     const out = await runOnPage(withHelpers(code), opts);
-    check(same(out, want), `${text}: ${JSON.stringify(out)}`);
+    check(opts?.late ? lateOk(out, want) : same(out, want), `${text}: ${JSON.stringify(out)}`);
     return out;
   };
   const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
@@ -227,7 +236,12 @@ const WAIT = {
   {
     const code = find('lecture', 'for await (const tick of every(300))').replace('if (tick === 3) break;', 'if (tick === 3) {\n      console.log("setInterval:", fired);\n      clearInterval(id);\n      break;\n    }');
     check(code.includes('fired'), 'lecture 10: the counter is added');
-    await extra(`let fired = 0;\nconst id = setInterval(() => fired++, 300);\n${code}`, ['тик 1 300 мс', 'тик 2 1200 мс', 'тик 3 2100 мс', 'setInterval: 7'], 'lecture 10: setInterval fired 7 times in 2.1 s', { ms: 2700 });
+    await extra(`let fired = 0;\nconst id = setInterval(() => fired++, 300);\n${code}`, ['тик 1 300 мс', 'тик 2 1200 мс', 'тик 3 2100 мс', 'setInterval: 7'], 'lecture 10: setInterval fired 7 times in 2.1 s', { ms: 2700, late: true });
+  }
+  // lecture 10, after the second box: a timer is never early, it may be late, and five waits add their lateness up
+  {
+    const out = await runOnPage([`(async () => {\n  const late = [];\n  const start = performance.now();\n  for (const ms of [300, 600, 300, 600, 300]) {\n    const t = performance.now();\n    await new Promise((r) => setTimeout(r, ms));\n    late.push(performance.now() - t - ms);\n  }\n  console.log(late.every((x) => x >= -1), Math.round(performance.now() - start - 2100) >= 0);\n})();`], { ms: 2700 });
+    check(same(out, ['true true']) && lecture.includes('таймер не срабатывает раньше') && lecture.includes('третий тик может') && lecture.includes('показать и 2200 мс'), `lecture 10: no timer early, the chain ends at 2100 ms or later; the text says so: ${JSON.stringify(out)}`);
   }
   // lecture 11 and 12: no take on an async iterator; the chain; AsyncGeneratorFunction without new
   await extra(`async function* every(ms) { while (true) { await wait(ms); yield 1; } }

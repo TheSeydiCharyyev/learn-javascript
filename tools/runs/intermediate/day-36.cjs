@@ -590,6 +590,62 @@ const strip = (l) => l.replace(/\s+\/\/ .*$/, '').trim();
   else console.log('-- student.html is not written yet');
   if (!all.tasks) console.log('-- tasks.html is not written yet');
 
+  // the tasks: no code blocks; task 8 and task 9 — reference solutions against the numbers of their criteria
+  if (all.tasks) {
+    check(all.tasks.blocks.length === 0, 'tasks: no code blocks');
+    // task 8: warnings 30 seconds before the end of every part longer than half a minute
+    const chrono = L.find((x) => x.code.includes('async function* chronometer')).code;
+    const warned = chrono.split(LF).slice(1).join(LF).replace('    await wait(p.minutes * msPerMinute);\n', [
+      '    if (p.minutes > 0.5) {',
+      '      await wait((p.minutes - 0.5) * msPerMinute);',
+      '      yield `${at + p.minutes - 0.5} мин: осталось 30 секунд: ${p.part}`;',
+      '      await wait(0.5 * msPerMinute);',
+      '    } else await wait(p.minutes * msPerMinute);',
+      '',
+    ].join(LF));
+    const defense = L.find((x) => x.code.includes('const defense = [')).code.split(LF).slice(1).join(LF).split('console.log(')[0];
+    const chronoPage = await open({ 'index.html': undefined, 'main.js': `${defense}${LF}${warned}${LF}const t0 = Date.now();${LF}for await (const line of chronometer(defense, 1000)) console.log(Math.round((Date.now() - t0) / 100) / 10, line);` });
+    await chronoPage.p.waitForTimeout(7400);   // the whole defense takes seven seconds here
+    await chronoPage.close();
+    const out = chronoPage.out;
+    // each line: the seconds measured, then the minute it names; timers run late a little (day 29), never early
+    const warnings = out.filter((l) => l.includes('осталось 30 секунд'));
+    const minute = (l) => Number(l.split(' ')[1]);
+    const onTime = out.every((l) => { const t = Number(l.split(' ')[0]); return t >= minute(l) - 0.05 && t <= minute(l) + 0.3; });
+    check(warnings.length === 5 && same(warnings.map(minute), [2, 3, 4, 5, 6.5]) && !out.some((l) => l.includes('осталось 30 секунд: одна фраза'))
+      && out.filter((l) => !l.includes('осталось')).map(minute).join() === '0,0.5,2.5,3.5,4.5,5.5,7' && out.at(-1).endsWith('7 мин: время вышло') && onTime, `task 8: the reference solution ${JSON.stringify(out)}`);
+    // task 9: forget() — only the numbers of its own deck; a stub fails the check
+    const forgetTest = '\nconst shared = new Map([[1, { next: today.add({ days: 2 }), step: 2 }], [4, { next: today.add({ days: 2 }), step: 2 }]]);\nnew Deck(school, shared).forget();\nconsole.assert(!shared.has(1) && shared.has(4), "forget трогает только свои номера");\n\nconsole.log("проверки закончены");';
+    const withTest = patch(APP, 'tests.js', '\nconsole.log("проверки закончены");', forgetTest);
+    const stub = patch(withTest, 'deck.js', '\n  // «Знаю»', '\n  forget() {\n  }\n\n  // «Знаю»');
+    const t1 = await open(stub, 'test.html');
+    check(same(t1.out, ['Assertion failed: forget трогает только свои номера', 'проверки закончены']), `task 9: the stub fails the check ${JSON.stringify(t1.out)}`);
+    await t1.close();
+    let done = patch(withTest, 'deck.js', '\n  // «Знаю»', '\n  // забыть прогресс своих карточек; чужие номера не трогать\n  forget() {\n    for (const id of this.#cards.keys()) this.#progress.delete(id);\n  }\n\n  // «Знаю»');
+    done = patch(done, 'index.html', '    <button id="reset">Начать сначала</button>\n', '    <button id="reset">Начать сначала</button>\n    <button id="forget">Забыть колоду</button>\n');
+    done = patch(done, 'main.js', '\nmakeDeckButtons();', '\ndocument.querySelector("#forget").addEventListener("click", () => {\n  opened.get(chosen)?.forget();\n  position = 0;\n  flipped = false;\n  render();\n});\n\nmakeDeckButtons();');
+    const t2 = await open(done, 'test.html');
+    check(same(t2.out, ['проверки закончены']), `task 9: the method passes ${JSON.stringify(t2.out)}`);
+    await t2.close();
+    const page = await open(done);
+    for (const phrase of ['«Знаю»', 'колода «еда»', '«Знаю»', 'колода «школа»']) await act(page, phrase);
+    const v1 = await view(page.p);
+    await page.p.click('#forget');
+    await page.p.waitForTimeout(250);
+    const v2 = await view(page.p);
+    await act(page, 'колода «еда»');
+    const v3 = await view(page.p);
+    await page.reload();
+    const v4 = await view(page.p);
+    await act(page, 'колода «еда»');
+    const v5 = await view(page.p);
+    await act(page, '«Начать сначала» → OK');
+    const v6 = await view(page.p);
+    check(v1.counter === 'На сегодня: 2 из 3' && v2.counter === 'На сегодня: 3 из 3' && v3.counter === 'На сегодня: 2 из 3' && v4.counter === 'На сегодня: 3 из 3' && v5.counter === 'На сегодня: 2 из 3' && v6.counter === 'На сегодня: 3 из 3' && page.out.length === 0,
+      `task 9: forget «школа» keeps «еда», after a reload too; «Начать сначала» resets all ${JSON.stringify([v1, v2, v3, v4, v5, v6].map((v) => v.counter))}`);
+    await page.close();
+  }
+
   // every block of the lecture is used: by a run, the finished project or a check above
   for (const [i, blk] of L.entries()) if (!blk.cheat) check(used.has(i) || late.some((x) => x.i === i), `lecture #${i} (${blk.code.split(LF)[0]}) is used`);
   check(all.lecture.scenarios === 0 && plainOut.length === 1 && late.length === 0, `the lecture: no scenario tables, one console text, no temporary block without a box (${all.lecture.scenarios}, ${plainOut.length}, ${late.length})`);

@@ -698,7 +698,8 @@ const indentOf = (line) => line.match(/^ */)[0];
       await page.close();
     }
     await clicks({ ...S_6, 'data/food.json': '[]' }, ['колода «еда»'], 'section 6: an empty deck file', (v) => !v.trainer && v.error === 'Не удалось загрузить колоду «еда»: в колоде нет карточек' && lec.includes('«Не удалось загрузить колоду «еда»: в колоде нет карточек»'));
-    // a failed import() is remembered until the page reloads
+    // the file is back: Chrome 155 remembered the failed import() until a reload (26.10.2026, no second request);
+    // Chrome 156 asks the server again, and the second click opens the deck
     let served = { ...S_6, 'data/food.json': undefined };
     const page = await open(() => served);
     await act(page, 'колода «еда»');
@@ -706,11 +707,8 @@ const indentOf = (line) => line.match(/^ */)[0];
     await act(page, 'колода «школа»');
     await act(page, 'колода «еда»');
     const v1 = await view(page.p);
-    const asked1 = page.requests.filter((r) => r === 'data/food.json').length;
-    await page.reload();
-    await act(page, 'колода «еда»');
-    const v2 = await view(page.p);
-    check(!v1.trainer && v1.error.includes('Failed to fetch dynamically imported module') && asked1 === 1 && v2.card === 'bread' && page.requests.filter((r) => r === 'data/food.json').length === 2, `section 6: a failed import() is remembered: ${JSON.stringify([v1.error, asked1, v2.card])}`);
+    const asked = page.requests.filter((r) => r === 'data/food.json').length;
+    check(v1.trainer && v1.card === 'bread' && v1.error === '' && asked === 2 && lec.includes('Chrome 155 запоминал отказ до обновления страницы, Chrome 156 спрашивает сервер снова'), `section 6: the file is back — in Chrome 156 the second click opens the deck: ${JSON.stringify([v1.card, v1.error, asked])}`);
     await page.close();
     // day 34: two decks at once still end on «дом»
     const p2 = await open(S_6);

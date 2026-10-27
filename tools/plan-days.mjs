@@ -3,7 +3,8 @@
 //
 //   node tools/plan-days.mjs 1              load per day; lists rows that no rule matched
 //   node tools/plan-days.mjs 1 --list 16    rows of one day
-//   node tools/plan-days.mjs 1 --markdown   table for docs/plan-1-essentials.md (course 2: plan-2-intermediate.md)
+//   node tools/plan-days.mjs 1 --markdown   table for docs/plan-1-essentials.md (course 2: plan-2-intermediate.md,
+//                                           course 3: plan-3-advanced.md)
 //   node tools/plan-days.mjs 1 --apply      write course, day, lesson and depth into docs/coverage/*.csv
 import path from 'node:path';
 import { readCsv, writeCsv } from './lib/csv.mjs';
@@ -283,10 +284,159 @@ const RULES_2 = [
   [31, 'кратко', /^(Operators\/import\.meta\/resolve|JSON\/(rawJSON|isRawJSON)|sec-json-object|sec-json\.israwjson|sec-json\.rawjson|sec-json-%symbol\.tostringtag%|Errors\/BigInt_not_serializable)$/],
 ];
 
+const DAYS_3 = [
+  [1, 'A1', 'Как устроена спецификация: обзор, термины, соглашения об алгоритмах'],
+  [2, 'A1', 'Грамматики и исходный текст: пробелы, переводы строк, комментарии, имена'],
+  [3, 'A1', 'Литералы, автоматическая вставка точки с запятой и висячие запятые'],
+  [4, 'A2', 'Типы языка и типы спецификации: Completion Record и Reference Record'],
+  [5, 'A2', 'Преобразования и сравнения: ToPrimitive, ToNumber, IsLooselyEqual'],
+  [6, 'A2', 'Числа как биты: побитовые операторы, ToInt32 и void'],
+  [7, 'A2', 'Операции над объектами и итераторами: Get, Set, Call, Construct'],
+  [8, 'A3', 'Синтаксически управляемые операции: Evaluation и объявленные имена'],
+  [9, 'A3', 'Контексты выполнения, реалмы, задания и агенты'],
+  [10, 'A3', 'Выражения по спецификации'],
+  [11, 'A3', 'Инструкции и объявления по спецификации'],
+  [12, 'A3', 'Функции и классы по спецификации'],
+  [13, 'A3', 'Скрипты и модули изнутри, eval'],
+  [14, 'A4', 'Внутренние методы обычных объектов и функций'],
+  [15, 'A4', 'Экзотические объекты: массив, строка, arguments, связанная функция'],
+  [16, 'A4', 'Proxy: ловушки и инварианты'],
+  [17, 'A4', 'Reflect и встроенные символы'],
+  [18, 'A4', 'Глобальный объект и стандартные встроенные объекты'],
+  [19, null, 'Мини-проект после модулей A1–A4'],
+  [20, 'A5', 'ArrayBuffer и типизированные массивы'],
+  [21, 'A5', 'DataView, порядок байтов, Float16 и base64'],
+  [22, 'A5', 'SharedArrayBuffer и Atomics'],
+  [23, 'A5', 'Модель памяти: гонки данных и happens-before'],
+  [24, 'A6', 'WeakRef и FinalizationRegistry: сборка мусора'],
+  [25, 'A6', 'using, await using и DisposableStack'],
+  [26, 'A7', 'ECMA-402 изнутри: языковые теги и согласование локалей'],
+  [27, 'A7', 'Intl.Locale и Intl.Collator'],
+  [28, 'A7', 'PluralRules, ListFormat и RelativeTimeFormat'],
+  [29, 'A7', 'DisplayNames, DurationFormat и Segmenter'],
+  [30, 'A7', 'Числа и даты по спецификации, функции, зависящие от локали'],
+  [31, 'A8', 'Наследие и совместимость: приложение B, with, устаревшие методы'],
+  [32, null, 'Мини-проект после модулей A5–A8'],
+  [33, null, 'Итоговый проект: замысел и план'],
+  [34, null, 'Итоговый проект: реализация'],
+  [35, null, 'Итоговый проект: доработка и проверка'],
+  [36, null, 'Защита проектов'],
+];
+
+// course 3: most rows are spec sections, so a rule may also match the section number ('262:9.4.2', '402:15.1');
+// the first match wins, so rows that move to a day of another module come first
+const RULES_3 = [
+  // переносы между модулями: спецификация операторов — к побитовым операторам, eval — к скриптам,
+  // TypedArray exotic — к типизированным массивам, сборка мусора и Symbol.dispose — в A6, with — в A8
+  [6, 'подробно', /^262:(13\.9|13\.12)$/],
+  [6, 'кратко', /^262:(13\.5\.[26]|13\.9\.[1-3]|13\.12\.1)$/],
+  [13, 'подробно', /^262:19\.2\.1$/],
+  [20, 'подробно', /^262:10\.4\.5$/],
+  [24, 'подробно', /^Guide\/Memory_management$/],
+  [25, 'подробно', /^Symbol\/dispose$/],
+  [25, 'кратко', /^Symbol\/asyncDispose$/],
+  [31, 'подробно', /^262:14\.11$/],
+  [31, 'кратко', /^262:14\.11\.[12]$/],
+  // 1. Как устроена спецификация
+  [1, 'подробно', /^262:(4\.[23]|5\.2(\.[1-5])?)$/],
+  [1, 'кратко', /^262:([1-4](\..*)?|5|5\.2\.\d+)$/],
+  // 2. Грамматики и исходный текст
+  [2, 'подробно', /^(Lexical_grammar|262:(5\.1(\.[125])?|11\.1|11\.2|12\.[2347]))$/],
+  [2, 'кратко', /^262:(5\.1\.\d|11(\.\d(\.\d)?)?|12(\.[1-8](\.\d)?)?)$/],
+  // 3. Литералы, вставка точки с запятой, висячие запятые
+  [3, 'подробно', /^(Trailing_commas|262:(12\.9\.[346]|12\.10(\.[13])?))$/],
+  [3, 'кратко', /^262:(12\.9(\.\d)?|12\.10\.\d|A(\.\d)?)$/],
+  // 4. Типы языка и типы спецификации
+  [4, 'подробно', /^262:(6|6\.1|6\.1\.[67]|6\.2|6\.2\.[245])$/],
+  [4, 'кратко', /^262:6\.[12]\.\d+$/],
+  // 5. Преобразования и сравнения
+  [5, 'подробно', /^262:(7\.1|7\.1\.(1|2|4|17|18|19)|7\.2|7\.2\.(9|12|13|14))$/],
+  [5, 'кратко', /^262:(7|7\.1\.(3|5|13|14|20|21|22)|7\.2\.\d+)$/],
+  // 6. Числа как биты
+  [6, 'подробно', /^(Operators\/(Bitwise_(AND|OR|XOR|NOT)|Left_shift|Right_shift|Unsigned_right_shift|void)|262:7\.1\.[67])$/],
+  [6, 'кратко', /^(Operators\/(Bitwise_(AND|OR|XOR)|Left_shift|Right_shift|Unsigned_right_shift)_assignment|262:7\.1\.(8|9|10|11|12|15|16))$/],
+  // 7. Операции над объектами и итераторами
+  [7, 'подробно', /^262:(7\.3|7\.3\.(2|4|13|14)|7\.4|7\.4\.1)$/],
+  [7, 'кратко', /^262:7\.[34]\.\d+$/],
+  // 8. Синтаксически управляемые операции
+  [8, 'подробно', /^262:(8|8\.1|8\.2|8\.2\.[146]|8\.4|8\.4\.5)$/],
+  [8, 'кратко', /^262:8\.\d(\.\d+)?$/],
+  // 9. Контексты выполнения, реалмы, задания, агенты
+  [9, 'подробно', /^(Execution_model|262:(9\.3|9\.4|9\.4\.[24]|9\.5|9\.6))$/],
+  [9, 'кратко', /^(Errors\/Property_access_denied|262:(9|9\.[3-8](\.\d)?))$/],
+  // 10. Выражения
+  [10, 'подробно', /^262:(13\.3\.2|13\.3\.6|13\.3\.9|13\.5\.1|13\.5\.3|13\.8\.1|13\.10\.2|13\.15\.2|13\.15\.5)$/],
+  [10, 'кратко', /^262:13(\.\d+(\.\d+)?)?$/],
+  // 11. Инструкции и объявления
+  [11, 'подробно', /^262:(14\.2\.3|14\.3\.[12]|14\.7\.[45]|14\.15|14\.15\.3)$/],
+  [11, 'кратко', /^262:14(\.\d+(\.\d+)?)?$/],
+  // 12. Функции и классы
+  [12, 'подробно', /^262:(15\.1|15\.2|15\.2\.4|15\.3|15\.7|15\.7\.14|15\.10)$/],
+  [12, 'кратко', /^262:15(\.\d+(\.\d+)?)?$/],
+  // 13. Скрипты и модули, eval; import defer и import source в Chrome 156 нет
+  [13, 'подробно', /^(eval|262:(16\.1|16\.1\.7|16\.2|16\.2\.1))$/],
+  [13, 'кратко', /^(AbstractModuleSource|(Operators|Statements)\/import\/(defer|source)|262:16(\.\d(\.\d)?)?)$/],
+  // 14. Внутренние методы обычных объектов и функций
+  [14, 'подробно', /^262:(10|10\.1|10\.1\.([5689]|11)|10\.2|10\.2\.(1|2|11))$/],
+  [14, 'кратко', /^262:(10\.3|10\.[123]\.\d+)$/],
+  // 15. Экзотические объекты
+  [15, 'подробно', /^262:(10\.4|10\.4\.[1-4])$/],
+  [15, 'кратко', /^262:(10\.4\.[67]|28\.3(\.1)?)$/],
+  // 16. Proxy
+  [16, 'подробно', /^(Guide\/Meta_programming|Proxy|Proxy\/(Proxy|revocable)|Proxy\/Proxy\/(get|set|has|deleteProperty|apply|construct|ownKeys)|262:(10\.5|10\.5\.(8|15)|28\.2))$/],
+  [16, 'кратко', /^(Proxy\/Proxy\/\w+|262:(10\.5\.\d+|28\.2\.\d))$/],
+  // 17. Reflect и встроенные символы
+  [17, 'подробно', /^(Reflect|Reflect\/(apply|construct|get|set|ownKeys|defineProperty)|Symbol\/(toPrimitive|toStringTag|species|hasInstance)|262:28\.1)$/],
+  [17, 'кратко', /^(Reflect\/\w+|Symbol\/(isConcatSpreadable|match|matchAll|replace|search|split|Symbol\.toPrimitive|unscopables)|Array\/Symbol\.(species|unscopables)|Function\/Symbol\.hasInstance|262:(28|28\.1\.\d+|20\.4(\.\d)?))$/],
+  // 18. Глобальный объект и стандартные встроенные объекты
+  [18, 'подробно', /^262:(18|19|19\.[12]|19\.2\.[56])$/],
+  [18, 'кратко', /^262:(17(\.1)?|19\.[1-4](\.\d+)?|20|20\.3(\.\d)?)$/],
+  // 20. ArrayBuffer и типизированные массивы
+  [20, 'подробно', /^(Guide\/Typed_arrays|ArrayBuffer|ArrayBuffer\/(ArrayBuffer|resize|transfer|slice)|TypedArray|TypedArray\/(set|subarray|from|buffer)|Uint8Array|Uint8Array\/Uint8Array|262:(23\.2|25\.1|25\.1\.2))$/],
+  [20, 'кратко', /^(ArrayBuffer\/[\w.]+|TypedArray\/[\w.]+|(Big(Int|Uint)64|Int(8|16|32)|Uint(16|32)|Uint8Clamped|Float(32|64))Array(\/\w+)?|262:(23|23\.2\.\d|25|25\.1\.\d))$/],
+  // 21. DataView, порядок байтов, Float16, base64
+  [21, 'подробно', /^(DataView|DataView\/(DataView|getUint16|setUint16|getFloat32|setFloat32)|Float16Array|Uint8Array\/(toBase64|fromBase64)|262:(25\.3|23\.3))$/],
+  [21, 'кратко', /^(DataView\/\w+|Float16Array\/\w+|Uint8Array\/\w+|262:(25\.3\.\d|23\.3\.\d))$/],
+  // 22. SharedArrayBuffer и Atomics (только при crossOriginIsolated)
+  [22, 'подробно', /^(SharedArrayBuffer|SharedArrayBuffer\/SharedArrayBuffer|Atomics|Atomics\/(add|load|store|compareExchange|wait|waitAsync|notify)|262:(25\.2|25\.4))$/],
+  [22, 'кратко', /^(SharedArrayBuffer\/[\w.]+|Atomics\/\w+|262:(25\.2\.\d|25\.4\.\d+))$/],
+  // 23. Модель памяти
+  [23, 'подробно', /^262:(29|29\.1|29\.6\.6|29\.8|29\.9|29\.10|29\.11)$/],
+  [23, 'кратко', /^262:29\.\d+(\.\d)?$/],
+  // 24. WeakRef и FinalizationRegistry
+  [24, 'подробно', /^(WeakRef|WeakRef\/deref|FinalizationRegistry|FinalizationRegistry\/register|262:(9\.9|9\.9\.2|26\.1|26\.2))$/],
+  [24, 'кратко', /^(WeakRef\/\w+|FinalizationRegistry\/\w+|262:(9\.9\.\d|9\.1[0-3]|26|26\.[12]\.\d))$/],
+  // 25. using и DisposableStack (в ECMA-262 2026 их нет)
+  [25, 'подробно', /^(Guide\/Resource_management|Statements\/(using|await_using)|DisposableStack|DisposableStack\/(use|defer|dispose)|SuppressedError)$/],
+  [25, 'кратко', /^((Async)?DisposableStack(\/[\w.]+)?|SuppressedError\/\w+)$/],
+  // 26. ECMA-402: главы 1–9
+  [26, 'подробно', /^(Intl|Intl\/(getCanonicalLocales|supportedValuesOf)|402:(4\.2|6\.2|8|9\.1|9\.2))$/],
+  [26, 'кратко', /^402:[1-9](\.\d+)*$/],
+  // 27. Intl.Locale и Intl.Collator
+  [27, 'подробно', /^(Intl\/Locale|Intl\/Locale\/(Locale|maximize|minimize|baseName|getWeekInfo)|Intl\/Collator|Intl\/Collator\/(Collator|compare)|402:(15\.1|10\.1|10\.3))$/],
+  [27, 'кратко', /^(Intl\/(Locale|Collator)\/\w+|402:(10|15)(\.\d+)*)$/],
+  // 28. PluralRules, ListFormat, RelativeTimeFormat
+  [28, 'подробно', /^(Intl\/(PluralRules|ListFormat|RelativeTimeFormat)|Intl\/PluralRules\/(PluralRules|select)|Intl\/ListFormat\/(ListFormat|format)|Intl\/RelativeTimeFormat\/(RelativeTimeFormat|format)|402:(17\.1|14\.1|18\.1))$/],
+  [28, 'кратко', /^(Intl\/(PluralRules|ListFormat|RelativeTimeFormat)\/\w+|402:(14|17|18)(\.\d+)*)$/],
+  // 29. DisplayNames, DurationFormat, Segmenter
+  [29, 'подробно', /^(Intl\/(DisplayNames|DurationFormat|Segmenter)|Intl\/DisplayNames\/(DisplayNames|of)|Intl\/DurationFormat\/(DurationFormat|format)|Intl\/Segmenter\/(Segmenter|segment)|Intl\/Segmenter\/segment\/Segments|402:(12\.1|13\.1|19\.1|19\.5))$/],
+  [29, 'кратко', /^(Intl\/(DisplayNames|DurationFormat|Segmenter)\/[\w./]+|402:(12|13|19)(\.\d+)*)$/],
+  // 30. Числа и даты по ECMA-262, функции ECMA-402, зависящие от локали
+  [30, 'подробно', /^(262:(21\.1|21\.3|21\.4\.1)|402:20)$/],
+  [30, 'кратко', /^(262:21(\.\d(\.\d)?)?|402:(20(\.\d+)+|[ABC]))$/],
+  // 31. Наследие и совместимость; две страницы ошибок source map
+  [31, 'подробно', /^(Deprecated_and_obsolete_features|Statements\/with|262:(B|B\.1\.1|B\.3\.2|B\.3\.6))$/],
+  [31, 'кратко', /^(Functions\/arguments\/callee|Date\/(getYear|setYear)|escape|unescape|Function\/(arguments|caller|displayName)|Object\/__(define|lookup)(G|S)etter__|RegExp\/(compile|input|lastMatch|lastParen|leftContext|n|rightContext)|String\/(anchor|big|blink|bold|fixed|fontcolor|fontsize|italics|link|small|strike|sub|substr|sup)|Errors\/(Already_has_pragma|Deprecated_source_map_pragma)|262:(B\.\d(\.\d)?|[DEF](\.\d)?))$/],
+];
+
 export const PLAN = {
   1: { course: 'Essentials', days: DAYS_1, rules: RULES_1 },
   2: { course: 'Intermediate', days: DAYS_2, rules: RULES_2 },
+  3: { course: 'Advanced', days: DAYS_3, rules: RULES_3 },
 };
+
+// a rule tests the short key; a spec row is also tested by its number: '262:9.4.2', '402:15.1'
+const ruleKeys = (r) => (r.map.startsWith('ecma') ? [shortKey(r.key), `${r.map.slice(4)}:${r.title.split(' ')[0]}`] : [shortKey(r.key)]);
 
 export function assign(courseNo) {
   const plan = PLAN[courseNo];
@@ -295,7 +445,7 @@ export function assign(courseNo) {
   const rows = planRows().filter((r) => modules.has(r.module) || r.module === 'ERRORS');
   const out = [], missed = [];
   for (const r of rows) {
-    const rule = plan.rules.find(([, , re]) => re.test(shortKey(r.key)));
+    const rule = plan.rules.find(([, , re]) => ruleKeys(r).some((k) => re.test(k)));
     if (rule) out.push({ ...r, day: rule[0], depth: rule[1] });
     else if (r.module !== 'ERRORS') missed.push(r);
   }

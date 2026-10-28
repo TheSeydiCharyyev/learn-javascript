@@ -28,6 +28,13 @@ try {
     writeCsv(tmp, header, records);
     check(`${f}: round trip identical, ${records.length} rows, all rows ${[...widths]} columns`, fs.readFileSync(tmp, 'utf8') === raw && widths.size === 1);
   }
+  // sections 2 and 3 need rows that nobody has taken; since the course 3 plan every language page and every spec
+  // clause of level 1-3 has a course, so the working copy forgets courses 3 and 4 (section 4 brings the real maps back)
+  for (const f of ['mdn-javascript.csv', 'mdn-webapi.csv', 'ecma262.csv', 'ecma402.csv']) {
+    const csv = load(f);
+    for (const x of csv.records) if (Number(x.course) >= 3) Object.assign(x, { course: '', day: '', lesson: '', depth: '' });
+    save(f, csv);
+  }
   const js = load('mdn-javascript.csv');
   const tricky = js.records.find((r) => r.path === 'Web/JavaScript/Reference/Errors/Not_a_function');
   check('title with quotes survives', tricky?.title === 'TypeError: "x" is not a function', JSON.stringify(tricky?.title));
@@ -104,9 +111,9 @@ try {
   for (const [, , re, what] of wrong) check(`reports ${what}`, re.test(r.stdout));
   check('reports duplicate key', new RegExp(`duplicate path: ${page.path}`).test(r.stdout));
 
-  // 4. the day plans of courses 1 and 2 match what is written in the maps
+  // 4. the day plans of courses 1-3 match what is written in the maps
   for (const f of Object.keys(original)) fs.writeFileSync(path.join(COV, f), original[f]);
-  for (const [no, name] of [[1, 'Essentials'], [2, 'Intermediate']]) {
+  for (const [no, name] of [[1, 'Essentials'], [2, 'Intermediate'], [3, 'Advanced']]) {
     const plan = run('plan-days.mjs', [String(no)]);
     check(`plan-days: every row of course ${no} has a day`, plan.status === 0 && /rows without a day: 0/.test(plan.stdout));
     const planned = Number(new RegExp(`course ${no} \\(${name}\\): (\\d+) rows`).exec(plan.stdout)?.[1]);

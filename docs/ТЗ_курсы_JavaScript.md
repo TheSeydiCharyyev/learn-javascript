@@ -176,8 +176,8 @@ internal / concrete / numeric method), 527 — встроенные функци
    - Essentials — [plan-1-essentials.md](plan-1-essentials.md), 20.09.2026: 487 строк по 30 учебным дням, 286 подробно;
    - Intermediate — [plan-2-intermediate.md](plan-2-intermediate.md), утверждён 13.10.2026: 870 строк по 30 учебным
      дням, 319 подробно; 3 страницы ошибок оставлены курсу 3;
-   - Advanced — [plan-3-advanced.md](plan-3-advanced.md), составлен 27.10.2026: 1438 строк по 30 учебным дням,
-     280 подробно; 3 страницы ошибок из курса 2; ждёт утверждения автором;
+   - Advanced — [plan-3-advanced.md](plan-3-advanced.md), утверждён 28.10.2026: 1438 строк по 30 учебным дням,
+     280 подробно; 3 страницы ошибок из курса 2;
    - Web APIs — дальше.
 
 Для каждого дня:

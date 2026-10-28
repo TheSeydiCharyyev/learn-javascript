@@ -16,7 +16,10 @@ const fs = require('node:fs');
 const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-01');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -117,7 +120,8 @@ const topSteps = (html) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
       // the comment of the early-error block is the console line itself
@@ -183,6 +187,12 @@ console.log(Array.prototype.includes.call(lesson, "çörek"));`, 'tryit.html');
   check(/Let methodNames be «"valueOf", "toString"»/.test(flat(clause(spec, 'sec-ordinarytoprimitive'))), 'lecture 15: with hint number OrdinaryToPrimitive tries valueOf first');
   const shorthand = flat(clause(spec, 'sec-shorthands-for-unwrapping-completion-records'));
   check(/If record is an abrupt completion, return record\./.test(shorthand), 'lecture 12: ? returns an abrupt record to the caller');
+
+  // notes, homework 1: both clauses have steps with ?, the first of them can throw
+  for (const id of ['sec-map.prototype.get', 'sec-string.prototype.at']) {
+    const steps = flat(clause(spec, id));
+    check(/\? \w+/.test(steps), `student homework 1: ${id} has steps with ?`);
+  }
 
   // every row of the day's plan is a link, every anchor of the lecture exists
   const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');

@@ -25,10 +25,11 @@ const run = (day) => {
 };
 // the tree holds exactly one day of one course
 const only = (day, course = 'essentials') => {
-  for (const c of ['essentials', 'intermediate']) fs.rmSync(path.join(root, c), { recursive: true, force: true });
+  for (const c of ['essentials', 'intermediate', 'advanced']) fs.rmSync(path.join(root, c), { recursive: true, force: true });
   return (body) => { write(course, day, body); return run(day); };
 };
 const course2 = (day) => only(day, 'intermediate');
+const course3 = (day) => only(day, 'advanced');
 
 try {
   // 1. a construct from a later day is found, and the day fails
@@ -138,6 +139,44 @@ try {
   // 21. every row of course 2 says on which day of course 2 it is taught
   const noDay2 = src.split('\n').filter((l) => /^\s*\{ id: .*where: 'курс 2'/.test(l) && !/day2: \d+/.test(l));
   check('таблица: у каждой строки курса 2 есть day2', noDay2.length === 0, noDay2.join(' | '));
+
+  // 22. course 3: what courses 1 and 2 taught is known from day 1; course 3 has no tour days either
+  r = course3(1)(js('class User { }\nconst today = Temporal.Now.plainDateISO();\nconst city = user?.city;'));
+  check('курс 3: конструкции курсов 1 и 2 разрешены с дня 1', r.code === 0 && !r.out.includes('SKIP'), r.out.split('\n')[0]);
+
+  // 23. course 3: Proxy and Reflect have their own days
+  r = course3(15)(js('const p = new Proxy({}, {});'));
+  check('курс 3: Proxy на дне 15 пойман с днём 16', r.out.includes('день 16') && r.code === 1, r.out.split('\n')[1]);
+  r = course3(16)(js('const p = new Proxy({}, {});'));
+  check('курс 3: Proxy на дне 16 разрешён', r.code === 0, r.out.split('\n')[0]);
+  r = course3(16)(js('Reflect.get(target, key, receiver);'));
+  check('курс 3: Reflect на дне 16 пойман с днём 17', r.out.includes('день 17') && r.code === 1, r.out.split('\n')[1]);
+
+  // 24. course 3: the excusing comment names a day of course 3
+  r = course3(10)(js('const p = new Proxy({}, {});   // день 16'));
+  check('курс 3: пометка «// день 16» снимает вопрос', r.code === 0, r.out.split('\n')[0]);
+  r = course3(10)(js('const p = new Proxy({}, {});   // день 12'));
+  check('курс 3: пометка на день раньше разбора не снимает', r.code === 1);
+
+  // 25. course 3: a Web API of course 4 is a tool here — never allowed without a comment that names course 4
+  r = course3(22)(js('const worker = new Worker("worker.js");'));
+  check('курс 3: Worker пойман как курс 4', r.out.includes('курс 4') && r.code === 1, r.out.split('\n')[1]);
+  r = course3(22)(js('const worker = new Worker("worker.js");   // курс 4'));
+  check('курс 3: пометка «// курс 4» снимает вопрос', r.code === 0, r.out.split('\n')[0]);
+
+  // 26. course 2: course 3 is still never allowed, also the new rows
+  r = course2(31)(js('const buffer = new ArrayBuffer(8);'));
+  check('курс 2: ArrayBuffer пойман как курс 3', r.out.includes('курс 3') && r.code === 1);
+
+  // 27. methods named like old features are not the old features
+  r = course3(10)(js('const copy = marks.with(1, 5);\nconst first = date.with({ day: 1 });\nconst safe = RegExp.escape("c++");'));
+  check('.with() и RegExp.escape() не приняты за устаревшее', r.code === 0, r.out.split('\n')[0]);
+  r = course3(10)(js('with (Math) { console.log(PI); }'));
+  check('курс 3: инструкция with на дне 10 поймана с днём 31', r.out.includes('день 31') && r.code === 1, r.out.split('\n')[1]);
+
+  // 28. every row of course 3 says on which day of course 3 it is taught
+  const noDay3 = src.split('\n').filter((l) => /^\s*\{ id: .*where: 'курс 3'/.test(l) && !/day3: \d+/.test(l));
+  check('таблица: у каждой строки курса 3 есть day3', noDay3.length === 0, noDay3.join(' | '));
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

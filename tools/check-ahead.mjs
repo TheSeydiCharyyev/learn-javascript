@@ -23,10 +23,13 @@
 //   where  for day 0: which course explains it
 //   day2   the day of course 2 where the construct is taught (docs/plan-2-intermediate.md); every row
 //          with where: 'курс 2' has it
+//   day3   the same for course 3 (docs/plan-3-advanced.md); every row with where: 'курс 3' has it
 //   re     what to look for, after strings and comments have been blanked out
 //
 // In course 2 everything taught in course 1 (day > 0) is known from day 1; a row with day2 may be used
-// from that day on; a row of course 3 is never allowed. The excusing comment names a day of the same course.
+// from that day on; a row of course 3 is never allowed. Course 3 works the same way: courses 1 and 2 are
+// known from day 1, a row with day3 from that day, a row of course 4 never (only with an excusing comment).
+// The excusing comment names a day of the same course.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -137,6 +140,7 @@ const CONSTRUCTS = [
   { id: 'class', title: 'class', day: 0, where: 'курс 2', day2: 8, re: /\bclass\s+[A-Za-z_$]/ },
   { id: 'private-static', title: 'приватные #поля и static', day: 0, where: 'курс 2', day2: 9, re: /#[A-Za-z_$]|\bstatic\s+[A-Za-z_$#{*]/ },
   { id: 'extends', title: 'extends, super, new.target', day: 0, where: 'курс 2', day2: 10, re: /\bextends\b|\bsuper\b|\bnew\.target\b/ },
+  { id: 'callee', title: 'arguments.callee', day: 0, where: 'курс 2', day2: 4, re: /\barguments\.callee\b/ },
   { id: 'symbol', title: 'Symbol', day: 0, where: 'курс 2', day2: 11, re: /\bSymbol\s*[.(]/ },
   { id: 'generator', title: 'генератор function* / yield', day: 0, where: 'курс 2', day2: 12, re: /function\s*\*|\byield\b/ },
   { id: 'iterator', title: 'Iterator и его методы', day: 0, where: 'курс 2', day2: 13, re: /\bIterator\.\w+|\.(?:take|drop|toArray)\s*\(/ },
@@ -158,25 +162,44 @@ const CONSTRUCTS = [
   { id: 'modules', title: 'import / export', day: 0, where: 'курс 2', day2: 30, re: /^\s*(?:import|export)\s/m },
   { id: 'dynamic-import', title: 'import() и import.meta', day: 0, where: 'курс 2', day2: 31, re: /\bimport\s*\(|\bimport\.meta\b/ },
 
-  // --- курс 3 ---
-  { id: 'proxy', title: 'Proxy / Reflect', day: 0, where: 'курс 3', re: /\b(?:Proxy|Reflect)\s*[.(]/ },
+  // --- курс 3: в курсах 1 и 2 не разбирается, day3 — день курса 3 ---
+  { id: 'bitwise', title: 'сдвиги <<, >>, >>>, ~ и void', day: 0, where: 'курс 3', day3: 6, re: /~|<<|>>|\bvoid\b/ },
+  { id: 'eval', title: 'eval', day: 0, where: 'курс 3', day3: 13, re: /\beval\s*\(/ },
+  { id: 'proxy', title: 'Proxy', day: 0, where: 'курс 3', day3: 16, re: /\bProxy\s*[.(]/ },
+  { id: 'reflect', title: 'Reflect', day: 0, where: 'курс 3', day3: 17, re: /\bReflect\s*\./ },
+  { id: 'typed-array', title: 'ArrayBuffer и типизированные массивы', day: 0, where: 'курс 3', day3: 20, re: /\b(?:ArrayBuffer|(?:Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float32|Float64|BigInt64|BigUint64)Array)\b/ },
+  { id: 'dataview', title: 'DataView, Float16Array, base64 и hex', day: 0, where: 'курс 3', day3: 21, re: /\b(?:DataView|Float16Array)\b|\bMath\.f16round\b|\bUint8Array\.from(?:Base64|Hex)\b|\.(?:toBase64|toHex|setFromBase64|setFromHex)\s*\(/ },
+  { id: 'atomics', title: 'SharedArrayBuffer и Atomics', day: 0, where: 'курс 3', day3: 22, re: /\b(?:SharedArrayBuffer|Atomics)\b/ },
+  { id: 'weakref', title: 'WeakRef и FinalizationRegistry', day: 0, where: 'курс 3', day3: 24, re: /\b(?:WeakRef|FinalizationRegistry)\b/ },
+  { id: 'using', title: 'using, DisposableStack, SuppressedError', day: 0, where: 'курс 3', day3: 25, re: /\busing\s+[A-Za-z_$]|\b(?:Async)?DisposableStack\b|\bSuppressedError\b|\bSymbol\.(?:dispose|asyncDispose)\b/ },
+  { id: 'intl-tags', title: 'Intl.getCanonicalLocales, supportedValuesOf', day: 0, where: 'курс 3', day3: 26, re: /\bIntl\.(?:getCanonicalLocales|supportedValuesOf)\b/ },
+  { id: 'intl-locale', title: 'Intl.Locale и Intl.Collator', day: 0, where: 'курс 3', day3: 27, re: /\bIntl\.(?:Locale|Collator)\b/ },
+  { id: 'intl-plural', title: 'PluralRules, ListFormat, RelativeTimeFormat', day: 0, where: 'курс 3', day3: 28, re: /\bIntl\.(?:PluralRules|ListFormat|RelativeTimeFormat)\b/ },
+  { id: 'intl-segmenter', title: 'DisplayNames, DurationFormat, Segmenter', day: 0, where: 'курс 3', day3: 29, re: /\bIntl\.(?:DisplayNames|DurationFormat|Segmenter)\b/ },
+  // инструкция with, а не метод .with() массива (Essentials) и Temporal (курс 2); escape(), а не RegExp.escape()
+  { id: 'legacy', title: 'with и устаревшие методы', day: 0, where: 'курс 3', day3: 31, re: /(?<![.\w$])with\s*\(|__(?:define|lookup)[GS]etter__|\.(?:substr|getYear|setYear)\s*\(|(?<![.\w$])(?:escape|unescape)\s*\(|\bRegExp\.(?:\$\d|input|lastMatch|lastParen|leftContext|rightContext)\b/ },
+
+  // --- курс 4: в курсе 3 только инструмент (дни 20–22), строка с пометкой «// курс 4» ---
+  { id: 'web-api', title: 'Worker, Blob, File, TextEncoder', day: 0, where: 'курс 4', re: /\bnew\s+(?:Worker|SharedWorker|Blob|File|TextEncoder|TextDecoder)\b|\.postMessage\s*\(/ },
 ];
 
 // the day of a course from which a construct may be used; Infinity — this course does not have it yet
 const allowedFrom = (c, course) => {
   if (course === 1) return c.day === 0 ? Infinity : (c.from ?? c.day);
-  if (course === 2 && c.day2) return c.day2;
-  return c.day > 0 || c.day2 ? 1 : Infinity; // known from an earlier course, or a later course
+  if (course === 2) return c.day2 ?? (c.day > 0 ? 1 : Infinity);
+  if (course === 3) return c.day3 ?? (c.day > 0 || c.day2 ? 1 : Infinity);
+  return c.day > 0 || c.day2 || c.day3 ? 1 : Infinity; // known from an earlier course, or a later course
 };
 // the day of a course that explains a construct; 0 — a later course explains it
-const taughtOn = (c, course) => (course === 1 ? c.day : course === 2 ? c.day2 ?? 0 : 0);
+const taughtOn = (c, course) => (course === 1 ? c.day : course === 2 ? c.day2 ?? 0 : course === 3 ? c.day3 ?? 0 : 0);
 
 if (argv.includes('--table')) {
-  console.log('id                title                                                 день   с дня  курс 2');
+  console.log('id                title                                                 день   с дня  курс 2   курс 3');
   for (const c of CONSTRUCTS) {
     const day = c.day === 0 ? c.where : String(c.day);
     const course2 = c.day2 ? String(c.day2) : c.day > 0 ? 'с дня 1' : c.where;
-    console.log(`${c.id.padEnd(17)} ${c.title.padEnd(52)} ${day.padEnd(6)} ${(c.day === 0 ? '' : String(c.from ?? c.day)).padEnd(6)} ${course2}`);
+    const course3 = c.day3 ? String(c.day3) : c.day > 0 || c.day2 ? 'с дня 1' : c.where;
+    console.log(`${c.id.padEnd(17)} ${c.title.padEnd(52)} ${day.padEnd(6)} ${(c.day === 0 ? '' : String(c.from ?? c.day)).padEnd(6)} ${course2.padEnd(8)} ${course3}`);
   }
   process.exit(0);
 }

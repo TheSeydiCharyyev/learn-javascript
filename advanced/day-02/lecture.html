@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 2 — Грамматики и исходный текст: пробелы, переводы строк, комментарии, имена</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #6366f1; }
+        h2 { color: #4338ca; background: #eef2ff; border-left-color: #6366f1; }
+        h3 { color: #3730a3; }
+        .step-number { background: #6366f1; }
+        .toc a { color: #4338ca; }
+        .grammar { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px;
+            font-family: Consolas, monospace; font-size: 0.9rem; overflow-x: auto; }
+        .grammar em { color: #4338ca; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 2</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 2 &bull; урок 1</span>
+        <h1>Грамматики и исходный текст: пробелы, переводы строк, комментарии, имена</h1>
+        <p>Курс 3, Advanced. Модуль «Как читать спецификацию; лексическая грамматика» — второй день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>объяснять, как текст программы превращается в токены, а токены — в дерево разбора;</li>
+            <li>читать правила грамматики: двоеточия, <code>opt</code>, параметры, проверки впереди;</li>
+            <li>знать, какие символы язык считает пробелом и переводом строки, и проверять это опытом;</li>
+            <li>предсказывать, где кончается комментарий и почему вложенный комментарий ломает код;</li>
+            <li>отличать имя от зарезервированного слова и называть, где какое слово можно.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#text">Как текст становится программой</a></li>
+            <li><a href="#grammars">Три грамматики и число двоеточий</a></li>
+            <li><a href="#notation">Как читать правило грамматики</a></li>
+            <li><a href="#source">Исходный текст — кодовые точки</a></li>
+            <li><a href="#kinds">Четыре вида кода и директива</a></li>
+            <li><a href="#longest">Лексер: самый длинный токен и пять целей</a></li>
+            <li><a href="#space">Пробелы</a></li>
+            <li><a href="#lines">Переводы строк</a></li>
+            <li><a href="#comments">Комментарии и hashbang</a></li>
+            <li><a href="#tokens">Токены и знаки пунктуации</a></li>
+            <li><a href="#names">Имена</a></li>
+            <li><a href="#reserved">Ключевые и зарезервированные слова</a></li>
+            <li><a href="#cards">«Карточки 2.0»: строка по токенам</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="text">1. Как текст становится программой</h2>
+
+    <p>Вчера мы читали алгоритмы — вторую половину спецификации. Но прежде чем выполняться,
+    программа должна быть <em>прочитана</em>: из строки символов получается структура, которую можно
+    вычислять. Как именно — описывают грамматики, и вся страница MDN
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Lexical_grammar">Lexical grammar</a>
+    посвящена первому шагу этого пути.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 300" role="img" aria-label="Путь от текста к выполнению: кодовые точки, лексическая грамматика, поток токенов, синтаксическая грамматика, дерево разбора, ранние ошибки, выполнение">
+            <rect x="10" y="10" width="190" height="66" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+            <text x="105" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#3730a3">1. Исходный текст</text>
+            <text x="105" y="50" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#3730a3">кодовые точки, глава 11</text>
+            <text x="105" y="67" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#3730a3">let mark = 4; // оценка</text>
+
+            <rect x="225" y="10" width="190" height="66" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+            <text x="320" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#5b21b6">2. Лексика ::</text>
+            <text x="320" y="50" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#5b21b6">глава 12, слева направо,</text>
+            <text x="320" y="67" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#5b21b6">самый длинный кусок</text>
+
+            <rect x="440" y="10" width="190" height="66" rx="10" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="535" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#075985">3. Элементы ввода</text>
+            <text x="535" y="50" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#075985">let · mark · = · 4 · ;</text>
+            <text x="535" y="67" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#075985">без пробелов и комментария</text>
+
+            <line x1="200" y1="43" x2="223" y2="43" stroke="#6366f1" stroke-width="2"/>
+            <line x1="415" y1="43" x2="438" y2="43" stroke="#6366f1" stroke-width="2"/>
+
+            <rect x="440" y="110" width="190" height="66" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="535" y="132" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#065f46">4. Синтаксис :</text>
+            <text x="535" y="150" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">главы 13–16, цель —</text>
+            <text x="535" y="167" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">Script или Module</text>
+
+            <rect x="225" y="110" width="190" height="66" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="320" y="132" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#065f46">5. Дерево разбора</text>
+            <text x="320" y="150" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">Script → … →</text>
+            <text x="320" y="167" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">LexicalDeclaration</text>
+
+            <rect x="10" y="110" width="190" height="66" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="105" y="132" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#991b1b">6. Ранние ошибки</text>
+            <text x="105" y="150" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">до первой строки</text>
+            <text x="105" y="167" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">(день 1, раздел 11)</text>
+
+            <line x1="535" y1="76" x2="535" y2="108" stroke="#6366f1" stroke-width="2"/>
+            <line x1="440" y1="143" x2="417" y2="143" stroke="#6366f1" stroke-width="2"/>
+            <line x1="225" y1="143" x2="202" y2="143" stroke="#6366f1" stroke-width="2"/>
+
+            <rect x="10" y="210" width="620" height="76" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="320" y="234" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#334155">7. Выполнение — алгоритмы дня 1</text>
+            <text x="320" y="254" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Ошибка на шагах 2–6 — SyntaxError, и скрипт не начинается.</text>
+            <text x="320" y="272" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Ошибка на шаге 7 — уже во время работы, после выполненных строк.</text>
+            <line x1="105" y1="176" x2="105" y2="208" stroke="#6366f1" stroke-width="2"/>
+        </svg>
+        <figcaption>Сегодня — шаги 1–3 и то, как записаны грамматики шагов 2 и 4</figcaption>
+    </figure>
+
+    <p>Отсюда главное различие ошибок: <code>SyntaxError</code> не даёт скрипту начаться (поэтому на
+    дне 26 курса 2 ошибку разбора не поймал <code>try</code> того же скрипта), а <code>TypeError</code>
+    или <code>ReferenceError</code> случаются на ходу. Первое — дело грамматик и ранних ошибок, второе —
+    алгоритмов.</p>
+
+    <h2 id="grammars">2. Три грамматики и число двоеточий</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-context-free-grammars">5.1.1</a> определяет
+    <strong>бесконтекстную грамматику</strong>: набор правил-продукций. У каждого правила слева —
+    <strong>нетерминал</strong>, абстрактное имя, справа — последовательность нетерминалов и
+    <strong>терминалов</strong>, «букв» этой грамматики. Начинают с одного нетерминала — <strong>цели</strong> —
+    и раз за разом заменяют нетерминалы правыми частями правил; все цепочки терминалов, которые так
+    получаются, и есть язык грамматики.</p>
+
+    <p>Грамматик в спецификации несколько, и различают их по числу двоеточий в правилах:</p>
+
+    <table>
+        <thead><tr><th>Грамматика</th><th>Буквы (терминалы)</th><th>Цель</th><th>Знак</th></tr></thead>
+        <tbody>
+            <tr><td>лексическая, глава 12 (5.1.2)</td><td>кодовые точки</td><td>пять видов <code>InputElement…</code></td><td><code>::</code></td></tr>
+            <tr><td>регулярных выражений, 22.2.1 (5.1.2)</td><td>кодовые точки</td><td><code>Pattern</code></td><td><code>::</code></td></tr>
+            <tr><td>числовых строк, 7.1.4.1 (5.1.3)</td><td>кодовые точки</td><td><code>StringNumericLiteral</code></td><td><code>:::</code></td></tr>
+            <tr><td>синтаксическая, главы 13–16 (5.1.4)</td><td>токены лексической</td><td><code>Script</code> или <code>Module</code></td><td><code>:</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Грамматику регулярных выражений мы читали на дне 17 курса 2. Грамматика числовых строк
+    работает, когда строка превращается в число, — и она не та же, что у чисел в коде:</p>
+
+    <pre class="code js">console.log(Number(" 12 "), Number("0x1F"), Number(""));   // пробелы по краям разрешены
+console.log(Number("\n12\t"), Number("-Infinity"));        // и переводы строк, и слово Infinity
+console.log(Number("1_000"), Number("12px"));               // разделителя _ в ней нет</pre>
+
+    <div class="result-box">
+        12 31 0<br>
+        12 -Infinity<br>
+        NaN NaN
+    </div>
+
+    <p>В коде можно написать <code>1_000</code> — это литерал лексической грамматики (о нём завтра),
+    а строка <code>"1_000"</code> числом не становится. Две грамматики, два разных набора правил.</p>
+
+    <p>Синтаксическая грамматика (раздел <a href="https://tc39.es/ecma262/2026/#sec-syntactic-grammar">5.1.4</a>)
+    строит из токенов <strong>дерево разбора</strong>: корень — <code>Script</code> или <code>Module</code>,
+    каждый узел — экземпляр символа грамматики. Если токены не складываются в одно дерево без
+    остатка, — <code>SyntaxError</code>. Узлы дерева — понятие спецификации: движок не обязан
+    строить именно такую структуру.</p>
+
+    <p>Иногда грамматика читает «на вырост». Текст <code>(a, b)</code> в начале может оказаться и
+    выражением в скобках, и параметрами стрелочной функции — это ясно только у <code>=&gt;</code>.
+    Поэтому сначала разбирается общее правило, а потом проверяется, что оно «покрывает» нужное:
+    раздел 5.1.4 называет это «P must cover an N». Выражением <code>(a + 1, b)</code> быть может,
+    а параметрами — нет:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("(a, b) =&gt; a + b"));
+console.log(parse("(a + 1, b) =&gt; a"));</pre>
+
+    <div class="result-box">
+        разобрано<br>
+        SyntaxError: Invalid destructuring assignment target
+    </div>
+
+    <p>Функцию <code>parse</code> будем звать весь день: <code>new Function</code> (день 4 курса 2)
+    разбирает строку как тело функции, и по ошибке видно, принимает ли текст грамматика.</p>
+
+    <h2 id="notation">3. Как читать правило грамматики</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-grammar-notation">5.1.5</a> — словарь записи.
+    Вот правило цикла <code>while</code> в синтаксической грамматике:</p>
+
+    <pre class="grammar"><em>WhileStatement</em> :
+    while ( <em>Expression</em> ) <em>Statement</em></pre>
+
+    <p>Моноширинным шрифтом — терминалы: их пишут в тексте буквально, и только символами латиницы
+    (похожая буква другого алфавита не подойдёт). Курсивом — нетерминалы. Одно двоеточие — синтаксическая
+    грамматика. Если вариантов несколько, каждый пишется на своей строке. Правило может ссылаться
+    на себя — так список аргументов растёт до любой длины:</p>
+
+    <pre class="grammar"><em>ArgumentList</em> :
+    <em>AssignmentExpression</em>
+    <em>ArgumentList</em> , <em>AssignmentExpression</em></pre>
+
+    <p>Остальные обозначения раздела:</p>
+
+    <table>
+        <thead><tr><th>Запись</th><th>Что значит</th><th>Пример</th></tr></thead>
+        <tbody>
+            <tr><td><em>X</em><sub>opt</sub></td><td>символ можно пропустить: два варианта в одном</td><td><code>let x</code> и <code>let x = 1</code></td></tr>
+            <tr><td><em>X</em>[Yield, Await]</td><td>параметры: одно правило — несколько версий для разных мест</td><td><code>await</code> в async-функции и вне её</td></tr>
+            <tr><td>one of</td><td>любой из перечисленных терминалов</td><td>знаки пунктуации</td></tr>
+            <tr><td>[empty]</td><td>пустая правая часть</td><td>пустой список параметров</td></tr>
+            <tr><td>[lookahead ∉ …]</td><td>проверка впереди: следующий токен не из набора</td><td><code>?.</code> перед цифрой (раздел 10)</td></tr>
+            <tr><td>[no <em>LineTerminator</em> here]</td><td>перевод строки здесь запрещён</td><td>после <code>return</code> (завтра)</td></tr>
+            <tr><td>but not</td><td>всё, кроме</td><td>имя, но не зарезервированное слово</td></tr>
+        </tbody>
+    </table>
+
+    <p>Пример с <code>opt</code> из раздела показывает, как быстро растёт число вариантов: правило цикла
+    <code>for</code> с двумя необязательными выражениями — это на самом деле четыре правила: с обоими
+    выражениями, с одним из двух и совсем без них.</p>
+
+    <h3>Параметры: зачем выражению [In]</h3>
+
+    <p>Выражения записаны как <em>Expression</em>[In] и в версии без <code>In</code>: там оператор
+    <code>in</code> запрещён. Нужно это в заголовке <code>for</code>: встретив <code>in</code>, грамматика
+    должна решить, оператор это или начало <code>for...in</code>. В начале заголовка она берёт версию без
+    <code>In</code>, и вставить туда оператор можно только в скобках:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse('for (var i = "a" in {}; false;) {}'));     // in — начало for...in
+console.log(parse('for (var i = ("a" in {}); false;) {}'));   // в скобках — оператор</pre>
+
+    <div class="result-box">
+        SyntaxError: Unexpected token ';'<br>
+        разобрано
+    </div>
+
+    <p>Первый заголовок прочитан как <code>for...in</code> с начальным значением (его в нестрогом коде
+    разрешает приложение B, день 31), и точка с запятой там уже лишняя.</p>
+
+    <h3>Проверка впереди: чем не может начинаться инструкция</h3>
+
+    <p>Инструкция-выражение (раздел 14.5) записана с проверкой
+    <code>[lookahead ∉ { {, function, async function, class, let [ }]</code>: она не начинается
+    с фигурной скобки, <code>function</code>, <code>class</code>. Иначе её нельзя было бы отличить от
+    блока и объявлений. Отсюда два знакомых правила:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("function () {}();"));       // в начале инструкции — объявление
+console.log((function () { return 5; })());     // в скобках — выражение
+console.log(parse("{ mark: 5 }"));              // { в начале — блок с меткой mark</pre>
+
+    <div class="result-box">
+        SyntaxError: Function statements require a function name<br>
+        5<br>
+        разобрано
+    </div>
+
+    <p>Поэтому функцию, вызываемую сразу (день 28 курса 2), берут в скобки: в начале инструкции
+    <code>function</code> — всегда объявление, и ему нужно имя. А <code>{ mark: 5 }</code> в начале
+    строки — не объект, а блок, внутри которого метка <code>mark</code> и число 5.</p>
+
+    <h2 id="source">4. Исходный текст — кодовые точки</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-source-text">11.1</a> начинается с правила
+    <code>SourceCharacter :: any Unicode code point</code>. Исходный текст — последовательность кодовых
+    точек Unicode; в каком кодировании лежит файл, стандарту неважно. Знакомое по дню 20 курса 2:
+    «буква с ударением», набранная двумя кодовыми точками, для языка — две точки, а не одна.</p>
+
+    <p>Отсюда неожиданное следствие для имён. Раздел 12.7.1 прямо говорит: два имени, которые Unicode
+    считает равными, но которые записаны разными кодовыми точками, — <em>разные</em> имена. Спросим
+    у Chrome через <code>new Function</code> (день 4 курса 2): он разбирает строку как тело функции.</p>
+
+    <pre class="code js">const composed = "caf" + String.fromCharCode(0xE9);           // é одной точкой
+const decomposed = "cafe" + String.fromCharCode(0x301);       // e и знак ударения
+console.log(composed === decomposed, composed.normalize() === decomposed.normalize());
+const body = `const ${composed} = 1; const ${decomposed} = 2; return [${composed}, ${decomposed}];`;
+console.log(new Function(body)());</pre>
+
+    <div class="result-box">
+        false true<br>
+        (2) [1, 2]
+    </div>
+
+    <p>На экране оба имени — «café», а переменных две. Нормализация из дня 20 курса 2 делает строки
+    равными, но к именам в коде её никто не применяет.</p>
+
+    <p>Второе следствие — escape-последовательности. В строках, регулярках, шаблонах и именах кодовую
+    точку можно записать числом: <code>&#92;u0061</code> — это «a». Но <strong>внутри комментария</strong>
+    такая запись — просто текст. Раздел 11.1 сравнивает с Java, где <code>&#92;u000A</code> в
+    комментарии превращается в перевод строки и обрывает комментарий. В ECMAScript — нет:</p>
+
+    <pre class="code js">let mark = 4;
+// &#92;u000A mark = 5;
+console.log(mark);</pre>
+
+    <div class="result-box">
+        4
+    </div>
+
+    <p>Подразделы 11.1.1–11.1.6 — служебные операции над текстом: собрать кодовую точку из двух
+    16-битных половинок, разложить строку на точки (<code>CodePointAt</code> мы пересказывали
+    на дне 20 курса 2) и <code>ParseText</code> — разобрать текст с заданной целью. <code>ParseText</code>
+    возвращает либо дерево, либо список ошибок: и синтаксических, и ранних. Наша <code>parse</code>
+    делает то же руками: <code>new Function</code> зовёт разбор с целью «тело функции» и превращает
+    первую ошибку списка в исключение.</p>
+
+    <h2 id="kinds">5. Четыре вида кода и директива</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-types-of-source-code">11.2</a> различает
+    четыре вида кода: <strong>глобальный</strong> (обычный скрипт), <strong>eval</strong> (строка,
+    переданная в <code>eval</code>, — день 13), <strong>код функции</strong> (тело и параметры) и
+    <strong>код модуля</strong>. Код вложенной функции не входит в код внешней: у каждой функции
+    свой.</p>
+
+    <p>Раздел 11.2.1 уточняет директиву <code>"use strict"</code>, знакомую по дню 3 курса 2. Она
+    действует, только если стоит в начале кода, в «прологе директив», и записана
+    <strong>точно</strong>: эти буквы, в двойных или одинарных кавычках, без escape-последовательностей.</p>
+
+    <pre class="code js">function loose() { "Use strict"; return typeof this; }   // большая U — просто строка
+function strict() { 'use strict'; return typeof this; }  // одинарные кавычки — директива
+console.log(loose(), strict());</pre>
+
+    <div class="result-box">
+        object undefined
+    </div>
+
+    <p>В <code>loose</code> строка с большой буквой — обычное выражение, режим остался нестрогим, и
+    <code>this</code> без объекта — окно браузера. Раздел 11.2.2 перечисляет, что строго всегда: код
+    модуля и тело класса. Раздел 11.2.3 разрешает функции, написанные не на ECMAScript: встроенные
+    функции движок может написать на чём угодно, и снаружи это почти незаметно — разве что исходника
+    у них нет:</p>
+
+    <pre class="code js">console.log(Math.max.toString());</pre>
+
+    <div class="result-box">
+        function max() { [native code] }
+    </div>
+
+    <h2 id="longest">6. Лексер: самый длинный токен и пять целей</h2>
+
+    <p>Глава <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-lexical-grammar">12</a>
+    начинается с правила, которое объясняет многие загадки: текст читается <strong>слева направо</strong>,
+    и каждый раз берётся <strong>самый длинный</strong> кусок, который может быть элементом ввода.</p>
+
+    <pre class="code js">let a = 1, b = 2;
+console.log(a+++b, a, b);</pre>
+
+    <div class="result-box">
+        3 2 2
+    </div>
+
+    <p>Лексер видит <code>+++</code> и берёт самое длинное — <code>++</code>, потом <code>+</code>.
+    Получается <code>a++ + b</code>: сложение 1 и 2, а <code>a</code> после этого стала 2. Пробелы
+    решают дело иначе: <code>a + ++b</code> — уже другая программа. А <code>a+++++b</code> разбивается
+    на <code>a ++ ++ + b</code>, и синтаксическая грамматика такое не принимает.</p>
+
+    <p>Второе правило главы — <strong>пять целей</strong>. Символ <code>/</code> может начинать и
+    деление, и регулярное выражение, и лексер решает по месту: там, где грамматика ждёт оператора, —
+    деление; где ждёт значения — регулярка. Примечание к главе приводит пример: после переноса строки
+    <code>/hi/g</code> читается как деление, потому что выражение <code>b</code> ещё может продолжаться.</p>
+
+    <pre class="code js">const b = 10, hi = 2, g = { exec: () =&gt; [1] }, c = 0;
+let a;
+a = b
+/hi/g.exec(c).map(Number);
+console.log(a);</pre>
+
+    <div class="result-box">
+        5
+    </div>
+
+    <p>Это <code>a = b / hi / g.exec(c).map(Number)</code>: 10 / 2 / 1. Точки с запятой после
+    <code>b</code> язык не вставил — почему, разберём завтра.</p>
+
+    <p>Так же лексер решает судьбу <code>}</code>. В шаблоне <code>`итог ${total / n} из ${n}`</code>
+    фигурная скобка после <code>n</code> закрывает подстановку, и дальше идёт не код, а продолжение
+    шаблона — « из ». Поэтому закрывающая скобка вынесена из общих токенов в отдельные правила,
+    и цель <code>InputElementTemplateTail</code> говорит лексеру: сейчас <code>}</code> — хвост шаблона.
+    Целей пять, потому что эти решения нужно принимать в разных местах грамматики.</p>
+
+    <h2 id="space">7. Пробелы</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-white-space">12.2</a>: пробелы разделяют токены
+    и в остальном ничего не значат. Таблица 30 перечисляет, что язык считает пробелом: табуляцию
+    (U+0009), вертикальную табуляцию (U+000B), перевод страницы (U+000C), U+FEFF и любой символ
+    категории Unicode «Space_Separator» — туда входят обычный пробел и неразрывный U+00A0. Других
+    «пробельных» символов Unicode язык нарочно не берёт. Проверим тремя символами:</p>
+
+    <pre class="code js">const NBSP = String.fromCharCode(0xA0), BOM = String.fromCharCode(0xFEFF), NEL = String.fromCharCode(0x85);
+console.log(new Function("let" + NBSP + "x = 1; return x;")());   // неразрывный пробел
+console.log(new Function("let" + BOM + "y = 2; return y;")());    // U+FEFF — тоже пробел
+try {
+  new Function("let" + NEL + "z = 3; return z;");                 // U+0085 — нет
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}</pre>
+
+    <div class="result-box">
+        1<br>
+        2<br>
+        SyntaxError: Invalid or unexpected token
+    </div>
+
+    <p>U+0085 («следующая строка») у Unicode — пробельный символ, но в таблицу 30 он не попал, и
+    в коде это ошибка. Неразрывный пробел, наоборот, в коде работает. Он легко попадает в программу,
+    когда код копируют из текстового редактора или со страницы, — и ошибкой не станет. Раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-unicode-format-control-characters">12.1</a> добавляет:
+    U+FEFF в начале файла — метка порядка байтов, а дальше в тексте — обычный пробел.</p>
+
+    <p>Тот же раздел говорит об управляющих символах формата — невидимых знаках вроде ZWNJ (U+200C) и
+    ZWJ (U+200D). MDN объясняет, зачем они: в некоторых письменностях, например в персидской, они
+    запрещают или требуют соединить соседние буквы. Поэтому стандарт пускает их в комментарии, строки,
+    шаблоны и регулярки, а ZWNJ и ZWJ — даже внутрь имён (раздел 11).</p>
+
+    <div class="mistake">
+        Пробел для языка и пробел для <code>trim</code> — не одно и то же. <code>trim</code> снимает
+        и переводы строк, а MDN напоминает: редакция ES2016 перешла на Unicode 8.0, где символ U+180E
+        из пробелов стал управляющим, и <code>"&#92;u180E".trim().length</code> с тех пор равен 1.
+        Определения зависят от версии Unicode, на которую ссылается стандарт.
+    </div>
+
+    <h2 id="lines">8. Переводы строк</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-line-terminators">12.3</a>: переводов строки
+    четыре — LF (U+000A), CR (U+000D), разделитель строк LS (U+2028) и разделитель абзацев PS (U+2029).
+    Пара CR LF считается одним. В отличие от пробелов, перевод строки влияет на грамматику: есть места,
+    где он запрещён (<code>[no LineTerminator here]</code>), и он управляет автоматической вставкой
+    точки с запятой — завтра.</p>
+
+    <p>LS и PS на экране не видны, но для языка это полноценный перевод строки. Например, на нём
+    кончается однострочный комментарий:</p>
+
+    <pre class="code js">const LS = String.fromCharCode(0x2028);
+const body = "let mark = 4;\n// комментарий" + LS + "mark = 5;\nreturn mark;";
+console.log(new Function(body)());</pre>
+
+    <div class="result-box">
+        5
+    </div>
+
+    <p>В редакторе строка «комментарий mark = 5;» выглядит одной строкой комментария, а язык выполнил
+    присваивание. Ещё одно правило 12.3 касается номеров строк: пару CR LF, которой заканчиваются
+    строки в файлах Windows, нужно считать <em>одним</em> переводом строки. Иначе номера строк в стеке
+    ошибки (день 26 курса 2) у файла из Windows удвоились бы. Класс <code>&#92;s</code> регулярных выражений, по словам раздела, включает и
+    переводы строк — поэтому на дне 17 курса 2 он совпал с набором, который снимает <code>trim</code>.</p>
+
+    <h2 id="comments">9. Комментарии и hashbang</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-comments">12.4</a>: однострочный комментарий
+    <code>//</code> — до конца строки, а сам перевод строки в него не входит и остаётся в потоке.
+    Многострочный <code>/* … */</code> можно поставить и посреди строки, и вокруг кода, который
+    нужно временно отключить, — пример MDN:</p>
+
+    <pre class="code js">const x = "dünýä";
+console.log("Salam, " + x /* вставили x */ + "!");
+/* console.log("этой строки не будет"); */</pre>
+
+    <div class="result-box">
+        Salam, dünýä!
+    </div>
+
+    <p>Но многострочные комментарии <strong>не вкладываются</strong>: отключить так кусок, в котором
+    уже есть <code>/* … */</code>, не выйдет. Почему ошибка выглядит так странно, объясняет правило
+    пяти целей:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("/* a /* b */ c */"));
+console.log(parse("/* a */ /* b */"));</pre>
+
+    <div class="result-box">
+        SyntaxError: Invalid regular expression: missing /<br>
+        разобрано
+    </div>
+
+    <p>Комментарий закончился на первом <code>*/</code>. Остаток <code>c */</code> — имя <code>c</code>,
+    знак умножения и <code>/</code>. После умножения грамматика ждёт значение, значит, <code>/</code>
+    начинает регулярное выражение — без закрывающей черты. Отсюда и текст про регулярку.</p>
+
+    <p>Ещё одно правило 12.4: многострочный комментарий, внутри которого есть перевод строки, для
+    грамматики <em>сам</em> считается переводом строки:</p>
+
+    <pre class="code js">function total() {
+  return /*
+  */ 5;
+}
+console.log(total());</pre>
+
+    <div class="result-box">
+        undefined
+    </div>
+
+    <p>Для грамматики это <code>return</code> и перевод строки, а после <code>return</code> перевод
+    строки запрещён — вставляется точка с запятой. Механизм — завтра.</p>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-hashbang">12.5</a> — комментарий
+    <code>#!</code>. Он допустим только в самом начале скрипта или модуля, без единого символа перед
+    ним, и нужен для запуска файла из командной строки. В браузере он тоже работает:</p>
+
+    <pre class="code js">#!/usr/bin/env node
+console.log("hashbang разобран");</pre>
+
+    <div class="result-box">
+        hashbang разобран
+    </div>
+
+    <p>Поставьте перед <code>#!</code> пробел или перенесите его на вторую строку —
+    <code>SyntaxError: Invalid or unexpected token</code>. Начало скрипта — единственное место, где
+    работает цель <code>InputElementHashbangOrRegExp</code>. MDN предупреждает: файл с <code>#!</code>
+    сохраняйте в UTF-8 без метки U+FEFF. Браузер метку снимает ещё при чтении файла, а командная строка
+    Unix с ней не узнает <code>#!</code>.</p>
+
+    <h2 id="tokens">10. Токены и знаки пунктуации</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-tokens">12.6</a>: обычные токены — имена,
+    приватные имена с <code>#</code>, знаки пунктуации, числа, строки и шаблоны. Деление,
+    регулярки, закрывающая фигурная скобка и хвосты шаблонов вынесены отдельно — именно их лексер
+    различает по цели. Раздел <a href="https://tc39.es/ecma262/2026/#sec-punctuators">12.8</a>
+    перечисляет знаки пунктуации через «one of»: от <code>{</code> до <code>=&gt;</code>, всего их
+    больше пятидесяти.</p>
+
+    <p>Один знак записан с проверкой впереди — необязательная цепочка:
+    <code>OptionalChainingPunctuator :: ?. [lookahead ∉ DecimalDigit]</code>. Знак <code>?.</code>,
+    за которым идёт цифра, — не цепочка. Без этого правила сломалась бы старая запись:</p>
+
+    <pre class="code js">const ready = true;
+console.log(ready?.5:0);                 // ? и .5 — тернарный оператор
+const card = { step: 2 };
+console.log(card?.step);                 // ?. — необязательная цепочка</pre>
+
+    <div class="result-box">
+        0.5<br>
+        2
+    </div>
+
+    <p>В первой строке <code>?.</code> не выделился в токен: следом цифра, поэтому лексер взял
+    <code>?</code>, а <code>.5</code> прочитал как число.</p>
+
+    <h2 id="names">11. Имена</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-names-and-keywords">12.7</a>: имя начинается
+    с символа, у которого в Unicode есть свойство ID_Start, или с <code>$</code> и <code>_</code>,
+    а дальше идут символы ID_Continue, <code>$</code> и два невидимых соединителя ZWNJ и ZWJ.
+    Буквы любых алфавитов годятся, цифра в начале — нет:</p>
+
+    <pre class="code js">const ýyl = 2026, çörek = "bread", $_$ = 3;
+console.log(ýyl, çörek, $_$);
+const apple = 5;
+console.log(&#92;u0061pple);                // &#92;u0061 — это «a»: то же имя</pre>
+
+    <div class="result-box">
+        2026 bread 3<br>
+        5
+    </div>
+
+    <p>MDN советует, если когда-нибудь придётся разбирать код самим, не считать имена латиницей: точнее
+    их описывает регулярное выражение на классах Unicode из дня 20 курса 2.</p>
+
+    <pre class="code js">const isName = (s) =&gt; /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u.test(s);
+console.log(["ýyl", "2mark", "çörek", "my-name", "_x", "$"].map(isName).join(" "));</pre>
+
+    <div class="result-box">
+        true false true false true true
+    </div>
+
+    <p>Туркменские ý и ç — буквы с ID_Start, имя законное; дефис в имя не входит. Запись <code>&#92;u0061pple</code> раздел
+    12.7.1 разрешает: escape-последовательность даёт ту же кодовую точку, и имя то же. Но так нельзя
+    протащить в имя то, что в нём запрещено. Невидимый ZWJ внутри имени тоже часть имени: <code>ab</code>
+    и то же имя с ZWJ между буквами — разные переменные, на экране неотличимые.</p>
+
+    <h2 id="reserved">12. Ключевые и зарезервированные слова</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-keywords-and-reserved-words">12.7.2</a>
+    разводит два понятия. <strong>Ключевое слово</strong> — имя, которое встречается в грамматике
+    буквально: <code>if</code>, <code>async</code>, <code>of</code>. <strong>Зарезервированное</strong> —
+    имя, которое нельзя сделать идентификатором. Раздел делит все имена на пять групп:</p>
+
+    <table>
+        <thead><tr><th>Группа</th><th>Примеры</th><th>Как имя переменной</th></tr></thead>
+        <tbody>
+            <tr><td>обычные имена</td><td><code>Math</code>, <code>window</code>, <code>_</code></td><td>всегда можно</td></tr>
+            <tr><td>зарезервированные всегда</td><td><code>if</code>, <code>class</code>, <code>enum</code>, <code>import</code></td><td>никогда</td></tr>
+            <tr><td>зависят от места</td><td><code>await</code>, <code>yield</code></td><td>можно вне async-функций и генераторов</td></tr>
+            <tr><td>запрещены в строгом коде</td><td><code>let</code>, <code>static</code>, <code>private</code>…</td><td>только в нестрогом</td></tr>
+            <tr><td>ключевые, но не зарезервированные</td><td><code>as</code>, <code>async</code>, <code>from</code>, <code>get</code>, <code>of</code>, <code>set</code></td><td>всегда можно</td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">const async = 5, of = 6, get = 7;
+let await = 8;                                  // обычный скрипт — можно
+console.log(async + of + get + await);
+const lesson = { import: 1, if: 2 };            // в именах свойств — можно
+console.log(lesson.import + lesson.if);</pre>
+
+    <div class="result-box">
+        26<br>
+        3
+    </div>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("const enum = 1;"));
+console.log(parse("function import() {}"));
+console.log(parse("let let = 1;"));
+console.log(parse("var let = 1;"));
+console.log(parse("const els&#92;u{65} = 1;"));</pre>
+
+    <div class="result-box">
+        SyntaxError: Unexpected reserved word<br>
+        SyntaxError: Unexpected token 'import'<br>
+        SyntaxError: let is disallowed as a lexically bound name<br>
+        разобрано<br>
+        SyntaxError: Keyword must not contain escaped characters
+    </div>
+
+    <p>Список меняется со временем. MDN перечисляет слова, которые редакции 1–3 держали «про запас»,
+    а теперь это обычные имена:</p>
+
+    <pre class="code js">const int = 1, goto = 2, abstract = 3, boolean = 4;
+console.log(int + goto + abstract + boolean);</pre>
+
+    <div class="result-box">
+        10
+    </div>
+
+    <p><code>enum</code> зарезервировано «на будущее» до сих пор и ничего не делает, но имени не даст.
+    <code>let</code> нельзя объявить через <code>let</code>, а через <code>var</code> в нестрогом
+    коде можно — пережиток времён, когда <code>let</code> ещё не было. Последняя строка — обход
+    через escape: <code>els&#92;u{65}</code> — это <code>else</code>, и раздел 12.7.2 прямо запрещает
+    так объявлять зарезервированные слова; V8 говорит, что в ключевом слове не может быть
+    escape-последовательностей.</p>
+
+    <p>Примечание 3 к разделу добавляет ещё два имени с ограничениями: <code>eval</code> и
+    <code>arguments</code> — не ключевые слова, но в строгом коде объявить их нельзя (таблица дня 3
+    курса 2):</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse('"use strict"; let eval = 1;'));
+console.log(parse("let eval = 1;"));</pre>
+
+    <div class="result-box">
+        SyntaxError: Unexpected eval or arguments in strict mode<br>
+        разобрано
+    </div>
+
+    <h2 id="cards">13. «Карточки 2.0»: строка по токенам</h2>
+
+    <p>Разберём руками строку из метода <code>know</code> «Карточек 2.0» (день 35 курса 2):</p>
+
+    <pre class="code js">// deck.js, день 35 курса 2 — одна строка метода know
+const step = this.progress.get(id)?.step ?? 1;</pre>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 210" role="img" aria-label="Строка const step равно this.progress.get(id)?.step ?? 1 разобрана на шестнадцать токенов четырёх видов">
+            <text x="10" y="22" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#1e1b4b">16 токенов, пробелы выброшены</text>
+
+            <rect x="10" y="34" width="52" height="34" rx="6" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/><text x="36" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#3730a3">const</text>
+            <rect x="68" y="34" width="44" height="34" rx="6" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/><text x="90" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#075985">step</text>
+            <rect x="118" y="34" width="24" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/><text x="130" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#9a3412">=</text>
+            <rect x="148" y="34" width="44" height="34" rx="6" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/><text x="170" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#3730a3">this</text>
+            <rect x="198" y="34" width="20" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/><text x="208" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#9a3412">.</text>
+            <rect x="224" y="34" width="72" height="34" rx="6" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/><text x="260" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#075985">progress</text>
+            <rect x="302" y="34" width="20" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/><text x="312" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#9a3412">.</text>
+            <rect x="328" y="34" width="36" height="34" rx="6" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/><text x="346" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#075985">get</text>
+            <rect x="370" y="34" width="20" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/><text x="380" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#9a3412">(</text>
+            <rect x="396" y="34" width="28" height="34" rx="6" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/><text x="410" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#075985">id</text>
+            <rect x="430" y="34" width="20" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/><text x="440" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#9a3412">)</text>
+            <rect x="456" y="34" width="28" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="2.5"/><text x="470" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">?.</text>
+            <rect x="490" y="34" width="44" height="34" rx="6" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/><text x="512" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#075985">step</text>
+            <rect x="540" y="34" width="28" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="2.5"/><text x="554" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">??</text>
+            <rect x="574" y="34" width="20" height="34" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/><text x="584" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#065f46">1</text>
+            <rect x="600" y="34" width="20" height="34" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/><text x="610" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#9a3412">;</text>
+
+            <rect x="10" y="92" width="14" height="14" rx="3" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+            <text x="32" y="104" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">зарезервированное слово (IdentifierName из списка ReservedWord): const, this</text>
+            <rect x="10" y="116" width="14" height="14" rx="3" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+            <text x="32" y="128" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">имя (IdentifierName): step, progress, get, id — get здесь просто имя метода</text>
+            <rect x="10" y="140" width="14" height="14" rx="3" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+            <text x="32" y="152" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">знак пунктуации (Punctuator); ?. и ?? — по одному токену: самый длинный кусок</text>
+            <rect x="10" y="164" width="14" height="14" rx="3" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+            <text x="32" y="176" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">числовой литерал (NumericLiteral): 1 — подробно завтра</text>
+            <text x="10" y="200" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#64748b">После ?. стоит буква s, а не цифра, — поэтому проверка впереди пропускает необязательную цепочку.</text>
+        </svg>
+        <figcaption>Строка «Карточек 2.0» глазами лексера: четыре вида токенов</figcaption>
+    </figure>
+
+    <p>Лексер прошёл строку слева направо и каждый раз брал самый длинный кусок. На <code>?.step</code>
+    он сначала проверил, не цифра ли после <code>?.</code>, — и взял знак необязательной цепочки целиком.
+    На <code>??</code> — два вопросительных знака одним токеном, а не два тернарных. Пробелы ушли из
+    потока, и синтаксическая грамматика получила 16 токенов. Если бы <code>id</code> назывался
+    <code>id</code> с невидимым ZWJ внутри, токенов было бы столько же — но имя другое, и
+    <code>progress.get</code> искал бы другую переменную.</p>
+
+    <h2 id="next">14. Что будет завтра</h2>
+
+    <p>Сегодня лексер выдавал имена, знаки и пробелы. Завтра, на дне 3, — остальные токены: литералы
+    чисел (разделитель <code>_</code>, <code>0b</code>, <code>0o</code>, <code>0x</code>, суффикс
+    <code>n</code>), строк и шаблонов (раздел 12.9), и правила автоматической вставки точки с запятой
+    (12.10) — почему <code>return</code> с переводом строки вернул <code>undefined</code>, а
+    <code>a = b</code> перед <code>/hi/g</code> точку с запятой не получил. И висячие запятые: где они
+    разрешены, а где — ошибка.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Lexical_grammar">MDN: Lexical grammar</a></td><td>пробелы, переводы строк, комментарии, имена, ключевые слова (литералы — завтра)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntactic-and-lexical-grammars">5.1 Syntactic and Lexical Grammars</a></td><td>грамматики спецификации</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-context-free-grammars">5.1.1 Context-Free Grammars</a></td><td>правила, нетерминалы, терминалы, цель</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-lexical-and-regexp-grammars">5.1.2 The Lexical and RegExp Grammars</a></td><td>из кодовых точек — элементы ввода; знак <code>::</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-numeric-string-grammar">5.1.3 The Numeric String Grammar</a></td><td>строка в число; знак <code>:::</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntactic-grammar">5.1.4 The Syntactic Grammar</a></td><td>из токенов — дерево разбора; знак <code>:</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-grammar-notation">5.1.5 Grammar Notation</a></td><td>opt, параметры, one of, проверки впереди, but not</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-source-code">11 Source Text</a></td><td>глава об исходном тексте</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-source-text">11.1 Source Text</a></td><td>текст — кодовые точки; escape в комментарии — текст</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-utf16encodecodepoint">11.1.1 UTF16EncodeCodePoint</a></td><td>кодовая точка — в 16-битные части</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-codepointstostring">11.1.2 CodePointsToString</a></td><td>точки — в строку</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-utf16decodesurrogatepair">11.1.3 UTF16SurrogatePairToCodePoint</a></td><td>пара половинок — в точку</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-codepointat">11.1.4 CodePointAt</a></td><td>точка в позиции строки (курс 2, день 20)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-stringtocodepoints">11.1.5 StringToCodePoints</a></td><td>строка — в список точек</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-parsetext">11.1.6 ParseText</a></td><td>разобрать текст с заданной целью</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-types-of-source-code">11.2 Types of Source Code</a></td><td>глобальный, eval, функции, модуля</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-directive-prologues-and-the-use-strict-directive">11.2.1 Directive Prologues</a></td><td>пролог директив; <code>"use strict"</code> — точно</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-strict-mode-code">11.2.2 Strict Mode Code</a></td><td>что строго: модули, классы, директива</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-non-ecmascript-functions">11.2.3 Non-ECMAScript Functions</a></td><td>встроенные функции на другом языке</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-lexical-grammar">12 Lexical Grammar</a></td><td>самый длинный кусок, пять целей</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-unicode-format-control-characters">12.1 Format-Control Characters</a></td><td>ZWNJ, ZWJ, U+FEFF</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-white-space">12.2 White Space</a></td><td>таблица 30: что считается пробелом</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-line-terminators">12.3 Line Terminators</a></td><td>LF, CR, LS, PS</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-comments">12.4 Comments</a></td><td>не вкладываются; с переводом строки — перевод строки</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-hashbang">12.5 Hashbang Comments</a></td><td><code>#!</code> только в самом начале</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tokens">12.6 Tokens</a></td><td>какие бывают токены</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-names-and-keywords">12.7 Names and Keywords</a></td><td>ID_Start, ID_Continue, <code>$</code>, <code>_</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-identifier-names">12.7.1 Identifier Names</a></td><td>escape в имени; равенство по кодовым точкам</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-keywords-and-reserved-words">12.7.2 Keywords and Reserved Words</a></td><td>пять групп имён, список ReservedWord</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-punctuators">12.8 Punctuators</a></td><td>знаки; <code>?.</code> не перед цифрой</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// путь: текст (кодовые точки) → лексика :: → токены → синтаксис : → дерево → ранние ошибки → выполнение
+// SyntaxError — до первой строки; TypeError, ReferenceError — на ходу
+// :: лексика и регулярки · ::: числовые строки (Number(" 12 ") — 12) · : синтаксис
+
+// лексер: слева направо, САМЫЙ ДЛИННЫЙ кусок — a+++b это a++ + b
+// / после значения — деление, где ждут значение — регулярка
+
+// пробел: TAB VT FF U+FEFF и Space_Separator (пробел, U+00A0); U+0085 — ошибка
+// перевод строки: LF CR LS(U+2028) PS(U+2029); LS тоже кончает //-комментарий
+// /* */ не вкладываются; с переводом строки внутри — сам перевод строки
+// #! — только самый первый символ скрипта
+
+// имя: ID_Start | $ | _, дальше ID_Continue | $ | ZWNJ | ZWJ; café двумя способами — два имени
+// escape в имени — та же точка; else через els\u{65} не объявить
+// ?. перед цифрой — не цепочка: ready?.5:0 — тернарный оператор</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Чем отличаются правила с <code>::</code>, <code>:::</code> и <code>:</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Это разные грамматики: <code>::</code> — лексическая и регулярных выражений (буквы —
+                    кодовые точки), <code>:::</code> — числовых строк, <code>:</code> — синтаксическая
+                    (буквы — токены лексической).
+                </details>
+            </li>
+            <li>Почему <code>a+++b</code> — это <code>a++ + b</code>, а не <code>a + ++b</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Лексер читает слева направо и каждый раз берёт самый длинный возможный кусок:
+                    сначала <code>++</code>, потом <code>+</code>.
+                </details>
+            </li>
+            <li>Почему <code>/* a /* b */ c */</code> даёт ошибку про регулярное выражение?
+                <details class="answer"><summary>Ответ</summary>
+                    Комментарии не вкладываются: он кончился на первом <code>*/</code>. Дальше
+                    <code>c * /</code>, а после умножения грамматика ждёт значение — <code>/</code>
+                    начинает регулярку, которая не закрыта.
+                </details>
+            </li>
+            <li>Неразрывный пробел U+00A0 и символ U+0085 оба пробельные для Unicode. Что будет с каждым
+                в коде?
+                <details class="answer"><summary>Ответ</summary>
+                    U+00A0 входит в категорию Space_Separator и для языка — пробел. U+0085 в таблицу 30 не
+                    входит: в коде это <code>SyntaxError: Invalid or unexpected token</code>.
+                </details>
+            </li>
+            <li>Можно ли назвать переменную <code>async</code>? А <code>enum</code>? А <code>let</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>async</code> — всегда: ключевое, но не зарезервированное. <code>enum</code> —
+                    никогда: зарезервировано на будущее. <code>let</code> — только через <code>var</code>
+                    и только в нестрогом коде.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Lexical_grammar">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

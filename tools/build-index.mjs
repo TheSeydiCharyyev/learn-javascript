@@ -28,6 +28,13 @@ const COURSES = [
       en: 'How the language works: closures and this, prototypes and classes, iterators, collections, regular expressions, Temporal and Intl, async code, modules.',
     },
   },
+  {
+    no: 3, dir: 'advanced', name: 'Advanced',
+    about: {
+      ru: 'Язык по спецификации: как читать ECMA-262, типы и абстрактные операции, контексты выполнения, Proxy и Reflect, двоичные данные и память, Intl целиком, наследие языка.',
+      en: 'The language by its specification: reading ECMA-262, types and abstract operations, execution contexts, Proxy and Reflect, binary data and memory, all of Intl, legacy features.',
+    },
+  },
 ];
 
 // colour and icon per module, in the order of MODULES
@@ -49,6 +56,14 @@ const LOOK = {
   I7: ['#06b6d4, #3b82f6', '&#x1F4C5;'],
   I8: ['#f59e0b, #dc2626', '&#x26A1;'],
   I9: ['#64748b, #334155', '&#x1F9F1;'],
+  A1: ['#6366f1, #4338ca', '&#x1F4D6;'],
+  A2: ['#8b5cf6, #7c3aed', '&#x1F9EE;'],
+  A3: ['#0ea5e9, #0369a1', '&#x1F3C3;'],
+  A4: ['#ec4899, #be185d', '&#x1FA9E;'],
+  A5: ['#10b981, #047857', '&#x1F4BE;'],
+  A6: ['#f97316, #c2410c', '&#x267B;&#xFE0F;'],
+  A7: ['#0891b2, #4f46e5', '&#x1F310;'],
+  A8: ['#78716c, #44403c', '&#x1F3FA;'],
   PROJECTS: ['#eab308, #f97316', '&#x1F3C6;'],
 };
 

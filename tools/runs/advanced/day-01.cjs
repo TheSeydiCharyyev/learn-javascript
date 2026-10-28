@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-01');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -35,6 +35,67 @@ const show = (a) => {
 // a block without a result-box: its output by the first line ("Uncaught …" for an error the console prints)
 const EXPECT = {
   'console.log("начало");': ["Uncaught SyntaxError: Identifier 'mark' has already been declared"],
+  // the tasks ask to predict these: the answers live here, not on the page
+  'const marks = [10, 20, 30, 40];': ['30 30 40', '10 10 10', 'undefined undefined'],
+  'const say = (word) => {': ['один', 'два', 'три', 'четыре', '7'],
+  'const mark = { valueOf() { console.log("valueOf вызван"); return 5; } };': ['valueOf вызван', 'NaN'],
+  'const days = [1, 2, 1];': ['2 0 2', '-1 -1 -1'],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  includesRecord: `const normal = (value) => ({ type: "normal", value });
+const thrown = (value) => ({ type: "throw", value });
+function toObjectRecord(x) {
+  if (x === null || x === undefined) return thrown(new TypeError("Cannot convert undefined or null to object"));
+  return normal(Object(x));
+}
+function includesRecord(o, search) {
+  const record = toObjectRecord(o);                    // 1. Let O be ? ToObject(this value).
+  if (record.type !== "normal") return record;
+  const obj = record.value;
+  const len = obj.length;
+  if (len === 0) return normal(false);                 // 3.
+  for (let k = 0; k < len; k++) {                      // 10.
+    const element = obj[k];
+    if (element === search || (element !== element && search !== search)) return normal(true);
+  }
+  return normal(false);                                // 11.
+}`,
+  due: `function due(cards, progress, today) {
+  return cards.filter((c) => !progress.has(c.id) || Temporal.PlainDate.compare(progress.get(c.id).next, today) <= 0);
+}`,
+  includesBySteps: `function includesBySteps(o, search, fromIndex) {
+  if (o === null || o === undefined) throw new TypeError("Cannot convert undefined or null to object");
+  const obj = Object(o);                                                  // 1. ToObject
+  let len = Math.trunc(Number(obj.length)) || 0;                          // 2. LengthOfArrayLike
+  len = Math.min(Math.max(len, 0), 2 ** 53 - 1);
+  if (len === 0) return false;                                            // 3.
+  const num = Number(fromIndex);                                          // 4. ToIntegerOrInfinity
+  let n = Number.isNaN(num) ? 0 : Number.isFinite(num) ? Math.trunc(num) : num;
+  if (n === Infinity) return false;                                       // 6.
+  if (n === -Infinity) n = 0;                                             // 7.
+  let k = n >= 0 ? n : Math.max(len + n, 0);                              // 8–9.
+  for (; k < len; k++) {                                                  // 10.
+    const element = obj[String(k)];
+    if (element === search || (element !== element && search !== search)) return true;
+  }
+  return false;                                                           // 11.
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
 };
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
@@ -99,6 +160,7 @@ const topSteps = (html) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -114,18 +176,24 @@ const topSteps = (html) => {
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `b${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
       // the comment of the early-error block is the console line itself
-      if (EXPECT[first]) check(blk.code.includes(`// ${EXPECT[first][0]}`), `${name} #${i}: the last comment is the console line`);
+      if (first === 'console.log("начало");') check(blk.code.includes(`// ${EXPECT[first][0]}`), `${name} #${i}: the last comment is the console line`);
     }
   }
 
@@ -160,6 +228,26 @@ console.log(Array.prototype.includes.call(lesson, "çörek"));`, 'tryit.html');
     check(JSON.stringify(out) === JSON.stringify(['Error: нет длины', 'true', 'читаем 0', 'читаем 1', 'false']), `lecture 13 try-it: length getter error, a string, length "2" ${JSON.stringify(out)}`);
   }
 
+  // task 4: every step of at with ? can throw, and the step that comes first wins
+  {
+    const out = await runScript(ctx, `const show = (f) => { try { f(); } catch (e) { console.log(e.name + ": " + e.message); } };
+show(() => Array.prototype.at.call(null, 0));
+show(() => Array.prototype.at.call({ get length() { throw new Error("длина"); } }, 0));
+show(() => [1].at(Symbol("n")));
+show(() => Array.prototype.at.call({ length: 1, get 0() { throw new Error("элемент"); } }, 0));
+show(() => Array.prototype.at.call({ get length() { throw new Error("длина"); } }, Symbol("n")));`, 'task4.html');
+    check(out.length === 5 && out[0].startsWith('TypeError: ') && JSON.stringify(out.slice(1)) === JSON.stringify(['Error: длина', 'TypeError: Cannot convert a Symbol value to a number', 'Error: элемент', 'Error: длина']),
+      `tasks 4: steps 1, 2, 3, 7 of at throw, step 2 before step 3 ${JSON.stringify(out)}`);
+  }
+
+  // task 7: a string date still works with compare, and <= still throws because of today
+  {
+    const out = await runScript(ctx, `const today = Temporal.PlainDate.from("2026-10-28");
+console.log(Temporal.PlainDate.compare("2026-10-27", today));
+try { console.log("2026-10-27" <= today); } catch (e) { console.log(e.name); }`, 'task7.html');
+    check(JSON.stringify(out) === '["-1","TypeError"]', `tasks 7: compare takes a string date, <= still throws ${JSON.stringify(out)}`);
+  }
+
   // section 15: a Temporal date has no Symbol.toPrimitive, so OrdinaryToPrimitive calls valueOf
   {
     const out = await runScript(ctx, 'console.log(typeof Temporal.PlainDate.prototype[Symbol.toPrimitive]);', 'toprim.html');
@@ -187,6 +275,16 @@ console.log(Array.prototype.includes.call(lesson, "çörek"));`, 'tryit.html');
   check(/Let methodNames be «"valueOf", "toString"»/.test(flat(clause(spec, 'sec-ordinarytoprimitive'))), 'lecture 15: with hint number OrdinaryToPrimitive tries valueOf first');
   const shorthand = flat(clause(spec, 'sec-shorthands-for-unwrapping-completion-records'));
   check(/If record is an abrupt completion, return record\./.test(shorthand), 'lecture 12: ? returns an abrupt record to the caller');
+
+  // tasks: what they say about the text
+  check(/implementation-defined/.test(flat(clause(spec, 'sec-math.random'))), 'tasks 1: Math.random uses an implementation-defined algorithm');
+  check(topSteps(clause(spec, 'sec-array.prototype.at')) === 7 && (flat(clause(spec, 'sec-array.prototype.at')).match(/\? /g) || []).length === 4
+    && /Return \? Get ?\(O, ! ToString/.test(flat(clause(spec, 'sec-array.prototype.at'))), 'tasks 4: at has 7 steps, 4 of them with ?, the last one with ! ToString');
+  check(/Let k be min ?\(n, len - 1\)/.test(flat(clause(spec, 'sec-array.prototype.lastindexof'))) && topSteps(clause(spec, 'sec-array.prototype.lastindexof')) === 9,
+    'tasks 9: lastIndexOf has 9 steps, step 6 takes min(n, len - 1)');
+  check(/IsStrictlyEqual/.test(flat(clause(spec, 'sec-array.prototype.indexof'))), 'tasks 6: indexOf compares with IsStrictlyEqual');
+  const max = flat(clause(spec, 'sec-math.max'));
+  check(/Let highest be -∞/.test(max) && max.indexOf('ToNumber') < max.indexOf('If number is NaN'), 'tasks 6: Math.max starts from -∞ and converts every argument before the NaN check');
 
   // notes, homework 1: both clauses have steps with ?, the first of them can throw
   for (const id of ['sec-map.prototype.get', 'sec-string.prototype.at']) {

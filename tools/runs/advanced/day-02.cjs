@@ -5,7 +5,8 @@
 // The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-02.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-02.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do; the quoted line of the neighbour (day 35 of course 2) is
+// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do, in the
+// tasks EXPECT holds the answers of the predictions and SOLUTIONS make the examples checkable; the quoted line of the neighbour (day 35 of course 2) is
 // the real one; the cheatsheet runs without an error; the experiments the lecture only tells about (hashbang not first,
 // a BOM before #!, U+180E and trim, ZWJ inside a name, await in a module, yield in strict code); what the lecture says
 // about the text of ECMA-262 2026 is checked against tools/.cache/ecma262-2026.html and what it quotes from MDN against
@@ -20,7 +21,7 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-02');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -36,8 +37,71 @@ const show = (a) => {
   return String(a.value ?? a.unserializableValue ?? a.description);
 };
 
-// a block without a result-box: its output by the first line
-const EXPECT = {};
+// a block without a result-box: its output by the first line; the tasks ask to predict these, the answers live here
+const EXPECT = {
+  'const lines = ["a+++b", "a+++++b", "a+ ++b", "x>>>=1", "c??=5", "ready?.5:0"];': ['a+++b разобрано',
+    "a+++++b SyntaxError: Unexpected token '++'", 'a+ ++b разобрано', 'x>>>=1 разобрано', 'c??=5 разобрано', 'ready?.5:0 разобрано'],
+  // U+FEFF is white space for the language but not for Unicode, U+0085 the other way round
+  'const codes = [0x09, 0xA0, 0xFEFF, 0x3000, 0x2028, 0x85, 0x200B, 0x180E];': ['9 true true true true', 'a0 true true true true',
+    'feff true true true false', '3000 true true true true', '2028 true true true true', '85 false false false true',
+    '200b false false false false', '180e false false false false'],
+  'const ýyl = 2026;': ['2026 true', 'да да нет нет да да нет нет нет'],
+  'const variants = [': ['1 разобрано', '2 разобрано', "3 SyntaxError: Unexpected token '>'", "4 SyntaxError: Unexpected identifier 'ter'",
+    '5 SyntaxError: missing ) after argument list', '6 разобрано'],
+  'let total = 0;': ['10', '1', '1 g'],
+  'function a() { "use strict"; return this; }': ['true true false false false false true'],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  invisible: `function invisible(code) {
+  const found = [];
+  for (let at = 0; at < code.length; at++) {
+    const ch = code[at];
+    if (ch === " " || ch === "\\n" || !/[\\p{White_Space}\\p{Cf}]/u.test(ch)) continue;
+    const hex = "U+" + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
+    const kind = /[\\n\\r\\u2028\\u2029]/.test(ch) ? "перевод строки" : /\\s/.test(ch) ? "пробел" : "не пробел";
+    found.push({ at, code: hex, kind });
+  }
+  return found;
+}`,
+  accessor: `function accessor(name) {
+  return /^[$_\\p{ID_Start}][$\\p{ID_Continue}]*$/u.test(name) ? \`card.\${name}\` : \`card[\${JSON.stringify(name)}]\`;
+}`,
+  tokens: `const PUNCT = ["{", "(", ")", "[", "]", ".", "...", ";", ",", "<", ">", "<=", ">=", "==", "!=", "===", "!==",
+  "+", "-", "*", "%", "**", "++", "--", "<<", ">>", ">>>", "&", "|", "^", "!", "~", "&&", "||", "??", "?", ":",
+  "=", "+=", "-=", "*=", "%=", "**=", "<<=", ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=", "??=", "=>", "}", "/", "/="]
+  .sort((a, b) => b.length - a.length);
+function tokens(code) {
+  const out = [];
+  let i = 0;
+  while (i < code.length) {
+    const rest = code.slice(i);
+    const skip = rest.match(/^(?:\\s+|\\/\\/[^\\n\\r\\u2028\\u2029]*|\\/\\*[\\s\\S]*?\\*\\/)/);
+    if (skip) { i += skip[0].length; continue; }
+    const m = rest.match(/^\\?\\.(?!\\d)/) || rest.match(/^(?:\\d+(?:\\.\\d*)?|\\.\\d+)/) || rest.match(/^[$_\\p{ID_Start}][$\\p{ID_Continue}]*/u);
+    const token = m ? m[0] : PUNCT.find((p) => rest.startsWith(p));
+    if (!token) throw new SyntaxError(\`Invalid or unexpected token at \${i}\`);
+    out.push(token);
+    i += token.length;
+  }
+  return out;
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
   '// deck.js, день 35 курса 2 — одна строка метода know': 'intermediate/day-35/lecture.html',
@@ -106,6 +170,7 @@ const terminals = (spec, name) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -121,12 +186,20 @@ const terminals = (spec, name) => {
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      // the tasks ask to copy parse from the lecture to the top of every file
+      const code = blk.code.includes('parse(') && !blk.code.includes('const parse') ? PARSE + blk.code : blk.code;
+      const out = await runScript(ctx, blk.example ? checkable(code) : code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
@@ -181,6 +254,19 @@ console.log(parse("function* g() { let yield = 1; }"));
 console.log(parse("async function f() { let await = 1; }"));`, 'yield.html');
     check(out.length === 4 && out[0].startsWith('SyntaxError') && out[1] === 'разобрано' && out[2].startsWith('SyntaxError') && out[3].startsWith('SyntaxError'),
       `lecture 12: yield is reserved in strict code and generators, await in async functions ${JSON.stringify(out)}`);
+  }
+  // tasks 2, 6, 8: what the criteria ask to find
+  {
+    const out = await runScript(ctx, `${PARSE}${SOLUTIONS.accessor}
+${SOLUTIONS.tokens}
+const ZWJ = String.fromCharCode(0x200D), NEL = String.fromCharCode(0x85), NBSP = String.fromCharCode(0xA0);
+console.log(parse("let" + ZWJ + "x = 1;"));
+console.log(["word", "ýyl", "if", "aýdym-saz", "2nji", ""].every((n) => parse("const card = {}; " + accessor(n) + ";") === "разобрано"));
+console.log(tokens("a+++++b").join(" "), parse("let a = 1, b = 2; a+++++b;").split(":")[0]);
+try { tokens("let" + NEL + "x"); } catch (e) { console.log(e.name); }
+console.log(tokens("let" + NBSP + "x").length);`, 'criteria.html');
+    check(JSON.stringify(out) === '["разобрано","true","a ++ ++ + b SyntaxError","SyntaxError","2"]',
+      `tasks 2, 6, 8: let+ZWJ+x parses (a name), every accessor parses, a+++++b lexes and fails in syntax, U+0085 throws, U+00A0 is white space ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -244,6 +330,15 @@ console.log(parse("async function f() { let await = 1; }"));`, 'yield.html');
   const early = flat(clause(spec, 'sec-identifiers-static-semantics-early-errors'));
   check(/LabelIdentifier : yield It is a Syntax Error if IsStrict \(this production\) is true/.test(early)
     && /LabelIdentifier : await It is a Syntax Error if the goal symbol of the syntactic grammar is Module/.test(early), 'lecture 12: 13.1.1 — yield is an error in strict code, await in a module');
+
+  // tasks: what they say about the text
+  check(/A UnicodeEscapeSequence cannot be used to contribute a code point to an IdentifierName that would otherwise be invalid/.test(flat(clause(spec, 'sec-identifier-names'))), 'tasks 3: 12.7.1 — an escape cannot bring in an invalid code point');
+  check(/ArrowParameters \[\?Yield, \?Await\] \[no LineTerminator here\] =>/.test(flat(clause(spec, 'sec-arrow-function-definitions'))), 'tasks 4: 15.3 — no line terminator before =>');
+  check(/The syntactic grammar defines Identifier as an IdentifierName that is not a ReservedWord/.test(names)
+    && /MemberExpression \[\?Yield, \?Await\]\. IdentifierName/.test(flat(clause(spec, 'sec-left-hand-side-expressions'))), 'tasks 6: Identifier is IdentifierName but not ReservedWord; after a dot — IdentifierName');
+  const prologue = flat(clause(spec, 'sec-directive-prologues-and-the-use-strict-directive'));
+  check(/consists entirely of a StringLiteral token followed by a semicolon/.test(prologue) && /may be inserted by automatic semicolon insertion/.test(prologue)
+    && /longest sequence of ExpressionStatement/.test(prologue), 'tasks 9: 11.2.1 — the longest sequence of string-only statements, ASI may give the semicolon');
 
   // notes, homework 1: yield is in the list, let and async are not
   check(reserved.includes('yield') && !reserved.includes('let') && !reserved.includes('async'), 'student homework 1: ReservedWord has yield, not let, async');

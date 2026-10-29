@@ -20,7 +20,10 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-03');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -124,7 +127,8 @@ const terminals = (spec, name) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
@@ -198,6 +202,11 @@ try {
 }`, 'cards-state.html');
     check(JSON.stringify(out) === '["TypeError \\"\\" false"]', `lecture 14: the counter is not updated and loading does not start ${JSON.stringify(out)}`);
   }
+  // notes, homework 1: _ right after 0x is an error, between two hex digits it is not
+  {
+    const out = await runScript(ctx, `${PARSE}console.log(parse("0x_FF").split(":")[0], parse("0xF_F"), 0xF_F);`, 'hw1.html');
+    check(JSON.stringify(out) === '["SyntaxError разобрано 255"]', `student homework 1: 0x_FF fails, 0xF_F is 255 ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -265,6 +274,10 @@ try {
   check(annexA.every((id, i) => new RegExp(`A\\.${i + 1} `).test(flat(clause(spec, id)).slice(0, 120))), 'lecture 15: A.1–A.8 in this order');
   check(/UTCOffset ::: ASCIISign Hour/.test(flat(clause(spec, 'sec-time-zone-offset-string-format'))), 'lecture 15: A.7 — the offset of a time zone');
 
+  // notes, homework 1 and 3: the rule HexDigits[Sep] and the last example of 12.10.2
+  check(numeric.includes('HexDigits [Sep] :: HexDigit HexDigits [?Sep] HexDigit [+Sep] HexDigits [+Sep] NumericLiteralSeparator HexDigit'), 'student homework 1: the rule HexDigits[Sep]');
+  check(examples.includes('a = b + c (d + e). print ()') && /is not transformed by automatic semicolon insertion, because the parenthesized expression/.test(examples), 'student homework 3: the last example of 12.10.2');
+
   // what the lecture quotes from MDN, in the cached copy of mdn/content
   const mdnPage = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/${p}/index.md`], { encoding: 'utf8' });
   const commas = mdnPage('trailing_commas');
@@ -274,6 +287,7 @@ try {
   check(/trailing commas are not allowed after the rest element|a trailing comma is not allowed after the rest element/.test(commas) && /trailing commas are not allowed in JSON/.test(commas), 'MDN: not after the rest element, not in JSON');
   check(/only allowed in \[dynamic imports\]\([^)]*\) if the runtime also implements the second `options` parameter/.test(commas) && /from matching "exactly `n`" to matching "at least `n`"/.test(commas),
     'MDN: import() with options; the quantifier changes its meaning');
+  check(commas.includes('### Trailing commas in destructuring') && /a trailing comma is not allowed after the rest element/.test(commas), 'student homework 4: MDN has the section on destructuring with the rest element');
   const lexical = mdnPage('lexical_grammar');
   check(/Within classes, class fields and generator methods can be a pitfall as well/.test(lexical) && lexical.includes(';(() => {'), 'MDN: class fields before a generator; ;( at the start of a line');
 

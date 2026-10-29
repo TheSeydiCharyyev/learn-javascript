@@ -5,7 +5,7 @@
 // The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-02.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-02.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted line of the neighbour (day 35 of course 2) is
+// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do; the quoted line of the neighbour (day 35 of course 2) is
 // the real one; the cheatsheet runs without an error; the experiments the lecture only tells about (hashbang not first,
 // a BOM before #!, U+180E and trim, ZWJ inside a name, await in a module, yield in strict code); what the lecture says
 // about the text of ECMA-262 2026 is checked against tools/.cache/ecma262-2026.html and what it quotes from MDN against
@@ -20,7 +20,10 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-02');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -124,7 +127,8 @@ const terminals = (spec, name) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
@@ -241,6 +245,9 @@ console.log(parse("async function f() { let await = 1; }"));`, 'yield.html');
   check(/LabelIdentifier : yield It is a Syntax Error if IsStrict \(this production\) is true/.test(early)
     && /LabelIdentifier : await It is a Syntax Error if the goal symbol of the syntactic grammar is Module/.test(early), 'lecture 12: 13.1.1 — yield is an error in strict code, await in a module');
 
+  // notes, homework 1: yield is in the list, let and async are not
+  check(reserved.includes('yield') && !reserved.includes('let') && !reserved.includes('async'), 'student homework 1: ReservedWord has yield, not let, async');
+
   // what the lecture quotes from MDN, in the cached copy of mdn/content
   const mdn = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/lexical_grammar/index.md'], { encoding: 'utf8' });
   check(mdn.includes('ES2016 upgraded the reference Unicode standard from 5.1 to 8.0.0') && mdn.includes('"\\u180E".trim().length'), 'MDN: U+180E and trim after ES2016');
@@ -249,6 +256,8 @@ console.log(parse("async function f() { let await = 1; }"));`, 'yield.html');
   check(/stripped during UTF-8 decoding/.test(mdn) && /shell will not recognize the hashbang if it's preceded by a BOM/.test(mdn), 'MDN: a BOM before #! — stripped by the browser, breaks the shell');
   const older = mdn.slice(mdn.indexOf('#### Future reserved words in older standards'), mdn.indexOf('### Identifiers with special meanings'));
   check(['int', 'goto', 'abstract', 'boolean'].every((w) => older.includes(`- \`${w}\``)) && /ECMAScript 1 till 3/.test(older), 'MDN: int, goto, abstract, boolean — reserved by editions 1–3');
+  const format = mdn.slice(mdn.indexOf('## Format-control characters'), mdn.indexOf('## White space'));
+  check(/U\+200C .*Zero width non-joiner/.test(format) && /U\+200D .*Zero width joiner/.test(format), 'student homework 4: MDN has the section Format-control characters with ZWNJ and ZWJ');
 
   // every row of the day's plan is a link, every anchor of the lecture exists
   const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');

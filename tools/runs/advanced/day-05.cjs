@@ -20,7 +20,10 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-05');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -131,7 +134,8 @@ const inOrder = (text, words) => words.every((w, i) => text.includes(w) && (i ==
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
@@ -159,6 +163,12 @@ console.log(JSON.stringify(["b", "B", "a", "ä"].sort((x, y) => x.localeCompare(
     check(JSON.stringify(out) === JSON.stringify(['RangeError: Invalid array buffer length true TypeError: First argument to String.prototype.includes must not be a regular expression',
       '["a","ä","b","B"] false']),
     `lecture 9, 11, 13, 14: ToIndex throws RangeError, IsArray sees through Proxy, includes rejects a regex, localeCompare sorts by the alphabet, a symbol is not == its text ${JSON.stringify(out)}`);
+  }
+  // notes, homework 1 and 2: a date and a Symbol object change ToPrimitive; the two comparisons of the ladder
+  {
+    const out = await runScript(ctx, `const attempt = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+console.log(typeof (new Date(0) + 1), attempt(() => Object(Symbol("x")) + ""), "1" == [1], [0] == false);`, 'hw.html');
+    check(JSON.stringify(out) === '["string TypeError: Cannot convert a Symbol value to a string true true"]', `student homework 1, 2: a date and a Symbol object, "1" == [1] and [0] == false ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -231,6 +241,7 @@ console.log(JSON.stringify(["b", "B", "a", "ä"].sort((x, y) => x.localeCompare(
   // the source page of MDN and the save of the Cards
   const mdn = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/guide/equality_comparisons_and_sameness/index.md'], { encoding: 'utf8' });
   check(/SameValueZero/.test(mdn) && /Object\.is\(\)/.test(mdn), 'MDN: Equality comparisons and sameness speaks of SameValueZero and Object.is()');
+  check(mdn.includes('## Comparing equality methods') && /\| `==` +\| `===` +\| `Object\.is` \| `SameValueZero` \|/.test(mdn), 'student homework 4: MDN has the table Comparing equality methods with four columns');
   const day33 = fs.readFileSync(path.join(ROOT, 'intermediate/day-33/lecture.html'), 'utf8');
   check(day33.includes('{"$map":[[1,'), 'lecture 15: save of day 33 writes progress as a list of pairs {"$map":[[1, …]]}');
   const day33decks = fs.readFileSync(path.join(ROOT, 'intermediate/day-33/lecture.html'), 'utf8');

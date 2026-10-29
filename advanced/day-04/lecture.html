@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 4 — Типы языка и типы спецификации: Completion Record и Reference Record</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #8b5cf6; }
+        h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+        h3 { color: #6d28d9; }
+        .step-number { background: #8b5cf6; }
+        .toc a { color: #7c3aed; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 4</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 4 &bull; урок 1</span>
+        <h1>Типы языка и типы спецификации: Completion Record и Reference Record</h1>
+        <p>Курс 3, Advanced. Модуль «Типы и абстрактные операции» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>называть восемь типов языка и отличать тип от ответа <code>typeof</code>;</li>
+            <li>объяснять, сколько значений у Number, откуда −0 и почему BigInt не смешивается с Number;</li>
+            <li>читать атрибуты свойства и таблицу внутренних методов объекта;</li>
+            <li>отличать типы языка от типов спецификации, которых в программе не увидеть;</li>
+            <li>предсказывать значение завершения и исход <code>try...finally</code> по Completion Record;</li>
+            <li>объяснять через Reference Record <code>typeof</code>, <code>delete</code>, присваивание и <code>this</code> при вызове.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#types">Два вида типов</a></li>
+            <li><a href="#simple">Undefined, Null, Boolean, String, Symbol</a></li>
+            <li><a href="#number">Number: 2⁶⁴ − 2⁵³ + 3 значения</a></li>
+            <li><a href="#bigint">BigInt и таблица числовых операций</a></li>
+            <li><a href="#object">Object: свойства и ключи</a></li>
+            <li><a href="#attributes">Атрибуты свойства</a></li>
+            <li><a href="#internal">Внутренние методы и слоты</a></li>
+            <li><a href="#spec-types">Типы спецификации: Enum, List, Record</a></li>
+            <li><a href="#completion">Completion Record</a></li>
+            <li><a href="#console">Значение завершения в консоли</a></li>
+            <li><a href="#finally">return и finally</a></li>
+            <li><a href="#reference">Reference Record</a></li>
+            <li><a href="#this">Откуда берётся this при вызове</a></li>
+            <li><a href="#others">Остальные типы спецификации</a></li>
+            <li><a href="#cards">«Карточки 2.0»: метод know без колоды</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="types">1. Два вида типов</h2>
+
+    <p>Модуль A2 начинается с главы 6 — <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-data-types-and-values">ECMAScript
+    Data Types and Values</a>. Первая её фраза: у каждого значения, с которым работают алгоритмы, есть тип, и других
+    типов, кроме описанных в главе, нет. Типы делятся на два вида. <strong>Типы языка</strong> (раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types">6.1</a>) — значения, которыми программист
+    пользуется прямо: их восемь — Undefined, Null, Boolean, String, Symbol, Number, BigInt и Object.
+    <strong>Типы спецификации</strong> (6.2) — служебные значения алгоритмов; в переменную их не положить.</p>
+
+    <p>На дне 5 Essentials мы читали страницу MDN <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures">JavaScript
+    data types and data structures</a> — это пересказ раздела 6.1. Знакомый оператор <code>typeof</code> отвечает на
+    вопрос о типе, но не совсем словами главы 6:</p>
+
+    <pre class="code js">const values = [undefined, null, true, "kitap", Symbol("id"), 2026, 2026n, {}, () =&gt; {}];
+console.log(values.map((v) =&gt; typeof v).join(" "));</pre>
+
+    <div class="result-box">
+        undefined object boolean string symbol number bigint object function
+    </div>
+
+    <p>Расхождений два. Для <code>null</code> — «object», хотя тип Null отдельный: алгоритм
+    <a href="https://tc39.es/ecma262/2026/#sec-typeof-operator-runtime-semantics-evaluation">typeof</a> так и
+    записан — «если val — null, вернуть "object"». И «function» — не тип: функция по главе 6 — это Object, у которого
+    есть внутренний метод <code>[[Call]]</code> (раздел 7). Оператор смотрит на этот метод.</p>
+
+    <h2 id="simple">2. Undefined, Null, Boolean, String, Symbol</h2>
+
+    <p>Разделы 6.1.1–6.1.5 короткие. У <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-undefined-type">Undefined</a>
+    и <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-null-type">Null</a> ровно по одному
+    значению, у <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-boolean-type">Boolean</a> — два.
+    <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-string-type">String</a> — не «текст», а
+    последовательность 16-битных элементов длиной до 2<sup>53</sup> − 1; что это UTF-16, предполагают только
+    операции, которые текст толкуют (день 20 курса 2). Одинокая половинка пары — тоже законная строка.
+    <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-symbol-type">Symbol</a> — значения, которые
+    годятся в ключи свойств, но не строки; каждый символ уникален, а описание хранит внутренний слот
+    <code>[[Description]]</code>.</p>
+
+    <pre class="code js">console.log("😀".length, [..."😀"].length, "&#92;uD800".length, "&#92;uD800".isWellFormed());
+console.log(Symbol("id") === Symbol("id"), Symbol("id").description, Symbol().description);
+console.log(Symbol.for("id") === Symbol.for("id"), typeof Symbol.iterator);</pre>
+
+    <div class="result-box">
+        2 1 1 false<br>
+        false id undefined<br>
+        true symbol
+    </div>
+
+    <p>Эмодзи — один символ на экране, но два элемента строки; «😀» по кодовым точкам — один. Предел длины
+    2<sup>53</sup> − 1 — это то, что разрешает стандарт; реализация ставит свой, намного меньше: в Chrome
+    <code>"x".repeat(2 ** 30)</code> бросает <code>RangeError: Invalid string length</code>. Различие «стандарт /
+    реализация» с дня 1 работает и здесь.</p>
+
+    <p>Два одинаковых описания — два разных символа. <code>Symbol.for</code> не нарушает правила: он берёт символ
+    из общего реестра, и второй вызов возвращает тот же. <code>Symbol.iterator</code> — один из
+    <a href="https://tc39.es/ecma262/2026/#sec-well-known-symbols">встроенных символов</a> (6.1.5.1), которыми
+    алгоритмы находят протоколы, — их мы видели на дне 11 курса 2.</p>
+
+    <h2 id="number">3. Number: 2⁶⁴ − 2⁵³ + 3 значения</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-numeric-types">6.1.6</a> вводит два числовых типа, а
+    подраздел 6.1.6.1 считает значения Number точно: 2<sup>64</sup> − 2<sup>53</sup> + 3. Это числа двойной
+    точности IEEE 754, только все 2<sup>53</sup> − 2 разных NaN стандарта IEEE язык видит как <em>один</em> NaN.
+    Кроме NaN — две бесконечности и конечные числа, среди которых два нуля, +0 и −0. Все целые по модулю до
+    2<sup>53</sup> представимы точно.</p>
+
+    <pre class="code js">console.log(2n ** 64n - 2n ** 53n + 3n);
+console.log(Object.is(NaN, 0 / 0), Object.is(0, -0), 0 === -0, 1 / -0);
+console.log(9007199254740993, 9007199254740995, 2 ** 53 + 2);
+console.log(1.7976931348623158e308, 1.7976931348623159e308);</pre>
+
+    <div class="result-box">
+        18437736874454810627n<br>
+        true false true -Infinity<br>
+        9007199254740992 9007199254740996 9007199254740994<br>
+        1.7976931348623157e+308 Infinity
+    </div>
+
+    <p>Число посчитано BigInt'ом — Number столько цифр точно не удержит. <code>Object.is</code> (день 6 курса 2)
+    различает нули и не различает NaN — это операция <code>Number::sameValue</code>. Последняя строка показывает
+    фразу, которой спецификация пользуется сотни раз: «the Number value for <em>x</em>» — ближайший Number, а при
+    равенстве — тот, у которого <em>чётная мантисса</em>. Поэтому 2<sup>53</sup> + 1 уходит вниз, к …992, а
+    2<sup>53</sup> + 3 — вверх, к …996: оба соседа на одном расстоянии, побеждает чётный.</p>
+
+    <p>У правила есть край. В набор, из которого выбирается ближайший, раздел добавляет два значения, которых в
+    Number нет, — ±2<sup>1024</sup>; если ближе всего оказалось одно из них, результат — бесконечность. Поэтому
+    запись чуть больше <code>Number.MAX_VALUE</code> ещё округляется к нему, а следующая по величине — уже
+    <code>Infinity</code>: ошибки «переполнения» в языке нет.</p>
+
+    <h2 id="bigint">4. BigInt и таблица числовых операций</h2>
+
+    <p>Подраздел 6.1.6.2: BigInt — целое любого размера, для побитовых операций — дополнительный код, где у
+    отрицательного числа слева бесконечно много единиц. Таблица 2 раздела 6.1.6 перечисляет операции: каждый
+    оператор вызывает пару <code>Number::…</code> или <code>BigInt::…</code> — <code>Number::add</code> для
+    <code>x + y</code>, <code>BigInt::divide</code> для <code>x / y</code> и так далее. Столбец «Result» говорит,
+    какие из них могут вернуть внезапную запись (день 1): у Number — ни одна, у BigInt — деление, остаток, степень
+    и беззнаковый сдвиг.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() =&gt; 1n + 1));
+console.log(attempt(() =&gt; 2n ** -1n));
+console.log(attempt(() =&gt; 1n / 0n));
+console.log(5n / 2n, -5n / 2n, -5n % 3n, Number(2n ** 64n));</pre>
+
+    <div class="result-box">
+        TypeError: Cannot mix BigInt and other types, use explicit conversions<br>
+        RangeError: Exponent must be positive<br>
+        RangeError: Division by zero<br>
+        2n -2n -2n 18446744073709552000
+    </div>
+
+    <p>Под таблицей — объяснение первой ошибки: типы не переводятся друг в друга без потерь, поэтому
+    <em>неявного</em> перевода между Number и BigInt нет. Number теряет точность, BigInt — дробную часть; переводить
+    нужно явно, <code>Number(…)</code> или <code>BigInt(…)</code>. Отрицательная степень дала бы дробь — поэтому
+    <code>RangeError</code>; V8 пишет «must be positive», хотя ноль разрешён: <code>2n ** 0n</code> — <code>1n</code>.
+    Деление и остаток отбрасывают дробь к нулю, и знак остатка — как у делимого. Беззнакового сдвига у BigInt нет
+    вовсе: при бесконечных единицах слева «беззнакового» результата не бывает — о сдвигах день 6.</p>
+
+    <h2 id="object">5. Object: свойства и ключи</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-object-type">6.1.7</a>: объект — набор свойств. Свойство
+    бывает <strong>данных</strong> (ключ, значение и атрибуты) или <strong>аксессором</strong> (ключ, одна или две
+    функции и атрибуты). Ключ свойства — строка или символ, других нет; пустая строка — тоже ключ. Среди строк
+    раздел выделяет <strong>целочисленный индекс</strong> (от 0 до 2<sup>53</sup> − 1) и <strong>индекс
+    массива</strong> — до 2<sup>32</sup> − 2. Только индексы массива двигают его <code>length</code>:</p>
+
+    <pre class="code js">console.log(Object.keys({ 1: "a", [Symbol("s")]: 2, "": 3 }));
+const a = [], b = [], c = [];
+a[4294967294] = 1;
+b[4294967295] = 1;
+c["-0"] = 1;
+console.log(a.length, b.length, c.length, Object.keys(c));</pre>
+
+    <div class="result-box">
+        (2) ['1', '']<br>
+        4294967295 0 0 (1) ['-0']
+    </div>
+
+    <p>Числовой ключ <code>1</code> стал строкой «1», символ в <code>Object.keys</code> не попал (день 11 курса 2),
+    пустая строка — попала. 4294967294 = 2<sup>32</sup> − 2 — последний индекс массива, длина стала
+    2<sup>32</sup> − 1. На единицу больше — уже обычное свойство, длина 0. Примечание раздела отдельно оговаривает
+    «-0»: это не индекс вовсе, просто строка из двух символов.</p>
+
+    <h2 id="attributes">6. Атрибуты свойства</h2>
+
+    <p>Подраздел <a href="https://tc39.es/ecma262/2026/#sec-property-attributes">6.1.7.1</a>, таблица 3 —
+    шесть атрибутов, знакомых по дню 5 курса 2:</p>
+
+    <table>
+        <thead><tr><th>Атрибут</th><th>У какого свойства</th><th>По умолчанию</th><th>Что значит</th></tr></thead>
+        <tbody>
+            <tr><td><code>[[Value]]</code></td><td>данных</td><td><code>undefined</code></td><td>значение при чтении</td></tr>
+            <tr><td><code>[[Writable]]</code></td><td>данных</td><td><code>false</code></td><td>можно ли менять <code>[[Value]]</code> через <code>[[Set]]</code></td></tr>
+            <tr><td><code>[[Get]]</code></td><td>аксессор</td><td><code>undefined</code></td><td>функция для чтения</td></tr>
+            <tr><td><code>[[Set]]</code></td><td>аксессор</td><td><code>undefined</code></td><td>функция для записи</td></tr>
+            <tr><td><code>[[Enumerable]]</code></td><td>оба</td><td><code>false</code></td><td>виден ли в <code>for...in</code></td></tr>
+            <tr><td><code>[[Configurable]]</code></td><td>оба</td><td><code>false</code></td><td>можно ли удалить и перенастроить</td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">console.log(JSON.stringify(Object.getOwnPropertyDescriptor({ word: "kitap" }, "word")));
+const card = Object.defineProperty({}, "word", { value: "kitap" });
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor(card, "word")));
+const timer = { get left() { return 5; } };
+console.log(Object.keys(Object.getOwnPropertyDescriptor(timer, "left")).join(" "));</pre>
+
+    <div class="result-box">
+        {"value":"kitap","writable":true,"enumerable":true,"configurable":true}<br>
+        {"value":"kitap","writable":false,"enumerable":false,"configurable":false}<br>
+        get set enumerable configurable
+    </div>
+
+    <p>Литерал объекта ставит атрибутам <code>true</code>, а <code>defineProperty</code> берёт значения по
+    умолчанию из таблицы — <code>false</code>. У аксессора нет ни <code>value</code>, ни <code>writable</code>: это
+    атрибуты только свойства данных.</p>
+
+    <h2 id="internal">7. Внутренние методы и слоты</h2>
+
+    <p>Подраздел <a href="https://tc39.es/ecma262/2026/#sec-object-internal-methods-and-internal-slots">6.1.7.2</a>
+    объясняет, как спецификация описывает поведение объектов: <strong>внутренними методами</strong> в двойных
+    квадратных скобках. Таблица 4 — одиннадцать обязательных методов любого объекта:
+    <code>[[GetPrototypeOf]]</code>, <code>[[SetPrototypeOf]]</code>, <code>[[IsExtensible]]</code>,
+    <code>[[PreventExtensions]]</code>, <code>[[GetOwnProperty]]</code>, <code>[[DefineOwnProperty]]</code>,
+    <code>[[HasProperty]]</code>, <code>[[Get]]</code>, <code>[[Set]]</code>, <code>[[Delete]]</code>,
+    <code>[[OwnPropertyKeys]]</code>. Таблица 5 добавляет функциям <code>[[Call]]</code> и конструкторам —
+    <code>[[Construct]]</code>. За знакомым кодом стоят именно они:</p>
+
+    <table>
+        <thead><tr><th>В коде</th><th>Внутренний метод</th></tr></thead>
+        <tbody>
+            <tr><td><code>obj.x</code>, <code>obj[k]</code></td><td><code>[[Get]]</code></td></tr>
+            <tr><td><code>obj.x = v</code></td><td><code>[[Set]]</code></td></tr>
+            <tr><td><code>"x" in obj</code></td><td><code>[[HasProperty]]</code></td></tr>
+            <tr><td><code>delete obj.x</code></td><td><code>[[Delete]]</code></td></tr>
+            <tr><td><code>Object.keys(obj)</code>, <code>for...in</code></td><td><code>[[OwnPropertyKeys]]</code> и <code>[[GetOwnProperty]]</code></td></tr>
+            <tr><td><code>Object.defineProperty</code></td><td><code>[[DefineOwnProperty]]</code></td></tr>
+            <tr><td><code>Object.getPrototypeOf</code>, <code>Object.setPrototypeOf</code></td><td><code>[[GetPrototypeOf]]</code>, <code>[[SetPrototypeOf]]</code></td></tr>
+            <tr><td><code>Object.preventExtensions</code>, <code>Object.isExtensible</code></td><td><code>[[PreventExtensions]]</code>, <code>[[IsExtensible]]</code></td></tr>
+            <tr><td><code>f()</code>, <code>new F()</code></td><td><code>[[Call]]</code>, <code>[[Construct]]</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Как работает каждый у обычного объекта — день 14; Proxy перехватывает ровно эти вызовы — день 16.</p>
+
+    <p>Объект, у которого все методы — стандартные из главы 10, называется <strong>обычным</strong>; остальные —
+    <strong>экзотические</strong>: массив, у которого <code>[[DefineOwnProperty]]</code> следит за
+    <code>length</code>, или Proxy (день 16). Если алгоритм зовёт метод, которого у объекта нет, — <code>TypeError</code>.
+    А <strong>внутренние слоты</strong> — скрытое состояние: это не свойства, их не прочитать из кода.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() =&gt; new (() =&gt; {})()));
+console.log(Object.getOwnPropertyNames(new Map([[1, "kitap"]])).length);
+console.log(attempt(() =&gt; Map.prototype.get.call({}, 1)));</pre>
+
+    <div class="result-box">
+        TypeError: (intermediate value) is not a constructor<br>
+        0<br>
+        TypeError: Method Map.prototype.get called on incompatible receiver #&lt;Object&gt;
+    </div>
+
+    <p>У стрелочной функции нет <code>[[Construct]]</code> — <code>new</code> падает. У <code>Map</code> нет ни одного
+    собственного свойства: его пары лежат во внутреннем слоте <code>[[MapData]]</code>. А <code>Map.prototype.get</code>
+    первым делом проверяет, есть ли у <code>this</code> такой слот, и у простого объекта его нет.</p>
+
+    <p>Подраздел 6.1.7.3 — <strong>инварианты</strong>: правила, которые обязан соблюдать любой объект (например,
+    ненастраиваемое свойство не может «исчезнуть»); Proxy проверяет их на ходу — день 16. Подраздел 6.1.7.4 —
+    <strong>встроенные объекты</strong> вроде <code>%Array.prototype%</code>: в знаках процента — объект текущего
+    реалма (день 9), а не то, что сейчас лежит в глобальной переменной <code>Array</code>.</p>
+
+    <h2 id="spec-types">8. Типы спецификации: Enum, List, Record</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-ecmascript-specification-types">6.2</a>: типы спецификации —
+    мета-значения, которые описывают работу языка. Раздел прямо говорит: они не обязаны соответствовать чему-то в
+    движке, и их нельзя сохранить в свойство или переменную.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 300" role="img" aria-label="Слева восемь типов языка, справа типы спецификации в трёх группах: записи, коллекции и прочие">
+            <rect x="10" y="10" width="250" height="236" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+            <text x="135" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#5b21b6">Типы языка, 6.1 — восемь</text>
+            <text x="135" y="54" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#5b21b6">в переменных и свойствах</text>
+            <rect x="24" y="66" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="76" y="86" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">Undefined</text>
+            <rect x="142" y="66" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="194" y="86" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">Null</text>
+            <rect x="24" y="106" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="76" y="126" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">Boolean</text>
+            <rect x="142" y="106" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="194" y="126" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">String</text>
+            <rect x="24" y="146" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="76" y="166" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">Symbol</text>
+            <rect x="142" y="146" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="194" y="166" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">Number</text>
+            <rect x="24" y="186" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="76" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">BigInt</text>
+            <rect x="142" y="186" width="104" height="30" rx="6" fill="#ffffff" stroke="#8b5cf6" stroke-width="1.5"/><text x="194" y="206" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">Object</text>
+            <text x="135" y="236" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#5b21b6">функция — Object с [[Call]]</text>
+
+            <rect x="280" y="10" width="350" height="236" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="455" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#334155">Типы спецификации, 6.2</text>
+            <text x="455" y="54" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">только внутри алгоритмов</text>
+            <rect x="294" y="66" width="322" height="56" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+            <text x="455" y="86" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">записи (Record)</text>
+            <text x="455" y="106" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">Completion, Reference, Property Descriptor, PrivateElement…</text>
+            <rect x="294" y="130" width="322" height="44" rx="6" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+            <text x="455" y="150" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#075985">коллекции</text>
+            <text x="455" y="166" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">List «1, 2», Set, Relation</text>
+            <rect x="294" y="180" width="322" height="58" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+            <text x="455" y="197" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">прочие</text>
+            <text x="455" y="213" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">Enum, Environment Record, Abstract Closure,</text>
+            <text x="455" y="229" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">Data Block, Private Name</text>
+
+            <text x="10" y="272" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Слева — то, что можно напечатать в консоли. Справа — то, через что алгоритм это получает:</text>
+            <text x="10" y="290" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">ошибка «вылетает» как запись throw, имя переменной ищется через Reference Record.</text>
+        </svg>
+        <figcaption>Два мира типов главы 6</figcaption>
+    </figure>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-enum-specification-type">Enum</a> (6.2.1) — имена вроде
+    <code>normal</code>, <code>return</code>, <code>throw</code>: ничего, кроме имени, у них нет.
+    <a href="https://tc39.es/ecma262/2026/#sec-list-and-record-specification-type">List</a> (6.2.2) — упорядоченный
+    список, пишется в угловых кавычках: <code>«1, 2»</code>, пустой — <code>«»</code>; так передаются, например,
+    аргументы вызова: <code>Function.prototype.apply</code> первым делом строит из похожего на массив объекта List
+    операцией <code>CreateListFromArrayLike</code>. <strong>Record</strong> — набор именованных полей, похожий на литерал объекта:
+    <code>{ [[Field1]]: 42, [[Field2]]: false }</code>. <a href="https://tc39.es/ecma262/2026/#sec-set-and-relation-specification-type">Set
+    и Relation</a> (6.2.3) нужны модели памяти (день 23) и не имеют отношения к объекту <code>Set</code>.</p>
+
+    <h2 id="completion">9. Completion Record</h2>
+
+    <p>На дне 1 мы разворачивали знаки <code>?</code> и <code>!</code> и уже пользовались записями. Раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-completion-record-specification-type">6.2.4</a> даёт им определение:
+    Completion Record объясняет, как значения и управление проходят через программу, — особенно
+    <code>break</code>, <code>continue</code>, <code>return</code> и <code>throw</code>, которые уводят выполнение
+    в другое место. Таблица 7 — три поля:</p>
+
+    <table>
+        <thead><tr><th>Поле</th><th>Значение</th><th>Смысл</th></tr></thead>
+        <tbody>
+            <tr><td><code>[[Type]]</code></td><td><code>normal</code>, <code>break</code>, <code>continue</code>, <code>return</code>, <code>throw</code></td><td>как завершилось</td></tr>
+            <tr><td><code>[[Value]]</code></td><td>любое значение, кроме самой записи</td><td>что получилось</td></tr>
+            <tr><td><code>[[Target]]</code></td><td>строка или <code>empty</code></td><td>метка для <code>break</code> и <code>continue</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Запись типа <code>normal</code> — <strong>обычная</strong>, любая другая — <strong>внезапная</strong>
+    (abrupt). Подразделы 6.2.4.1–6.2.4.3 — сокращения: <code>NormalCompletion(v)</code>,
+    <code>ThrowCompletion(e)</code>, <code>ReturnCompletion(v)</code>. Вот какие записи дают знакомые инструкции:</p>
+
+    <table>
+        <thead><tr><th>Инструкция</th><th><code>[[Type]]</code></th><th><code>[[Value]]</code></th><th><code>[[Target]]</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>x + 1;</code></td><td><code>normal</code></td><td>значение <code>x + 1</code></td><td><code>empty</code></td></tr>
+            <tr><td><code>var x = 3;</code></td><td><code>normal</code></td><td><code>empty</code></td><td><code>empty</code></td></tr>
+            <tr><td><code>return 5;</code></td><td><code>return</code></td><td>5</td><td><code>empty</code></td></tr>
+            <tr><td><code>throw err;</code></td><td><code>throw</code></td><td>объект <code>err</code></td><td><code>empty</code></td></tr>
+            <tr><td><code>break outer;</code></td><td><code>break</code></td><td><code>empty</code></td><td>«outer»</td></tr>
+            <tr><td><code>continue;</code></td><td><code>continue</code></td><td><code>empty</code></td><td><code>empty</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Вызываемые объекты спецификации возвращают
+    только обычную запись или throw — <code>return</code> до вызывающего не доходит, он превращается в обычное
+    значение. А <code>[[Value]]</code> бывает пустым, <code>empty</code>: так завершаются инструкции без значения
+    — <code>var x = 3;</code>, пустая <code>;</code>. Подраздел
+    <a href="https://tc39.es/ecma262/2026/#sec-updateempty">6.2.4.4 UpdateEmpty</a> заполняет пустое значение,
+    если оно пустое, и не трогает, если нет.</p>
+
+    <h2 id="console">10. Значение завершения в консоли</h2>
+
+    <p>Обычно значения завершения не видны, но консоль DevTools их показывает: после ввода она печатает
+    <code>[[Value]]</code> записи, которой закончился весь ввод. Введите строки по одной:</p>
+
+    <pre class="code js">// в консоли: каждая строка — отдельный ввод
+if (true) { 5 }
+{ 7 }
+for (let i = 0; i &lt; 3; i++) { i * 10; }
+2; var x = 3;
+1; if (false) {}
+try { 1 } finally { 2 }
+l: { 3; break l; }
+"a"; ;
+switch (1) { case 1: "один"; }
+try { throw 1 } catch { 8 }</pre>
+
+    <div class="result-box">
+        5<br>
+        7<br>
+        20<br>
+        2<br>
+        undefined<br>
+        1<br>
+        3<br>
+        'a'<br>
+        'один'<br>
+        8
+    </div>
+
+    <p>Инструкции <code>if</code> и блок отдают значение последней инструкции внутри. Цикл — значение последнего
+    шага: 20. <code>var x = 3;</code> завершается пустым значением, и список инструкций сохраняет предыдущее, 2.
+    А <code>if (false) {}</code> возвращает не пустое, а <code>undefined</code> — алгоритм <code>if</code>
+    заканчивается <code>UpdateEmpty(…, undefined)</code>, и 1 затирается. <code>finally</code> со своим обычным
+    завершением значение <code>try</code> не меняет. <code>break l</code> несёт метку в <code>[[Target]]</code>,
+    помеченный блок её узнаёт и превращает запись в обычную с последним значением, 3. Пустая инструкция
+    <code>;</code> завершается пустым значением, как <code>var</code>, и строка «a» остаётся. <code>switch</code>
+    отдаёт значение последней выполненной инструкции ветки, а <code>catch</code> — значение своего блока: запись
+    <code>throw</code> из <code>try</code> он превратил в обычную. Консоль печатает строки в кавычках — так она
+    отличает их от чисел.</p>
+
+    <h2 id="finally">11. return и finally</h2>
+
+    <p>Алгоритм <a href="https://tc39.es/ecma262/2026/#sec-try-statement-runtime-semantics-evaluation">try...finally</a>
+    (14.15.3) в три шага: вычислить блок — запись B; вычислить <code>finally</code> — запись F; если F обычная,
+    вернуть B, иначе — F. Значит, внезапное завершение <code>finally</code> побеждает всё, что было в
+    <code>try</code>, — и <code>return</code>, и даже ошибку:</p>
+
+    <pre class="code js">function f() { try { return "из try"; } finally { return "из finally"; } }
+function g() { try { throw new Error("пропала"); } finally { return "ошибки нет"; } }
+function h() { for (const n of [1, 2, 3]) { try { return n; } finally { continue; } } return "дошли"; }
+function k() { try { return "из try"; } finally { console.log("finally выполнен"); } }
+console.log(f(), "|", g(), "|", h());
+console.log(k());</pre>
+
+    <div class="result-box">
+        из finally | ошибки нет | дошли<br>
+        finally выполнен<br>
+        из try
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 196" role="img" aria-label="Функция g: блок try даёт запись throw, finally даёт запись return, итог — запись return">
+            <rect x="10" y="10" width="190" height="84" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="105" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#991b1b">B — блок try</text>
+            <text x="105" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#991b1b">[[Type]]: throw</text>
+            <text x="105" y="74" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#991b1b">[[Value]]: Error</text>
+
+            <rect x="225" y="10" width="190" height="84" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="320" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#9a3412">F — finally</text>
+            <text x="320" y="54" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#9a3412">[[Type]]: return</text>
+            <text x="320" y="74" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#9a3412">[[Value]]: "ошибки нет"</text>
+
+            <rect x="440" y="10" width="190" height="84" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="535" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#065f46">итог try</text>
+            <text x="535" y="54" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">F не обычная —</text>
+            <text x="535" y="74" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">возвращается F</text>
+
+            <line x1="200" y1="52" x2="223" y2="52" stroke="#8b5cf6" stroke-width="2"/>
+            <line x1="415" y1="52" x2="438" y2="52" stroke="#8b5cf6" stroke-width="2"/>
+
+            <rect x="10" y="120" width="620" height="64" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="320" y="142" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Если бы finally завершился обычно, итогом стала бы B — и ошибка вылетела бы дальше.</text>
+            <text x="320" y="164" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Запись return дошла до вызова g, и вызов вернул её [[Value]] как обычный результат.</text>
+        </svg>
+        <figcaption>Функция g глазами Completion Record</figcaption>
+    </figure>
+
+    <p>Это та «странность», о которой предупреждал день 11 Essentials: <code>return</code> в <code>finally</code>
+    побеждает. Теперь видно, что это не исключение из правила, а само правило — три шага алгоритма. В
+    <code>h</code> запись <code>continue</code> из <code>finally</code> отменила <code>return</code>, цикл дошёл до
+    конца, и функция вернула «дошли». А <code>k</code> — обычный случай: <code>finally</code> выполнился
+    (строка напечатана раньше результата), завершился обычной записью, и итогом осталась запись
+    <code>return</code> из <code>try</code>. Поэтому <code>finally</code> годится для уборки — закрыть, остановить,
+    напечатать, — а <code>return</code>, <code>break</code> и <code>continue</code> в нём не пишут.</p>
+
+    <h2 id="reference">12. Reference Record</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-reference-record-specification-type">6.2.5</a>: Reference
+    Record — это «ссылка» на имя или свойство, ещё не превращённая в значение. Её получает левая часть присваивания,
+    аргумент <code>typeof</code> и <code>delete</code>, имя функции при вызове. Поля по таблице 8:</p>
+
+    <table>
+        <thead><tr><th>Поле</th><th>Что там</th></tr></thead>
+        <tbody>
+            <tr><td><code>[[Base]]</code></td><td>значение (для свойства), Environment Record (для переменной) или <code>unresolvable</code> — имя не нашлось</td></tr>
+            <tr><td><code>[[ReferencedName]]</code></td><td>имя: строка, символ, Private Name — или пока любое значение, до <code>ToPropertyKey</code></td></tr>
+            <tr><td><code>[[Strict]]</code></td><td>создана ли ссылка в строгом коде</td></tr>
+            <tr><td><code>[[ThisValue]]</code></td><td>для <code>super.x</code> — <code>this</code> на момент создания, иначе <code>empty</code></td></tr>
+        </tbody>
+    </table>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 214" role="img" aria-label="Три Reference Record: свойство card.word, переменная word и ненайденное имя nope, и что с каждой делает GetValue">
+            <rect x="10" y="10" width="200" height="112" rx="10" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="110" y="32" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#075985">card.word</text>
+            <text x="110" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#075985">[[Base]]: объект card</text>
+            <text x="110" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#075985">[[ReferencedName]]: "word"</text>
+            <text x="110" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#075985">GetValue: card.[[Get]]("word")</text>
+
+            <rect x="220" y="10" width="200" height="112" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+            <text x="320" y="32" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#5b21b6">word</text>
+            <text x="320" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#5b21b6">[[Base]]: Environment Record</text>
+            <text x="320" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#5b21b6">[[ReferencedName]]: "word"</text>
+            <text x="320" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#5b21b6">GetValue: значение привязки</text>
+
+            <rect x="430" y="10" width="200" height="112" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="530" y="32" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#991b1b">nope</text>
+            <text x="530" y="56" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#991b1b">[[Base]]: unresolvable</text>
+            <text x="530" y="76" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#991b1b">[[ReferencedName]]: "nope"</text>
+            <text x="530" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">GetValue: ReferenceError</text>
+
+            <text x="10" y="150" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">typeof смотрит на ссылку раньше GetValue: для unresolvable — «undefined» без ошибки.</text>
+            <text x="10" y="172" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">PutValue для unresolvable: в нестрогом коде — новое свойство глобального объекта,</text>
+            <text x="10" y="194" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">в строгом ([[Strict]] — true) — ReferenceError.</text>
+        </svg>
+        <figcaption>Три Reference Record и операция GetValue</figcaption>
+    </figure>
+
+    <p>Две главные операции — <a href="https://tc39.es/ecma262/2026/#sec-getvalue">GetValue</a> (прочитать) и
+    <a href="https://tc39.es/ecma262/2026/#sec-putvalue">PutValue</a> (записать). Их шаги объясняют вещи, которые
+    раньше приходилось запоминать:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(typeof nope, attempt(() =&gt; nope));
+function leak() { leaked = 1; }
+leak();
+console.log(globalThis.leaked, attempt(() =&gt; { "use strict"; strictLeak = 1; }));
+console.log(attempt(() =&gt; { "use strict"; Math.PI = 3; }));
+console.log(attempt(() =&gt; { "use strict"; "kitap".x = 1; }));
+console.log(delete nope, delete Math.PI);</pre>
+
+    <div class="result-box">
+        undefined ReferenceError: nope is not defined<br>
+        1 ReferenceError: strictLeak is not defined<br>
+        TypeError: Cannot assign to read only property 'PI' of object '#&lt;Object&gt;'<br>
+        TypeError: Cannot create property 'x' on string 'kitap'<br>
+        true false
+    </div>
+
+    <p><code>typeof</code> сначала проверяет: ссылка не разрешилась — «undefined» (день 5 Essentials называл это
+    «особой добротой»). Простое <code>nope</code> идёт через GetValue, а её шаг 2 — <code>ReferenceError</code>: так
+    вчерашний <code>continue⏎outer</code> упал на имени <code>outer</code>. PutValue в нестрогом коде записывает
+    ненайденное имя в глобальный объект — отсюда «утечка» <code>leaked</code> (день 3 курса 2), а в строгом
+    бросает. Поле <code>[[Strict]]</code> решает и судьбу неудачной записи: <code>[[Set]]</code> вернул
+    <code>false</code>, и только строгий код превращает это в <code>TypeError</code>. То же со свойством строки:
+    <code>[[Base]]</code> — примитив, PutValue делает из него временный объект (<code>ToObject</code>), пишет в него
+    и выбрасывает. Примечание к PutValue оговаривает, что этот объект снаружи не виден, — в нестрогом коде запись
+    просто пропадает. <code>delete</code> для ненайденного имени возвращает <code>true</code>, а для ненастраиваемого
+    свойства — <code>false</code>.</p>
+
+    <h2 id="this">13. Откуда берётся this при вызове</h2>
+
+    <p>Вызов <code>f()</code> вычисляет <code>f</code> и смотрит, что получилось
+    (<a href="https://tc39.es/ecma262/2026/#sec-evaluatecall">EvaluateCall</a>, 13.3.6.2). Если это Reference
+    Record на свойство, <code>this</code> берётся из него операцией
+    <a href="https://tc39.es/ecma262/2026/#sec-getthisvalue">GetThisValue</a> — то есть из <code>[[Base]]</code>.
+    Если ссылку уже превратили в значение, <code>this</code> взять неоткуда:</p>
+
+    <pre class="code js">const card = { word: "kitap", show() { return this === card; } };
+console.log(card.show(), (card.show)(), card["show"](), card?.show());
+console.log((0, card.show)(), (card.show = card.show)(), [card.show][0]());
+const { show } = card;
+console.log(show());</pre>
+
+    <div class="result-box">
+        true true true true<br>
+        false false false<br>
+        false
+    </div>
+
+    <p>Скобки <a href="https://tc39.es/ecma262/2026/#sec-grouping-operator-runtime-semantics-evaluation">( … )</a>
+    возвращают то, что вернуло выражение внутри, — ссылку, и <code>this</code> сохраняется. Оператор
+    <a href="https://tc39.es/ecma262/2026/#sec-comma-operator-runtime-semantics-evaluation">запятая</a> и
+    присваивание вызывают GetValue — остаётся голая функция; этот приём <code>(0, card.show)()</code> мы видели на
+    дне 2 курса 2. <code>[card.show][0]</code> — тоже ссылка, но на свойство «0» массива, и <code>this</code> — массив.
+    Деструктуризация кладёт в <code>show</code> значение. И ещё одно следствие раздела 7: метод, записанный
+    коротко, — функция без <code>[[Construct]]</code>, и <code>new card.show()</code> бросает
+    <code>TypeError: card.show is not a constructor</code>.</p>
+
+    <p>Четвёртое поле, <code>[[ThisValue]]</code>, нужно для <code>super</code>: метод родителя ищется в прототипе,
+    а <code>this</code> должен остаться нашим объектом:</p>
+
+    <pre class="code js">class Card { label() { return this.word; } }
+class TurkmenCard extends Card { word = "kitap"; label() { return "tk: " + super.label(); } }
+console.log(new TurkmenCard().label());</pre>
+
+    <div class="result-box">
+        tk: kitap
+    </div>
+
+    <h2 id="others">14. Остальные типы спецификации</h2>
+
+    <table>
+        <thead><tr><th>Раздел</th><th>Тип</th><th>Зачем</th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-property-descriptor-specification-type">6.2.6</a></td><td>Property Descriptor</td><td>запись с атрибутами из таблицы 3; данных или аксессора, но не то и другое</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-lexical-environment-and-environment-record-specification-types">6.2.7</a></td><td>Environment Record</td><td>области видимости (день 1 курса 2), подробно — глава 9, день 9</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-abstract-closure">6.2.8</a></td><td>Abstract Closure</td><td>шаги алгоритма вместе с «захваченными» значениями — замыкание спецификации</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-data-blocks">6.2.9</a></td><td>Data Block</td><td>последовательность байтов — память <code>ArrayBuffer</code> (день 20)</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privateelement-specification-type">6.2.10</a></td><td>PrivateElement</td><td>приватное поле, метод или аксессор объекта</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-classfielddefinition-record-specification-type">6.2.11</a></td><td>ClassFieldDefinition</td><td>имя поля класса и его инициализатор</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-private-names">6.2.12</a></td><td>Private Name</td><td>ключ <code>#имени</code>: уникален, даже если описание то же</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-classstaticblockdefinition-record-specification-type">6.2.13</a></td><td>ClassStaticBlockDefinition</td><td>тело блока <code>static { … }</code> как функция</td></tr>
+        </tbody>
+    </table>
+
+    <p>Два из них можно увидеть по следам. Property Descriptor с полями обоих видов отвергает
+    <code>ToPropertyDescriptor</code>. А Private Name создаётся при каждом вычислении класса — два класса из одной
+    фабрики получают разные <code>#step</code>, хоть и написаны одинаково:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() =&gt; Object.defineProperty({}, "x", { get() { return 1; }, value: 1 })));
+const make = () =&gt; class { #step = 1; static has(o) { return #step in o; } };
+const A = make(), B = make();
+console.log(A.has(new A()), A.has(new B()));</pre>
+
+    <div class="result-box">
+        TypeError: Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #&lt;Object&gt;<br>
+        true false
+    </div>
+
+    <h2 id="cards">15. «Карточки 2.0»: метод know без колоды</h2>
+
+    <p>Кнопка «Знаю» в «Карточках 2.0» (день 34 курса 2) зовёт метод колоды так:</p>
+
+    <pre class="code js">// main.js, день 34 курса 2 — кнопка «Знаю»
+const word = current();
+if (word === null) return;
+opened.get(chosen).know(word.id, today);</pre>
+
+    <p>Выражение <code>opened.get(chosen).know</code> даёт Reference Record: <code>[[Base]]</code> — колода,
+    которую вернул <code>get</code>, <code>[[ReferencedName]]</code> — «know», <code>[[Strict]]</code> —
+    <code>true</code>, ведь модули строгие. Вызов берёт <code>this</code> из <code>[[Base]]</code>. Попробуем
+    «упростить» код — сохранить метод в переменную или отдать его прямо в <code>forEach</code>:</p>
+
+    <pre class="code js">class Deck {
+  #cards = new Map([[1, "kitap"]]);
+  #progress = new Map();
+  know(id) {
+    if (!this.#cards.has(id)) throw new Error(`в колоде нет карточки ${id}`);
+    this.#progress.set(id, 2);
+    return this.#progress.size;
+  }
+}
+const deck = new Deck();
+const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(deck.know(1));
+const know = deck.know;
+console.log(attempt(() =&gt; know(1)));
+console.log(attempt(() =&gt; [1].forEach(deck.know)));
+console.log(know.call(deck, 1), deck.know.bind(deck)(1), [1].map((id) =&gt; deck.know(id)).length);</pre>
+
+    <div class="result-box">
+        1<br>
+        TypeError: Cannot read properties of undefined (reading '#cards')<br>
+        TypeError: Cannot read properties of undefined (reading '#cards')<br>
+        1 1 1
+    </div>
+
+    <p>В <code>know</code> лежит значение — функция, ссылки на колоду в нём нет. Код класса строгий, и
+    <code>this</code> без объекта — <code>undefined</code>, а у него не прочитать <code>#cards</code>.
+    <code>forEach</code> тоже получил голую функцию. Лечат тремя способами из последней строки: передать
+    <code>this</code> явно (<code>call</code>), привязать (<code>bind</code>, день 2 курса 2) или обернуть в стрелку,
+    где вызов снова идёт через ссылку <code>deck.know</code>. В «Карточках 2.0» выбран третий: обработчик кнопки —
+    стрелка, и метод вызывается прямо на колоде.</p>
+
+    <h2 id="next">16. Что будет завтра</h2>
+
+    <p>Сегодня мы видели типы. Завтра, на дне 5, — как значения одного типа становятся значениями другого:
+    <code>ToPrimitive</code>, <code>ToNumber</code>, <code>ToString</code>, <code>ToPropertyKey</code> (почему ключ
+    <code>1</code> стал «1») и сравнения — <code>IsStrictlyEqual</code>, <code>IsLooselyEqual</code>,
+    <code>SameValue</code> и <code>SameValueZero</code> из таблицы 2.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Страница</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-data-types-and-values">6 Data Types and Values</a></td><td>два вида типов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types">6.1 Language Types</a></td><td>восемь типов языка</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-undefined-type">6.1.1 Undefined</a></td><td>одно значение</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-null-type">6.1.2 Null</a></td><td>одно значение</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-boolean-type">6.1.3 Boolean</a></td><td>два значения</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-string-type">6.1.4 String</a></td><td>16-битные элементы, до 2<sup>53</sup> − 1</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-symbol-type">6.1.5 Symbol</a></td><td>уникальные ключи, <code>[[Description]]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-numeric-types">6.1.6 Numeric Types</a></td><td>Number и BigInt, таблица 2 операций</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-object-type">6.1.7 Object</a></td><td>свойства, ключи, атрибуты, внутренние методы и слоты</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-specification-types">6.2 Specification Types</a></td><td>мета-значения алгоритмов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-enum-specification-type">6.2.1 Enum</a></td><td>имена вроде <code>normal</code>, <code>throw</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-list-and-record-specification-type">6.2.2 List and Record</a></td><td><code>«1, 2»</code> и <code>{ [[Field]]: … }</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-set-and-relation-specification-type">6.2.3 Set and Relation</a></td><td>для модели памяти</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-completion-record-specification-type">6.2.4 Completion Record</a></td><td>три поля, UpdateEmpty, значение завершения, finally</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reference-record-specification-type">6.2.5 Reference Record</a></td><td>четыре поля, GetValue, PutValue, GetThisValue</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-property-descriptor-specification-type">6.2.6 Property Descriptor</a></td><td>атрибуты как запись</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-lexical-environment-and-environment-record-specification-types">6.2.7 Environment Record</a></td><td>области видимости — глава 9</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-abstract-closure">6.2.8 Abstract Closure</a></td><td>шаги и захваченные значения</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-data-blocks">6.2.9 Data Blocks</a></td><td>байты</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privateelement-specification-type">6.2.10 PrivateElement</a></td><td>приватные элементы</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-classfielddefinition-record-specification-type">6.2.11 ClassFieldDefinition</a></td><td>поле класса</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-private-names">6.2.12 Private Names</a></td><td>ключи <code>#имён</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-classstaticblockdefinition-record-specification-type">6.2.13 ClassStaticBlockDefinition</a></td><td>блок <code>static</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// типы языка: Undefined Null Boolean String Symbol Number BigInt Object; функция — Object с [[Call]]
+// typeof null — "object", typeof функции — "function": так записан алгоритм typeof
+// Number: 2^64 − 2^53 + 3 значения, один NaN, +0 и −0; ничья при округлении — к чётной мантиссе
+// BigInt: точно, без неявного смешивания с Number; / % ** у BigInt могут бросить; ближайшее ±2^1024 — это ±Infinity
+// ключ — строка или символ; индекс массива — до 2^32 − 2; "-0" — не индекс
+// атрибуты: [[Value]] [[Writable]] [[Get]] [[Set]] [[Enumerable]] [[Configurable]], по умолчанию false
+// 11 внутренних методов + [[Call]] и [[Construct]]; слоты — не свойства ([[MapData]])
+
+// Completion Record: [[Type]] normal | break | continue | return | throw, [[Value]], [[Target]]
+// консоль печатает [[Value]] итоговой записи: if (true) { 5 } → 5; var — пусто, if — undefined
+// try...finally: обычная F — итог B; внезапная F (return, break, continue, throw) — итог F
+// Reference Record: [[Base]] (значение | Environment Record | unresolvable), [[ReferencedName]], [[Strict]], [[ThisValue]]
+// typeof ненайденного — "undefined"; GetValue ненайденного — ReferenceError; PutValue — глобальное свойство или ошибка
+// this при вызове — из [[Base]] ссылки; (0, obj.m)(), const m = obj.m — ссылки нет</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>typeof null</code> — «object», хотя тип Null отдельный?
+                <details class="answer"><summary>Ответ</summary>
+                    Так записан алгоритм <code>typeof</code> (13.5.3.1): «если val — null, вернуть "object"». Ответ
+                    оператора — это его таблица, а не название типа из главы 6.
+                </details>
+            </li>
+            <li>Почему <code>2 ** 53 + 1 === 2 ** 53</code>, а <code>2n ** 53n + 1n</code> — нет?
+                <details class="answer"><summary>Ответ</summary>
+                    2<sup>53</sup> + 1 не представимо в Number, и «the Number value for x» выбирает соседа с чётной
+                    мантиссой — 2<sup>53</sup>. BigInt хранит целые любого размера точно.
+                </details>
+            </li>
+            <li>Что напечатает консоль на ввод <code>1; if (false) {}</code> и почему не 1?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>undefined</code>: инструкция <code>if</code> завершается <code>UpdateEmpty(…, undefined)</code>
+                    и её значение не пустое, поэтому оно заменяет 1. С <code>var x = 3;</code> было бы 1 — у неё
+                    значение пустое.
+                </details>
+            </li>
+            <li>Почему <code>return</code> в <code>finally</code> отменяет ошибку из <code>try</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Алгоритм <code>try...finally</code> возвращает запись блока, только если <code>finally</code>
+                    завершился обычно. Запись <code>return</code> внезапная — она и становится итогом, а запись
+                    <code>throw</code> из блока отбрасывается.
+                </details>
+            </li>
+            <li>Почему <code>(card.show)()</code> сохраняет <code>this</code>, а <code>(0, card.show)()</code> — нет?
+                <details class="answer"><summary>Ответ</summary>
+                    Скобки возвращают Reference Record, и вызов берёт <code>this</code> из её <code>[[Base]]</code>.
+                    Оператор запятая вызывает GetValue: остаётся функция без ссылки на объект.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

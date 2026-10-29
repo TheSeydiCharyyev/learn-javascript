@@ -4,7 +4,8 @@
 // printed as "Uncaught SyntaxError: …". The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-03.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-03.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted lines of render (day 33 of course 2) are the
+// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do, in the
+// tasks EXPECT holds the answers of the predictions and SOLUTIONS make the examples checkable; the quoted lines of render (day 33 of course 2) are the
 // real ones; the cheatsheet runs without an error; the experiments the lecture only tells about (undefined cannot be
 // redefined, a space after \ at the end of a line, trailing commas in a module, the values of scheme 1, the tagged
 // template at the start of a line, …); what the lecture says about the text of ECMA-262 2026 is checked against
@@ -20,7 +21,7 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-03');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -36,8 +37,76 @@ const show = (a) => {
   return String(a.value ?? a.unserializableValue ?? a.description);
 };
 
-// a block without a result-box: its output by the first line
-const EXPECT = {};
+// a block without a result-box: its output by the first line; the tasks ask to predict these, the answers live here
+const EXPECT = {
+  'const codes = ["0b1_0", "0B11", "0o_7", "0x1F_FFn", "1_0.5_0", "1e-1_0", "08", "0.1e1n"];': ['0b1_0 → 2', '0B11 → 3',
+    '0o_7 → Invalid or unexpected token', '0x1F_FFn → 8191', '1_0.5_0 → 10.5', '1e-1_0 → 1e-10', '08 → 8', '0.1e1n → Invalid or unexpected token'],
+  'const strings = [': ['1 3', '2 Invalid hexadecimal escape sequence', '3 2', '4 4', '5 2', '6 1', '7 3', '8 2'],
+  'function f(a, b,) {}': ['2 3 2 2', '2 2 -1'],
+  'const bodies = [': ['1 TypeError: 1 is not a function', '2 TypeError: [1,2][(0 , 1)].forEach is not a function', '3 TypeError: "a" is not a function',
+    "4 ReferenceError: Cannot access 'n' before initialization", '5 ReferenceError: g is not defined', '6 1'],
+  'const restricted = [': ['1 undefined', '2 {"ok":true}', '3 2', '4 SyntaxError: Illegal newline after throw', "5 SyntaxError: Unexpected token '=>'",
+    '6 4', '7 "вышли"'],
+  'const parts = (strings) => strings.map((s, i) => `${JSON.stringify(s)} ${JSON.stringify(strings.raw[i])}`).join(" | ");': ["\"a\\tb\" \"a\\\\tb\"",
+    "\"A\" \"\\\\u{41}\" | undefined \"\\\\x\"", "\"$5 ${x}\" \"$5 \\\\${x}\""],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  looseJSON: `function looseJSON(text) {
+  let out = "", inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (ch === "\\\\") out += text[++i];
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    if (ch === "," && /^\\s*[\\]}]/.test(text.slice(i + 1))) continue;
+    out += ch;
+  }
+  return JSON.parse(out);
+}`,
+  asiHazards: `function asiHazards(code) {
+  const found = [];
+  let prev = "";
+  code.split("\\n").forEach((line, i) => {
+    const t = line.trim();
+    if (t === "") return;
+    if (prev && /^[(\\[\`+\\-/]/.test(t) && !/^\\/[/*]/.test(t) && !/[;{,]$/.test(prev)) found.push(i + 1);
+    prev = t;
+  });
+  return found;
+}`,
+  numericValue: `function numericValue(text) {
+  const big = text.endsWith("n");
+  const body = big ? text.slice(0, -1) : text;
+  const prefixed = /^0[xob]/i.test(body);
+  const digit = prefixed ? { x: "[0-9a-f]", o: "[0-7]", b: "[01]" }[body[1].toLowerCase()] : "\\\\d";
+  const part = \`\${digit}+(?:_\${digit}+)*\`;
+  const ok = prefixed ? new RegExp(\`^\${part}$\`, "i").test(body.slice(2))
+    : new RegExp(\`^(?:\${part}(?:\\\\.(?:\${part})?)?|\\\\.\${part})(?:e[+-]?\${part})?$\`, "i").test(body) && !/^0_/.test(body);
+  if (!ok || (big && !prefixed && /[.e]/i.test(body))) throw new SyntaxError(\`Invalid number \${text}\`);
+  const clean = body.replaceAll("_", "");
+  return big ? BigInt(clean) : Number(clean);
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
   '// main.js, день 33 курса 2 — строки render': 'intermediate/day-33/lecture.html',
@@ -106,6 +175,7 @@ const terminals = (spec, name) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -121,12 +191,18 @@ const terminals = (spec, name) => {
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
@@ -202,6 +278,24 @@ try {
 }`, 'cards-state.html');
     check(JSON.stringify(out) === '["TypeError \\"\\" false"]', `lecture 14: the counter is not updated and loading does not start ${JSON.stringify(out)}`);
   }
+  // tasks: what the criteria ask to find
+  {
+    const out = await runScript(ctx, `${PARSE}${SOLUTIONS.looseJSON}
+${SOLUTIONS.asiHazards}
+${SOLUTIONS.numericValue}
+const naive = (t) => { try { return JSON.parse(t.replace(/,\\s*([\\]}])/g, "$1")); } catch (e) { return e.name; } };
+console.log(parse('"use strict"; return 08').split(":")[0], parse('"use strict"; return "\\\\08"').split(":")[0], parse('"use strict"; return "\\\\0"'), [, 1].includes(undefined));
+console.log(JSON.stringify(naive('{"text": "a, ]"}')), JSON.stringify(naive('{"text": "\\\\"a, }"}')));
+try { looseJSON("[1, , 2]"); } catch (e) { console.log(e.name); }
+console.log(JSON.stringify(asiHazards("if (ok) {\\n}\\n(1)")), new Function("if (true) {}\\n(1)\\nreturn 'не склеилось'")(), new Function("const f = function () { return 5 }\\n(1)\\nreturn f")());
+const bad = ["1__0", "1_", "0_1", "0x_1", "1.5n"];
+console.log(bad.map((t) => { try { numericValue(t); return "нет"; } catch (e) { return e.name; } }).join(" "), bad.map((t) => parse(t).split(":")[0]).join(" "));
+console.log(String(numericValue("9007199254740993")), String(numericValue("9007199254740993n")), Number("0x1F"), Number("1e3"), Number("1_0"), parse("\`\\\\x\`"));`, 'criteria.html');
+    check(JSON.stringify(out) === JSON.stringify(['SyntaxError SyntaxError разобрано true', '{"text":"a]"} {"text":"\\"a}"}', 'SyntaxError', '[3] не склеилось 5',
+      'SyntaxError SyntaxError SyntaxError SyntaxError SyntaxError SyntaxError SyntaxError SyntaxError SyntaxError SyntaxError',
+      '9007199254740992 9007199254740993 31 1000 NaN SyntaxError: Invalid hexadecimal escape sequence']),
+    `tasks 1, 2, 3, 5, 6, 8, 9: strict 08 and "\\08", includes finds the hole, the naive regex eats commas in strings, [1, , 2] still throws, the linter is noisy after a block but a function expression glues, the bad numbers fail like Chrome, A.6 knows 0x and e but not _, untagged \\x fails ${JSON.stringify(out)}`);
+  }
   // notes, homework 1: _ right after 0x is an error, between two hex digits it is not
   {
     const out = await runScript(ctx, `${PARSE}console.log(parse("0x_FF").split(":")[0], parse("0xF_F"), 0xF_F);`, 'hw1.html');
@@ -273,6 +367,11 @@ try {
   const annexA = ['sec-lexical-grammar', 'sec-expressions', 'sec-statements', 'sec-functions-and-classes', 'sec-scripts-and-modules', 'sec-number-conversions', 'sec-time-zone-offset-string-format', 'sec-regular-expressions'];
   check(annexA.every((id, i) => new RegExp(`A\\.${i + 1} `).test(flat(clause(spec, id)).slice(0, 120))), 'lecture 15: A.1–A.8 in this order');
   check(/UTCOffset ::: ASCIISign Hour/.test(flat(clause(spec, 'sec-time-zone-offset-string-format'))), 'lecture 15: A.7 — the offset of a time zone');
+
+  // tasks 9: the raw value keeps the backslash of both kinds of escapes
+  const trv = flat(clause(spec, 'sec-static-semantics-trv'));
+  check(['TemplateEscapeSequence', 'NotEscapeSequence'].every((w) => trv.includes(`The TRV of TemplateCharacter :: \\ ${w} is the string-concatenation of the code unit 0x005C (REVERSE SOLIDUS)`)),
+    'tasks 9: 12.9.6.2 — TRV keeps the backslash of an escape and of a NotEscapeSequence');
 
   // notes, homework 1 and 3: the rule HexDigits[Sep] and the last example of 12.10.2
   check(numeric.includes('HexDigits [Sep] :: HexDigit HexDigits [?Sep] HexDigit [+Sep] HexDigits [+Sep] NumericLiteralSeparator HexDigit'), 'student homework 1: the rule HexDigits[Sep]');

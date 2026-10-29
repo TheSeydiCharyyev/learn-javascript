@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 4 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #8b5cf6; }
+        h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 4</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 4. Типы языка и типы спецификации</h1>
+    <p class="subtitle">Выжимка лекции: восемь типов языка, Number и BigInt, объект изнутри, Completion Record
+    и Reference Record.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Типы языка</strong> (6.1) — значения программы: Undefined, Null, Boolean, String, Symbol, Number,
+        BigInt, Object. <strong>Типы спецификации</strong> (6.2) — служебные значения алгоритмов: в переменную их
+        не положить.
+    </div>
+
+    <div class="key-point">
+        Ответ <code>typeof</code> — не тип: для <code>null</code> он «object», для функции — «function», потому
+        что так записан его алгоритм.
+    </div>
+
+    <h2>Number, BigInt, Object</h2>
+
+    <pre class="code js">console.log(typeof null, typeof (() =&gt; {}), typeof 1n);          // object function bigint — ответ typeof
+console.log(Object.is(0, -0), 0 === -0, 9007199254740993);        // false true 9007199254740992 — ничья к чётному
+console.log(Object.keys({ 1: "a", [Symbol("s")]: 2 }).length);    // 1 — ключ 1 стал строкой «1», символ не виден</pre>
+
+    <div class="remember">
+        Number: 2<sup>64</sup> − 2<sup>53</sup> + 3 значения, один NaN, +0 и −0, целые точно до 2<sup>53</sup>;
+        ближайшее ±2<sup>1024</sup> — бесконечность. BigInt — целые любого размера, без неявного смешивания с Number.
+        <br>Ключ — строка или символ; индекс массива — до 2<sup>32</sup> − 2. Атрибуты: <code>[[Value]]</code>,
+        <code>[[Writable]]</code>, <code>[[Get]]</code>, <code>[[Set]]</code>, <code>[[Enumerable]]</code>,
+        <code>[[Configurable]]</code>, по умолчанию <code>false</code>.
+        <br>11 внутренних методов у всех объектов, у функций ещё <code>[[Call]]</code> и <code>[[Construct]]</code>;
+        внутренние слоты — не свойства.
+    </div>
+
+    <h2>Completion Record</h2>
+
+    <table>
+        <thead><tr><th>Поле</th><th>Что там</th></tr></thead>
+        <tbody>
+            <tr><td><code>[[Type]]</code></td><td><code>normal</code> или внезапные: <code>break</code>, <code>continue</code>, <code>return</code>, <code>throw</code></td></tr>
+            <tr><td><code>[[Value]]</code></td><td>значение или <code>empty</code></td></tr>
+            <tr><td><code>[[Target]]</code></td><td>метка или <code>empty</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Консоль печатает <code>[[Value]]</code> итоговой записи: <code>if (true) { 5 }</code> → 5. <code>var</code>
+        и пустая <code>;</code> завершаются пусто — остаётся прежнее значение; <code>if</code> без значения даёт
+        <code>undefined</code> (UpdateEmpty).
+        <br><code>try...finally</code>: обычный <code>finally</code> — итог блока <code>try</code>; внезапный —
+        итог <code>finally</code>, даже поверх ошибки.
+    </div>
+
+    <pre class="code js">function g() { try { throw new Error("пропала"); } finally { return "ошибки нет"; } }
+function k() { try { return "из try"; } finally { "уборка"; } }
+console.log(g());   // ошибки нет — внезапная запись finally победила throw
+console.log(k());   // из try — обычный finally итог не меняет</pre>
+
+    <h2>Reference Record</h2>
+
+    <div class="remember">
+        Поля: <code>[[Base]]</code> (значение, Environment Record или <code>unresolvable</code>),
+        <code>[[ReferencedName]]</code>, <code>[[Strict]]</code>, <code>[[ThisValue]]</code> (для <code>super</code>).
+        <br>GetValue ненайденного имени — <code>ReferenceError</code>, но <code>typeof</code> смотрит раньше и даёт
+        «undefined». PutValue ненайденного: нестрогий код — свойство глобального объекта, строгий — ошибка.
+        <br><code>this</code> при вызове — из <code>[[Base]]</code> ссылки.
+    </div>
+
+    <pre class="code js">const card = { word: "kitap", show() { return this === card; } };
+console.log(typeof nope, (card.show)(), (0, card.show)());   // undefined true false — ссылка, ссылка, значение
+const { show } = card;
+console.log(show(), show.call(card));                         // false true — без ссылки this передают явно</pre>
+
+    <div class="homework">
+        <ol>
+            <li>Введите в консоли по одной строке и предскажите ответ: <code>3; let a = 1;</code>,
+                <code>4; if (true) {}</code>, <code>6; { }</code>, <code>7; class C {}</code>. Объясните каждый
+                через пустое значение и UpdateEmpty.</li>
+            <li>Найдите в EvaluateCall (13.3.6.2) шаг, который даёт <code>this</code> вызову простого имени, и
+                выпишите, какая операция там зовётся.</li>
+            <li>Найдите в своих «Карточках 2.0» место, где метод передаётся без вызова, и проверьте, теряется ли
+                <code>this</code>.</li>
+            <li>Прочитайте раздел «Primitive values» страницы MDN
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures">JavaScript data types and data structures</a>
+                и выпишите, чем MDN объясняет <code>typeof null</code>.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -21,7 +21,10 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-04');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -130,7 +133,8 @@ const clause = (spec, id) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
@@ -150,6 +154,11 @@ console.log("kitap".x, typeof (() => {}), (() => {}) instanceof Object);`, 'told
   {
     const out = await runScript(ctx, 'console.log(typeof this, (function () { return this; })());', 'module.html', ' type="module"');
     check(JSON.stringify(out) === '["undefined undefined"]', `lecture 15: module code is strict ${JSON.stringify(out)}`);
+  }
+  // notes, homework 1: an empty block and declarations complete empty, if completes with undefined
+  {
+    const out = await runConsole(ctx, '// в консоли\n3; let a = 1;\n4; if (true) {}\n6; { }\n7; class C {}', 'hw1.html');
+    check(JSON.stringify(out) === '["3","undefined","6","7"]', `student homework 1: the console answers ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -227,6 +236,9 @@ console.log("kitap".x, typeof (() => {}), (() => {}) instanceof Object);`, 'told
   // the source page of MDN, in the cached copy of mdn/content
   const mdn = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/guide/data_structures/index.md'], { encoding: 'utf8' });
   check(/`typeof null` returns `"object"`/.test(mdn) || /typeof null === "object"/.test(mdn), 'MDN: Data structures speaks of typeof null');
+  const primitives = mdn.slice(mdn.indexOf('## Primitive values'), mdn.indexOf('## Objects'));
+  check(primitives.includes('typeof null'), 'student homework 4: the section Primitive values of MDN speaks of typeof null');
+  check(/Let thisValue be refEnv\. ?WithBaseObject/.test(flat(clause(spec, 'sec-evaluatecall'))), 'student homework 2: EvaluateCall asks WithBaseObject of the Environment Record');
 
   // the button handler of day 34 is an arrow, and know is called on the deck
   const day34 = fs.readFileSync(path.join(ROOT, 'intermediate/day-34/lecture.html'), 'utf8');

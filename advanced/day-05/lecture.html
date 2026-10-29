@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 5 — Преобразования и сравнения: ToPrimitive, ToNumber, IsLooselyEqual</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #8b5cf6; }
+        h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+        h3 { color: #6d28d9; }
+        .step-number { background: #8b5cf6; }
+        .toc a { color: #7c3aed; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 5</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 5 &bull; урок 1</span>
+        <h1>Преобразования и сравнения: ToPrimitive, ToNumber, IsLooselyEqual</h1>
+        <p>Курс 3, Advanced. Модуль «Типы и абстрактные операции» — второй день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>предсказывать, какой метод объекта вызовет преобразование и с какой подсказкой;</li>
+            <li>считать <code>!!x</code>, <code>+x</code> и <code>String(x)</code> по таблицам главы 7, а не по памяти;</li>
+            <li>объяснять, как значение становится ключом свойства;</li>
+            <li>различать SameValue, SameValueZero и <code>===</code> на NaN и нулях;</li>
+            <li>сравнивать строки и числа по алгоритму IsLessThan;</li>
+            <li>проходить лестницу IsLooselyEqual для любого <code>==</code>.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#operations">Абстрактные операции</a></li>
+            <li><a href="#toprimitive">ToPrimitive и подсказка</a></li>
+            <li><a href="#ordinary">OrdinaryToPrimitive: valueOf или toString</a></li>
+            <li><a href="#toboolean">ToBoolean</a></li>
+            <li><a href="#tonumber">ToNumber и ToNumeric</a></li>
+            <li><a href="#tostring">ToString</a></li>
+            <li><a href="#toobject">ToObject и RequireObjectCoercible</a></li>
+            <li><a href="#topropertykey">ToPropertyKey</a></li>
+            <li><a href="#integers">Целые: ToIntegerOrInfinity, ToLength, ToIndex</a></li>
+            <li><a href="#tobigint">ToBigInt и StringToBigInt</a></li>
+            <li><a href="#checks">Проверки: IsArray, IsCallable, IsRegExp…</a></li>
+            <li><a href="#samevalue">SameValue и его родня</a></li>
+            <li><a href="#islessthan">IsLessThan: «10» меньше «9»</a></li>
+            <li><a href="#loose">IsLooselyEqual и IsStrictlyEqual</a></li>
+            <li><a href="#cards">«Карточки 2.0»: ключ из dataset</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="operations">1. Абстрактные операции</h2>
+
+    <p>Глава <a href="https://tc39.es/ecma262/2026/#sec-abstract-operations">7</a> начинается честно: эти операции
+    — не часть языка, их нельзя вызвать из кода, они нужны, чтобы описать язык. Увидеть их можно только по следам —
+    через операторы и встроенные функции, которые их зовут. Раздел
+    <a href="https://tc39.es/ecma262/2026/#sec-type-conversion">7.1</a> добавляет: язык сам переводит значения из
+    типа в тип, когда нужно, а для BigInt неявных переводов нет — только явный вызов <code>BigInt</code> (день 4).</p>
+
+    <p>Вчера мы видели типы. Сегодня — как значение одного типа становится значением другого, и как значения
+    сравниваются. Страница MDN <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness">Equality
+    comparisons and sameness</a> (день 6 курса 2) дала таблицы; теперь — алгоритмы, из которых они получаются.</p>
+
+    <p>Почти все преобразования устроены одинаково: перебрать типы по очереди и для каждого вернуть готовый ответ, а
+    для объекта — сначала ToPrimitive с подходящей подсказкой и затем ту же операцию ещё раз, уже для примитива.
+    Поэтому ключ ко всей главе — ToPrimitive: разобравшись с ним, остальные таблицы читаются за минуту.</p>
+
+    <h2 id="toprimitive">2. ToPrimitive и подсказка</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-toprimitive">ToPrimitive</a> (7.1.1) делает из объекта примитив.
+    Второй аргумент — <strong>подсказка</strong>, какой примитив желателен: <code>string</code> или
+    <code>number</code>; её может и не быть. Если на вход пришёл не объект — он возвращается как есть.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 286" role="img" aria-label="Путь ToPrimitive: не объект — вернуть, есть Symbol.toPrimitive — вызвать с подсказкой, иначе OrdinaryToPrimitive по порядку методов">
+            <rect x="10" y="10" width="300" height="48" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+            <text x="160" y="31" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#5b21b6">ToPrimitive(input, hint)</text>
+            <text x="160" y="49" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#5b21b6">не объект — вернуть как есть</text>
+
+            <rect x="10" y="84" width="300" height="62" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="160" y="105" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#9a3412">есть метод Symbol.toPrimitive?</text>
+            <text x="160" y="123" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">вызвать с "default", "string" или "number";</text>
+            <text x="160" y="139" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">так поступают Date и Symbol, подробно — день 17</text>
+
+            <rect x="10" y="172" width="300" height="62" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="160" y="193" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#065f46">нет — OrdinaryToPrimitive</text>
+            <text x="160" y="211" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">string: toString, потом valueOf</text>
+            <text x="160" y="227" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">number или без подсказки: valueOf, потом toString</text>
+
+            <line x1="160" y1="58" x2="160" y2="82" stroke="#8b5cf6" stroke-width="2"/>
+            <line x1="160" y1="146" x2="160" y2="170" stroke="#8b5cf6" stroke-width="2"/>
+
+            <rect x="330" y="10" width="300" height="224" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="480" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#334155">кто какую подсказку даёт</text>
+            <text x="346" y="58" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">number</text>
+            <text x="346" y="76" font-family="Consolas, monospace" font-size="11" fill="#334155">+x, x * 1, x &lt; y, Number(x)</text>
+            <text x="346" y="106" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">string</text>
+            <text x="346" y="124" font-family="Consolas, monospace" font-size="11" fill="#334155">String(x), `${x}`, obj[x]</text>
+            <text x="346" y="154" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">без подсказки (как number)</text>
+            <text x="346" y="172" font-family="Consolas, monospace" font-size="11" fill="#334155">x + y, x == y</text>
+            <text x="346" y="204" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">Результат — первый примитив;</text>
+            <text x="346" y="222" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">если оба метода дали объект — TypeError</text>
+
+            <text x="10" y="262" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Подсказка — пожелание, не приказ: valueOf может вернуть строку, и при hint number</text>
+            <text x="10" y="280" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">ToPrimitive вернёт строку — дальше ToNumber переведёт её в число.</text>
+        </svg>
+        <figcaption>ToPrimitive по шагам 7.1.1</figcaption>
+    </figure>
+
+    <p>Подсмотрим, кто кого зовёт. Объект с методами, которые записывают свой вызов, — практика дня:</p>
+
+    <pre class="code js">const log = [];
+const mark = {
+  valueOf() { log.push("valueOf"); return 5; },
+  toString() { log.push("toString"); return "пять"; },
+};
+const run = (name, f) =&gt; {
+  log.length = 0;
+  const result = f();
+  console.log(name, String(result), log.join(" "));
+};
+run("+mark", () =&gt; +mark);
+run("`${mark}`", () =&gt; `${mark}`);
+run('mark + ""', () =&gt; mark + "");
+run("String(mark)", () =&gt; String(mark));
+run("mark == 5", () =&gt; mark == 5);
+run("mark &lt; 6", () =&gt; mark &lt; 6);
+run("[mark].join()", () =&gt; [mark].join());
+run("{ [mark]: 1 }", () =&gt; Object.keys({ [mark]: 1 })[0]);</pre>
+
+    <div class="result-box">
+        +mark 5 valueOf<br>
+        `${mark}` пять toString<br>
+        mark + "" 5 valueOf<br>
+        String(mark) пять toString<br>
+        mark == 5 true valueOf<br>
+        mark &lt; 6 true valueOf<br>
+        [mark].join() пять toString<br>
+        { [mark]: 1 } пять toString
+    </div>
+
+    <p>Главная неожиданность — <code>mark + ""</code>: хотя справа строка, сложение зовёт ToPrimitive <em>без
+    подсказки</em>, а это значит «как number» — <code>valueOf</code>, 5, и только потом склейка в «5». Шаблон,
+    <code>String</code>, <code>join</code> и ключ свойства просят строку — работает <code>toString</code>.</p>
+
+    <p>Подсказка — пожелание, а не приказ. OrdinaryToPrimitive возвращает первый примитив, какого бы типа он ни был,
+    а довести его до нужного типа — дело следующей операции:</p>
+
+    <pre class="code js">console.log(+{ valueOf() { return "12"; } });
+console.log({ toString() { return 5; } } + "", typeof `${{ toString() { return 5; } }}`);</pre>
+
+    <div class="result-box">
+        12<br>
+        5 string
+    </div>
+
+    <p><code>valueOf</code> вернул строку «12», и ToNumber уже после ToPrimitive сделал из неё 12. <code>toString</code>
+    вернул число 5 — шаблон перевёл его в строку сам.</p>
+
+    <h2 id="ordinary">3. OrdinaryToPrimitive: valueOf или toString</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ordinarytoprimitive">OrdinaryToPrimitive</a> (7.1.1.1) — короткий
+    цикл: взять два имени в порядке подсказки, для каждого прочитать метод, если он вызываемый — вызвать, и если
+    результат не объект — вернуть его. Метод, который вернул объект, просто пропускается. Не помог ни один —
+    <code>TypeError</code>.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(+{ valueOf() { return {}; }, toString() { return "7"; } });
+console.log(attempt(() =&gt; +{ valueOf() { return {}; }, toString() { return {}; } }));
+console.log(attempt(() =&gt; `${Object.create(null)}`));
+console.log(typeof (new Date(0) + 1), new Date(0) - 1);</pre>
+
+    <div class="result-box">
+        7<br>
+        TypeError: Cannot convert object to primitive value<br>
+        TypeError: Cannot convert object to primitive value<br>
+        string -1
+    </div>
+
+    <p>Первый объект прошёл: <code>valueOf</code> вернул объект, он пропущен, и <code>toString</code> дал «7». Второй
+    упал — оба метода вернули объекты. У объекта без прототипа нет ни <code>toString</code>, ни <code>valueOf</code> —
+    нечем стать строкой. У обычного объекта оба метода есть всегда: <code>valueOf</code> из
+    <code>Object.prototype</code> возвращает сам объект (поэтому его пропускают), а <code>toString</code> — строку
+    «[object Object]»; у массива <code>toString</code> свой — он зовёт <code>join</code>. Последняя
+    строка — исключение, о котором говорит примечание к ToPrimitive: из встроенных объектов только у дат и
+    символов есть свой метод <code>Symbol.toPrimitive</code>, и дата без подсказки выбирает строку. Поэтому
+    <code>new Date(0) + 1</code> — склейка текста даты с «1», а вычитание просит число — −1 (день 21 курса 2).</p>
+
+    <h2 id="toboolean">4. ToBoolean</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-toboolean">ToBoolean</a> (7.1.2) — самая короткая операция главы:
+    <code>false</code> дают <code>undefined</code>, <code>null</code>, оба нуля, NaN, <code>0n</code> и пустая строка;
+    всё остальное — <code>true</code>. Объекты не преобразуются через методы — они просто истинны. Практика: <code>!!x</code>
+    для дюжины значений.</p>
+
+    <pre class="code js">const values = [0, -0, NaN, "", "0", " ", [], {}, null, undefined, 0n, Symbol(), new Boolean(false), document.all];
+console.log(values.map((v) =&gt; !!v).join(" "));</pre>
+
+    <div class="result-box">
+        false false false false true true true true false false false true true false
+    </div>
+
+    <p>Строка «0» и строка из пробела истинны — правило смотрит на длину, а не на смысл. Пустой массив истинен,
+    объект-обёртка <code>new Boolean(false)</code> — тоже: это объект. И одно исключение, которое стандарт
+    разрешает браузерам: у <code>document.all</code> есть слот <code>[[IsHTMLDDA]]</code>, и такой объект ложен.
+    Это наследие старых страниц, подробно — день 31.</p>
+
+    <p>ToBoolean зовут <code>if</code>, <code>while</code>, <code>?:</code>, <code>!</code>, <code>&amp;&amp;</code> и
+    <code>||</code>. А <code>??</code> (день 6 курса 2) её не зовёт: он смотрит только на <code>null</code> и
+    <code>undefined</code>, поэтому 0 и пустая строка проходят через него как есть:</p>
+
+    <pre class="code js">console.log(0 || "x", "" || "x", 0 ?? "x", JSON.stringify("" ?? "x"));</pre>
+
+    <div class="result-box">
+        x x 0 ""
+    </div>
+
+    <h2 id="tonumber">5. ToNumber и ToNumeric</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-tonumber">ToNumber</a> (7.1.4) по типам: <code>undefined</code> —
+    NaN; <code>null</code> и <code>false</code> — +0; <code>true</code> — 1; строка — по грамматике числовых строк
+    (день 2, <code>:::</code>); Symbol и BigInt — <code>TypeError</code>; объект — ToPrimitive с подсказкой number и
+    снова ToNumber. <a href="https://tc39.es/ecma262/2026/#sec-tonumeric">ToNumeric</a> (7.1.3) — то же, но BigInt
+    оставляет как есть: ею пользуются арифметические операторы.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const values = [undefined, null, true, "", " 12 ", "0x1F", "1e3", "1_000", "Infinity", "-0", [], [5], [1, 2], {}];
+console.log(values.map((v) =&gt; +v).join(" "));
+console.log(attempt(() =&gt; +Symbol()));
+console.log(attempt(() =&gt; +1n), Number(1n));</pre>
+
+    <div class="result-box">
+        NaN 0 1 0 12 31 1000 NaN Infinity 0 0 5 NaN NaN<br>
+        TypeError: Cannot convert a Symbol value to a number<br>
+        TypeError: Cannot convert a BigInt value to a number 1
+    </div>
+
+    <p>Пустая строка — 0: грамматика числовых строк разрешает строку из одних пробелов. Массивы проходят через
+    <code>toString</code>: <code>[]</code> — «», то есть 0; <code>[5]</code> — «5»; <code>[1, 2]</code> — «1,2», NaN.
+    Унарный плюс зовёт ToNumber и падает на BigInt, а функция <code>Number</code> зовёт ToNumeric и переводит BigInt
+    сама — явный перевод разрешён. «-0» стал −0 — <code>join</code> напечатал его как «0».</p>
+
+    <p>Строки разбирает <code>StringToNumber</code> (7.1.4.1) по грамматике приложения A.6. В ней знак разрешён только
+    у десятичного числа, приставки <code>0b</code>, <code>0o</code>, <code>0x</code> — без знака, а
+    «Infinity» — только целым словом:</p>
+
+    <pre class="code js">const strings = ["0b101", "0o17", "0X1f", "-0x1F", "+1e3", ".5", "5.", "1e", "Infinityx", "-Infinity"];
+console.log(strings.map((s) =&gt; +s).join(" "));
+console.log(parseInt("-0x1F"));</pre>
+
+    <div class="result-box">
+        5 15 31 NaN 1000 0.5 5 NaN NaN -Infinity<br>
+        -31
+    </div>
+
+    <p><code>parseInt</code> — не ToNumber, а свой алгоритм: он берёт знак, потом приставку, потом цифры, пока они
+    есть. Поэтому <code>"-0x1F"</code> для плюса — NaN, а для <code>parseInt</code> — −31.</p>
+
+    <h2 id="tostring">6. ToString</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-tostring">ToString</a> (7.1.17): строка остаётся, Symbol —
+    <code>TypeError</code>, <code>undefined</code>, <code>null</code> и булевы — их имена, числа —
+    <code>Number::toString</code>, BigInt — цифры без <code>n</code>, объект — ToPrimitive с подсказкой string.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const values = [-0, 1e21, 1e-7, 0.000001, [1, [2, 3]], [null, undefined], {}, 123n, true];
+console.log(values.map((v) =&gt; String(v)).join(" | "));
+console.log(String(Symbol("id")), attempt(() =&gt; `${Symbol("id")}`));
+console.log(String(123e18), String(1234e18), String(0.0000012), String(0.00000012));</pre>
+
+    <div class="result-box">
+        0 | 1e+21 | 1e-7 | 0.000001 | 1,2,3 | , | [object Object] | 123 | true<br>
+        Symbol(id) TypeError: Cannot convert a Symbol value to a string<br>
+        123000000000000000000 1.234e+21 0.0000012 1.2e-7
+    </div>
+
+    <p>−0 печатается как «0» — так записан <code>Number::toString</code>. Он же решает, когда нужен порядок:
+    если до точки получается больше 21 цифры (10<sup>21</sup>) или после точки перед первой значащей цифрой больше
+    шести нулей (10<sup>−7</sup>). 123 · 10<sup>18</sup> — ровно 21 цифра, ещё без порядка; 1234 · 10<sup>18</sup> —
+    уже 22, и появляется «e+21». <code>null</code> и <code>undefined</code> внутри массива дают пустые места —
+    это правило <code>join</code>, а не ToString. И главное про символы: ToString бросает, поэтому шаблон и
+    склейка ломаются, а функция <code>String</code> проверяет символ раньше, чем зовёт ToString, и печатает описание.</p>
+
+    <h2 id="toobject">7. ToObject и RequireObjectCoercible</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-toobject">ToObject</a> (7.1.18) заворачивает примитив в объект-обёртку
+    со слотом <code>[[StringData]]</code>, <code>[[NumberData]]</code> и т. д., а для <code>undefined</code> и
+    <code>null</code> бросает. <a href="https://tc39.es/ecma262/2026/#sec-requireobjectcoercible">RequireObjectCoercible</a>
+    (7.2.1) — та же проверка без заворачивания: ею начинаются методы строк.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(Object.keys("ab"), attempt(() =&gt; Object.keys(null)));
+console.log(JSON.stringify(Object(null)), typeof Object(1n), Object("ab") instanceof String);
+console.log(attempt(() =&gt; String.prototype.trim.call(undefined)));
+console.log(new String("a") == "a", new String("a") === "a", !!new String(""));</pre>
+
+    <div class="result-box">
+        (2) ['0', '1'] TypeError: Cannot convert undefined or null to object<br>
+        {} object true<br>
+        TypeError: String.prototype.trim called on null or undefined<br>
+        true false true
+    </div>
+
+    <p><code>Object.keys</code> зовёт ToObject, и у строки «ab» появляются ключи «0» и «1». Функция <code>Object</code> —
+    не то же самое: для <code>null</code> она не бросает, а создаёт пустой объект. Это частая путаница: имя функции
+    и операции похожи, но шаги разные. Обёртка — полноценный объект: <code>==</code> разворачивает её через
+    ToPrimitive, <code>===</code> видит разные типы, а ToBoolean считает истинной даже обёртку пустой строки.</p>
+
+    <h2 id="topropertykey">8. ToPropertyKey</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-topropertykey">ToPropertyKey</a> (7.1.19) — два шага: ToPrimitive с
+    подсказкой string; символ оставить, остальное — ToString. Вот почему вчера ключ <code>1</code> стал «1»:</p>
+
+    <pre class="code js">const o = {};
+const sym = Symbol("s");
+for (const key of [1, {}, [1, 2], null, 1.5, -0, 1e21, sym, "1"]) o[key] = true;
+console.log(Object.keys(o), Object.getOwnPropertySymbols(o).length);</pre>
+
+    <div class="result-box">
+        (7) ['0', '1', '[object Object]', '1,2', 'null', '1.5', '1e+21'] 1
+    </div>
+
+    <p>Девять записей — семь строковых ключей и один символ: <code>1</code> и «1» — один ключ, −0 стал «0». Любой
+    объект без своего <code>toString</code> становится «[object Object]» — поэтому объекты в ключи обычного объекта
+    не годятся, для этого есть <code>Map</code>. Числовые ключи в списке впереди — это порядок
+    <code>[[OwnPropertyKeys]]</code>, день 14.</p>
+
+    <h2 id="integers">9. Целые: ToIntegerOrInfinity, ToLength, ToIndex</h2>
+
+    <p>Четыре операции для номеров. <a href="https://tc39.es/ecma262/2026/#sec-tointegerorinfinity">ToIntegerOrInfinity</a>
+    (7.1.5) мы проходили на дне 1: NaN — 0, бесконечности остаются, остальное — отбросить дробь.
+    <a href="https://tc39.es/ecma262/2026/#sec-tolength">ToLength</a> (7.1.20) зажимает длину похожего на массив
+    объекта между 0 и 2<sup>53</sup> − 1. <a href="https://tc39.es/ecma262/2026/#sec-toindex">ToIndex</a> (7.1.22)
+    строже: вне этого промежутка — <code>RangeError</code>; ею пользуются двоичные данные (день 20).
+    <a href="https://tc39.es/ecma262/2026/#sec-canonicalnumericindexstring">CanonicalNumericIndexString</a> (7.1.21)
+    отвечает, похожа ли строка на число «по-настоящему»: «1» — да, «1.0» — нет, «-0» — да.</p>
+
+    <pre class="code js">console.log(Array.from({ length: 2.7 }).length, Array.from({ length: -3 }).length);
+console.log(Array.prototype.join.call({ length: "2", 0: "a", 1: "b" }), "abc".at(-1.5), "abc".at("1"));</pre>
+
+    <div class="result-box">
+        2 0<br>
+        a,b c b
+    </div>
+
+    <h2 id="tobigint">10. ToBigInt и StringToBigInt</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-tobigint">ToBigInt</a> (7.1.13), таблица 12: булево — <code>1n</code>
+    или <code>0n</code>, строка — <a href="https://tc39.es/ecma262/2026/#sec-stringtobigint">StringToBigInt</a>
+    (7.1.14), а <code>undefined</code>, <code>null</code>, Number и Symbol — ошибка. Number здесь бросает нарочно:
+    неявного перевода в BigInt нет. Функция <code>BigInt</code> принимает числа сама, своей операцией
+    <code>NumberToBigInt</code>, — но только целые.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(BigInt("0x1F"), BigInt(" 12 "), BigInt(""), BigInt(true));
+console.log(attempt(() =&gt; BigInt("1.5")), "|", attempt(() =&gt; BigInt(1.5)));
+console.log(attempt(() =&gt; BigInt(undefined)));</pre>
+
+    <div class="result-box">
+        31n 12n 0n 1n<br>
+        SyntaxError: Cannot convert 1.5 to a BigInt | RangeError: The number 1.5 cannot be converted to a BigInt because it is not an integer<br>
+        TypeError: Cannot convert undefined to a BigInt
+    </div>
+
+    <p>Пустая строка — <code>0n</code>, как и в ToNumber. Строка «1.5» не проходит грамматику целых —
+    <code>SyntaxError</code>, а число 1.5 не целое — <code>RangeError</code>: одна и та же «полторашка» даёт две разные
+    ошибки, потому что идёт двумя разными путями.</p>
+
+    <h2 id="checks">11. Проверки: IsArray, IsCallable, IsRegExp…</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-testing-and-comparison-operations">7.2</a> открывают короткие
+    проверки. Они отвечают <code>true</code> или <code>false</code>, и встроенные функции принимают по ним решения:</p>
+
+    <table>
+        <thead><tr><th>Проверка</th><th>Что смотрит</th><th>Где видно</th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isarray">IsArray</a></td><td>экзотический объект-массив (или Proxy над ним)</td><td><code>Array.isArray</code></td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iscallable">IsCallable</a></td><td>есть <code>[[Call]]</code></td><td><code>typeof</code> «function»</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isconstructor">IsConstructor</a></td><td>есть <code>[[Construct]]</code></td><td><code>new</code></td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isextensible-o">IsExtensible</a></td><td><code>[[IsExtensible]]</code></td><td><code>Object.isExtensible</code></td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isregexp">IsRegExp</a></td><td><code>Symbol.match</code> или слот <code>[[RegExpMatcher]]</code></td><td><code>startsWith</code>, <code>includes</code></td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isstringwellformedunicode">IsStringWellFormedUnicode</a></td><td>нет одиноких половинок</td><td><code>isWellFormed</code></td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-sametype">SameType</a></td><td>один ли тип у двух значений</td><td>начало всех сравнений</td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() =&gt; "kitap".startsWith(/k/)));
+console.log(attempt(() =&gt; new Math.max()));
+console.log(Array.isArray([]), Array.isArray({ length: 0 }), "&#92;uD800".isWellFormed(), Object.isExtensible(Object.freeze({})));</pre>
+
+    <div class="result-box">
+        TypeError: First argument to String.prototype.startsWith must not be a regular expression<br>
+        TypeError: Math.max is not a constructor<br>
+        true false false false
+    </div>
+
+    <p><code>startsWith</code> нарочно отказывается от регулярки: иначе непонятно, искать её текст или совпадение.
+    Распознаёт он её через IsRegExp — по слоту, а не по имени конструктора.</p>
+
+    <h2 id="samevalue">12. SameValue и его родня</h2>
+
+    <p>Три операции равенства «без преобразований» отличаются только двумя случаями — NaN и нулями:</p>
+
+    <table>
+        <thead><tr><th>Операция</th><th><code>NaN</code> и <code>NaN</code></th><th><code>+0</code> и <code>−0</code></th><th>Где работает</th></tr></thead>
+        <tbody>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-samevalue">SameValue</a> (7.2.9)</td><td>равны</td><td>разные</td><td><code>Object.is</code>, проверки свойств</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-samevaluezero">SameValueZero</a> (7.2.10)</td><td>равны</td><td>равны</td><td><code>includes</code>, <code>Map</code>, <code>Set</code></td></tr>
+            <tr><td>IsStrictlyEqual (7.2.14)</td><td>разные</td><td>равны</td><td><code>===</code>, <code>indexOf</code></td></tr>
+        </tbody>
+    </table>
+
+    <p>Для всех остальных значений все три зовут <a href="https://tc39.es/ecma262/2026/#sec-samevaluenonnumber">SameValueNonNumber</a>
+    (7.2.11): строки — по элементам, BigInt — по значению, булевы — по значению, объекты и символы — «это тот же
+    самый».</p>
+
+    <pre class="code js">console.log(Object.is(NaN, NaN), Object.is(0, -0), NaN === NaN, 0 === -0);
+console.log([NaN].includes(NaN), [NaN].indexOf(NaN), [-0].includes(0));
+console.log(new Set([0, -0, NaN, NaN]).size, Object.is([...new Map([[-0, "a"]]).keys()][0], -0));</pre>
+
+    <div class="result-box">
+        true false false true<br>
+        true -1 true<br>
+        2 false
+    </div>
+
+    <p>В множестве четыре значения стали двумя: нули — одно, NaN — одно. А <code>Map</code> мало того, что не
+    различает нули, — она ещё и хранит ключ −0 как +0: так записан её <code>set</code>.</p>
+
+    <p>SameValue работает и там, где его не видно, — в проверках свойств. Замороженному объекту можно
+    «переопределить» свойство тем же самым значением, и «тем же» считается по SameValue:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const frozen = Object.freeze({ x: -0, y: NaN });
+console.log(attempt(() =&gt; Object.defineProperty(frozen, "x", { value: 0 })));
+console.log(attempt(() =&gt; Object.defineProperty(frozen, "x", { value: -0 }) === frozen));
+console.log(attempt(() =&gt; Object.defineProperty(frozen, "y", { value: NaN }) === frozen));</pre>
+
+    <div class="result-box">
+        TypeError: Cannot redefine property: x<br>
+        true<br>
+        true
+    </div>
+
+    <p>0 вместо −0 — другое значение, и свойство защищено. NaN вместо NaN — то же самое, хотя <code>===</code> сказал
+    бы «разные». Сама проверка — ValidateAndApplyPropertyDescriptor, день 14.</p>
+
+    <h2 id="islessthan">13. IsLessThan: «10» меньше «9»</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-islessthan">IsLessThan</a> (7.2.12) — основа <code>&lt;</code>,
+    <code>&gt;</code>, <code>&lt;=</code> и <code>&gt;=</code> (день 1). Сначала оба операнда — ToPrimitive с подсказкой
+    number. Если оба получились строками — сравнить <em>по 16-битным элементам</em>, слева направо. Если строка и
+    BigInt — StringToBigInt. Иначе — оба в числа через ToNumeric; NaN даёт <code>undefined</code>, «не сравнимо», и
+    оператор превращает его в <code>false</code>.</p>
+
+    <pre class="code js">console.log("10" &lt; "9", "10" &lt; 9, "a" &lt; "B", "ä" &lt; "z");
+console.log(null &lt; 1, undefined &lt; 1, undefined &gt;= 1, [2] &lt; [10]);
+console.log(1n &lt; "2", "x" &lt; 1n, "x" &gt;= 1n, "😀" &lt; "&#92;uFFFF");</pre>
+
+    <div class="result-box">
+        true false false false<br>
+        true false false false<br>
+        true false false true
+    </div>
+
+    <p>«10» &lt; «9»: две строки, первый элемент «1» меньше «9» — дальше не смотрят. Стоит одной стороне стать
+    числом — сравнение числовое. Большие буквы латиницы идут раньше маленьких, «ä» — позже «z»: это коды, а не
+    алфавит (для алфавита — <code>localeCompare</code> и <code>Intl.Collator</code>, день 27). <code>[2]</code> и
+    <code>[10]</code> стали строками «2» и «10» — и «2» больше. <code>undefined</code> с числом даёт
+    <code>undefined</code>, поэтому и <code>&lt;</code>, и <code>&gt;=</code> — <code>false</code>. Эмодзи — пара
+    половинок, первая из них 0xD83D, меньше 0xFFFF, хотя кодовая точка больше: примечание 2 раздела.</p>
+
+    <p>То же сравнение строк стоит за <code>sort</code> без аргумента: элементы переводятся в строки и
+    сравниваются по кодам. Числа так сортировать нельзя — нужна своя функция сравнения:</p>
+
+    <pre class="code js">console.log([10, 9, 1].sort(), [10, 9, 1].sort((a, b) =&gt; a - b));
+console.log(["b", "B", "a", "ä"].sort());</pre>
+
+    <div class="result-box">
+        (3) [1, 10, 9] (3) [1, 9, 10]<br>
+        (4) ['B', 'a', 'b', 'ä']
+    </div>
+
+    <p>Третий аргумент, <code>LeftFirst</code>, хранит порядок вычисления. Для <code>a &gt; b</code> язык считает
+    <code>b &lt; a</code>, но ToPrimitive левого операнда всё равно идёт первым:</p>
+
+    <pre class="code js">const log = [];
+const a = { valueOf() { log.push("a"); return 1; } };
+const b = { valueOf() { log.push("b"); return 2; } };
+console.log(a &lt; b, a &gt; b, a &lt;= b, log.join(" "));</pre>
+
+    <div class="result-box">
+        true false true a b a b a b
+    </div>
+
+    <h2 id="loose">14. IsLooselyEqual и IsStrictlyEqual</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-islooselyequal">IsLooselyEqual</a> (7.2.13) — алгоритм
+    <code>==</code>. Он не «приводит всё к числу», а идёт по лестнице, и на каждой ступени либо отвечает, либо
+    переводит один операнд и начинает заново:</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 312" role="img" aria-label="Лестница IsLooselyEqual: восемь ступеней от одного типа до ответа false">
+            <rect x="10" y="10" width="620" height="32" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="22" y="31" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#5b21b6"><tspan font-weight="700">1.</tspan> Один тип — ответ даёт IsStrictlyEqual, как у ===</text>
+            <rect x="10" y="48" width="620" height="32" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+            <text x="22" y="69" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46"><tspan font-weight="700">2.</tspan> null и undefined (в любом порядке) — true; с чем-то ещё они не равны ничему</text>
+            <rect x="10" y="86" width="620" height="32" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+            <text x="22" y="107" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#075985"><tspan font-weight="700">3.</tspan> Number и String — строку через ToNumber, начать заново</text>
+            <rect x="10" y="124" width="620" height="32" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+            <text x="22" y="145" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#075985"><tspan font-weight="700">4.</tspan> BigInt и String — строку через StringToBigInt; не вышло — false</text>
+            <rect x="10" y="162" width="620" height="32" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+            <text x="22" y="183" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412"><tspan font-weight="700">5.</tspan> Boolean с любой стороны — его через ToNumber (true — 1, false — 0), начать заново</text>
+            <rect x="10" y="200" width="620" height="32" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+            <text x="22" y="221" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412"><tspan font-weight="700">6.</tspan> Объект и примитив — объект через ToPrimitive без подсказки, начать заново</text>
+            <rect x="10" y="238" width="620" height="32" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+            <text x="22" y="259" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155"><tspan font-weight="700">7.</tspan> BigInt и Number — сравнить математические значения (бесконечность не равна ничему)</text>
+            <rect x="10" y="276" width="620" height="32" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="22" y="297" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b"><tspan font-weight="700">8.</tspan> Всё остальное — false: например, symbol и строка, null и 0</text>
+        </svg>
+        <figcaption>IsLooselyEqual по шагам 7.2.13</figcaption>
+    </figure>
+
+    <pre class="code js">const rows = [
+  ["" == 0, "0" == false, "" == false, " &#92;n" == 0],
+  [null == undefined, null == 0, undefined == 0, null == false],
+  [NaN == NaN, [] == ![], [0] == false, "1" == [1]],
+  [1n == 1, 1n == "1", 1n == "x", 1n == 1.5],
+  [({}) == "[object Object]", Symbol.iterator == Symbol.iterator, document.all == null],
+];
+rows.forEach((row) =&gt; console.log(row.join(" ")));</pre>
+
+    <div class="result-box">
+        true true true true<br>
+        true false false false<br>
+        false true true true<br>
+        true true false false<br>
+        true true true
+    </div>
+
+    <p>Пройдём знаменитый <code>[] == ![]</code>. Справа <code>![]</code> — <code>false</code> (массив истинен).
+    Ступень 5: <code>false</code> → 0, теперь <code>[] == 0</code>. Ступень 6: <code>[]</code> → ToPrimitive → «»,
+    теперь <code>"" == 0</code>. Ступень 3: «» → 0, и <code>0 == 0</code> — <code>true</code>. Никакой магии — четыре
+    шага. <code>null == 0</code> ложно: <code>null</code> на ступени 2 равен только <code>undefined</code>, а до числа
+    его никто не доводит. <code>document.all == null</code> — та же поблажка <code>[[IsHTMLDDA]]</code>.</p>
+
+    <p>Отсюда и единственная привычка, ради которой <code>==</code> пишут нарочно: <code>x == null</code> истинно
+    ровно для <code>null</code> и <code>undefined</code>. А два объекта с обеих сторон — один тип, ступень 1, и
+    сравниваются они как <code>===</code>, по тождеству:</p>
+
+    <pre class="code js">console.log([] == [], null == undefined, 0 == null, "" == null, false == null);</pre>
+
+    <div class="result-box">
+        false true false false false
+    </div>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-isstrictlyequal">IsStrictlyEqual</a> (7.2.14) — без лестницы:
+    разные типы — <code>false</code>, числа — <code>Number::equal</code> (NaN не равен себе, нули равны), остальное —
+    SameValueNonNumber.</p>
+
+    <pre class="code js">console.log(NaN === NaN, 0 === -0, 1n === 1, "a" === "a", {} === {});</pre>
+
+    <div class="result-box">
+        false true false true false
+    </div>
+
+    <h2 id="cards">15. «Карточки 2.0»: ключ из dataset</h2>
+
+    <p>Кнопки колод «Карточек 2.0» (день 34 курса 2) хранят номер колоды в атрибуте и читают его обратно:</p>
+
+    <pre class="code js">// main.js, день 34 курса 2 — кнопки колод
+button.dataset.deck = info.id;
+chosen = button.dataset.deck;</pre>
+
+    <p>Номера колод в <code>decks.json</code> — строки («school», «food»), и всё работает. Но у карточек номера —
+    числа (<code>"id": 1</code>), а <code>dataset</code> хранит только строки: запись проходит через ToString.
+    Представим, что номер карточки положили в кнопку так же и ищем по нему прогресс:</p>
+
+    <pre class="code js">const progress = new Map([[1, { step: 2 }]]);
+const plain = { 1: { step: 2 } };
+const button = document.createElement("button");
+button.dataset.card = 1;
+console.log(typeof button.dataset.card, progress.get(button.dataset.card));
+console.log(JSON.stringify(progress.get(Number(button.dataset.card))), JSON.stringify(plain[button.dataset.card]));
+console.log(button.dataset.card === 1, button.dataset.card == 1);</pre>
+
+    <div class="result-box">
+        string undefined<br>
+        {"step":2} {"step":2}<br>
+        false true
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 200" role="img" aria-label="Обычный объект переводит ключ в строку, поэтому 1 и строка 1 — один ключ; Map сравнивает ключи по SameValueZero, и это разные ключи">
+            <rect x="10" y="10" width="300" height="140" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="160" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#065f46">обычный объект</text>
+            <text x="160" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#065f46">plain["1"]   plain[1]</text>
+            <text x="160" y="84" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">ключ идёт через ToPropertyKey:</text>
+            <text x="160" y="102" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">1 → «1», и это один ключ</text>
+            <text x="160" y="132" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">нашёл в обоих случаях</text>
+
+            <rect x="330" y="10" width="300" height="140" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="480" y="34" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" fill="#991b1b">Map</text>
+            <text x="480" y="60" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#991b1b">progress.get("1")</text>
+            <text x="480" y="84" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">ключи сравнивает SameValueZero:</text>
+            <text x="480" y="102" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">строка «1» и число 1 — разные типы</text>
+            <text x="480" y="132" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#991b1b">undefined</text>
+
+            <text x="10" y="178" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Лечение — перевести ключ явно при чтении (Number(…)) или хранить в Map строки с самого начала;</text>
+            <text x="10" y="196" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">== «находит» совпадение, но строгое сравнение и Map — нет, и это правильно.</text>
+        </svg>
+        <figcaption>Один и тот же номер в двух хранилищах</figcaption>
+    </figure>
+
+    <p>Обычный объект нашёл прогресс, потому что ключ свойства — всегда строка или символ. <code>Map</code> хранит
+    ключи любых типов и сравнивает их SameValueZero, поэтому «1» и 1 для неё разные. Ошибка тихая: никакого
+    исключения, просто <code>undefined</code> — и колода «забывает» шаги. Поэтому в «Карточках 2.0» номера колод
+    строковые с самого начала, а номер карточки из разметки нужно переводить в число явно.</p>
+
+    <p>Та же развилка ждёт в <code>localStorage</code>. Ключи объекта в JSON — всегда строки, а элементы массива
+    сохраняют тип:</p>
+
+    <pre class="code js">console.log(Object.keys(JSON.parse('{"1": 2}')), JSON.parse("[[1, 2]]")[0][0] === 1);</pre>
+
+    <div class="result-box">
+        (1) ['1'] true
+    </div>
+
+    <p>Поэтому <code>save</code> «Карточек 2.0» (день 33) записывает прогресс не объектом, а списком пар:
+    <code>{"$map":[[1, …]]}</code>. Номер карточки возвращается из хранилища числом, и <code>Map</code> находит его.</p>
+
+    <h2 id="next">16. Что будет завтра</h2>
+
+    <p>Сегодня числа преобразовывались целиком. Завтра, на дне 6, — числа как биты: побитовые операторы,
+    <code>ToInt32</code>, <code>ToUint32</code>, сдвиги и оператор <code>void</code> — почему <code>~~x</code> отбрасывает
+    дробь и где у числа «32-битная» жизнь.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Раздел</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-abstract-operations">7 Abstract Operations</a></td><td>операции не из языка</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-type-conversion">7.1 Type Conversion</a></td><td>неявные преобразования; у BigInt их нет</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toprimitive">7.1.1 ToPrimitive</a></td><td>подсказка, Symbol.toPrimitive, OrdinaryToPrimitive</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toboolean">7.1.2 ToBoolean</a></td><td>семь ложных значений и <code>[[IsHTMLDDA]]</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tonumeric">7.1.3 ToNumeric</a></td><td>как ToNumber, но BigInt остаётся</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tonumber">7.1.4 ToNumber</a></td><td>таблица по типам, строки по грамматике</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tointegerorinfinity">7.1.5 ToIntegerOrInfinity</a></td><td>NaN — 0, дробь — прочь</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tobigint">7.1.13 ToBigInt</a></td><td>таблица 12; Number — ошибка</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-stringtobigint">7.1.14 StringToBigInt</a></td><td>строка по грамматике целых</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tostring">7.1.17 ToString</a></td><td>таблица по типам; Symbol — ошибка</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toobject">7.1.18 ToObject</a></td><td>объекты-обёртки; <code>null</code> — ошибка</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-topropertykey">7.1.19 ToPropertyKey</a></td><td>строка или символ</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tolength">7.1.20 ToLength</a></td><td>длина от 0 до 2<sup>53</sup> − 1</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-canonicalnumericindexstring">7.1.21 CanonicalNumericIndexString</a></td><td>«1» — число, «1.0» — нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toindex">7.1.22 ToIndex</a></td><td>номер или RangeError</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-testing-and-comparison-operations">7.2 Testing and Comparison</a></td><td>проверки и сравнения</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-requireobjectcoercible">7.2.1 RequireObjectCoercible</a></td><td><code>null</code> и <code>undefined</code> — ошибка</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isarray">7.2.2 IsArray</a></td><td>массив или Proxy над ним</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iscallable">7.2.3 IsCallable</a></td><td><code>[[Call]]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isconstructor">7.2.4 IsConstructor</a></td><td><code>[[Construct]]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isextensible-o">7.2.5 IsExtensible</a></td><td><code>[[IsExtensible]]</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isregexp">7.2.6 IsRegExp</a></td><td><code>Symbol.match</code> или слот</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isstringwellformedunicode">7.2.7 IsStringWellFormedUnicode</a></td><td>одинокие половинки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-sametype">7.2.8 SameType</a></td><td>один ли тип</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-samevalue">7.2.9 SameValue</a></td><td>NaN равен NaN, нули разные</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-samevaluezero">7.2.10 SameValueZero</a></td><td>нули равны</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-samevaluenonnumber">7.2.11 SameValueNonNumber</a></td><td>всё, кроме чисел</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-islessthan">7.2.12 IsLessThan</a></td><td>строки по элементам, LeftFirst</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-islooselyequal">7.2.13 IsLooselyEqual</a></td><td>лестница <code>==</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isstrictlyequal">7.2.14 IsStrictlyEqual</a></td><td><code>===</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// ToPrimitive(x, hint): не объект — как есть; Symbol.toPrimitive (Date, Symbol) — день 17;
+//   иначе string: toString → valueOf, number и без подсказки: valueOf → toString; оба объекты — TypeError
+// подсказка number: +x, x * 1, x &lt; y; string: String(x), `${x}`, obj[x]; без: x + y, x == y
+// ToBoolean false: undefined null +0 −0 NaN 0n "" (и document.all); всё прочее, даже [] и "0", — true
+// ToNumber: undefined NaN, null 0, "" 0, " 12 " 12, "0x1F" 31, "1_000" NaN, [] 0, [5] 5, {} NaN; Symbol, BigInt — TypeError
+// ToString: −0 "0", 1e21 "1e+21", [1,[2,3]] "1,2,3", {} "[object Object]"; Symbol — TypeError, но String(sym) работает
+// ToObject: null, undefined — TypeError; ToPropertyKey: символ или ToString — 1 и "1" один ключ
+// ToBigInt: "" 0n, "1.5" SyntaxError; BigInt(1.5) — RangeError (другой путь)
+
+// SameValue: NaN = NaN, +0 ≠ −0 (Object.is) · SameValueZero: и нули равны (includes, Map, Set) · === : NaN ≠ NaN
+// x &lt; y: две строки — по кодам ("10" &lt; "9"), иначе числа; NaN — undefined → false
+// x == y: один тип — ===; null == undefined; строка → число; boolean → число; объект → примитив; иначе false</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>mark + ""</code> вызвал <code>valueOf</code>, а не <code>toString</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Сложение зовёт ToPrimitive без подсказки, а без подсказки OrdinaryToPrimitive идёт как при
+                    number: сначала <code>valueOf</code>. Что справа строка, он узнаёт уже после — и склеивает.
+                </details>
+            </li>
+            <li>Что даёт <code>+[]</code>, <code>+[5]</code> и <code>+[1, 2]</code> и почему?
+                <details class="answer"><summary>Ответ</summary>
+                    0, 5 и NaN. ToNumber объекта — ToPrimitive с подсказкой number; <code>valueOf</code> массива
+                    возвращает сам массив, поэтому работает <code>toString</code>: «», «5», «1,2». Дальше строка по
+                    грамматике числовых строк.
+                </details>
+            </li>
+            <li>Чем отличаются <code>Object.is</code>, <code>includes</code> и <code>===</code> на NaN и −0?
+                <details class="answer"><summary>Ответ</summary>
+                    SameValue (<code>Object.is</code>): NaN равен NaN, нули разные. SameValueZero (<code>includes</code>):
+                    NaN равен NaN, нули равны. IsStrictlyEqual (<code>===</code>): NaN не равен NaN, нули равны.
+                </details>
+            </li>
+            <li>Почему <code>"10" &lt; "9"</code> — <code>true</code>, а <code>"10" &lt; 9</code> — <code>false</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Две строки IsLessThan сравнивает по 16-битным элементам: «1» меньше «9». Если хотя бы одна
+                    сторона — число, обе переводятся в числа, и 10 больше 9.
+                </details>
+            </li>
+            <li>Пройдите лестницу для <code>[] == ![]</code>.
+                <details class="answer"><summary>Ответ</summary>
+                    <code>![]</code> — <code>false</code>; boolean → 0: <code>[] == 0</code>; объект → ToPrimitive → «»:
+                    <code>"" == 0</code>; строка → число: <code>0 == 0</code> — <code>true</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness">MDN Web Docs</a> (авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

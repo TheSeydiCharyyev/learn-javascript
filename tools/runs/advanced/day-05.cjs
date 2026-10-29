@@ -5,7 +5,8 @@
 // The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-05.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-05.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted lines of the deck buttons (day 34 of course 2)
+// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do, in the
+// tasks EXPECT holds the answers of the predictions and SOLUTIONS make the examples checkable; the quoted lines of the deck buttons (day 34 of course 2)
 // are the real ones; the cheatsheet runs without an error; the experiments the lecture only tells about; what the
 // lecture says about the text of ECMA-262 2026 is checked against tools/.cache/ecma262-2026.html and what it takes from
 // MDN against the page in tools/.cache/mdn-content.git; every row of the day's plan is a link and every tc39.es anchor
@@ -20,7 +21,7 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-05');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -38,8 +39,90 @@ const show = (a) => {
 // what the console prints after an input: strings in quotes, the rest as in console.log
 const echo = (a) => (a.type === 'string' ? q(a.value) : show(a));
 
-// a block without a result-box: its output by the first line
-const EXPECT = {};
+// a block without a result-box: its output by the first line; the tasks ask to predict these, the answers live here
+const EXPECT = {
+  'const values = [undefined, null, true, "", " 7 ", "0x10", "1e2", [], [3], [1, 2], {}, -0];': ['NaN "undefined" false', '0 "null" false',
+    '1 "true" true', '0 "" false', '7 " 7 " true', '16 "0x10" true', '100 "1e2" true', '0 "" true', '3 "3" true', 'NaN "1,2" true',
+    'NaN "[object Object]" true', '-0 "0" false'],
+  // the lecture and the notes also start blocks with this line, but they have a result-box or comments
+  'const log = [];': ['1 6 valueOf', '2 шаг toString', '3 3 valueOf', '4 2! valueOf', '5 шаг-шаг toString toString', '6 шаг toString',
+    '7 true valueOf', '8 true valueOf', '9 2 valueOf', '10 шаг toString'],
+  'console.log("2" > "12", 2 > "12", "2" > 12, "abc" < "abd", "Z" < "a", "10" == 10, "10" === 10);': ['true false false true true true false',
+    '1,10,100,9 1,9,10,100', 'true true true true'],
+  'const pairs = [[[], false], [[1], "1"], [null, 0], [undefined, ""], ["", 0], [{}, "[object Object]"],': ['1 true', '2 true', '3 false',
+    '4 false', '5 true', '6 true', '7 true', '8 false', '9 true', '10 true'],
+  'const order = [];': ['true true false false true', 'a b c d e f g h i j'],
+  'const strings = [" 0b11 ", "-0x1F", "+12", "-0", "", "1_000", "Infinity", "1e3", "12n", "0o17"];': ['" 0b11 " 3', '"-0x1F" SyntaxError',
+    '"+12" 12', '"-0" 0', '"" 0', '"1_000" SyntaxError', '"Infinity" SyntaxError', '"1e3" SyntaxError', '"12n" SyntaxError', '"0o17" 15'],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  toPrimitive: `function ordinaryToPrimitive(obj, hint) {
+  const names = hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"];
+  for (const name of names) {
+    const method = obj[name];
+    if (typeof method === "function") {
+      const result = method.call(obj);
+      if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+    }
+  }
+  throw new TypeError("Cannot convert object to primitive value");
+}
+function toPrimitive(input, hint) {
+  if (input === null || (typeof input !== "object" && typeof input !== "function")) return input;
+  return ordinaryToPrimitive(input, hint ?? "number");
+}`,
+  cardId: `function cardId(raw) {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && String(Number(raw)) === raw ? Number(raw) : NaN;
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}`,
+  looseEqual: `function looseEqual(x, y) {
+  const type = (v) => (v === null ? "null" : typeof v === "function" ? "object" : typeof v);
+  const toPrim = (o) => {
+    for (const name of ["valueOf", "toString"]) {
+      const m = o[name];
+      if (typeof m === "function") {
+        const r = m.call(o);
+        if (r === null || (typeof r !== "object" && typeof r !== "function")) return r;
+      }
+    }
+    throw new TypeError("Cannot convert object to primitive value");
+  };
+  const big = (s) => { try { return BigInt(s); } catch { return undefined; } };
+  const tx = type(x), ty = type(y);
+  if (tx === ty) return x === y;                                                       // 1
+  if ((x === null && y === undefined) || (x === undefined && y === null)) return true;  // 2
+  if (tx === "number" && ty === "string") return looseEqual(x, Number(y));             // 3
+  if (tx === "string" && ty === "number") return looseEqual(Number(x), y);
+  if (tx === "bigint" && ty === "string") { const n = big(y); return n === undefined ? false : looseEqual(x, n); }   // 4
+  if (tx === "string" && ty === "bigint") return looseEqual(y, x);
+  if (tx === "boolean") return looseEqual(Number(x), y);                               // 5
+  if (ty === "boolean") return looseEqual(x, Number(y));
+  const prim = ["string", "number", "bigint", "symbol"];
+  if (prim.includes(tx) && ty === "object") return looseEqual(x, toPrim(y));           // 6
+  if (tx === "object" && prim.includes(ty)) return looseEqual(toPrim(x), y);
+  if ((tx === "bigint" && ty === "number") || (tx === "number" && ty === "bigint")) {  // 7
+    const [b, n] = tx === "bigint" ? [x, y] : [y, x];
+    return Number.isInteger(n) && BigInt(n) === b;
+  }
+  return false;                                                                         // 8
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
   '// main.js, день 34 курса 2 — кнопки колод': 'intermediate/day-34/lecture.html',
@@ -112,6 +195,7 @@ const inOrder = (text, words) => words.every((w, i) => text.includes(w) && (i ==
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -128,12 +212,19 @@ const inOrder = (text, words) => words.every((w, i) => text.includes(w) && (i ==
         continue;
       }
       const consoleBlock = first.startsWith('// в консоли');
-      const out = consoleBlock ? await runConsole(ctx, blk.code, `${name}-${i}.html`) : await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = consoleBlock ? await runConsole(ctx, blk.code, `${name}-${i}.html`)
+        : await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : consoleBlock ? ' (console)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : consoleBlock ? ' (console)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
@@ -163,6 +254,19 @@ console.log(JSON.stringify(["b", "B", "a", "ä"].sort((x, y) => x.localeCompare(
     check(JSON.stringify(out) === JSON.stringify(['RangeError: Invalid array buffer length true TypeError: First argument to String.prototype.includes must not be a regular expression',
       '["a","ä","b","B"] false']),
     `lecture 9, 11, 13, 14: ToIndex throws RangeError, IsArray sees through Proxy, includes rejects a regex, localeCompare sorts by the alphabet, a symbol is not == its text ${JSON.stringify(out)}`);
+  }
+  // tasks 5, 6, 8: what the criteria ask to find
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.toPrimitive}
+${SOLUTIONS.looseEqual}
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const both = { valueOf() { return {}; }, toString() { return {}; } };
+console.log(attempt(() => toPrimitive(both)), attempt(() => +both));
+console.log(+"", +" 12 ", +true);
+const d = new Date(0);
+console.log(looseEqual(d, String(d)), d == String(d));`, 'tasks-criteria.html');
+    check(JSON.stringify(out) === JSON.stringify(['TypeError: Cannot convert object to primitive value TypeError: Cannot convert object to primitive value', '0 12 1', 'false true']),
+      `tasks 5, 6, 8: both methods give objects — TypeError like +x; +"" +" 12 " +true err; a date breaks looseEqual without Symbol.toPrimitive ${JSON.stringify(out)}`);
   }
   // notes, homework 1 and 2: a date and a Symbol object change ToPrimitive; the two comparisons of the ladder
   {
@@ -210,6 +314,12 @@ console.log(typeof (new Date(0) + 1), attempt(() => Object(Symbol("x")) + ""), "
   check(/Undefined Throw a TypeError exception\. Null Throw a TypeError exception\. Boolean Return 1n if prim is true and 0n if prim is false/.test(toBigInt) && /Number Throw a TypeError exception/.test(toBigInt)
     && /If n is undefined, throw a SyntaxError exception/.test(toBigInt), 'lecture 10: table 12 — Number throws, a bad string is SyntaxError');
   check(/Let literal be ParseText ?\(str, StringIntegerLiteral\)/.test(flat(clause(spec, 'sec-stringtobigint'))), 'lecture 10: StringToBigInt — the integer grammar');
+  const binary = flat(clause(spec, 'sec-applystringornumericbinaryoperator'));
+  check(/If opText is \+, then Let lPrim be \? ToPrimitive ?\(lVal\)\. Let rPrim be \? ToPrimitive ?\(rVal\)/.test(binary) && /Let lNum be \? ToNumeric ?\(lVal\)/.test(binary)
+    && /Let middle be \? ToString ?\(sub\)/.test(flat(clause(spec, 'sec-template-literals-runtime-semantics-evaluation'))),
+  'lecture 2, tasks 2: + calls ToPrimitive without a hint, * calls ToNumeric, a template calls ToString');
+  check(/StringIntegerLiteral ::: StrWhiteSpace opt StrWhiteSpace opt StrIntegerLiteral StrWhiteSpace opt StrIntegerLiteral ::: SignedInteger \[~Sep\] NonDecimalIntegerLiteral \[~Sep\]/.test(flat(clause(spec, 'sec-stringintegerliteral-grammar'))),
+    'tasks 9: 7.1.14.1 — a sign only with decimal digits, prefixes without a sign, no separators');
   check(/If prim is a Number, return \? NumberToBigInt ?\(prim\)\. Return \? ToBigInt ?\(prim\)/.test(flat(clause(spec, 'sec-bigint-constructor-number-value'))), 'lecture 10: BigInt(value) — its own NumberToBigInt for numbers');
   check(/If argument is a Proxy exotic object/.test(flat(clause(spec, 'sec-isarray'))) && /If argument has a \[\[Call\]\] internal method, return true/.test(flat(clause(spec, 'sec-iscallable')))
     && /If argument has a \[\[Construct\]\] internal method, return true/.test(flat(clause(spec, 'sec-isconstructor'))) && /Return \? O\. ?\[\[IsExtensible\]\] ?\(\)/.test(flat(clause(spec, 'sec-isextensible-o'))),

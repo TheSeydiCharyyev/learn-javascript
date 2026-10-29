@@ -6,7 +6,8 @@
 // The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-04.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-04.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted lines of the «Знаю» button (day 34 of
+// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do, in the
+// tasks EXPECT holds the answers of the predictions and SOLUTIONS make the examples checkable; the quoted lines of the «Знаю» button (day 34 of
 // course 2) are the real ones; the cheatsheet runs without an error; the experiments the lecture only tells about;
 // what the lecture says about the text of ECMA-262 2026 is checked against tools/.cache/ecma262-2026.html and what it
 // takes from MDN against the page in tools/.cache/mdn-content.git; every row of the day's plan is a link and every
@@ -21,7 +22,7 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-04');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -39,8 +40,62 @@ const show = (a) => {
 // what the console prints after an input: strings in quotes, the rest as in console.log
 const echo = (a) => (a.type === 'string' ? q(a.value) : show(a));
 
-// a block without a result-box: its output by the first line
-const EXPECT = {};
+// a block without a result-box: its output by the first line; the tasks ask to predict these, the answers live here
+const EXPECT = {
+  'const items = [null, () => {}, class {}, new Map(), Symbol.iterator, -0, NaN, 10n ** 20n, "", Object(1)];':
+    ['object function function object symbol number number bigint string object'],
+  // a break inside if leaves with undefined: if fills the empty value of the break with UpdateEmpty(…, undefined)
+  '// в консоли: вводите по одной строке': ['3', '2', 'undefined', '4', 'undefined', "'kitap'"],
+  'console.log(2 ** 53 === 2 ** 53 + 1, 2 ** 53 + 3, 0.1 + 0.2 === 0.3);': ['true 9007199254740996 false', 'true -Infinity Infinity -0',
+    '9007199254740992 9007199254740993n'],
+  'const deck = { cards: ["kitap", "suw"], size() { return this === deck ? this.cards.length : "без колоды"; } };': ['1 2', '2 2',
+    '3 без колоды', '4 без колоды', '5 без колоды', '6 2', '7 без колоды', '8 2', '9 2'],
+  'const tryIt = (f) => {': ['undefined undefined ReferenceError: nope is not defined', 'true ReferenceError: nope is not defined', 'false true',
+    "ReferenceError: Cannot access 'later' before initialization"],
+  'const log = [];': ['a b c try после метки', 'try finally b-finally c-finally'],
+  'const o = { word: "kitap", get size() { return 2; } };': ['word value writable enumerable configurable', 'size get set enumerable configurable',
+    'id value writable enumerable configurable', 'nope нет свойства'],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  bound: `function bound(obj) {
+  const out = {};
+  for (let p = Object.getPrototypeOf(obj); p && p !== Object.prototype; p = Object.getPrototypeOf(p)) {
+    for (const key of Object.getOwnPropertyNames(p)) {
+      const d = Object.getOwnPropertyDescriptor(p, key);
+      if (key !== "constructor" && typeof d.value === "function" && !(key in out)) out[key] = d.value.bind(obj);
+    }
+  }
+  return out;
+}`,
+  evaluateList: `function updateEmpty(record, value) {
+  return record.value !== EMPTY ? record : { ...record, value };
+}
+function evaluateList(records) {
+  let value = EMPTY;
+  for (const r of records) {
+    const s = updateEmpty(r, value);
+    if (s.type !== "normal") return s;
+    value = s.value;
+  }
+  return { type: "normal", value, target: EMPTY };
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
   '// main.js, день 34 курса 2 — кнопка «Знаю»': 'intermediate/day-34/lecture.html',
@@ -111,6 +166,7 @@ const clause = (spec, id) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -127,12 +183,19 @@ const clause = (spec, id) => {
         continue;
       }
       const consoleBlock = first.startsWith('// в консоли');
-      const out = consoleBlock ? await runConsole(ctx, blk.code, `${name}-${i}.html`) : await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = consoleBlock ? await runConsole(ctx, blk.code, `${name}-${i}.html`)
+        : await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : consoleBlock ? ' (console)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : consoleBlock ? ' (console)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
@@ -154,6 +217,16 @@ console.log("kitap".x, typeof (() => {}), (() => {}) instanceof Object);`, 'told
   {
     const out = await runScript(ctx, 'console.log(typeof this, (function () { return this; })());', 'module.html', ' type="module"');
     check(JSON.stringify(out) === '["undefined undefined"]', `lecture 15: module code is strict ${JSON.stringify(out)}`);
+  }
+  // tasks 1, 6: what the criteria ask to find
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.bound}
+class Deck { #seen = 0; know() { this.#seen++; return this.#seen; } }
+const deck = new Deck();
+try { [1, 2, 3].forEach(deck.know); } catch (e) { console.log(e.name + ": " + e.message); }
+console.log(typeof Object(1), Object(1) instanceof Number, Object(1) + 1);`, 'tasks-criteria.html');
+    check(JSON.stringify(out) === '["TypeError: Cannot read properties of undefined (reading \'#seen\')","object true 2"]',
+      `tasks 6, 1: forEach(deck.know) throws, Object(1) is an object around a number ${JSON.stringify(out)}`);
   }
   // notes, homework 1: an empty block and declarations complete empty, if completes with undefined
   {
@@ -213,6 +286,18 @@ console.log("kitap".x, typeof (() => {}), (() => {}) instanceof Object);`, 'told
     && /Callable objects that are defined in this specification only return a normal completion or a throw completion/.test(completion), 'lecture 9: table 7 — three fields; abrupt; callables return normal or throw');
   check(/completionRecord\. ?\[\[Value\]\] is not empty, return \? completionRecord/.test(flat(clause(spec, 'sec-updateempty'))), 'lecture 9: UpdateEmpty keeps a value that is not empty');
   check(/If F is a normal completion, set F to B/.test(flat(clause(spec, 'sec-try-statement-runtime-semantics-evaluation'))), 'lecture 11: 14.15.3 — a normal finally gives back the record of the block');
+  const ifStatement = flat(clause(spec, 'sec-if-statement-runtime-semantics-evaluation'));
+  check(/If exprValue is false, return undefined\. Let stmtCompletion be Completion ?\(Evaluation of Statement\)\. Return \? UpdateEmpty ?\(stmtCompletion, undefined\)/.test(ifStatement),
+    'lecture 10, tasks 2: 14.6.2 — if (false) returns undefined at once, a branch that ran goes through UpdateEmpty(…, undefined)');
+  check(/Block : \{ \} Return empty/.test(flat(clause(spec, 'sec-block-runtime-semantics-evaluation'))) && /Return \? UpdateEmpty ?\(s, sl\)/.test(flat(clause(spec, 'sec-block-runtime-semantics-evaluation'))),
+    'student homework 1, tasks 8: an empty block is empty; a statement list is UpdateEmpty(s, sl)');
+  check(/If stmtResult\. ?\[\[Target\]\] is empty, then If stmtResult\. ?\[\[Value\]\] is empty, set stmtResult to NormalCompletion ?\(undefined\)/.test(flat(clause(spec, 'sec-labelled-statements-runtime-semantics-labelledevaluation'))),
+    'tasks 2, 7: LabelledEvaluation turns a break into a normal completion');
+  check(/If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception/.test(flat(clause(spec, 'sec-declarative-environment-records-getbindingvalue-n-s'))),
+    'tasks 5: GetBindingValue of an uninitialized binding throws — typeof does not help in the TDZ');
+  const fromDesc = flat(clause(spec, 'sec-frompropertydescriptor'));
+  check(/If Desc is undefined, return undefined/.test(fromDesc) && ['"value"', '"writable"', '"get"', '"set"', '"enumerable"', '"configurable"'].every((w, i, all) => i === 0 || fromDesc.indexOf(all[i - 1]) < fromDesc.indexOf(w)),
+    'tasks 9: FromPropertyDescriptor — undefined for no property, keys in the order value, writable, get, set, enumerable, configurable');
   const reference = flat(clause(spec, 'sec-reference-record-specification-type'));
   check(['[[Base]]', '[[ReferencedName]]', '[[Strict]]', '[[ThisValue]]'].every((w) => reference.includes(w)) && /A \[\[Base\]\] of unresolvable indicates that the binding could not be resolved/.test(reference)
     && /Super Reference Record/.test(reference), 'lecture 12: table 8 — four fields, unresolvable, the super reference');

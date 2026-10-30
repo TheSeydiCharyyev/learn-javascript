@@ -7,8 +7,9 @@
 //   node tools/runs/advanced/day-09.cjs --quiet    only the checks
 // Checks: a result-box right after a block equals its output; in the notes the output equals the comments of the lines
 // that print it; the quoted lines of main.js (day 35 of course 2) are the real ones; the cheatsheet runs without an error;
-// the homework of the notes; the experiments the lecture only tells about (a real click of a
-// person, the call frames and scopes the debugger gets, the species of a subclass, the same module from import());
+// the homework of the notes; the examples of the tasks run with reference solutions, the predictions of the tasks and
+// what their criteria ask to find; the experiments the lecture only tells about (a real click of a person, the call
+// frames and scopes the debugger gets, the species of a subclass, the same module from import());
 // what the lecture says about the text of ECMA-262 2026 (chapter 9 and the operations that call it, found by a search
 // of the callers) is checked against tools/.cache/ecma262-2026.html; what it says about MDN — against
 // tools/.cache/mdn-content.git; the days it points to say what it says; the reference table holds all 25 rows of
@@ -25,7 +26,7 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-09');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -43,8 +44,97 @@ const show = (a) => {
   return String(a.value ?? a.unserializableValue ?? a.description);
 };
 
-// a block without a result-box: its output by "page #index" or by the first line
-const EXPECT = {};
+// a block without a result-box: its output by "page #index" or by the first line; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['false true false true', 'false true true false'],
+  'tasks #1': ['global global obj obj global call obj', 'нет', 'F'],
+  'tasks #2': ['b ← a ← скрипт', 'b ← a', 'b ← a ← c', 'b ← a ← d', 'b ← a'],
+  'tasks #6': ['рамка страница рамка страница'],
+  'tasks #8': ['1 then 2 готово 3 4'],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  resolveThisBinding: `function hasThisBinding(env) {
+  if (env.kind === "declarative") return false;
+  if (env.kind === "function") return env.status !== "lexical";
+  return true;
+}
+function getThisEnvironment(env) {
+  while (!hasThisBinding(env)) env = env.outer;
+  return env;
+}
+function resolveThisBinding(env) {
+  const found = getThisEnvironment(env);
+  if (found.kind === "module") return undefined;
+  if (found.status === "uninitialized") throw new ReferenceError("this is not initialized");
+  return found.thisValue;
+}
+function getNewTarget(env) {
+  return getThisEnvironment(env).newTarget;
+}`,
+  makeLoop: `function makeLoop() {
+  const tasks = [];
+  const microtasks = [];
+  const entries = [];
+  const runJob = (fn) => {
+    try { fn(); } catch (e) { entries.push("ошибка: " + e.message); }
+  };
+  return {
+    script(fn) { tasks.push(fn); },
+    task(fn) { tasks.push(fn); },
+    microtask(fn) { microtasks.push(fn); },
+    log(text) { entries.push(text); },
+    run() {
+      while (tasks.length > 0) {
+        runJob(tasks.shift());
+        while (microtasks.length > 0) runJob(microtasks.shift());
+      }
+    },
+    journal() { return entries.slice(); },
+  };
+}`,
+  once: `function once(asyncFn) {
+  let pending = null;
+  return () => {
+    pending ??= asyncFn().finally(() => { pending = null; });
+    return pending;
+  };
+}`,
+  resolveBinding: `function resolveBinding(name, env, strict) {
+  while (env !== null) {
+    if (env.bindings.has(name)) return { base: env, name, strict };
+    env = env.outer;
+  }
+  return { base: "unresolvable", name, strict };
+}
+function getValue(ref) {
+  if (ref.base === "unresolvable") throw new ReferenceError(ref.name + " is not defined");
+  return ref.base.bindings.get(ref.name);
+}
+function putValue(ref, value, globalObject) {
+  if (ref.base === "unresolvable") {
+    if (ref.strict) throw new ReferenceError(ref.name + " is not defined");
+    globalObject[ref.name] = value;
+    return;
+  }
+  ref.base.bindings.set(ref.name, value);
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
@@ -169,6 +259,7 @@ const topSteps = (spec, id) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -185,12 +276,18 @@ const topSteps = (spec, id) => {
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[`${name} #${i}`] ?? EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[`${name} #${i}`] ?? EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
@@ -296,6 +393,53 @@ console.log(Array.prototype.filter.call(other.Array.of(1, 2), Boolean) instanceo
 Promise.resolve(1).then(other.Function("x", "return [x];")).then((v) => console.log(v instanceof Array, v instanceof other.Array));`, 'hw.html');
     check(JSON.stringify(out) === JSON.stringify(['true false true', 'false true']),
       `student homework 2, 3: filter of the page — an array of the page, slice of the frame on our array — of the frame, spread — of the page; a frame handler makes a frame array ${JSON.stringify(out)}`);
+  }
+  // tasks 4–6, 9: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.resolveThisBinding}
+${SOLUTIONS.makeLoop}
+const global = { kind: "global", thisValue: "window", outer: null };
+const method = { kind: "function", status: "initialized", thisValue: "obj", outer: global };
+const model = resolveThisBinding({ kind: "declarative", outer: { kind: "function", status: "lexical", outer: method } });
+const obj = { name: "obj", method() { const arrow = () => { { return this.name; } }; return arrow(); } };
+console.log(model, obj.method());
+const loop = makeLoop();
+loop.script(() => {
+  loop.log("скрипт");
+  loop.task(() => loop.log("таймер"));
+  loop.microtask(() => { loop.log("микро 1"); loop.microtask(() => loop.log("микро 3")); });
+  loop.microtask(() => loop.log("микро 2"));
+});
+loop.run();
+const real = [];
+setTimeout(() => { real.push("таймер"); console.log(loop.journal().join(" | ") === real.join(" | "), real.join(" | ")); }, 0);
+real.push("скрипт");
+Promise.resolve().then(() => { real.push("микро 1"); Promise.resolve().then(() => real.push("микро 3")); });
+Promise.resolve().then(() => real.push("микро 2"));`, 'tasks-criteria-1.html');
+    check(JSON.stringify(out) === JSON.stringify(['obj obj', 'true скрипт | микро 1 | микро 2 | микро 3 | таймер']),
+      `tasks 4, 5: the model of GetThisEnvironment and the language agree on a block in an arrow in a method; the loop model and Chrome give the same order ${JSON.stringify(out)}`);
+  }
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.once}
+let loads = 0;
+let fail = true;
+const slow = async () => { loads++; await null; if (fail) { fail = false; throw new Error("нет сети"); } return "колоды"; };
+const openAll = once(slow);
+openAll().catch((e) => {
+  console.log("отказ:", e.message, loads);
+  return openAll();
+}).then((v) => {
+  console.log("снова:", v, loads);
+  return openAll();
+}).then((v) => console.log("и ещё:", v, loads));
+const log = [];
+const done = Promise.resolve("готово");
+Promise.resolve().then(() => log.push("1"));
+new Promise((resolve) => resolve(done)).then((v) => log.push(v));
+Promise.resolve().then(() => log.push("2")).then(() => log.push("3")).then(() => log.push("4"));
+setTimeout(() => console.log(log.join(" ")), 0);`, 'tasks-criteria-2.html');
+    check(JSON.stringify(out) === JSON.stringify(['отказ: нет сети 1', 'снова: колоды 2', 'и ещё: колоды 3', '1 2 3 готово 4']),
+      `tasks 6, 9: once tries again after a rejection and after a fulfilment; a fulfilled promise instead of the thenable puts "готово" after "3" — two jobs ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -412,6 +556,16 @@ Promise.resolve(1).then(other.Function("x", "return [x];")).then((v) => console.
       'every unblocked agent with a dedicated executing thread eventually makes forward progress', 'in a set of agents that share an executing thread, one agent eventually makes forward progress',
       'an agent does not cause another agent to become blocked except via explicit APIs that provide blocking']),
   'lecture 15: 9.7 — shared memory, one cluster each, same LittleEndian and IsLockFree, other Signifier, no partial stop, terminate all; 9.8 — blocked, CanBlock, three guarantees');
+  check(f('sec-array.prototype.tosorted').includes('Let A be ? ArrayCreate (len)') && !f('sec-array.prototype.tosorted').includes('ArraySpeciesCreate'),
+    'tasks 1: toSorted makes its result with ArrayCreate in the current realm and never asks the constructor');
+  check(inOrder(f('sec-getvalue'), ['If V is not a Reference Record, return V', 'If IsUnresolvableReference (V) is true, throw a ReferenceError exception'])
+    && flat(spec.slice(spec.indexOf('id="sec-reference-record-specification-type"'), spec.indexOf('id="sec-reference-record-specification-type"') + 9000)).includes('[[Strict]] a Boolean true if the Reference Record originated in strict mode code'),
+  'tasks 8: GetValue throws on an unresolvable reference in any code; [[Strict]] of a Reference Record is read by PutValue');
+  check(f('sec-promise-resolve-functions').includes('Let job be NewPromiseResolveThenableJob (promise, resolution, thenJobCallback). Perform HostEnqueuePromiseJob (job. [[Job]], job. [[Realm]])')
+    && hasAll(f('sec-newpromiseresolvethenablejob'), ['Let getThenRealmResult be Completion (GetFunctionRealm (then. [[Callback]]))', 'Else, let thenRealm be the current Realm Record',
+      'When then. [[Callback]] is a revoked Proxy and no code runs, thenRealm is used to create error objects'])
+    && fs.readFileSync(path.join(ROOT, 'intermediate/day-28/lecture.html'), 'utf8').includes('лишних задания в разделе 3: одно — вызвать <code>then</code> возвращённого промиса, второе — его реакция'),
+  'tasks 9: resolve with a thenable enqueues NewPromiseResolveThenableJob in the realm of then (the current one for a revoked proxy); course 2 day 28 — two extra jobs for a promise');
   check(hasAll(f('sec-getactivescriptormodule'), ['Let ec be the topmost execution context on the execution context stack whose ScriptOrModule component is not null'])
     && ['EvaluateImportCall', 'sec-meta-properties-runtime-semantics-evaluation'].every((c) => callers('GetActiveScriptOrModule').includes(c)),
   'reference table: GetActiveScriptOrModule — the topmost context with a script or module; import() and import.meta use it');

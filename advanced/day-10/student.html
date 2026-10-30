@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 10 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 10</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 10. Выражения по спецификации</h1>
+    <p class="subtitle">Выжимка лекции: приоритет и порядок вычисления, доступ и вызов, необязательная цепочка,
+    <code>delete</code> и <code>typeof</code>, сложение и сравнения, три формы присваивания.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Приоритет</strong> задаёт грамматика — форму дерева. <strong>Порядок вычисления</strong> задают шаги
+        Evaluation: левый операнд, правый, операция. Цель присваивания — ссылка (Reference Record): её вычисляют первой,
+        а приводят ключ (ToPropertyKey) только при чтении или записи.
+    </div>
+
+    <h2>Порядок и ссылка</h2>
+
+    <pre class="code js">const log = [];
+const v = (name, value) =&gt; { log.push(name); return value; };
+console.log(v("f", 1) + v("g", 2) * v("h", 3), log.join(" "));   // 7 f g h — слева направо, хотя * раньше +
+const a = [];
+let i = 0;
+a[i++] = i;
+console.log(JSON.stringify(a));                                   // [1] — ключ 0 вычислен до правой части
+log.length = 0;
+const key = { toString() { log.push("ключ"); return "k"; } };
+const o = {};
+o[key] = v("правая", 1);
+console.log(log.join(" "));                                       // правая ключ — ToPropertyKey после правой части</pre>
+
+    <div class="remember">
+        Вызов и <code>new</code>: сначала аргументы, потом проверка «is not a function» или «is not a constructor».
+        <code>null[f()]</code> вызывает <code>f</code> и только потом падает. Скобки ссылку не теряют, запятая и
+        присваивание — теряют.
+    </div>
+
+    <h2>?., delete и typeof</h2>
+
+    <pre class="code js">const obj = { a: null };
+console.log(obj?.a?.b, null?.x.y.z);                      // undefined undefined — одна проверка на всю цепочку
+console.log(delete obj.a, delete obj.nope, "a" in obj);   // true true false — удалить можно и то, чего нет
+var counter = 1;
+console.log(delete counter, typeof undeclaredName);       // false undefined — var не удалить; typeof неразрешимого имени
+console.log(typeof document.all, typeof class {});        // undefined function — [[IsHTMLDDA]] и [[Call]]</pre>
+
+    <div class="remember">
+        <code>?.</code> проверяет только основу, скобки кончают цепочку. Нельзя: слева от <code>=</code>, в
+        <code>++</code>, после <code>new</code>, с тегом шаблона. <code>delete</code>: не ссылка и неразрешимое имя —
+        <code>true</code>; в строгом коде имя — SyntaxError, неудача — TypeError; приватное поле — никогда.
+        <code>typeof</code> защищает только само имя: если имени нет, <code>typeof имя?.y</code> бросает.
+    </div>
+
+    <h2>Присваивание</h2>
+
+    <pre class="code js">const log = [];
+const obj = { get v() { log.push("get"); return 1; }, set v(x) { log.push(`set ${x}`); } };
+obj.v ||= 5;
+obj.v += 1;
+console.log(log.join(", "));                    // get, get, set 2 — ||= не записал, += прочитал до записи
+const steps = [];
+const k = { toString() { steps.push("ключ"); return "k"; } };
+const target = { k: 1 };
+target[k] += 1;
+console.log(steps.join(" "), target.k);         // ключ ключ 2 — Chrome 156; по тексту 2026 «ключ» один раз
+let d1, d2;
+({ d1 = "умолчание", d2 = "умолчание" } = { d1: null, d2: undefined });
+console.log(d1, d2);                            // null умолчание — умолчание только для undefined</pre>
+
+    <table>
+        <thead><tr><th>Форма</th><th>Читает цель</th><th>Правая часть</th><th>Пишет</th></tr></thead>
+        <tbody>
+            <tr><td><code>a = b</code></td><td>нет</td><td>да</td><td>да</td></tr>
+            <tr><td><code>a += b</code></td><td>да, до правой части</td><td>да</td><td>да</td></tr>
+            <tr><td><code>a ||= b</code>, <code>a</code> истинно</td><td>да</td><td>нет</td><td>нет</td></tr>
+            <tr><td><code>a ??= b</code>, <code>a</code> не <code>null</code></td><td>да</td><td>нет</td><td>нет</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        <code>+</code>: ToPrimitive без подсказки, строка с любой стороны — склейка, BigInt с Number — TypeError.
+        <code>&gt;</code> меняет операнды местами, но LeftFirst сохраняет порядок. <code>instanceof</code> сначала
+        спрашивает <code>Symbol.hasInstance</code> — он есть у каждой функции и только для чтения. Деструктуризация:
+        цель раньше чтения, <code>{} = null</code> — TypeError, итератор закрывается.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Предскажите <code>log</code> после <code>v("o", obj)[v("k", "x")] = v("r", 1) + v("s", 2)</code> и после
+                <code>v("o", obj)[v("k", "x")] ||= v("r", 1)</code> (помощник <code>v</code> — из первого блока,
+                <code>obj = { x: 0 }</code>). Каким стал <code>obj.x</code>?</li>
+            <li>Что даст <code>a?.b.c()</code>, если <code>a</code> — <code>null</code>, <code>{}</code> и
+                <code>{ b: { c() { return this === a.b; } } }</code>? Найдите шаг 13.3.9.1 или 13.3.9.2 для каждого ответа.</li>
+            <li>Прочитайте IteratorDestructuringAssignmentEvaluation (13.15.5.5) и предскажите порядок «цель», «next»,
+                «запись», «return» для <code>[t().x] = iterable</code>. Проверьте, как в разделе 15 лекции.</li>
+            <li>Прочитайте разделы «Short-circuiting» и «Invalid optional chaining» страницы MDN
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining">Optional chaining</a>
+                и найдите для каждого примера правило спецификации: шаг 13.3.9.1, ранняя ошибка 13.3.1.1 или 8.6.4.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining">MDN Web Docs</a>
+        (Optional chaining, delete, typeof, instanceof, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

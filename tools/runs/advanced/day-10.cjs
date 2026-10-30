@@ -5,8 +5,9 @@
 // The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-10.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-10.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted lines of main.js (day 34 of course 2) are the
-// real ones; the cheatsheet runs without an error; the experiments the lecture only tells about (f()++ and f() += 1 at
+// Checks: a result-box right after a block equals its output; in the notes the output equals the comments of the lines
+// that print it; the quoted lines of main.js (day 34 of course 2) are the real ones; the cheatsheet runs without an
+// error; the homework of the notes; the experiments the lecture only tells about (f()++ and f() += 1 at
 // run time, this inside with, super.m(), a private field under delete, the attributes of
 // Function.prototype[Symbol.hasInstance], the iterator a destructuring assignment closes); what the lecture says about
 // the text of ECMA-262 2026 (chapter 13 and the operations it calls) is checked against tools/.cache/ecma262-2026.html;
@@ -22,7 +23,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-10');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -121,7 +125,8 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[`${name} #${i}`] ?? EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[`${name} #${i}`] ?? EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
@@ -152,6 +157,28 @@ console.log(p, steps.join(" "), NaN <= 1);`, 'told-2.html');
     check(JSON.stringify(out) === JSON.stringify(["SyntaxError: Private fields can not be deleted | SyntaxError: Invalid left-hand side in assignment | SyntaxError: Invalid tagged template on optional chain",
       'false false false [Symbol.hasInstance]', '0 next return false']),
     `lecture 6, 8, 11, 12, 14: a private field cannot be deleted; f() ||= 1 is an early error; ?. with a template on the next line too; Function.prototype[Symbol.hasInstance] is locked; a destructuring assignment closes the iterator; NaN <= 1 is false ${JSON.stringify(out)}`);
+  }
+  // notes, homework 1–3: the log of two assignments, where a?.b.c() breaks, the order of an array pattern
+  {
+    const out = await runScript(ctx, `${ATTEMPT}const log = [];
+const v = (name, value) => { log.push(name); return value; };
+const obj = { x: 0 };
+v("o", obj)[v("k", "x")] = v("r", 1) + v("s", 2);
+const first = log.join(" ");
+log.length = 0;
+v("o", obj)[v("k", "x")] ||= v("r", 1);
+console.log(first, "|", log.join(" "), obj.x);
+const call = (a) => attempt(() => a?.b.c());
+const a3 = { b: { c() { return this === a3.b; } } };
+console.log(call(null), "|", call({}), "|", call(a3));
+const steps = [];
+const target = { set x(val) { steps.push("запись x=" + val); } };
+const t = () => { steps.push("цель"); return target; };
+const iterable = { [Symbol.iterator]() { let i = 0; return { next() { steps.push("next"); return { value: ++i, done: false }; }, return() { steps.push("return"); return {}; } }; } };
+[t().x] = iterable;
+console.log(steps.join(", "));`, 'hw.html');
+    check(JSON.stringify(out) === JSON.stringify(['o k r s | o k 3', "undefined | TypeError: Cannot read properties of undefined (reading 'c') | true", 'цель, next, запись x=1, return']),
+      `student homework 1–3: = evaluates all four, ||= stops after the key; a?.b.c() — undefined, TypeError, true; an array pattern takes the target before next and closes the iterator ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -262,6 +289,10 @@ console.log(p, steps.join(" "), NaN <= 1);`, 'told-2.html');
   // the MDN pages of the footer
   const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/operators/${p}/index.md`], { encoding: 'utf8' });
   check(['optional_chaining', 'delete', 'typeof', 'instanceof'].every((p) => mdn(p).startsWith('---\ntitle:')), 'footer: the MDN pages Optional chaining, delete, typeof, instanceof are in the cache');
+  check(hasAll(mdn('optional_chaining'), ['### Short-circuiting', '### Invalid optional chaining'])
+    && /^id="sec-runtime-semantics-iteratordestructuringassignmentevaluation"[^>]*> 13\.15\.5\.5 /.test(f('sec-runtime-semantics-iteratordestructuringassignmentevaluation'))
+    && f('sec-runtime-semantics-iteratordestructuringassignmentevaluation').includes('If DestructuringAssignmentTarget is neither an ObjectLiteral nor an ArrayLiteral, then Let lRef be ? Evaluation of DestructuringAssignmentTarget'),
+  'student homework 3, 4: 13.15.5.5 takes the target before the iterator step; MDN Optional chaining has the sections Short-circuiting and Invalid optional chaining');
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

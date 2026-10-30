@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 8 — Синтаксически управляемые операции: Evaluation и объявленные имена</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+        h3 { color: #075985; }
+        .step-number { background: #0ea5e9; }
+        .toc a { color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 8</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 8 &bull; урок 1</span>
+        <h1>Синтаксически управляемые операции: Evaluation и объявленные имена</h1>
+        <p>Курс 3, Advanced. Модуль «Выполнение кода» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>читать операцию, заданную кусками по правилам грамматики;</li>
+            <li>отличать статическую семантику от выполнения;</li>
+            <li>находить имена, которые объявляет блок, функция и скрипт, — и предсказывать «has already been declared»;</li>
+            <li>объяснять «подъём» и мёртвую зону через списки имён;</li>
+            <li>предсказывать <code>name</code> у любой функции по правилам NamedEvaluation;</li>
+            <li>знать, что ещё проверяется до выполнения: метки, <code>super</code>, цели присваивания.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#sdo">Операции по дереву разбора</a></li>
+            <li><a href="#evaluation">Evaluation и статическая семантика</a></li>
+            <li><a href="#bound">BoundNames: какие имена объявлены</a></li>
+            <li><a href="#lexvar">Лексические имена и имена var</a></li>
+            <li><a href="#redeclare">Повторные объявления</a></li>
+            <li><a href="#toplevel">Функции наверху — как var</a></li>
+            <li><a href="#hoisting">Откуда «подъём»</a></li>
+            <li><a href="#labels">Метки</a></li>
+            <li><a href="#contains">Contains: super и new.target</a></li>
+            <li><a href="#naming">Вывод имени функции</a></li>
+            <li><a href="#noname">Где имени не будет</a></li>
+            <li><a href="#binding">Привязки и параметры</a></li>
+            <li><a href="#targets">Куда можно присваивать</a></li>
+            <li><a href="#propname">PropName и const</a></li>
+            <li><a href="#cards">«Карточки 2.0»: имена в main.js</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="sdo">1. Операции по дереву разбора</h2>
+
+    <p>Модуль «Типы и абстрактные операции» закончен; начинается модуль «Выполнение кода». Его первый инструмент —
+    <a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations">синтаксически управляемые операции</a>
+    (глава 8). На дне 1 мы видели их определение (5.2.2): операция задана <em>кусками</em> — для каждого правила
+    грамматики свой алгоритм, — и выполняется над узлом дерева разбора (день 2). Если для правила вида «A : B» кусок
+    не написан, операция просто передаётся вниз, к B. Главе 8 принадлежат общие операции; остальные разбросаны по
+    главам языка, рядом со своими правилами.</p>
+
+    <p>Операции бывают двух сортов. <strong>Статические</strong> (Static Semantics) отвечают на вопросы о тексте —
+    какие имена объявлены, есть ли внутри <code>super</code>, — и работают до выполнения: на них построены ранние
+    ошибки. <strong>Выполнения</strong> (Runtime Semantics) — это Evaluation и его помощники, они работают с
+    окружениями и значениями.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 250" role="img" aria-label="Дерево разбора объявления let с деструктуризацией и операции над ним: статические — BoundNames, IsConstantDeclaration; выполнения — Evaluation, BindingInitialization, NamedEvaluation">
+            <rect x="10" y="10" width="360" height="190" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="32" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#0c4a6e">let [a, b = () =&gt; 1] = list;</text>
+            <text x="22" y="62" font-family="Consolas, monospace" font-size="11" fill="#334155">LexicalDeclaration</text>
+            <text x="42" y="84" font-family="Consolas, monospace" font-size="11" fill="#334155">LetOrConst: let</text>
+            <text x="42" y="106" font-family="Consolas, monospace" font-size="11" fill="#334155">LexicalBinding</text>
+            <text x="62" y="128" font-family="Consolas, monospace" font-size="11" fill="#334155">ArrayBindingPattern [a, b = …]</text>
+            <text x="82" y="150" font-family="Consolas, monospace" font-size="11" fill="#334155">SingleNameBinding b = () =&gt; 1</text>
+            <text x="62" y="172" font-family="Consolas, monospace" font-size="11" fill="#334155">Initializer = list</text>
+
+            <rect x="390" y="10" width="240" height="90" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="510" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#065f46">статические — до выполнения</text>
+            <text x="402" y="54" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">BoundNames → «a, b»</text>
+            <text x="402" y="72" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">IsConstantDeclaration → false</text>
+            <text x="402" y="90" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">ранние ошибки: нет ли повтора имён</text>
+
+            <rect x="390" y="110" width="240" height="90" rx="10" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="510" y="132" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#075985">выполнения — Evaluation</text>
+            <text x="402" y="154" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">Evaluation: list → значение</text>
+            <text x="402" y="172" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">BindingInitialization: итератор (день 7)</text>
+            <text x="402" y="190" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">NamedEvaluation «b» для () =&gt; 1</text>
+
+            <text x="10" y="226" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Каждая операция — набор кусков, по одному на правило грамматики; узел дерева выбирает свой кусок,</text>
+            <text x="10" y="244" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">а для правила «A : B» без своего куска операция передаётся к B.</text>
+        </svg>
+        <figcaption>Одна строка кода и операции над её деревом разбора</figcaption>
+    </figure>
+
+    <h2 id="evaluation">2. Evaluation и статическая семантика</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-evaluation">Evaluation</a> (8.1) — главная операция выполнения:
+    она возвращает Completion Record (день 4). Раздел 8.1 пуст и только объясняет, что куски Evaluation стоят по всей
+    спецификации, сразу после своих правил: Evaluation сложения — в 13.8, <code>if</code> — в 14.6. Статические
+    операции проверяют текст до того, как выполнится хоть одна строка. Это видно, если разобрать код, не запуская
+    его, — помощник <code>parse</code> из дня 2:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse('console.log("раз"); let a; let a;'));
+console.log(parse('console.log("раз"); null.x;'));</pre>
+
+    <div class="result-box">
+        SyntaxError: Identifier 'a' has already been declared<br>
+        ok
+    </div>
+
+    <p>Первая строка — ранняя ошибка, её нашла статическая семантика; второй код синтаксически верен, а ошибка
+    <code>null.x</code> случится только при выполнении. Слово «раз» не напечатано ни там, ни там:
+    <code>new Function</code> только разбирает тело. Помните: <code>parse</code> проверяет код как <em>тело
+    функции</em>, а не как скрипт, — в разделах 6 и 9 это будет важно.</p>
+
+    <h2 id="bound">3. BoundNames: какие имена объявлены</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-scope-analysis">Анализ областей</a>
+    (8.2) начинается с <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-boundnames">BoundNames</a>
+    (8.2.1): список имён, которые связывает объявление. Для <code>let x = 1</code> — «x», для деструктуризации — все
+    имена шаблона, для функции — её имя, для параметров — все имена параметров. Повтор в списке — первая ранняя
+    ошибка:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("let [a, a] = [];"), "|", parse("let { x, y: x } = {};"));
+console.log(parse("(function (a, { b: a }) {})"), "|", parse("(function (a, a) {})"));</pre>
+
+    <div class="result-box">
+        SyntaxError: Identifier 'a' has already been declared | SyntaxError: Identifier 'x' has already been declared<br>
+        SyntaxError: Duplicate parameter name not allowed in this context | ok
+    </div>
+
+    <table>
+        <thead><tr><th>Объявление</th><th>BoundNames</th></tr></thead>
+        <tbody>
+            <tr><td><code>let { a, b: [c, ...d] } = o;</code></td><td>«a, c, d» — ключ <code>b</code> не имя</td></tr>
+            <tr><td><code>function f(x, { y } = {}, ...z) {}</code></td><td>«f»; у списка параметров — «x, y, z»</td></tr>
+            <tr><td><code>class Card {}</code></td><td>«Card»</td></tr>
+            <tr><td><code>import x, { y as z } from "./m.js";</code></td><td>«x, z» — местные имена, а не внешние</td></tr>
+            <tr><td><code>export default function () {}</code></td><td>«*default*» — служебное имя</td></tr>
+        </tbody>
+    </table>
+
+    <p>Последняя строка — из примечания к 8.2.1: так спецификация называет безымянный экспорт по умолчанию, из кода
+    это имя не увидеть. А последний ответ опыта неожиданный: два параметра <code>a</code> в нестрогой функции с
+    простым списком параметров разрешены — наследие старого языка, о нём в разделе 12.
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isconstantdeclaration">IsConstantDeclaration</a>
+    (8.2.3) отвечает, константа ли объявление (<code>const</code> — да, <code>let</code> и функции — нет), а
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-declarationpart">DeclarationPart</a> (8.2.2) выдаёт
+    сам узел объявления.</p>
+
+    <h2 id="lexvar">4. Лексические имена и имена var</h2>
+
+    <p>Две главные операции раздела собирают имена всего тела.
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-lexicallydeclarednames">LexicallyDeclaredNames</a>
+    (8.2.4) — имена <code>let</code>, <code>const</code>, <code>class</code> и функций <em>этого</em> блока: во
+    вложенные блоки она не заглядывает. <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-vardeclarednames">VarDeclaredNames</a>
+    (8.2.6) — имена <code>var</code>, и она, наоборот, проходит сквозь блоки, <code>if</code>, циклы и
+    <code>try</code> до границы функции или скрипта. Рядом живут
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-lexicallyscopeddeclarations">LexicallyScopedDeclarations</a>
+    и <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-varscopeddeclarations">VarScopedDeclarations</a>
+    (8.2.5, 8.2.7) — те же списки, но из самих объявлений, а не из имён: по ним создаются привязки.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 214" role="img" aria-label="var a внутри блока if поднимается в список имён var всей функции, let b остаётся в лексическом списке блока">
+            <defs>
+                <marker id="d8-up" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#c2410c"/>
+                </marker>
+            </defs>
+            <rect x="10" y="10" width="380" height="170" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="22" y="32" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#9a3412">function f() {</text>
+            <text x="22" y="52" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">VarDeclaredNames тела: «a»</text>
+
+            <rect x="40" y="68" width="330" height="96" rx="10" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="52" y="90" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#075985">if (ok) {</text>
+            <text x="52" y="110" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">LexicallyDeclaredNames блока: «b»</text>
+            <text x="72" y="134" font-family="Consolas, monospace" font-size="12" fill="#334155">var a = 1;</text>
+            <text x="72" y="154" font-family="Consolas, monospace" font-size="12" fill="#334155">let b = 2;</text>
+            <path d="M 160 128 L 330 128 L 330 44" stroke="#c2410c" stroke-width="2" fill="none" marker-end="url(#d8-up)"/>
+
+            <text x="410" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">var — сквозь блоки, if и циклы</text>
+            <text x="410" y="50" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">до тела функции или скрипта</text>
+            <text x="410" y="80" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">let, const, class — в своём блоке</text>
+            <text x="410" y="98" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">функция в блоке — тоже лексическая</text>
+            <text x="410" y="128" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">функция наверху тела —</text>
+            <text x="410" y="146" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">как var (8.2.8–8.2.11)</text>
+
+            <text x="10" y="204" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Ранняя ошибка (14.2.1): имя дважды в лексическом списке блока или и там, и среди его имён var.</text>
+        </svg>
+        <figcaption>Куда попадают имена: var поднимается до функции, let остаётся в блоке</figcaption>
+    </figure>
+
+    <p>На этих списках стоят ранние ошибки блока (<a href="https://tc39.es/ecma262/2026/#sec-block-static-semantics-early-errors">14.2.1</a>):
+    повтор в LexicallyDeclaredNames — ошибка; имя, которое есть и в LexicallyDeclaredNames, и в VarDeclaredNames
+    блока, — ошибка. У функции (<a href="https://tc39.es/ecma262/2026/#sec-function-definitions-static-semantics-early-errors">15.2.1</a>)
+    добавляется третье правило: имя параметра не может повториться среди лексических имён тела.</p>
+
+    <p>Списки нужны и при выполнении. <a href="https://tc39.es/ecma262/2026/#sec-block-runtime-semantics-evaluation">Evaluation
+    блока</a> (14.2.2) при каждом входе создаёт новое окружение и зовёт
+    <a href="https://tc39.es/ecma262/2026/#sec-blockdeclarationinstantiation">BlockDeclarationInstantiation</a> — она
+    заводит в нём привязки по LexicallyScopedDeclarations. Имена <code>var</code> создаются один раз на всю функцию
+    или скрипт. Отсюда разница замыканий (день 1 курса 2) в цикле:</p>
+
+    <pre class="code js">const byLet = [];
+const byVar = [];
+for (var i = 0; i &lt; 3; i++) {
+  let copy = i;
+  var shared = i;
+  byLet.push(() =&gt; copy);
+  byVar.push(() =&gt; shared);
+}
+console.log(byLet.map((f) =&gt; f()).join(), byVar.map((f) =&gt; f()).join());</pre>
+
+    <div class="result-box">
+        0,1,2 2,2,2
+    </div>
+
+    <p>Три прохода тела — три окружения блока и три разных <code>copy</code>; <code>shared</code> — одна привязка на
+    всех, и все три стрелки видят её последнее значение.</p>
+
+    <h2 id="redeclare">5. Повторные объявления</h2>
+
+    <p>Практика дня — повторные объявления <code>let</code> и <code>var</code> в одном блоке и в разных. Сначала
+    предскажите каждую строку по двум правилам 14.2.1 и третьему из 15.2.1:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const cases = ["let x; let x;", "let x; var x;", "var x; var x;", "var x; { let x; }", "{ let x; } { let x; }",
+  "{ var x; } let x;", "switch (1) { case 1: let a; break; case 2: let a; }", "try {} catch (e) { let e; }",
+  "try {} catch (e) { var e; }", "for (let i = 0; i &lt; 1; i++) { let i; }", "(function (p) { let p; })", "(function (p) { var p; })"];
+for (const c of cases) console.log(c, "→", parse(c));</pre>
+
+    <div class="result-box">
+        let x; let x; → SyntaxError: Identifier 'x' has already been declared<br>
+        let x; var x; → SyntaxError: Identifier 'x' has already been declared<br>
+        var x; var x; → ok<br>
+        var x; { let x; } → ok<br>
+        { let x; } { let x; } → ok<br>
+        { var x; } let x; → SyntaxError: Identifier 'x' has already been declared<br>
+        switch (1) { case 1: let a; break; case 2: let a; } → SyntaxError: Identifier 'a' has already been declared<br>
+        try {} catch (e) { let e; } → SyntaxError: Identifier 'e' has already been declared<br>
+        try {} catch (e) { var e; } → ok<br>
+        for (let i = 0; i &lt; 1; i++) { let i; } → ok<br>
+        (function (p) { let p; }) → SyntaxError: Identifier 'p' has already been declared<br>
+        (function (p) { var p; }) → ok
+    </div>
+
+    <p>Повтор <code>var</code> безвреден: VarDeclaredNames могут повторяться. <code>{ var x; } let x;</code> — ошибка,
+    хотя <code>var</code> во вложенном блоке: VarDeclaredNames проходит сквозь блок и встречает лексический
+    <code>x</code> наверху. Все ветки <code>switch</code> — один блок, поэтому две <code>let a</code> в разных
+    <code>case</code> сталкиваются. <code>catch (e) { var e; }</code> разрешено приложением B (день 31). А
+    <code>let i</code> в теле цикла живёт в своём блоке, отдельно от <code>let i</code> заголовка.</p>
+
+    <h2 id="toplevel">6. Функции наверху — как var</h2>
+
+    <p>Четыре операции 8.2.8–8.2.11 —
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevellexicallydeclarednames">TopLevelLexicallyDeclaredNames</a>,
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevellexicallyscopeddeclarations">TopLevelLexicallyScopedDeclarations</a>,
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevelvardeclarednames">TopLevelVarDeclaredNames</a>,
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevelvarscopeddeclarations">TopLevelVarScopedDeclarations</a>
+    — нужны для верхнего уровня тела функции и скрипта. Примечание к 8.2.8 говорит главное: на верхнем уровне
+    объявления функций считаются как <code>var</code>, а не как лексические. В блоке — наоборот. А модуль пользуется
+    обычными LexicallyDeclaredNames, и там функция — лексическое имя:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("function f() {} var f;"), "|", parse("{ function f() {} var f; }"));
+console.log(parse("{ function f() {} function f() {} }"), "|", parse("'use strict'; { function f() {} function f() {} }"));
+import("data:text/javascript,function f(){} var f;").catch((e) =&gt; console.log("модуль:", `${e.name}: ${e.message}`));</pre>
+
+    <div class="result-box">
+        ok | SyntaxError: Identifier 'f' has already been declared<br>
+        ok | SyntaxError: Identifier 'f' has already been declared<br>
+        модуль: SyntaxError: Identifier 'f' has already been declared
+    </div>
+
+    <p>Одна и та же пара «<code>function f</code> и <code>var f</code>» верна наверху функции и ошибочна в блоке и в
+    модуле. Вторая строка — исключение из 14.2.1: в браузере, в нестрогом коде, повтор в блоке разрешён, если оба
+    имени — объявления функций (снова приложение B). Модуль загружен из адреса <code>data:</code> — так проще всего
+    проверить текст модуля без файла (динамический <code>import()</code> — день 31 курса 2).</p>
+
+    <h2 id="hoisting">7. Откуда «подъём»</h2>
+
+    <p>«Подъём» (Essentials, дни 4 и 12) — не перестановка строк, а следствие этих списков. Перед тем как выполнять
+    тело, движок создаёт привязки: для имён из VarDeclaredNames — со значением <code>undefined</code>, для
+    лексических — без значения (мёртвая зона), а для объявлений функций сразу зовёт
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiatefunctionobject">InstantiateFunctionObject</a>
+    (8.6.1) — функция готова до первой строки. Сами шаги этого создания — FunctionDeclarationInstantiation и
+    GlobalDeclarationInstantiation — дни 12 и 13.</p>
+
+    <pre class="code js">console.log(typeof later, typeof ready, ready(), typeof nowhere);
+var later = 1;
+function ready() { return "готова"; }
+try {
+  console.log(early);
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}
+let early = 1;</pre>
+
+    <div class="result-box">
+        undefined function готова undefined<br>
+        ReferenceError: Cannot access 'early' before initialization
+    </div>
+
+    <p><code>later</code> есть, но пока <code>undefined</code>; <code>ready</code> — уже функция; <code>nowhere</code>
+    не объявлено нигде — <code>typeof</code> не бросает (день 4). А <code>early</code> есть в списке, но ещё без
+    значения — ReferenceError мёртвой зоны.</p>
+
+    <h2 id="labels">8. Метки</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-labels">8.3</a> — три проверки
+    меток (Essentials, день 10): <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsduplicatelabels">ContainsDuplicateLabels</a>
+    — одна метка внутри другой с тем же именем;
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsundefinedbreaktarget">ContainsUndefinedBreakTarget</a>
+    — <code>break</code> на метку, которой нет вокруг;
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsundefinedcontinuetarget">ContainsUndefinedContinueTarget</a>
+    — <code>continue</code> на метку, которая стоит не на цикле.</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const cases = ["a: a: ;", "a: { b: ; } a: ;", "break nope;", "a: { break a; }", "a: { continue a; }",
+  "a: for (;;) { continue a; }", "a: for (;;) { (() =&gt; { break a; }); }"];
+for (const c of cases) console.log(c, "→", parse(c));</pre>
+
+    <div class="result-box">
+        a: a: ; → SyntaxError: Label 'a' has already been declared<br>
+        a: { b: ; } a: ; → ok<br>
+        break nope; → SyntaxError: Undefined label 'nope'<br>
+        a: { break a; } → ok<br>
+        a: { continue a; } → SyntaxError: Illegal continue statement: 'a' does not denote an iteration statement<br>
+        a: for (;;) { continue a; } → ok<br>
+        a: for (;;) { (() =&gt; { break a; }); } → SyntaxError: Undefined label 'a'
+    </div>
+
+    <p>Две метки <code>a</code> подряд, а не одна в другой, — не повтор. <code>break</code> выходит из любого
+    помеченного блока, <code>continue</code> — только к циклу. Последняя строка: метки не видны сквозь границу
+    функции, даже стрелки.</p>
+
+    <h2 id="contains">9. Contains: super и new.target</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-contains">Contains</a> (8.5) отвечает,
+    есть ли в узле данный символ грамматики. По умолчанию — обход всех детей, но
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-contains">8.5.1</a> делает два исключения:
+    внутрь определений функций он не заглядывает (примечание 1), а стрелку проходит насквозь, если ищут
+    <code>this</code>, <code>new.target</code> или <code>super</code>. На этом стоят ранние ошибки «<code>super</code>
+    вне метода» и «<code>new.target</code> вне функции»:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("class A extends B { constructor() { () =&gt; super(); } }"), "|", parse("class A extends B { constructor() { function g() { super(); } } }"));
+console.log(parse("class A { constructor() { super(); } }"), "|", parse("new.target"));
+const script = document.createElement("script");
+script.textContent = "new.target";
+document.body.append(script);</pre>
+
+    <div class="result-box">
+        ok | SyntaxError: 'super' keyword unexpected here<br>
+        SyntaxError: 'super' keyword unexpected here | ok<br>
+        Uncaught SyntaxError: Failed to execute 'append' on 'Element': new.target expression is not allowed here
+    </div>
+
+    <p><code>super()</code> в стрелке внутри конструктора наследника законен: стрелка прозрачна. В обычной вложенной
+    функции — нет. <code>new.target</code> в <code>parse</code> прошёл — ведь это тело функции, а настоящий скрипт с
+    той же строкой не разобрался (Chrome сообщает об этом от имени <code>append</code>, который его вставил). <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-computedpropertycontains">ComputedPropertyContains</a>
+    (8.5.2) — то же, но только по вычисляемым ключам класса.</p>
+
+    <h2 id="naming">10. Вывод имени функции</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-function-name-inference">8.4</a>
+    объясняет свойство <code>name</code> (день 4 курса 2). Четыре проверки:
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isfunctiondefinition">IsFunctionDefinition</a> — это
+    определение функции или класса (скобки вокруг не мешают);
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hasname">HasName</a> — у него есть своё имя;
+    <a href="https://tc39.es/ecma262/2026/#sec-isanonymousfunctiondefinition">IsAnonymousFunctionDefinition</a> — первое
+    без второго; <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isidentifierref">IsIdentifierRef</a> — слева
+    просто имя, а не <code>obj.x</code>. Если безымянное определение стоит там, где известно имя,
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-namedevaluation">NamedEvaluation</a> (8.4.5) создаёт
+    функцию сразу с этим именем. Такие места: инициализатор <code>let</code>, <code>const</code>, <code>var</code>;
+    присваивание <code>=</code>, <code>&amp;&amp;=</code>, <code>||=</code>, <code>??=</code> простому имени; ключ в
+    литерале; значение по умолчанию в деструктуризации и у параметра; поле класса. Практика дня — дюжина имён:</p>
+
+    <pre class="code js">const arrow = () =&gt; {};
+const expr = function () {};
+const named = function inner() {};
+const paren = (function () {});
+const obj = { method() {}, prop: () =&gt; {}, ["co" + "mputed"]: () =&gt; {}, [Symbol("tag")]: () =&gt; {}, get size() { return 1; } };
+let byOr;
+byOr ||= () =&gt; {};
+const { fromDefault = () =&gt; {} } = {};
+class Card { static #hidden() {} static field = () =&gt; {}; static hiddenName() { return Card.#hidden.name; } }
+const symbolKey = Object.getOwnPropertySymbols(obj)[0];
+const show = (list) =&gt; list.map((f) =&gt; JSON.stringify(f.name)).join(" ");
+console.log(show([arrow, expr, named, paren]));
+console.log(show([obj.method, obj.prop, obj.computed, obj[symbolKey], Object.getOwnPropertyDescriptor(obj, "size").get]));
+console.log(show([byOr, fromDefault, Card.field, arrow.bind(null)]), Card.hiddenName());</pre>
+
+    <div class="result-box">
+        "arrow" "expr" "inner" "paren"<br>
+        "method" "prop" "computed" "[tag]" "get size"<br>
+        "byOr" "fromDefault" "field" "bound arrow" #hidden
+    </div>
+
+    <p>Своё имя важнее: <code>inner</code>, а не <code>named</code>. Скобки пропускают имя дальше — так написан
+    первый кусок NamedEvaluation. Вычисляемый ключ дал «computed», символ — описание в скобках, геттер — приставку
+    «get», приватный метод — «#hidden». Приставки и скобки добавляет
+    <a href="https://tc39.es/ecma262/2026/#sec-setfunctionname">SetFunctionName</a> (10.2.9), а «bound» — <code>bind</code>
+    (день 2 курса 2).</p>
+
+    <p>Ещё одно место с именем — <code>export default</code>: для безымянного определения шаги
+    <a href="https://tc39.es/ecma262/2026/#sec-exports-runtime-semantics-evaluation">16.2.3.7</a> зовут NamedEvaluation
+    с именем «default». Проверим на модулях из адресов <code>data:</code>:</p>
+
+    <pre class="code js">const sources = ["export default () =&gt; {}", "export default function () {}", "export default class {}", "export default (0, function () {})"];
+Promise.all(sources.map((code) =&gt; import(`data:text/javascript,${code}`)))
+  .then((modules) =&gt; console.log(modules.map((m) =&gt; JSON.stringify(m.default.name)).join(" ")));</pre>
+
+    <div class="result-box">
+        "default" "default" "default" ""
+    </div>
+
+    <p>Запятая и здесь отнимает имя: выражение с ней — не определение функции.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 214" role="img" aria-label="Где NamedEvaluation даёт функции имя и где нет">
+            <rect x="10" y="10" width="300" height="170" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="160" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#065f46">имя будет — NamedEvaluation</text>
+            <text x="22" y="58" font-family="Consolas, monospace" font-size="11" fill="#065f46">const f = () =&gt; {}</text>
+            <text x="22" y="80" font-family="Consolas, monospace" font-size="11" fill="#065f46">x ||= function () {}</text>
+            <text x="22" y="102" font-family="Consolas, monospace" font-size="11" fill="#065f46">{ key: () =&gt; {} }</text>
+            <text x="22" y="124" font-family="Consolas, monospace" font-size="11" fill="#065f46">{ a = () =&gt; {} } = obj</text>
+            <text x="22" y="146" font-family="Consolas, monospace" font-size="11" fill="#065f46">class { field = () =&gt; {} }</text>
+            <text x="22" y="168" font-family="Consolas, monospace" font-size="11" fill="#065f46">const g = (function () {})</text>
+
+            <rect x="330" y="10" width="300" height="170" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="480" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#991b1b">имени не будет — «»</text>
+            <text x="342" y="58" font-family="Consolas, monospace" font-size="11" fill="#991b1b">obj.p = () =&gt; {}</text>
+            <text x="342" y="80" font-family="Consolas, monospace" font-size="11" fill="#991b1b">const h = (0, function () {})</text>
+            <text x="342" y="102" font-family="Consolas, monospace" font-size="11" fill="#991b1b">const k = x || function () {}</text>
+            <text x="342" y="124" font-family="Consolas, monospace" font-size="11" fill="#991b1b">listen(() =&gt; {})</text>
+            <text x="342" y="146" font-family="Consolas, monospace" font-size="11" fill="#991b1b">[function () {}]</text>
+            <text x="342" y="168" font-family="Segoe UI, sans-serif" font-size="11" fill="#991b1b">слева не имя или справа не определение</text>
+
+            <text x="10" y="204" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Нужны оба условия: безымянное определение функции (IsAnonymousFunctionDefinition) и место с именем.</text>
+        </svg>
+        <figcaption>Где функция получает имя от места, в котором создана</figcaption>
+    </figure>
+
+    <h2 id="noname">11. Где имени не будет</h2>
+
+    <p>Достаточно нарушить одно из условий. Запятая и <code>||</code> — уже не определение функции, а другое
+    выражение: IsFunctionDefinition ложно. <code>obj.later =</code> — слева не простое имя: IsIdentifierRef ложно.
+    Аргумент вызова и элемент массива — не места с именем.</p>
+
+    <pre class="code js">const comma = (0, function () {});
+const either = null || function () {};
+const obj = {};
+obj.later = function () {};
+const list = [function () {}];
+let reassigned = function () {};
+reassigned = () =&gt; {};
+const D = class { static name = "мой"; };
+const show = (all) =&gt; all.map((f) =&gt; JSON.stringify(f.name)).join(" ");
+console.log(show([comma, either, obj.later, list[0], reassigned]), D.name);
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor(comma, "name")), JSON.stringify(new Function().name));</pre>
+
+    <div class="result-box">
+        "" "" "" "" "reassigned" мой<br>
+        {"value":"","writable":false,"enumerable":false,"configurable":true} "anonymous"
+    </div>
+
+    <p>Повторное присваивание <code>reassigned = () =&gt; {}</code> — тоже место с именем, и новая стрелка получила
+    «reassigned». Статическое поле <code>name</code> класса заменило выведенное имя. Безымянная функция всё равно
+    имеет своё свойство <code>name</code> — пустую строку, только для чтения. А <code>new Function</code> по своим
+    шагам называет функцию «anonymous».</p>
+
+    <h2 id="binding">12. Привязки и параметры</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-miscellaneous">8.6</a> собирает
+    операции, которым не нашлось другого места.
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-bindinginitialization">BindingInitialization</a> (8.6.2)
+    кладёт значение в имена шаблона, а для массивного шаблона зовёт
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-iteratorbindinginitialization">IteratorBindingInitialization</a>
+    (8.6.3) — с GetIterator и IteratorClose дня 7. Примечания к обеим говорят о старом случае: если окружения нет,
+    значение пишется через PutValue — так у <code>var</code> и у параметров нестрогих функций, где имена могут
+    повторяться:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+function sloppy(a, a) { return a; }
+console.log(sloppy(1, 2), "|", parse("'use strict'; function s(a, a) {}"));
+console.log(parse("function s(a, [a]) {}"), "|", parse("(a, a) =&gt; 1"));</pre>
+
+    <div class="result-box">
+        2 | SyntaxError: Duplicate parameter name not allowed in this context<br>
+        SyntaxError: Duplicate parameter name not allowed in this context | SyntaxError: Duplicate parameter name not allowed in this context
+    </div>
+
+    <p>Второй <code>a</code> перезаписал первый — побеждает последний. Строгий код, сложный список параметров и
+    стрелки повторов не разрешают.</p>
+
+    <h2 id="targets">13. Куда можно присваивать</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-assignmenttargettype">AssignmentTargetType</a> (8.6.4)
+    решает, можно ли присваивать выражению: <em>simple</em> — имя и обращение к свойству, <em>invalid</em> —
+    остальное, и ранняя ошибка. Есть третий ответ — <em>web-compat</em>: вызов функции в нестрогом коде браузера. Это
+    необязательная часть стандарта из приложения B (<a href="https://tc39.es/ecma262/2026/#sec-runtime-errors-for-function-call-assignment-targets">B.3.9
+    Runtime Errors for Function Call Assignment Targets</a>, приложение — день 31): старые сайты писали <code>f() = 1</code> в ветках, которые не
+    выполнялись, и ранняя ошибка сломала бы их целиком.</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const cases = ["1 = 2;", "a?.b = 1;", "(a) = 1;", "(a, b) = 1;", "a++ = 1;", "[a, b] = [1, 2];", "f() = 1;", "'use strict'; f() = 1;"];
+for (const c of cases) console.log(c, "→", parse(c));
+const log = [];
+const f = () =&gt; { log.push("f вызвана"); return {}; };
+try {
+  f() = 1;
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`, "|", log.join());
+}</pre>
+
+    <div class="result-box">
+        1 = 2; → SyntaxError: Invalid left-hand side in assignment<br>
+        a?.b = 1; → SyntaxError: Invalid left-hand side in assignment<br>
+        (a) = 1; → ok<br>
+        (a, b) = 1; → SyntaxError: Invalid left-hand side in assignment<br>
+        a++ = 1; → SyntaxError: Invalid left-hand side in assignment<br>
+        [a, b] = [1, 2]; → ok<br>
+        f() = 1; → ok<br>
+        'use strict'; f() = 1; → ok<br>
+        ReferenceError: Invalid left-hand side in assignment | f вызвана
+    </div>
+
+    <p>Скобки вокруг имени не мешают, запятая — мешает. <code>f() = 1</code> разобран, а при выполнении шаг 13.15.2
+    сначала вычислил левую часть — <code>f</code> вызвана, — и только потом бросил ReferenceError. Предпоследняя строка
+    — расхождение Chrome с текстом: по 8.6.4 в строгом коде вызов — <em>invalid</em>, то есть ранняя ошибка, а
+    Chrome 156 и здесь откладывает ошибку до выполнения. Текст стандарта и реализация не всегда совпадают (день 1).</p>
+
+    <h2 id="propname">14. PropName и const</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-propname">PropName</a> (8.6.5) — имя свойства,
+    известное по тексту: у <code>a: 1</code> и <code>"a": 1</code> — «a», у вычисляемого <code>[k]: 1</code> — пусто.
+    На нём держится единственная ранняя ошибка о повторе ключей в литерале объекта: двух
+    <code>__proto__: значение</code> (день 7 курса 2). А <code>const</code> без значения ловит грамматика объявления; присваивание
+    константе — уже ошибка выполнения:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const cases = ["({ __proto__: a, __proto__: b })", "({ __proto__: a, '__proto__': b })", "({ __proto__: a, ['__proto__']: b })",
+  "({ __proto__, __proto__: b })", "({ a: 1, a: 2 })", "const c;"];
+for (const c of cases) console.log(c, "→", parse(c));
+const fixed = 1;
+try {
+  fixed = 2;
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}</pre>
+
+    <div class="result-box">
+        ({ __proto__: a, __proto__: b }) → SyntaxError: Duplicate __proto__ fields are not allowed in object literals<br>
+        ({ __proto__: a, '__proto__': b }) → SyntaxError: Duplicate __proto__ fields are not allowed in object literals<br>
+        ({ __proto__: a, ['__proto__']: b }) → ok<br>
+        ({ __proto__, __proto__: b }) → ok<br>
+        ({ a: 1, a: 2 }) → ok<br>
+        const c; → SyntaxError: Missing initializer in const declaration<br>
+        TypeError: Assignment to constant variable.
+    </div>
+
+    <p>Строка в кавычках — та же запись «ключ: значение» с PropName «__proto__». У вычисляемого ключа PropName
+    пустой, а сокращённая запись <code>{ __proto__ }</code> хоть и даёт «__proto__», но правило
+    <a href="https://tc39.es/ecma262/2026/#sec-object-initializer-static-semantics-early-errors">13.2.5.1</a> считает
+    только записи «ключ: значение». Обе создают обычное свойство, а не меняют прототип. Повтор обычного ключа
+    <code>a</code> разрешён — побеждает последний.</p>
+
+    <h2 id="cards">15. «Карточки 2.0»: имена в main.js</h2>
+
+    <p>В <code>main.js</code> «Карточек 2.0» (день 33 курса 2) рядом стоят оба вида функций:</p>
+
+    <pre class="code js">// main.js, день 33 курса 2 — заглушки и слушатели
+function render() {
+async function openDeck() {
+knowButton.addEventListener("click", () =&gt; {</pre>
+
+    <p>Прочитаем их операциями главы 8. <code>main.js</code> — модуль, поэтому <code>render</code> и
+    <code>openDeck</code> — лексические имена: второй <code>render</code> или <code>var render</code> в том же файле
+    — ранняя ошибка. Но привязка функции создаётся со значением ещё до первой строки модуля (InstantiateFunctionObject
+    при его подготовке), поэтому слушатели могут звать <code>render</code>, объявленную ниже. А сами слушатели —
+    стрелки в аргументе вызова: места с именем нет, и <code>name</code> у них пустой. Проверим то же на модели:</p>
+
+    <pre class="code js">const listeners = [];
+const listen = (type, handler) =&gt; listeners.push(handler);
+listen("click", () =&gt; {});
+const onKnow = () =&gt; {};
+listen("click", onKnow);
+console.log(listeners.map((h) =&gt; JSON.stringify(h.name)).join(" "), render.name, typeof render);
+function render() {}</pre>
+
+    <div class="result-box">
+        "" "onKnow" render function
+    </div>
+
+    <p>Безымянный слушатель работе не мешает, но убрать его через <code>removeEventListener</code> нечем: нужна та
+    же функция, а она нигде не сохранена. Если слушателя придётся снимать или искать при отладке, дайте ему имя
+    константой, как <code>onKnow</code>.</p>
+
+    <h2 id="next">16. Что будет завтра</h2>
+
+    <p>Сегодня — что спецификация знает о программе до запуска. Завтра, на дне 9, — в чём программа выполняется:
+    контексты выполнения, реалмы (свои глобальные объекты у каждой вкладки и рамки), задания и агенты — то, что стоит
+    за очередью микрозадач курса 2.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Раздел</th><th>Что делает и где мы это видели</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations">8 Syntax-Directed Operations</a></td><td>операции, заданные кусками по правилам грамматики</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-evaluation">8.1 Evaluation</a></td><td>выполнение узла, куски — по главам 13–16</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-scope-analysis">8.2 Scope Analysis</a></td><td>какие имена объявляет код</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-boundnames">8.2.1 BoundNames</a></td><td>имена одного объявления, шаблона, параметров</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-declarationpart">8.2.2 DeclarationPart</a></td><td>сам узел объявления</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isconstantdeclaration">8.2.3 IsConstantDeclaration</a></td><td><code>const</code> — да, <code>let</code> и функции — нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-lexicallydeclarednames">8.2.4 LexicallyDeclaredNames</a></td><td>имена <code>let</code>, <code>const</code>, <code>class</code> блока; «has already been declared» (Essentials, 4)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-lexicallyscopeddeclarations">8.2.5 LexicallyScopedDeclarations</a></td><td>сами лексические объявления — для создания привязок</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-vardeclarednames">8.2.6 VarDeclaredNames</a></td><td>имена <code>var</code> сквозь блоки; «подъём» (Essentials, 4 и 12)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-varscopeddeclarations">8.2.7 VarScopedDeclarations</a></td><td>сами объявления <code>var</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevellexicallydeclarednames">8.2.8 TopLevelLexicallyDeclaredNames</a></td><td>наверху тела функции без функций</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevellexicallyscopeddeclarations">8.2.9 TopLevelLexicallyScopedDeclarations</a></td><td>то же — объявления</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevelvardeclarednames">8.2.10 TopLevelVarDeclaredNames</a></td><td><code>var</code> и функции верхнего уровня</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-toplevelvarscopeddeclarations">8.2.11 TopLevelVarScopedDeclarations</a></td><td>то же — объявления</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-labels">8.3 Labels</a></td><td>проверки меток (Essentials, 10)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsduplicatelabels">8.3.1 ContainsDuplicateLabels</a></td><td>метка внутри метки с тем же именем</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsundefinedbreaktarget">8.3.2 ContainsUndefinedBreakTarget</a></td><td><code>break</code> на несуществующую метку</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsundefinedcontinuetarget">8.3.3 ContainsUndefinedContinueTarget</a></td><td><code>continue</code> не к циклу</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-function-name-inference">8.4 Function Name Inference</a></td><td>свойство <code>name</code> (день 4 курса 2)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hasname">8.4.1 HasName</a></td><td>есть ли своё имя</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isfunctiondefinition">8.4.2 IsFunctionDefinition</a></td><td>определение функции или класса, скобки не мешают</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isanonymousfunctiondefinition">8.4.3 IsAnonymousFunctionDefinition</a></td><td>определение без своего имени</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isidentifierref">8.4.4 IsIdentifierRef</a></td><td>слева простое имя, а не свойство</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-namedevaluation">8.4.5 NamedEvaluation</a></td><td>создать функцию сразу с именем места</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-contains">8.5 Contains</a></td><td>есть ли символ внутри</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-contains">8.5.1 Contains</a></td><td>не заглядывает в функции, стрелки прозрачны для <code>super</code>, <code>this</code>, <code>new.target</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-computedpropertycontains">8.5.2 ComputedPropertyContains</a></td><td>то же по вычисляемым ключам класса</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-syntax-directed-operations-miscellaneous">8.6 Miscellaneous</a></td><td>прочие операции</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiatefunctionobject">8.6.1 InstantiateFunctionObject</a></td><td>функция из объявления — до первой строки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-bindinginitialization">8.6.2 BindingInitialization</a></td><td>значения в имена шаблона; деструктуризация (Essentials, 22)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-iteratorbindinginitialization">8.6.3 IteratorBindingInitialization</a></td><td>массивный шаблон и параметры через итератор (день 7)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-assignmenttargettype">8.6.4 AssignmentTargetType</a></td><td>simple, invalid или web-compat</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-propname">8.6.5 PropName</a></td><td>имя ключа по тексту; повтор <code>__proto__</code> (день 7 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// синтаксически управляемая операция: кусок на каждое правило; «A : B» без куска — к B
+// статические (до выполнения): BoundNames, …DeclaredNames, Contains, PropName — на них ранние ошибки
+// выполнения: Evaluation (Completion Record), NamedEvaluation, BindingInitialization
+
+// LexicallyDeclaredNames: let, const, class, функции в блоке — только этот блок
+// VarDeclaredNames: var — сквозь блоки, if, циклы, try до функции или скрипта
+// ошибка: повтор в лексических; имя и в лексических, и в var; параметр среди лексических тела
+// наверху функции и скрипта функция — как var (8.2.8); в блоке и в модуле — лексическая
+// подъём: var — undefined, let/const — мёртвая зона, функция — готова (InstantiateFunctionObject)
+
+// метки: не повторять вложенно, break — на существующую, continue — только к циклу; функцию не пересекают
+// Contains не входит в функции; стрелка прозрачна для this, super, new.target
+
+// имя функции: безымянное определение + место с именем (let/const/var, =, ||=, ключ, умолчание, поле)
+// нет имени: obj.x = …, (0, f), a || f, аргумент, элемент массива; get/set/bound/[символ] — SetFunctionName
+// цель присваивания: simple, invalid (ранняя ошибка), web-compat — f() = 1 бросает при выполнении</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>{ var x; } let x;</code> — ошибка, а <code>var x; { let x; }</code> — нет?
+                <details class="answer"><summary>Ответ</summary>
+                    VarDeclaredNames проходит сквозь блок, и <code>x</code> из <code>var</code> попадает в список верхнего
+                    уровня, где уже есть лексический <code>x</code>. Во втором случае <code>let x</code> — в своём блоке,
+                    а в этом блоке нет <code>var x</code>.
+                </details>
+            </li>
+            <li>Почему <code>function f() {} var f;</code> допустимо наверху функции, но не в блоке и не в модуле?
+                <details class="answer"><summary>Ответ</summary>
+                    На верхнем уровне тела функции и скрипта объявления функций считаются как <code>var</code> (8.2.8), и
+                    повтор двух var-имён разрешён. В блоке и в модуле функция — лексическое имя, и встреча с
+                    <code>var</code> того же имени — ранняя ошибка.
+                </details>
+            </li>
+            <li>Какое <code>name</code> у <code>(0, function () {})</code>, присвоенной константе, и почему?
+                <details class="answer"><summary>Ответ</summary>
+                    Пустая строка. Выражение с запятой — не определение функции, IsFunctionDefinition ложно, и
+                    NamedEvaluation не вызывается.
+                </details>
+            </li>
+            <li>Почему <code>super()</code> в стрелке внутри конструктора наследника законен, а во вложенной функции — нет?
+                <details class="answer"><summary>Ответ</summary>
+                    Contains не заглядывает внутрь функций, но стрелку проходит насквозь, если ищут <code>super</code>,
+                    <code>this</code> или <code>new.target</code>. Значит, <code>super()</code> в стрелке «принадлежит»
+                    конструктору, а во вложенной функции — ей самой, и там он запрещён.
+                </details>
+            </li>
+            <li>Что произойдёт при <code>f() = 1</code> в нестрогом коде?
+                <details class="answer"><summary>Ответ</summary>
+                    Код разберётся: у вызова AssignmentTargetType web-compat. При выполнении левая часть вычислится —
+                    <code>f</code> будет вызвана, — и потом ReferenceError.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/name">MDN Web Docs</a>
+        (Function: name, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

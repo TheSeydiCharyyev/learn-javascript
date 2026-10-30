@@ -7,7 +7,8 @@
 //   node tools/runs/advanced/day-10.cjs --quiet    only the checks
 // Checks: a result-box right after a block equals its output; in the notes the output equals the comments of the lines
 // that print it; the quoted lines of main.js (day 34 of course 2) are the real ones; the cheatsheet runs without an
-// error; the homework of the notes; the experiments the lecture only tells about (f()++ and f() += 1 at
+// error; the homework of the notes; the examples of the tasks run with reference solutions, the predictions of the
+// tasks and what their criteria ask to find; the experiments the lecture only tells about (f()++ and f() += 1 at
 // run time, this inside with, super.m(), a private field under delete, the attributes of
 // Function.prototype[Symbol.hasInstance], the iterator a destructuring assignment closes); what the lecture says about
 // the text of ECMA-262 2026 (chapter 13 and the operations it calls) is checked against tools/.cache/ecma262-2026.html;
@@ -23,7 +24,7 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-10');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -41,8 +42,116 @@ const show = (a) => {
   return String(a.value ?? a.unserializableValue ?? a.description);
 };
 
-// a block without a result-box: its output by "page #index" or by the first line
-const EXPECT = {};
+// a block without a result-box: its output by "page #index" or by the first line; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['abc=-4 abc=512', 'okab=3 a=undefined', 'abc=да a=0'],
+  'tasks #1': ['true false true false false', "TypeError: Cannot delete property 'fixed' of #<Object> | true",
+    'SyntaxError: Delete of an unqualified identifier in strict mode. | ok | ok'],
+  'tasks #2': ['undefined object undefined undefined', 'undefined | ReferenceError: notDeclared is not defined | ReferenceError: notDeclared is not defined',
+    "ReferenceError: Cannot access 'soon' before initialization string function object"],
+  'tasks #3': ['true 1,2'],
+  'tasks #9': ['1 {"b":2} ключ, чтение a, чтение b'],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const TO_PRIMITIVE = `const toPrimitive = (x) => {
+  if (x === null || (typeof x !== "object" && typeof x !== "function")) return x;
+  const exotic = x[Symbol.toPrimitive];
+  if (exotic !== undefined) return exotic.call(x, "default");
+  for (const name of ["valueOf", "toString"]) {
+    const result = typeof x[name] === "function" ? x[name]() : x;
+    if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+  }
+  throw new TypeError("Cannot convert object to primitive value");
+};`;
+const SOLUTIONS = {
+  add: `${TO_PRIMITIVE}
+function add(a, b) {
+  const l = toPrimitive(a);
+  const r = toPrimitive(b);
+  if (typeof l === "string" || typeof r === "string") return \`\${l}\${r}\`;
+  const ln = typeof l === "bigint" ? l : Number(l);
+  const rn = typeof r === "bigint" ? r : Number(r);
+  if (typeof ln !== typeof rn) throw new TypeError("Cannot mix BigInt and other types, use explicit conversions");
+  return ln + rn;
+}`,
+  instanceOf: `function ordinaryHasInstance(C, O) {
+  if (typeof C !== "function") return false;
+  if (O === null || (typeof O !== "object" && typeof O !== "function")) return false;
+  const P = C.prototype;
+  if (P === null || (typeof P !== "object" && typeof P !== "function")) throw new TypeError("Function has non-object prototype in instanceof check");
+  for (let proto = Object.getPrototypeOf(O); proto !== null; proto = Object.getPrototypeOf(proto)) {
+    if (proto === P) return true;
+  }
+  return false;
+}
+function instanceOf(v, target) {
+  if (target === null || (typeof target !== "object" && typeof target !== "function")) throw new TypeError("Right-hand side of 'instanceof' is not an object");
+  const handler = target[Symbol.hasInstance];
+  if (handler !== undefined && handler !== null) {
+    if (typeof handler !== "function") throw new TypeError("Symbol.hasInstance is not a function");
+    return Boolean(handler.call(target, v));
+  }
+  if (typeof target !== "function") throw new TypeError("Right-hand side of 'instanceof' is not callable");
+  return ordinaryHasInstance(target, v);
+}`,
+  chain: `function chain(base, links) {
+  if (base === null || base === undefined) return undefined;
+  let value = base;
+  let thisValue;
+  for (const [kind, arg] of links) {
+    if (kind === "get") {
+      if (value === null || value === undefined) throw new TypeError("Cannot read properties of " + value);
+      thisValue = value;
+      value = value[arg];
+    } else {
+      if (typeof value !== "function") throw new TypeError("is not a function");
+      value = value.apply(thisValue, arg);
+      thisValue = undefined;
+    }
+  }
+  return value;
+}`,
+  currentWord: `function currentWord(opened, chosen, position) {
+  const card = opened.get(chosen)?.cardAt(position);
+  if (card === undefined) return "колода не загружена";
+  return card?.word ?? "на сегодня всё";
+}`,
+  compoundAdd: `function ref(base, name) {
+  return { base, name };
+}
+function toKey(r) {
+  if (typeof r.name !== "string" && typeof r.name !== "symbol") r.name = String(r.name);
+  return r.name;
+}
+function getValue(r) {
+  if (r.base === null || r.base === undefined) throw new TypeError("Cannot read properties of " + r.base);
+  return r.base[toKey(r)];
+}
+function putValue(r, value) {
+  if (r.base === null || r.base === undefined) throw new TypeError("Cannot set properties of " + r.base);
+  r.base[toKey(r)] = value;
+}
+function compoundAdd(r, rhs) {
+  const left = getValue(r);
+  const right = rhs();
+  putValue(r, left + right);
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
@@ -103,6 +212,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -119,12 +229,18 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[`${name} #${i}`] ?? EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[`${name} #${i}`] ?? EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
@@ -179,6 +295,44 @@ const iterable = { [Symbol.iterator]() { let i = 0; return { next() { steps.push
 console.log(steps.join(", "));`, 'hw.html');
     check(JSON.stringify(out) === JSON.stringify(['o k r s | o k 3', "undefined | TypeError: Cannot read properties of undefined (reading 'c') | true", 'цель, next, запись x=1, return']),
       `student homework 1–3: = evaluates all four, ||= stops after the key; a?.b.c() — undefined, TypeError, true; an array pattern takes the target before next and closes the iterator ${JSON.stringify(out)}`);
+  }
+  // tasks 4–8: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.add}
+${SOLUTIONS.instanceOf}
+const pairs = [[1, 2], ["1", 2], [[1], [2]], [null, true], [undefined, 1], [1n, 2n], ["1", 1n], [{}, []], [new Date(0), 1], [true, "x"]];
+console.log(pairs.every(([a, b]) => String(add(a, b)) === String(a + b)), String(add("1", 1n)));
+const calls = [];
+const original = ordinaryHasInstance;
+ordinaryHasInstance = (C, O) => { calls.push(C.name); return original(C, O); };
+function F() {}
+const G = function G() {};
+const g = new G();
+Object.setPrototypeOf(G, null);
+console.log(instanceOf(new F(), F), instanceOf(g, G), calls.join() || "никто");`, 'tasks-criteria-1.html');
+    check(JSON.stringify(out) === JSON.stringify(['true 11', 'true true G']),
+      `tasks 4, 5: add agrees with + on ten pairs ("1" + 1n too); ordinaryHasInstance runs only for G without a prototype — F answers through Function.prototype[Symbol.hasInstance] ${JSON.stringify(out)}`);
+  }
+  {
+    const out = await runScript(ctx, `${ATTEMPT}${SOLUTIONS.chain}
+${SOLUTIONS.currentWord}
+const obj = { n: 5, m() { return this.n; } };
+const pairs = [[() => chain(null, [["get", "a"], ["get", "b"]]), () => null?.a.b], [() => chain({ a: { b: 2 } }, [["get", "a"], ["get", "b"]]), () => ({ a: { b: 2 } })?.a.b],
+  [() => chain({ a: null }, [["get", "a"], ["get", "b"]]), () => ({ a: null })?.a.b], [() => chain(obj, [["get", "m"], ["call", []]]), () => obj?.m()],
+  [() => chain({}, [["get", "nope"], ["call", []]]), () => ({})?.nope()]];
+const kind = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+console.log(pairs.every(([mine, real]) => kind(mine) === kind(real)));
+let asked = 0;
+const opened = new Map([["home", { cardAt: (p) => { asked++; return p < 2 ? { word: "window" } : null; } }]]);
+const merged = (chosen, p) => opened.get(chosen)?.cardAt(p) ?? null;
+console.log(currentWord(opened, "food", 0), asked, merged("food", 0), merged("home", 5));
+let conversions = 0;
+const key = { toString() { conversions++; return "k"; } };
+const o = { k: 1 };
+o[key] += 1;
+console.log(o.k, conversions);`, 'tasks-criteria-2.html');
+    check(JSON.stringify(out) === JSON.stringify(['true', 'колода не загружена 0 null null', '2 2']),
+      `tasks 6–8: chain agrees with the language on the five lines; no cardAt without a deck, ?? null merges both cases; o[key] += 1 converts the key twice in Chrome ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -289,6 +443,12 @@ console.log(steps.join(", "));`, 'hw.html');
   // the MDN pages of the footer
   const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/operators/${p}/index.md`], { encoding: 'utf8' });
   check(['optional_chaining', 'delete', 'typeof', 'instanceof'].every((p) => mdn(p).startsWith('---\ntitle:')), 'footer: the MDN pages Optional chaining, delete, typeof, instanceof are in the cache');
+  check(f('sec-object-environment-records-deletebinding-n').includes('Let bindingObject be envRec. [[BindingObject]]. Return ? bindingObject. [[Delete]] (N)')
+    && f('sec-runtime-semantics-propertydestructuringassignmentevaluation').includes('Let name be ? Evaluation of PropertyName. Perform ? KeyedDestructuringAssignmentEvaluation of AssignmentElement with arguments value and name')
+    && inOrder(f('sec-runtime-semantics-restdestructuringassignmentevaluation'), ['Let lRef be ? Evaluation of DestructuringAssignmentTarget', 'Perform ? CopyDataProperties (restObj, value, excludedNames)', 'Return ? PutValue (lRef, restObj)'])
+    && f('sec-runtime-semantics-destructuringassignmentevaluation').includes('Let excludedNames be ? PropertyDestructuringAssignmentEvaluation of AssignmentPropertyList with argument value. Return ? RestDestructuringAssignmentEvaluation of AssignmentRestProperty with arguments value and excludedNames')
+    && fs.readFileSync(path.join(ROOT, 'advanced/day-07/lecture.html'), 'utf8').includes('CopyDataProperties'),
+  'tasks 2, 9: delete of a var name ends in [[Delete]] of the global object too; the key, then the keyed step; the rest gets excludedNames and copies with CopyDataProperties (day 7)');
   check(hasAll(mdn('optional_chaining'), ['### Short-circuiting', '### Invalid optional chaining'])
     && /^id="sec-runtime-semantics-iteratordestructuringassignmentevaluation"[^>]*> 13\.15\.5\.5 /.test(f('sec-runtime-semantics-iteratordestructuringassignmentevaluation'))
     && f('sec-runtime-semantics-iteratordestructuringassignmentevaluation').includes('If DestructuringAssignmentTarget is neither an ObjectLiteral nor an ArrayLiteral, then Let lRef be ? Evaluation of DestructuringAssignmentTarget'),

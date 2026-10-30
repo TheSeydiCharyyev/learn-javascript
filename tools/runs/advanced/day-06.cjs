@@ -6,7 +6,8 @@
 //   node tools/runs/advanced/day-06.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-06.cjs --quiet    only the checks
 // Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do and the
-// homework has its answers; the quoted lines of the method know (day 34 of course 2,
+// homework has its answers, in the tasks EXPECT holds the answers of the predictions and SOLUTIONS make the examples
+// checkable; the quoted lines of the method know (day 34 of course 2,
 // a block with data-page) are the real ones; the cheatsheet runs without an error; the experiments the lecture only
 // tells about (the table of ToInt8 … ToBigUint64 through typed arrays, which the lecture may not use before day 20);
 // what the lecture says about the text of ECMA-262 2026 is checked against tools/.cache/ecma262-2026.html and what it
@@ -22,7 +23,7 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-06');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -41,11 +42,58 @@ const show = (a) => {
 const echo = (a) => (a.type === 'string' ? q(a.value) : show(a));
 
 // a block without a result-box: its output by the first line; the tasks ask to predict these, the answers live here
-const EXPECT = {};
+const EXPECT = {
+  'const values = [7.9, -7.9, 2 ** 31 - 1, 2 ** 31 + 1, 2 ** 32 + 7, -1, "0b101", " 3 ", [8], null, NaN, -Infinity];': ['1 7 7', '2 -7 4294967289',
+    '3 2147483647 2147483647', '4 -2147483647 2147483649', '5 7 7', '6 -1 4294967295', '7 5 5', '8 3 3', '9 8 8', '10 0 0', '11 0 0', '12 0 0'],
+  'const a = 0b1100, b = 0b1010;': ['8 14 6 -13 4 12', '255 -241 7 -6 4 1 -1'],
+  'console.log(3 << 2 + 1, (3 << 2) + 1, 1 << 31 >> 31, 1 << 31 >>> 31, -1 >>> 28);': ['24 13 -1 1 15', 'true 0 false 2 0', '5 0 3 -52 204 42'],
+  // the lecture also starts a block with this line, but it has a result-box
+  'const log = [];': ['||NaN|undefined|true|2 size size', 'ReferenceError undefined', 'undefined 3'],
+};
 
 // Examples of the tasks call functions the student writes. These reference solutions make every
 // "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
-const SOLUTIONS = {};
+const SOLUTIONS = {
+  toIntN: `function toUintN(x, bits) {
+  const number = +x;
+  if (!Number.isFinite(number) || number === 0) return 0;
+  const size = 2 ** bits;
+  return ((Math.trunc(number) % size) + size) % size;
+}
+function toIntN(x, bits) {
+  const u = toUintN(x, bits);
+  return u >= 2 ** (bits - 1) ? u - 2 ** bits : u;
+}`,
+  grant: `function grant(r, ...flags) { return flags.reduce((acc, f) => acc | f, r); }
+function revoke(r, ...flags) { return flags.reduce((acc, f) => acc & ~f, r); }
+function toggle(r, flag) { return r ^ flag; }
+function has(r, flag) { return (r & flag) !== 0; }
+function names(r, table) { return Object.keys(table).filter((name) => has(r, table[name])); }`,
+  mark: `const DAYS = 7;
+function mark(week) { return week | 1; }
+function nextDay(week) { return (week << 1) & ((1 << DAYS) - 1); }
+function streak(week) { let n = 0; while (n < DAYS && (week & (1 << n)) !== 0) n++; return n; }
+function count(week) { let n = 0; for (let w = week; w !== 0; w &= w - 1) n++; return n; }`,
+  shl: `const uint32 = (x) => { const n = +x; if (!Number.isFinite(n) || n === 0) return 0; return ((Math.trunc(n) % 2 ** 32) + 2 ** 32) % 2 ** 32; };
+const int32 = (x) => { const u = uint32(x); return u >= 2 ** 31 ? u - 2 ** 32 : u; };
+function shl(x, y) { return int32(int32(x) * 2 ** (uint32(y) % 32)); }
+function sar(x, y) { return Math.floor(int32(x) / 2 ** (uint32(y) % 32)); }
+function shr(x, y) { return Math.floor(uint32(x) / 2 ** (uint32(y) % 32)); }`,
+  bigOp: `function bigOp(op, x, y) {
+  const mod2 = (n) => ((n % 2n) + 2n) % 2n;
+  const bit = (a, b) => (op === "&" ? a * b : op === "|" ? a + b - a * b : (a + b) % 2n);
+  let result = 0n, shift = 0n;
+  while (!((x === 0n || x === -1n) && (y === 0n || y === -1n))) {
+    const xDigit = mod2(x), yDigit = mod2(y);
+    result += 2n ** shift * bit(xDigit, yDigit);
+    shift += 1n;
+    x = (x - xDigit) / 2n;
+    y = (y - yDigit) / 2n;
+  }
+  if (bit(mod2(x), mod2(y)) !== 0n) result -= 2n ** shift;
+  return result;
+}`,
+};
 const checkable = (code) => {
   const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
   const lines = code.split('\n').map((line) => {
@@ -220,6 +268,21 @@ console.log(4294967295.7 | 0, -2147483649 | 0, 1 << -1, 1 << 33, attempt(() => {
     check(JSON.stringify(out) === '["-1 2147483647 -2147483648 2 TypeError 5n"]',
       `student homework 1, 2, 4: 4294967295.7 → −1, −2147483649 → 2147483647; 1 << −1 and 1 << 33; c >>>= 2n throws ${JSON.stringify(out)}`);
   }
+  // tasks: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.toIntN}
+${SOLUTIONS.grant}
+${SOLUTIONS.bigOp}
+const values = [7.9, -7.9, 2 ** 31 - 1, 2 ** 31 + 1, 2 ** 32 + 7, -1, "0b101", " 3 ", [8], null, NaN, -Infinity];
+console.log(values.every((v) => toIntN(v, 32) === (v | 0) && toUintN(v, 32) === v >>> 0), values.filter((v) => (v | 0) === v >>> 0).length, 2 ** 63 + 1 === 2 ** 63);
+console.log([12, 40, 6].map((x) => x & -x).join(" "), 0b0110 - 1, revoke(0b0110, 1), has((1 << 31) | 1, 1 << 31), names((1 << 31) | 4, { LOW: 4, TOP: 1 << 31 }).join());
+let week = 0b1000001;
+for (let day = 0; day < 31; day++) week = (week << 1) | 1;
+console.log(week, JSON.stringify(0b1010101).length, JSON.stringify([true, false, true, false, true, false, true]).length);
+console.log(Math.trunc(-9 / 4), -9 >> 2, String(-9n % 2n), String(bigOp("&", -9n, -4n)), String(-9n & -4n));`, 'tasks-criteria.html');
+    check(JSON.stringify(out) === JSON.stringify(['true 9 true', '4 8 2 5 6 true LOW,TOP', '-1 2 39', '-2 -3 -1 -12 -12']),
+      `tasks 1, 2, 4, 5, 6, 8, 9: toIntN/toUintN = | 0 / >>> 0, nine values agree (the rest are negative or above 2^31), 2^63 + 1 is 2^63; x & −x is the lowest bit; minus breaks a revoke; the 32nd flag works; without a mask the week grows into the sign; 2 against 39 characters; trunc against >>; −9n % 2n is −1n; −9n & −4n ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -268,6 +331,14 @@ console.log(4294967295.7 | 0, -2147483649 | 0, 1 << -1, 1 << 33, attempt(() => {
     && f('sec-numeric-types-number-bitwiseNOT').includes('Let oldValue be ! ToInt32 (x). Return the bitwise complement of oldValue') && f('sec-numeric-types-bigint-bitwiseNOT').includes('Return - x - 1 ℤ'),
   'lecture 7: ~ — ToNumeric; Number: ToInt32 and complement; BigInt: −x − 1');
   check(f('sec-numeric-types-number-leftShift').includes('6.1.6.1.9 Number::leftShift (x, y)'), 'student homework 2: Number::leftShift is 6.1.6.1.9');
+  check(f('sec-numeric-types-number-signedRightShift').includes('6.1.6.1.10 Number::signedRightShift') && f('sec-numeric-types-number-unsignedRightShift').includes('6.1.6.1.11 Number::unsignedRightShift')
+    && ['sec-toint32 7.1.6 ToInt32', 'sec-touint32 7.1.7 ToUint32', 'sec-toint16 7.1.8 ToInt16', 'sec-touint16 7.1.9 ToUint16', 'sec-toint8 7.1.10 ToInt8', 'sec-touint8 7.1.11 ToUint8']
+      .every((s) => f(s.split(' ')[0]).includes(s.slice(s.indexOf(' ') + 1)))
+    && f('sec-typeof-operator-runtime-semantics-evaluation').includes('13.5.3.1 Runtime Semantics: Evaluation') && f('sec-void-operator-runtime-semantics-evaluation').includes('13.5.2.1 Runtime Semantics: Evaluation'),
+  'tasks 3, 4, 7, 8: 6.1.6.1.9–11, the six ToIntN of 7.1.6–7.1.11, 13.5.2.1 and 13.5.3.1 are where the tasks say');
+  check(f('sec-bigintbitwiseop').includes('6.1.6.2.17 BigIntBitwiseOp') && f('sec-binaryand').includes('6.1.6.2.14 BinaryAnd') && f('sec-binaryor').includes('6.1.6.2.15 BinaryOr')
+    && f('sec-binaryxor').includes('6.1.6.2.16 BinaryXor') && f('sec-bigintbitwiseop').includes('Let xDigit be x modulo 2. Let yDigit be y modulo 2'),
+  'tasks 9: BigIntBitwiseOp 6.1.6.2.17 and BinaryAnd, BinaryOr, BinaryXor 6.1.6.2.14–16; the digits are taken modulo 2');
   check(f('sec-numeric-types-number-leftShift').includes('Let lNum be ! ToInt32 (x). Let rNum be ! ToUint32 (y). Let shiftCount be ℝ (rNum) modulo 32')
     && hasAll(f('sec-numeric-types-number-signedRightShift'), ['Let lNum be ! ToInt32 (x). Let rNum be ! ToUint32 (y). Let shiftCount be ℝ (rNum) modulo 32', 'The most significant bit is propagated']),
   'lecture 8: << and >> — the left operand ToInt32, the count ToUint32 modulo 32, >> copies the top bit');

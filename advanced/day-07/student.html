@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 7 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #8b5cf6; }
+        h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 7</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 7. Операции над объектами и итераторами</h1>
+    <p class="subtitle">Выжимка лекции: Get и Set, запись против определения, Call и Construct, GroupBy, записи
+    итераторов.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Операции 7.3 и 7.4</strong> — обёртки внутренних методов (день 4) с проверкой: «функция ли»,
+        «удалось ли», «объект ли». На них написаны все встроенные функции.
+    </div>
+
+    <div class="key-point">
+        <strong>Запись</strong> (Set, <code>[[Set]]</code>) идёт по прототипам: зовёт сеттеры, в том числе
+        <code>__proto__</code>, отказывает перед свойством «только чтение». <strong>Определение</strong>
+        (CreateDataProperty) создаёт своё свойство-значение. Запись — присваивание и <code>Object.assign</code>;
+        определение — литерал, spread, поле класса, <code>Object.defineProperty</code>.
+    </div>
+
+    <h2>Set и определение</h2>
+
+    <pre class="code js">const a = Object.freeze([1, 2]);
+a[0] = 9;
+console.log(a[0], Object.isFrozen(a));                           // 1 true — нестрогое присваивание молчит
+const data = JSON.parse('{"__proto__": {"admin": true}}');
+console.log(Object.assign({}, data).admin, { ...data }.admin);   // true undefined — Set против определения</pre>
+
+    <div class="remember">
+        Встроенные функции зовут Set с <code>Throw = true</code>: <code>push</code>, <code>pop</code>,
+        <code>Object.assign</code> на замороженном бросают и в нестрогом коде. Семейство «…OrThrow» превращает ответ
+        <code>false</code> в <code>TypeError</code>. Копируя чужие данные, берите spread.
+    </div>
+
+    <h2>Call, Construct и поля</h2>
+
+    <pre class="code js">const log = [];
+class Base { set word(v) { log.push(v); } }
+class Field extends Base { word = "kitap"; }
+class Assign extends Base { constructor() { super(); this.word = "galam"; } }
+console.log(Object.hasOwn(new Field(), "word"), Object.hasOwn(new Assign(), "word"), log.join());   // true false galam — поле определяет
+class Words extends Array {}
+console.log(Words.from(["a"]) instanceof Words, Words.from(["a"]).map((x) =&gt; x) instanceof Words);   // true true — Construct от наследника</pre>
+
+    <table>
+        <thead><tr><th>Операция</th><th>Что делает</th><th>Где видно</th></tr></thead>
+        <tbody>
+            <tr><td>Get / GetV</td><td><code>[[Get]]</code> с получателем — <code>this</code> геттера</td><td>геттер в прототипе</td></tr>
+            <tr><td>Set</td><td><code>[[Set]]</code>, при <code>false</code> и Throw — <code>TypeError</code></td><td><code>push</code>, <code>Object.assign</code></td></tr>
+            <tr><td>CopyDataProperties</td><td>свои перечисляемые, Get и определение</td><td><code>{ ...o }</code>, <code>{ a, ...rest }</code></td></tr>
+            <tr><td>Call</td><td>IsCallable, потом <code>[[Call]]</code></td><td>любой колбэк</td></tr>
+            <tr><td>Construct</td><td><code>[[Construct]]</code> с newTarget</td><td><code>super()</code>, <code>Words.from</code></td></tr>
+            <tr><td>GroupBy</td><td>итератор, колбэк, ключ, группа по SameValue</td><td><code>Object.groupBy</code>, <code>Map.groupBy</code></td></tr>
+            <tr><td>IteratorClose</td><td>зовёт <code>return</code> при досрочном выходе</td><td><code>break</code>, деструктуризация</td></tr>
+        </tbody>
+    </table>
+
+    <h2>Итераторы</h2>
+
+    <pre class="code js">const log = [];
+const it = { [Symbol.iterator]() { return { next: () =&gt; ({ value: 1, done: false }), return: () =&gt; { log.push("return"); return {}; } }; } };
+for (const x of it) break;
+const [first] = it;
+console.log(first, log.join());   // 1 return,return — досрочный выход закрывает
+console.log(Object.keys(Object.groupBy([1, "1", 2], (x) =&gt; x)).join(), Map.groupBy([1, "1", 2], (x) =&gt; x).size);   // 1,2 3 — ключи объекта и Map</pre>
+
+    <div class="remember">
+        <strong>Iterator Record</strong>: <code>[[Iterator]]</code>, <code>[[NextMethod]]</code> (читается один раз),
+        <code>[[Done]]</code>. Шаг <code>for...of</code> (14.7.5.7): <code>next()</code> → объект? → ToBoolean
+        <code>done</code> → <code>value</code>. Досрочный выход — IteratorClose: <code>return()</code>, и ошибка тела
+        важнее его ошибок.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Прочитайте шаги <code>Array.prototype.push</code> (23.1.3.23): найдите оба вызова Set и флажок у
+                них. Объясните сообщение <code>Object.freeze([]).push(1)</code>.</li>
+            <li>Предскажите по шагам TestIntegrityLevel (7.3.16) и проверьте:
+                <code>Object.isFrozen(Object.freeze({ get x() { return 1; } }))</code>,
+                <code>Object.isFrozen(Object.seal({ a: 1 }))</code>, <code>Object.isSealed(Object.freeze({ a: 1 }))</code>,
+                <code>Object.isFrozen(Object.seal({}))</code>.</li>
+            <li>Найдите в своих «Карточках 2.0», где данные из JSON копируются в объект, и проверьте: <code>Object.assign</code>
+                там или spread, и что будет с ключом <code>"__proto__"</code>.</li>
+            <li>Прочитайте на MDN раздел «Errors during iteration» страницы
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols">Iteration protocols</a>
+                и проверьте в Chrome: зовёт ли <code>for...of</code> метод <code>return</code>, если ошибку бросил сам
+                <code>next()</code>?</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols">MDN Web Docs</a>
+        (Iteration protocols, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

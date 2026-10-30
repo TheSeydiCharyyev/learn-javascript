@@ -5,7 +5,8 @@
 // "Uncaught TypeError: …". The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-07.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-07.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted line of the twins search (day 33 of course 2,
+// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do and the
+// homework has its answers (MDN from tools/.cache/mdn-content.git); the quoted line of the twins search (day 33 of course 2,
 // a block with data-page) is the real one; the cheatsheet runs without an error; the experiments the lecture only
 // tells about; what the lecture says about the text of ECMA-262 2026 (sections 7.3 and 7.4 and the built-ins that call
 // them) is checked against tools/.cache/ecma262-2026.html; the days it points to say what it says; the reference
@@ -14,11 +15,13 @@
 const { chromium } = require('playwright');
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-07');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
+const PAGES = ['lecture', 'student'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -201,6 +204,18 @@ console.log(attempt(() => Object.groupBy(null, (x) => x)), attempt(() => Object.
     check(JSON.stringify(out) === JSON.stringify(['TypeError TypeError TypeError', 'return']),
       `lecture 11, 13: groupBy checks null and the callback, a number is not iterable; break in for await calls return ${JSON.stringify(out)}`);
   }
+  // notes, homework 1, 2 and 4: push on a frozen empty array, four integrity tests, next throws — no return
+  {
+    const out = await runScript(ctx, `const attempt = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+console.log(attempt(() => Object.freeze([]).push(1)));
+console.log(Object.isFrozen(Object.freeze({ get x() { return 1; } })), Object.isFrozen(Object.seal({ a: 1 })), Object.isSealed(Object.freeze({ a: 1 })), Object.isFrozen(Object.seal({})));
+const log = [];
+const it = { [Symbol.iterator]() { return { next() { throw new Error("next"); }, return() { log.push("return"); return {}; } }; } };
+try { for (const x of it) {} } catch (e) { log.push(e.message); }
+console.log(log.join());`, 'hw.html');
+    check(JSON.stringify(out) === JSON.stringify(['TypeError: Cannot add property 0, object is not extensible', 'true false true true', 'next']),
+      `student homework 1, 2, 4: push on a frozen [] — "Cannot add property 0"; isFrozen/isSealed by TestIntegrityLevel; a throwing next() is not closed ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -270,6 +285,12 @@ console.log(attempt(() => Object.groupBy(null, (x) => x)), attempt(() => Object.
     && f('sec-error-message').includes('CreateNonEnumerableDataPropertyOrThrow (O, "message", msg)') && f('sec-installerrorcause').includes('CreateNonEnumerableDataPropertyOrThrow (O, "cause", cause)')
     && !spec.includes('id="sec-error.prototype.stack"'), 'lecture 14: LengthOfArrayLike, CreateListFromArrayLike throws on a non-object; message and cause are non-enumerable; no stack in the standard');
   check(f('sec-object.keys').includes('EnumerableOwnProperties (obj, key)'), 'scheme 1: Object.keys is EnumerableOwnProperties');
+  const push = f('sec-array.prototype.push');
+  check(push.includes('23.1.3.23 Array.prototype.push') && (push.match(/Perform \? Set \(O, /g) || []).length === 2 && push.includes('Perform ? Set (O, ! ToString (𝔽 (len)), E, true)')
+    && push.includes('Perform ? Set (O, "length", 𝔽 (len), true)'), 'student homework 1: push is 23.1.3.23 with two Set calls, both with true');
+  const mdn = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/iteration_protocols/index.md'], { encoding: 'utf8' });
+  check(mdn.includes('### Errors during iteration') && mdn.includes('the iteration in progress is aborted without retrying or cleanup')
+    && mdn.includes('The `return()` method is only called for premature exits'), 'student homework 4: MDN — a throwing next() is not cleaned up, return() only for premature exits');
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

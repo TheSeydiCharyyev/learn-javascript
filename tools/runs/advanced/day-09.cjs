@@ -5,8 +5,9 @@
 // The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-09.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-09.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted lines of main.js (day 35 of course 2) are the
-// real ones; the cheatsheet runs without an error; the experiments the lecture only tells about (a real click of a
+// Checks: a result-box right after a block equals its output; in the notes the output equals the comments of the lines
+// that print it; the quoted lines of main.js (day 35 of course 2) are the real ones; the cheatsheet runs without an error;
+// the homework of the notes; the experiments the lecture only tells about (a real click of a
 // person, the call frames and scopes the debugger gets, the species of a subclass, the same module from import());
 // what the lecture says about the text of ECMA-262 2026 (chapter 9 and the operations that call it, found by a search
 // of the callers) is checked against tools/.cache/ecma262-2026.html; what it says about MDN — against
@@ -24,7 +25,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-09');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -187,7 +191,8 @@ const topSteps = (spec, id) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[`${name} #${i}`] ?? EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[`${name} #${i}`] ?? EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
@@ -281,6 +286,16 @@ const url = "data:text/javascript,export const n = 1;";
 Promise.all([import(url), import(url)]).then(([a, b]) => console.log("тот же модуль:", a === b));`, 'told-6.html');
     check(JSON.stringify(out) === JSON.stringify(['тот же модуль: true', 'object object', 'SecurityError', 'SecurityError']),
       `lecture 15, 16: frames and location of a foreign window are open, name and Array are not; import() of one address gives the same module ${JSON.stringify(out)}`);
+  }
+  // notes, homework 2 and 3: the methods of two realms on a foreign array; the realm of a then job is the handler's
+  {
+    const out = await runScript(ctx, `const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+console.log(Array.prototype.filter.call(other.Array.of(1, 2), Boolean) instanceof Array, other.Array.prototype.slice.call([1]) instanceof Array, [...other.Array.of(1)] instanceof Array);
+Promise.resolve(1).then(other.Function("x", "return [x];")).then((v) => console.log(v instanceof Array, v instanceof other.Array));`, 'hw.html');
+    check(JSON.stringify(out) === JSON.stringify(['true false true', 'false true']),
+      `student homework 2, 3: filter of the page — an array of the page, slice of the frame on our array — of the frame, spread — of the page; a frame handler makes a frame array ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -418,6 +433,8 @@ Promise.all([import(url), import(url)]).then(([a, b]) => console.log("тот ж�
     && !denied.includes('Failed to read a named property'),
   'lecture 15: MDN — the title is the text of Firefox, the text of Chromium has no "Failed to read a named property" in front');
   check(mdn('reference/global_objects/error/stack').includes('  - non-standard'), 'lecture 7: MDN — Error.prototype.stack is non-standard');
+  check(model.includes('### Never blocking') && model.includes('some legacy exceptions exist like `alert()` or synchronous XHR'),
+    'student homework 4: MDN — the section Never blocking names two legacy exceptions, alert() and synchronous XHR');
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

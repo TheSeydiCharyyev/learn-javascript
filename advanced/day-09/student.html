@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 9 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 9</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 9. Контексты выполнения, реалмы, задания и агенты</h1>
+    <p class="subtitle">Выжимка лекции: модель выполнения, реалмы и текущий реалм, стек контекстов, поиск
+    <code>this</code>, задания и агенты.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Агент</strong> — исполнитель JavaScript: один поток, стек контекстов, очередь заданий и куча.
+        <strong>Реалм</strong> — встроенные объекты, глобальный объект с окружением и всё загруженное в нём; в вебе — один
+        на окно и рамку. <strong>Контекст выполнения</strong> — запись о работающем коде: функция, реалм, окружения.
+        <strong>Задание</strong> — кусок работы, который начинается с пустого стека.
+    </div>
+
+    <h2>Реалмы</h2>
+
+    <pre class="code js">const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const list = other.Array.of(1, 2);
+console.log(list instanceof Array, Array.isArray(list));                  // false true — у рамки свой Array.prototype
+console.log(list.map((x) =&gt; x) instanceof Array);                         // false — map рамки, массив рамки
+console.log(Array.prototype.map.call(list, (x) =&gt; x) instanceof Array);   // true — map страницы отбросил чужой %Array%
+console.log(other.Function("return [];")() instanceof Array);             // false — литерал в реалме функции</pre>
+
+    <table>
+        <thead><tr><th>Что создаётся</th><th>В каком реалме</th></tr></thead>
+        <tbody>
+            <tr><td>литерал, ошибка, объект встроенной функции</td><td>реалм выполняемой функции — текущий</td></tr>
+            <tr><td><code>this</code> нестрогой функции без объекта</td><td>глобальный <code>this</code> реалма функции</td></tr>
+            <tr><td><code>x = 1</code> без объявления, нестрогий код</td><td>свойство глобального объекта текущего реалма</td></tr>
+            <tr><td><code>map</code>, <code>filter</code>, <code>slice</code> чужого массива</td><td>реалм метода, если конструктор — чужой <code>%Array%</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Рамка того же источника — свой реалм в том же агенте: одна очередь микрозадач, один поток. Данные, которые могли
+        прийти из другого окна, проверяйте <code>Array.isArray</code> и <code>Error.isError</code>, а не
+        <code>instanceof</code>. Переход рамки на новую страницу — новый реалм, а <code>contentWindow</code> тот же.
+    </div>
+
+    <h2>Стек и this</h2>
+
+    <pre class="code js">const stack = () =&gt; new Error().stack.split("\n").slice(2)
+  .map((line) =&gt; line.trim().slice(3).split(" (")[0])
+  .map((name) =&gt; (name.includes("://") ? "скрипт" : name)).join(" ← ");
+function outer() { return inner(); }
+function inner() { return stack(); }
+console.log(outer());                                  // inner ← outer ← скрипт — наверху выполняемый контекст
+const obj = { name: "obj", method() { return (() =&gt; this.name)(); } };
+console.log(obj.method());                             // obj — стрелку поиск this проходит мимо
+class Base {}
+class Child extends Base {
+  constructor() {
+    try { this; } catch (e) { console.log(e.name); }   // ReferenceError — до super() this не связан
+    super();
+  }
+}
+new Child();</pre>
+
+    <div class="remember">
+        Вызов кладёт контекст на стек, <code>return</code> снимает; <code>yield</code> и <code>await</code> снимают и
+        потом возвращают. Имя ищется от места, где написан код (ResolveBinding). <code>this</code> и
+        <code>new.target</code> — вверх по <code>[[OuterEnv]]</code> до записи с <code>this</code>: блок и стрелка — мимо,
+        у модуля <code>undefined</code>. В отладчике: Call Stack — кадры, Scope — Local, Script, Global.
+    </div>
+
+    <h2>Задания</h2>
+
+    <pre class="code js">console.log("скрипт");                                             // скрипт
+document.addEventListener("ping", () =&gt; console.log("событие"));   // событие — dispatchEvent из кода: сразу, в том же задании
+document.dispatchEvent(new Event("ping"));
+Promise.resolve().then(() =&gt; console.log("then"));                 // then — задание промиса, микрозадача
+setTimeout(() =&gt; console.log("таймер"), 0);                        // таймер — задача HTML, после всех микрозадач</pre>
+
+    <div class="remember">
+        Задание начинается с пустого стека, выполняется одно за раз и до конца; ошибка в нём — его забота
+        (в <code>then</code> — отказ промиса). Промисы ставит язык (HostEnqueuePromiseJob, по порядку); таймеры,
+        события и <code>queueMicrotask</code> — HTML. Окно не может блокироваться, worker может. Кластер — агенты с общей
+        памятью. Чужое окно — SecurityError.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Поставьте <code>debugger</code> в <code>inner</code> из блока «Стек и this», откройте DevTools и
+                перезагрузите страницу. Запишите строки Call Stack и что показывает Scope у каждого кадра.</li>
+            <li>Предскажите и проверьте: <code>Array.prototype.filter.call(other.Array.of(1, 2), Boolean) instanceof Array</code>,
+                <code>other.Array.prototype.slice.call([1]) instanceof Array</code>,
+                <code>[...other.Array.of(1)] instanceof Array</code>.</li>
+            <li>По примечанию к HostEnqueuePromiseJob (9.5.5) найдите, в каком реалме работает задание
+                <code>then</code>. Проверьте: чей массив вернёт <code>Promise.resolve(1).then(other.Function("x", "return [x];"))</code>?</li>
+            <li>Прочитайте раздел «Never blocking» страницы MDN
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model">JavaScript execution model</a>
+                и найдите два старых исключения. Объясните через раздел 9.5, почему на время такого вызова замирает вся
+                страница.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model">MDN Web Docs</a>
+        (JavaScript execution model, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

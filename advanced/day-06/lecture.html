@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 6 — Числа как биты: побитовые операторы, ToInt32 и void</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #8b5cf6; }
+        h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+        h3 { color: #6d28d9; }
+        .step-number { background: #8b5cf6; }
+        .toc a { color: #7c3aed; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 6</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 6 &bull; урок 1</span>
+        <h1>Числа как биты: побитовые операторы, ToInt32 и void</h1>
+        <p>Курс 3, Advanced. Модуль «Типы и абстрактные операции» — третий день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>переводить число в 32-битное целое по шагам ToInt32 и ToUint32;</li>
+            <li>читать отрицательные числа в дополнительном коде;</li>
+            <li>предсказывать <code>&amp;</code>, <code>|</code>, <code>^</code>, <code>~</code>, <code>&lt;&lt;</code>,
+                <code>&gt;&gt;</code> и <code>&gt;&gt;&gt;</code> для чисел и BigInt;</li>
+            <li>помнить, что <code>&amp;</code> слабее <code>===</code>, а сдвиг слабее сложения;</li>
+            <li>хранить флаги и цвета в битах и знать, где ломается граница 2<sup>31</sup>;</li>
+            <li>объяснять, что вычисляет <code>void</code> и зачем он нужен сегодня.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#bits">Числа как биты</a></li>
+            <li><a href="#twos">Дополнительный код: 32 разряда</a></li>
+            <li><a href="#toint32">ToInt32 по шагам</a></li>
+            <li><a href="#touint32">ToUint32 и операции на 16, 8 и 64 бита</a></li>
+            <li><a href="#andorxor">&amp;, | и ^: NumberBitwiseOp</a></li>
+            <li><a href="#precedence">Приоритет: &amp; слабее ===</a></li>
+            <li><a href="#not">~ и ~~</a></li>
+            <li><a href="#shifts">Сдвиги &lt;&lt; и &gt;&gt;</a></li>
+            <li><a href="#unsigned">&gt;&gt;&gt; и приём &gt;&gt;&gt; 0</a></li>
+            <li><a href="#bigint">BigInt: биты без конца</a></li>
+            <li><a href="#compound">Составные присваивания</a></li>
+            <li><a href="#trunc">x | 0 против Math.trunc</a></li>
+            <li><a href="#masks">Маски: права, чётность, цвет</a></li>
+            <li><a href="#void">Оператор void</a></li>
+            <li><a href="#cards">«Карточки 2.0»: шаг повторения</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="bits">1. Числа как биты</h2>
+
+    <p>В таблице операторов Essentials (день 6) была строка «побитовые — курс 3». Пришла пора. Число в JavaScript —
+    64-битная дробь (день 4), но семь операторов работают с ним так, будто это 32-битное целое:
+    <code>&amp;</code>, <code>|</code>, <code>^</code>, <code>~</code>, <code>&lt;&lt;</code>, <code>&gt;&gt;</code> и
+    <code>&gt;&gt;&gt;</code>. Они на время переводят операнды в 32 разряда, работают с каждым разрядом и
+    возвращают обычное число.</p>
+
+    <pre class="code js">console.log(5 &amp; 3, 5 | 3, 5 ^ 3, ~5, 5 &lt;&lt; 1, -5 &gt;&gt; 1, -5 &gt;&gt;&gt; 28);
+console.log(2.7 | 0, 2 ** 32 | 0, 3e9 | 0, "12" | 0, 1n | 2n);</pre>
+
+    <div class="result-box">
+        1 7 6 -6 10 -3 15<br>
+        2 0 -1294967296 12 3n
+    </div>
+
+    <p>Вторая строка — весь день в миниатюре: дробь пропала, 2<sup>32</sup> стало нулём, три миллиарда —
+    отрицательным числом, строка — числом, а BigInt остался BigInt. Операторы живут в трёх разделах: <a href="https://tc39.es/ecma262/2026/#sec-bitwise-not-operator">13.5.6</a> — <code>~</code>,
+    <a href="https://tc39.es/ecma262/2026/#sec-bitwise-shift-operators">13.9</a> — сдвиги,
+    <a href="https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators">13.12</a> — <code>&amp;</code>,
+    <code>^</code> и <code>|</code>. Сами разделы короткие: каждый отсылает к
+    <a href="https://tc39.es/ecma262/2026/#sec-evaluatestringornumericbinaryexpression">EvaluateStringOrNumericBinaryExpression</a>,
+    а та — к <a href="https://tc39.es/ecma262/2026/#sec-applystringornumericbinaryoperator">ApplyStringOrNumericBinaryOperator</a>
+    (13.15.3), общему алгоритму всех двуместных арифметических операторов. Путь у шести побитовых такой же, как у <code>*</code>: оба операнда
+    через ToNumeric, типы должны совпасть, а дальше — операция из таблицы: для чисел
+    <code>Number::leftShift</code>, <code>Number::bitwiseAND</code> и соседи (6.1.6.1), для BigInt —
+    <code>BigInt::leftShift</code> и соседи (6.1.6.2). Внутри числовых операций и стоит то, ради чего день назван
+    «числа как биты», — <a href="https://tc39.es/ecma262/2026/#sec-toint32">ToInt32</a> и
+    <a href="https://tc39.es/ecma262/2026/#sec-touint32">ToUint32</a>.</p>
+
+    <p>И восьмой оператор дня — <code>void</code>. Он не побитовый, но живёт рядом с <code>~</code> в разделе унарных
+    операторов, и в курсах 1–2 его не было. Ему — раздел 14.</p>
+
+    <h2 id="twos">2. Дополнительный код: 32 разряда</h2>
+
+    <p>32-битное целое со знаком хранится в <strong>дополнительном коде</strong> (two's complement). Разряды
+    нумеруются справа налево от 0 до 31. Разряд <em>k</em> весит 2<sup><em>k</em></sup>, и только старший, 31-й,
+    весит −2<sup>31</sup>. Поэтому если старший разряд — 1, число отрицательное, а строка из одних единиц — это
+    −2<sup>31</sup> + (2<sup>31</sup> − 1) = −1. Получить −x просто: перевернуть все разряды и прибавить 1.
+    Диапазон — от −2<sup>31</sup> (−2147483648) до 2<sup>31</sup> − 1 (2147483647).</p>
+
+    <p>Функция <code>bits</code> печатает 32 разряда числа; как она устроена — раздел 9.</p>
+
+    <pre class="code js">const bits = (n) =&gt; (n &gt;&gt;&gt; 0).toString(2).padStart(32, "0");
+console.log(bits(9));
+console.log(bits(-9));
+console.log(bits(-1));
+console.log(bits(2 ** 31 - 1));
+console.log(bits(-(2 ** 31)));
+console.log((9).toString(2), (-9).toString(2), ~9 + 1);</pre>
+
+    <div class="result-box">
+        00000000000000000000000000001001<br>
+        11111111111111111111111111110111<br>
+        11111111111111111111111111111111<br>
+        01111111111111111111111111111111<br>
+        10000000000000000000000000000000<br>
+        1001 -1001 -9
+    </div>
+
+    <p>−9 — это перевёрнутое 9 (…11110110) плюс 1: …11110111. Наибольшее число — ноль и тридцать одна единица,
+    наименьшее — единица и тридцать один ноль. А <code>toString(2)</code> (Essentials, день 16) пишет −9 как
+    «-1001» — знак и модуль: о 32 разрядах метод числа ничего не знает. <code>~9 + 1</code> — рецепт «перевернуть
+    и прибавить 1»: <code>~</code> переворачивает разряды (раздел 7).</p>
+
+    <h2 id="toint32">3. ToInt32 по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-toint32">ToInt32</a> (7.1.6) — пять шагов, и каждый виден из кода:</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 262" role="img" aria-label="Пять шагов ToInt32 на двух примерах: 3e9 становится -1294967296, -2.9 становится -2">
+            <text x="22" y="20" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#5b21b6">шаг ToInt32 (7.1.6)</text>
+            <text x="450" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#5b21b6">3e9</text>
+            <text x="570" y="20" text-anchor="middle" font-family="Consolas, monospace" font-size="12" font-weight="700" fill="#5b21b6">-2.9</text>
+
+            <rect x="10" y="30" width="620" height="34" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="22" y="51" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155"><tspan font-weight="700">1.</tspan> ToNumber — число из любого значения</text>
+            <text x="450" y="51" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#334155">3000000000</text>
+            <text x="570" y="51" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#334155">-2.9</text>
+
+            <rect x="10" y="70" width="620" height="34" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+            <text x="22" y="91" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b"><tspan font-weight="700">2.</tspan> NaN, ±Infinity, +0 или −0 — сразу ответ +0</text>
+            <text x="450" y="91" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">дальше</text>
+            <text x="570" y="91" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#991b1b">дальше</text>
+
+            <rect x="10" y="110" width="620" height="34" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="22" y="131" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155"><tspan font-weight="700">3.</tspan> truncate — отбросить дробь</text>
+            <text x="450" y="131" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#334155">3000000000</text>
+            <text x="570" y="131" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#334155">-2</text>
+
+            <rect x="10" y="150" width="620" height="34" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+            <text x="22" y="171" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#075985"><tspan font-weight="700">4.</tspan> modulo 2³² — остаток всегда от 0 до 2³² − 1</text>
+            <text x="450" y="171" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">3000000000</text>
+            <text x="570" y="171" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">4294967294</text>
+
+            <rect x="10" y="190" width="620" height="34" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+            <text x="22" y="211" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46"><tspan font-weight="700">5.</tspan> 2³¹ и больше — вычесть 2³²</text>
+            <text x="450" y="211" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#065f46">-1294967296</text>
+            <text x="570" y="211" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#065f46">-2</text>
+
+            <text x="10" y="250" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Итог всегда от −2³¹ до 2³¹ − 1. ToUint32 — те же шаги без пятого: от 0 до 2³² − 1.</text>
+        </svg>
+        <figcaption>ToInt32 по шагам 7.1.6</figcaption>
+    </figure>
+
+    <p>Повторим алгоритм своим кодом — шаг за шагом — и сверим с <code>| 0</code>, который зовёт настоящий ToInt32:</p>
+
+    <pre class="code js">const toInt32 = (x) =&gt; {
+  const number = +x;                                          // 1. ToNumber
+  if (!Number.isFinite(number) || number === 0) return 0;     // 2. NaN, ±Infinity, ±0
+  const int = Math.trunc(number);                             // 3. truncate
+  const int32bit = ((int % 2 ** 32) + 2 ** 32) % 2 ** 32;     // 4. modulo, а не %
+  return int32bit &gt;= 2 ** 31 ? int32bit - 2 ** 32 : int32bit; // 5. знак
+};
+const values = [2.9, -2.9, 2 ** 31 - 1, 2 ** 31, 2 ** 32, 2 ** 32 + 5, -(2 ** 31) - 1, 3e9, 1e21, NaN, Infinity, -0, "12", "0x10", [], null];
+console.log(values.map(toInt32).join(" "));
+console.log(values.map((v) =&gt; v | 0).join(" "));
+console.log(values.every((v) =&gt; Object.is(toInt32(v), v | 0)));</pre>
+
+    <div class="result-box">
+        2 -2 2147483647 -2147483648 0 5 2147483647 -1294967296 -559939584 0 0 0 12 16 0 0<br>
+        2 -2 2147483647 -2147483648 0 5 2147483647 -1294967296 -559939584 0 0 0 12 16 0 0<br>
+        true
+    </div>
+
+    <p>Шестнадцать значений, ни одного расхождения — даже −0 превратился в +0 у обоих. Самое важное на шаге 4.
+    Слово <em>modulo</em> в спецификации — математический остаток, он всегда того же знака, что делитель, то есть
+    неотрицательный. А оператор <code>%</code> (день 6 Essentials) берёт знак делимого. Поэтому в функции
+    стоит «прибавить делитель и взять остаток ещё раз»:</p>
+
+    <pre class="code js">console.log(-1 % 2 ** 32, ((-1 % 2 ** 32) + 2 ** 32) % 2 ** 32);
+console.log(-7 % 3, ((-7 % 3) + 3) % 3);</pre>
+
+    <div class="result-box">
+        -1 4294967295<br>
+        -1 2
+    </div>
+
+    <p>Примечание к ToInt32 добавляет два свойства. Первое: операция идемпотентна — применённая к своему же
+    результату, ничего не меняет. Второе: ToInt32 от результата ToUint32 — то же, что ToInt32 сразу. Ради второго
+    свойства бесконечности и отображаются в +0, а не в «самое большое число»:</p>
+
+    <pre class="code js">const x = -1.5e10;
+console.log(x | 0, (x | 0) | 0, x &gt;&gt;&gt; 0, (x &gt;&gt;&gt; 0) | 0);
+console.log(Infinity | 0, -Infinity &gt;&gt;&gt; 0, Object.is(-0 | 0, 0));</pre>
+
+    <div class="result-box">
+        -2115098112 -2115098112 2179869184 -2115098112<br>
+        0 0 true
+    </div>
+
+    <h2 id="touint32">4. ToUint32 и операции на 16, 8 и 64 бита</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-touint32">ToUint32</a> (7.1.7) — те же шаги без пятого: остаток
+    от деления на 2<sup>32</sup> так и остаётся ответом, от 0 до 4294967295. За ними в главе 7 идут операции с
+    другим числом разрядов. В коде их не вызвать: они нужны встроенным функциям и типизированным массивам (день 20).</p>
+
+    <table>
+        <thead><tr><th>Операция</th><th>Диапазон</th><th>Где встретим</th></tr></thead>
+        <tbody>
+            <tr><td>ToInt32 / ToUint32</td><td>−2<sup>31</sup>…2<sup>31</sup> − 1 / 0…2<sup>32</sup> − 1</td><td>побитовые операторы, <code>Math.imul</code>, <code>Math.clz32</code>, длина массива</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toint16">ToInt16</a> / <a href="https://tc39.es/ecma262/2026/#sec-touint16">ToUint16</a></td><td>−32768…32767 / 0…65535</td><td><code>String.fromCharCode</code> (ToUint16); <code>Int16Array</code>, <code>Uint16Array</code> — день 20</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toint8">ToInt8</a> / <a href="https://tc39.es/ecma262/2026/#sec-touint8">ToUint8</a></td><td>−128…127 / 0…255</td><td><code>Int8Array</code>, <code>Uint8Array</code> — день 20</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-touint8clamp">ToUint8Clamp</a></td><td>0…255, с зажимом</td><td><code>Uint8ClampedArray</code> — пиксели картинки: 300 → 255, −5 → 0; дробь округляется к чётному (2.5 → 2, 3.5 → 4), а не отбрасывается</td></tr>
+            <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tobigint64">ToBigInt64</a> / <a href="https://tc39.es/ecma262/2026/#sec-tobiguint64">ToBigUint64</a></td><td>−2<sup>63</sup>…2<sup>63</sup> − 1 / 0…2<sup>64</sup> − 1</td><td><code>BigInt64Array</code> — день 20; та же арифметика, что у <code>BigInt.asIntN(64, x)</code> и <code>asUintN</code> (день 21 курса 2)</td></tr>
+        </tbody>
+    </table>
+
+    <p>Следы этих операций видны во встроенных функциях. <a href="https://tc39.es/ecma262/2026/#sec-string.fromcharcode">String.fromCharCode</a>
+    зовёт ToUint16 для каждого аргумента, <a href="https://tc39.es/ecma262/2026/#sec-math.imul">Math.imul</a> и
+    <a href="https://tc39.es/ecma262/2026/#sec-math.clz32">Math.clz32</a> (Essentials, день 18) — ToUint32,
+    <a href="https://tc39.es/ecma262/2026/#sec-bigint.asintn">BigInt.asIntN</a> — ту же «остаток и знак», что
+    ToBigInt64:</p>
+
+    <pre class="code js">console.log(-1 &gt;&gt;&gt; 0, 2 ** 32 &gt;&gt;&gt; 0, 2 ** 32 + 5 &gt;&gt;&gt; 0);
+console.log(String.fromCharCode(65 + 2 ** 16), String.fromCharCode(2 ** 16 + 0x44B), String.fromCharCode(-1).charCodeAt(0));
+console.log(Math.imul(0xFFFFFFFF, 5), Math.imul(0x7FFFFFFF, 0x7FFFFFFF), (0x7FFFFFFF * 0x7FFFFFFF) | 0);
+console.log(Math.clz32(1), Math.clz32(-1), Math.clz32(0), Math.clz32(2 ** 32));
+console.log(BigInt.asIntN(64, 2n ** 63n), BigInt.asUintN(64, -1n));</pre>
+
+    <div class="result-box">
+        4294967295 0 5<br>
+        A ы 65535<br>
+        -5 1 0<br>
+        31 0 32 32<br>
+        -9223372036854775808n 18446744073709551615n
+    </div>
+
+    <p>Код 65 + 65536 стал «A», а 65536 + 0x44B — «ы»: 17-й разряд отброшен. <code>Math.imul</code> перемножает
+    32-битные целые: <code>0xFFFFFFFF</code> для неё −1, и −1 · 5 = −5. А обычное умножение и <code>| 0</code> дают 0
+    вместо 1: произведение больше 2<sup>53</sup>, младшие разряды потерялись ещё в дроби. <code>Math.clz32(-1)</code>
+    — 0: −1 для ToUint32 — 32 единицы.</p>
+
+    <p>Ещё одно место — длина массива. Её задаёт <a href="https://tc39.es/ecma262/2026/#sec-arraysetlength">ArraySetLength</a>
+    (10.4.2.4): новое значение проходит через ToUint32 и отдельно через ToNumber, и если результаты не совпали —
+    <code>RangeError</code>. Две операции — два вызова <code>valueOf</code>:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const list = [];
+let calls = 0;
+list.length = { valueOf() { calls++; return 3; } };
+console.log(list.length, calls);
+console.log(attempt(() =&gt; { list.length = 2 ** 32; }));
+console.log(attempt(() =&gt; { list.length = 1.5; }));
+list.length = 2 ** 32 - 1;
+console.log(list.length);</pre>
+
+    <div class="result-box">
+        3 2<br>
+        RangeError: Failed to set the 'length' property on 'Array': Invalid array length<br>
+        RangeError: Failed to set the 'length' property on 'Array': Invalid array length<br>
+        4294967295
+    </div>
+
+    <p>2<sup>32</sup> для ToUint32 — 0, для ToNumber — 2<sup>32</sup>: не совпали. 1.5 — 1 против 1.5: тоже. Отсюда и
+    наибольшая длина массива — 2<sup>32</sup> − 1, а наибольший индекс — на единицу меньше (день 4).</p>
+
+    <p>И хозяин. Задержку <code>setTimeout</code> описывает стандарт HTML, и принимает он её как тип
+    <code>long</code> из WebIDL, а перевод в <code>long</code> — та же арифметика, что у ToInt32. Отсюда строка
+    таблицы дня 30 Essentials: задержка больше 2147483647 мс «переполняется»:</p>
+
+    <pre class="code js">setTimeout(() =&gt; console.log("2 ** 32 + 100 мс"), 2 ** 32 + 100);
+setTimeout(() =&gt; console.log("300 мс"), 300);</pre>
+
+    <div class="result-box">
+        2 ** 32 + 100 мс<br>
+        300 мс
+    </div>
+
+    <p>«Сорок девять дней» сработали через 100 мс — раньше таймера на 300 мс.</p>
+
+    <h2 id="andorxor">5. &amp;, | и ^: NumberBitwiseOp</h2>
+
+    <p>Для чисел все три оператора ведут в одну операцию — <a href="https://tc39.es/ecma262/2026/#sec-numberbitwiseop">NumberBitwiseOp</a>
+    (6.1.6.1.16). Она переводит оба операнда через ToInt32, записывает их 32-разрядными строками и проходит по
+    парам разрядов: первый с первым, второй со вторым. Результат собирается из ответов по таблице:</p>
+
+    <table>
+        <thead><tr><th>x</th><th>y</th><th>x &amp; y (оба)</th><th>x | y (хотя бы один)</th><th>x ^ y (ровно один)</th></tr></thead>
+        <tbody>
+            <tr><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+            <tr><td>0</td><td>1</td><td>0</td><td>1</td><td>1</td></tr>
+            <tr><td>1</td><td>0</td><td>0</td><td>1</td><td>1</td></tr>
+            <tr><td>1</td><td>1</td><td>1</td><td>1</td><td>0</td></tr>
+        </tbody>
+    </table>
+
+    <p>Пример страниц MDN: 14 — это 1110, 9 — 1001. Общая единица только в разряде 3 — <code>&amp;</code> даёт 1000,
+    то есть 8; <code>|</code> — 1111, 15; <code>^</code> — 0111, 7. Операнды могут быть чем угодно: ToNumeric
+    сделает из них числа.</p>
+
+    <pre class="code js">console.log(14 &amp; 9, 14 | 9, 14 ^ 9, 0b1010 &amp; 0b0110);
+console.log("3" &amp; "5", [7] | 0, null | 8, "x" | 0, {} ^ 6, true &lt;&lt; 3);</pre>
+
+    <div class="result-box">
+        8 15 7 2<br>
+        1 7 8 0 6 8
+    </div>
+
+    <p>«x» стал NaN, а NaN на шаге 2 ToInt32 — 0. Объект <code>{}</code> — тоже NaN, то есть 0, и 0 ^ 6 = 6.
+    Порядок вычисления — как у всех двуместных операторов: сначала левый операнд целиком, потом правый, потом
+    ToNumeric слева и ToNumeric справа — как журнал <code>valueOf</code> у сравнений на дне 5. И, в отличие от
+    <code>+</code>, здесь нет шага «ToPrimitive без
+    подсказки»: дата отдаёт число, а не строку:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const log = [];
+const a = { valueOf() { log.push("a"); return 6; } };
+const b = { valueOf() { log.push("b"); return 3; } };
+console.log(a &amp; b, a | b, a ^ b, log.join(" "));
+console.log(new Date(5) | 0, typeof (new Date(5) + 0));
+console.log(attempt(() =&gt; Symbol() | 0));</pre>
+
+    <div class="result-box">
+        2 7 5 a b a b a b<br>
+        5 string<br>
+        TypeError: Cannot convert a Symbol value to a number
+    </div>
+
+    <h2 id="precedence">6. Приоритет: &amp; слабее ===</h2>
+
+    <p>Грамматика раздела <a href="https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators">13.12</a> выстраивает
+    лесенку: <code>|</code> собирается из <code>^</code>, <code>^</code> — из <code>&amp;</code>, а <code>&amp;</code> —
+    из выражений равенства. Значит, <code>==</code> и <code>===</code> связывают сильнее, чем <code>&amp;</code>.
+    Сдвиги (13.9) стоят между сравнениями и сложением: их операнды — выражения сложения, поэтому
+    <code>1 &lt;&lt; 2 + 1</code> — это <code>1 &lt;&lt; 3</code>. От сильного к слабому: <code>+ -</code>, затем
+    <code>&lt;&lt; &gt;&gt; &gt;&gt;&gt;</code>, затем <code>&lt; &gt;</code>, затем <code>== ===</code>, затем
+    <code>&amp;</code>, <code>^</code>, <code>|</code> и только потом <code>&amp;&amp;</code> и <code>||</code>.</p>
+
+    <pre class="code js">const n = 4;
+console.log(n &amp; 1 === 0, (n &amp; 1) === 0);
+console.log(1 &lt;&lt; 2 + 1, (1 &lt;&lt; 2) + 1);
+console.log(1 | 2 ^ 3 &amp; 4, ((1 | 2) ^ 3) &amp; 4);
+console.log(6 &amp; 3 &gt; 1, 5 &amp; 3 &gt; 1);</pre>
+
+    <div class="result-box">
+        0 true<br>
+        8 5<br>
+        3 0<br>
+        0 1
+    </div>
+
+    <p>Первая строка — классическая ошибка проверки на чётность. <code>n &amp; 1 === 0</code> читается как
+    <code>n &amp; (1 === 0)</code>, то есть <code>4 &amp; false</code>, то есть 0 — ложь для любого <code>n</code>.
+    Последняя строка ещё коварнее: <code>3 &gt; 1</code> — <code>true</code>, то есть 1, и ответ зависит от последнего
+    разряда левого числа. Правило простое: побитовое выражение рядом со сравнением — всегда в скобках.</p>
+
+    <h2 id="not">7. ~ и ~~</h2>
+
+    <p>Вычисление <code>~</code> (<a href="https://tc39.es/ecma262/2026/#sec-bitwise-not-operator-runtime-semantics-evaluation">13.5.6.1</a>):
+    ToNumeric операнда; число — в <a href="https://tc39.es/ecma262/2026/#sec-numeric-types-number-bitwiseNOT">Number::bitwiseNOT</a>,
+    которая делает ToInt32 и переворачивает все 32 разряда; BigInt — в
+    <a href="https://tc39.es/ecma262/2026/#sec-numeric-types-bigint-bitwiseNOT">BigInt::bitwiseNOT</a>, а там
+    просто −x − 1. Для 32-битных чисел ответ тот же: перевернуть и прибавить 1 — это −x, значит, просто
+    перевернуть — −x − 1.</p>
+
+    <pre class="code js">console.log(~9, ~-1, ~0, ~"5", ~"x", ~undefined, ~null, ~2.7);
+console.log(~~2.7, ~~-2.7, ~~"12.9", ~~NaN, ~~3e9);
+console.log(~0n, ~4294967295n, ~-1n);
+const words = ["kitap", "galam"];
+console.log(~words.indexOf("galam"), ~words.indexOf("depder"), words.includes("depder"));</pre>
+
+    <div class="result-box">
+        -10 0 -1 -6 -1 -1 -1 -3<br>
+        2 -2 12 0 -1294967296<br>
+        -1n -4294967296n 0n<br>
+        -2 0 false
+    </div>
+
+    <p><code>~"x"</code>, <code>~undefined</code> и <code>~null</code> — все −1: ToInt32 сделал из них 0. Двойная
+    тильда <code>~~x</code> — это ToInt32 и больше ничего: на маленьких числах похоже на <code>Math.trunc</code>, на
+    3e9 — нет (раздел 12). BigInt не обрезается: <code>~4294967295n</code> — −4294967296n, не 0. Последняя
+    строка — старая привычка: <code>indexOf</code> без находки даёт −1, а <code>~(-1)</code> — 0, единственный ложный
+    ответ <code>~</code>. Так проверяли «есть ли в массиве» до <code>includes</code>; сегодня так не пишут, но в чужом
+    коде встретите.</p>
+
+    <h2 id="shifts">8. Сдвиги &lt;&lt; и &gt;&gt;</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-numeric-types-number-leftShift">Number::leftShift</a> (6.1.6.1.9):
+    левый операнд — ToInt32, правый — <em>ToUint32</em>, и от правого берётся остаток от деления на 32. Потом левое
+    число сдвигается на столько разрядов влево, справа вдвигаются нули, а то, что вышло за 32 разряда, пропадает.
+    <a href="https://tc39.es/ecma262/2026/#sec-numeric-types-number-signedRightShift">Number::signedRightShift</a>
+    (6.1.6.1.10) — то же вправо, но слева вдвигаются копии старшего разряда: знак сохраняется.</p>
+
+    <pre class="code js">console.log(9 &lt;&lt; 2, 9 &lt;&lt; 3, 1 &lt;&lt; 30, 1 &lt;&lt; 31, 1 &lt;&lt; 32, 1 &lt;&lt; 33, 1 &lt;&lt; -1);
+console.log(-9 &gt;&gt; 2, Math.floor(-9 / 4), Math.trunc(-9 / 4), 9 &gt;&gt; 2, -1 &gt;&gt; 5);
+console.log(2 ** 30 &lt;&lt; 1, 2 ** 30 * 2, 1.9 &lt;&lt; 1, 5 &lt;&lt; 1.9, "2" &lt;&lt; "3");</pre>
+
+    <div class="result-box">
+        36 72 1073741824 -2147483648 1 2 -2147483648<br>
+        -3 -3 -2 2 -1<br>
+        -2147483648 2147483648 2 10 16
+    </div>
+
+    <p>Сдвиг влево на <em>k</em> — умножение на 2<sup><em>k</em></sup>, пока единица не дошла до разряда 31:
+    <code>1 &lt;&lt; 31</code> уже отрицательное. Сдвиг на 32 — это сдвиг на 0 (32 по модулю 32), на 33 — на 1, а на
+    −1 — ToUint32(−1) = 4294967295, по модулю 32 это 31. Сдвиг вправо на <em>k</em> — деление на
+    2<sup><em>k</em></sup> с округлением <em>вниз</em>, как <code>Math.floor</code>, а не к нулю: −9 &gt;&gt; 2 — −3,
+    а не −2. Дробь у счётчика сдвига тоже отбрасывается: <code>5 &lt;&lt; 1.9</code> — сдвиг на 1.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 228" role="img" aria-label="Число -9 в 32 разрядах и результаты сдвигов: >> 2 вдвигает слева копии знака и даёт -3, >>> 2 вдвигает нули и даёт 1073741821, << 2 вдвигает нули справа и даёт -36">
+            <text x="128" y="16" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">разряд 31</text>
+            <text x="352" y="16" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">0</text>
+
+            <rect x="10" y="24" width="620" height="26" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="110" y="42" text-anchor="end" font-family="Consolas, monospace" font-size="12" fill="#334155">9</text>
+            <text x="125" y="42" font-family="Consolas, monospace" font-size="12" fill="#334155"><tspan fill="#dc2626" font-weight="700">0</tspan>0000000 00000000 00000000 00001001</text>
+            <text x="400" y="42" font-family="Consolas, monospace" font-size="12" fill="#334155">= 9</text>
+
+            <rect x="10" y="56" width="620" height="26" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="110" y="74" text-anchor="end" font-family="Consolas, monospace" font-size="12" fill="#334155">-9</text>
+            <text x="125" y="74" font-family="Consolas, monospace" font-size="12" fill="#334155"><tspan fill="#dc2626" font-weight="700">1</tspan>1111111 11111111 11111111 11110111</text>
+            <text x="400" y="74" font-family="Consolas, monospace" font-size="12" fill="#334155">= -9</text>
+
+            <rect x="10" y="88" width="620" height="26" rx="6" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1"/>
+            <text x="110" y="106" text-anchor="end" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">-9 &gt;&gt; 2</text>
+            <text x="125" y="106" font-family="Consolas, monospace" font-size="12" fill="#334155"><tspan fill="#ea580c" font-weight="700">11</tspan>111111 11111111 11111111 11111101</text>
+            <text x="400" y="106" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">= -3</text>
+            <text x="500" y="106" font-family="Segoe UI, sans-serif" font-size="11" fill="#5b21b6">слева копии знака</text>
+
+            <rect x="10" y="120" width="620" height="26" rx="6" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1"/>
+            <text x="110" y="138" text-anchor="end" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">-9 &gt;&gt;&gt; 2</text>
+            <text x="125" y="138" font-family="Consolas, monospace" font-size="12" fill="#334155"><tspan fill="#ea580c" font-weight="700">00</tspan>111111 11111111 11111111 11111101</text>
+            <text x="400" y="138" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">= 1073741821</text>
+            <text x="500" y="138" font-family="Segoe UI, sans-serif" font-size="11" fill="#5b21b6">слева нули</text>
+
+            <rect x="10" y="152" width="620" height="26" rx="6" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1"/>
+            <text x="110" y="170" text-anchor="end" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">-9 &lt;&lt; 2</text>
+            <text x="125" y="170" font-family="Consolas, monospace" font-size="12" fill="#334155">11111111 11111111 11111111 110111<tspan fill="#ea580c" font-weight="700">00</tspan></text>
+            <text x="400" y="170" font-family="Consolas, monospace" font-size="12" fill="#5b21b6">= -36</text>
+            <text x="500" y="170" font-family="Segoe UI, sans-serif" font-size="11" fill="#5b21b6">справа нули</text>
+
+            <text x="10" y="200" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Красным — знаковый разряд 31, его вес −2³¹. Оранжевым — разряды, которые вдвинул сдвиг;</text>
+            <text x="10" y="218" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">выпавшие с другого края разряды пропадают. Только &gt;&gt;&gt; читает результат без знака.</text>
+        </svg>
+        <figcaption>Сдвиги на 32 разрядах: пример −9 со страниц MDN</figcaption>
+    </figure>
+
+    <h2 id="unsigned">9. &gt;&gt;&gt; и приём &gt;&gt;&gt; 0</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-numeric-types-number-unsignedRightShift">Number::unsignedRightShift</a>
+    (6.1.6.1.11) отличается от <code>&gt;&gt;</code> двумя вещами: левый операнд переводит ToUint32, а не ToInt32, и
+    слева вдвигает нули. Результат всегда неотрицательный — от 0 до 2<sup>32</sup> − 1. Отсюда приём
+    <code>x &gt;&gt;&gt; 0</code>: сдвиг на ноль разрядов не делает ничего, кроме ToUint32. Им и пользуется функция
+    <code>bits</code> из раздела 2: −9 как беззнаковое — 4294967287, и его двоичная запись — ровно 32 разряда
+    дополнительного кода.</p>
+
+    <pre class="code js">console.log(-9 &gt;&gt;&gt; 2, 9 &gt;&gt;&gt; 2, -1 &gt;&gt;&gt; 0, -1 &gt;&gt;&gt; 31);
+console.log((-9 &gt;&gt;&gt; 0).toString(2), (-9).toString(2));
+console.log((-9 &gt;&gt;&gt; 0).toString(16), 0xFFFFFFF7 | 0, 0xFFFFFFF7 &gt;&gt;&gt; 0);</pre>
+
+    <div class="result-box">
+        1073741821 2 4294967295 1<br>
+        11111111111111111111111111110111 -1001<br>
+        fffffff7 -9 4294967287
+    </div>
+
+    <p>Для положительных чисел <code>&gt;&gt;</code> и <code>&gt;&gt;&gt;</code> совпадают (9 → 2), для отрицательных
+    расходятся: −9 &gt;&gt;&gt; 2 — большое положительное число, как на схеме. <code>-1 &gt;&gt;&gt; 31</code> — 1: из 32
+    единиц осталась одна. Последняя строка показывает, что одни и те же 32 разряда — это −9 для ToInt32 и
+    4294967287 для ToUint32. Разряды одни, прочтения два.</p>
+
+    <h2 id="bigint">10. BigInt: биты без конца</h2>
+
+    <p>У BigInt нет 32 разрядов — у него их бесконечно много. <a href="https://tc39.es/ecma262/2026/#sec-bigintbitwiseop">BigIntBitwiseOp</a>
+    (6.1.6.2.17) идёт по разрядам обоих чисел, пока каждое не станет 0 или −1, то есть пока дальше не потянутся
+    одни нули или одни единицы. Положительное число — бесконечные нули слева, отрицательное — бесконечные единицы
+    (день 4). Поэтому <code>-1n &amp; 0xFFn</code> — 255n: у −1 единицы везде, и <code>&amp;</code> оставляет младший
+    байт.</p>
+
+    <pre class="code js">console.log(14n &amp; 9n, -1n &amp; 0xFFn, -256n | 255n, 5n &amp; -2n);
+console.log(1n &lt;&lt; 64n, -9n &gt;&gt; 2n, 1n &lt;&lt; -1n, -1n &lt;&lt; -1n, -1n &gt;&gt; 100n, 9n &gt;&gt; -2n);</pre>
+
+    <div class="result-box">
+        8n 255n -1n 4n<br>
+        18446744073709551616n -3n 0n -1n -1n 36n
+    </div>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-numeric-types-bigint-leftShift">BigInt::leftShift</a>
+    (6.1.6.2.9) не берёт счётчик по модулю: <code>1n &lt;&lt; 64n</code> — честные 2<sup>64</sup>. Отрицательный
+    счётчик сдвигает в другую сторону с округлением вниз: ⌊1/2⌋ = 0, ⌊−1/2⌋ = −1. А
+    <code>&gt;&gt;</code> у BigInt — это <code>&lt;&lt;</code> с минусом. Для <code>&gt;&gt;&gt;</code> места не нашлось:
+    «вдвинуть нули слева» нельзя, потому что левого края нет.
+    <a href="https://tc39.es/ecma262/2026/#sec-numeric-types-bigint-unsignedRightShift">BigInt::unsignedRightShift</a>
+    (6.1.6.2.11) состоит из одного шага — бросить <code>TypeError</code>:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() =&gt; 5n &gt;&gt;&gt; 1n));
+console.log(attempt(() =&gt; 1n &lt;&lt; 1));
+console.log(attempt(() =&gt; 1n &lt;&lt; 2n ** 40n));
+let c = 5n;
+console.log(attempt(() =&gt; { c &gt;&gt;&gt;= 2n; return c; }), c);</pre>
+
+    <div class="result-box">
+        TypeError: BigInts have no unsigned right shift, use &gt;&gt; instead<br>
+        TypeError: Cannot mix BigInt and other types, use explicit conversions<br>
+        RangeError: Maximum BigInt size exceeded<br>
+        TypeError: BigInts have no unsigned right shift, use &gt;&gt; instead 5n
+    </div>
+
+    <p>Смешивать BigInt и число нельзя: ApplyStringOrNumericBinaryOperator проверяет SameType. Сдвиг на
+    2<sup>40</sup> разрядов спецификация разрешает, но у V8 свой предел размера BigInt — это реализация (день 1).
+    Последняя строка — поправка к MDN: на странице
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift_assignment">Unsigned
+    right shift assignment</a> в примере написано <code>c &gt;&gt;&gt;= 2n; // 1n</code>. Это неверно: составное
+    присваивание идёт тем же путём, что <code>&gt;&gt;&gt;</code>, Chrome бросает ту же ошибку, и <code>c</code>
+    остаётся 5n. Страница <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift">Unsigned
+    right shift</a> пишет верно: «doesn't work with BigInts».</p>
+
+    <h2 id="compound">11. Составные присваивания</h2>
+
+    <p>У каждого из шести двуместных операторов есть составное присваивание: <code>&amp;=</code>, <code>|=</code>,
+    <code>^=</code>, <code>&lt;&lt;=</code>, <code>&gt;&gt;=</code>, <code>&gt;&gt;&gt;=</code>. Страницы MDN говорят:
+    <code>x &lt;&lt;= y</code> — это <code>x = x &lt;&lt; y</code>, только <code>x</code> вычисляется один раз.
+    В спецификации это видно по шагам <a href="https://tc39.es/ecma262/2026/#sec-assignment-operators-runtime-semantics-evaluation">13.15.2</a>:
+    ссылка слева вычисляется один раз, из неё читается значение, вычисляется правая часть, по таблице выбирается
+    оператор без «=», результат ApplyStringOrNumericBinaryOperator записывается PutValue в ту же ссылку (день 4).</p>
+
+    <pre class="code js">const o = { a: 5 };
+let calls = 0;
+const pick = () =&gt; { calls++; return "a"; };
+o[pick()] &lt;&lt;= 2;
+console.log(o.a, calls);
+o[pick()] = o[pick()] &lt;&lt; 2;
+console.log(o.a, calls);
+let s = "3";
+s &amp;= "6";
+let neg = -5;
+neg &gt;&gt;&gt;= 2;
+console.log(s, typeof s, neg);</pre>
+
+    <div class="result-box">
+        20 1<br>
+        80 3<br>
+        2 number 1073741822
+    </div>
+
+    <p>Составное присваивание позвало <code>pick</code> один раз, развёрнутая запись — два: с побочным эффектом
+    разница настоящая. Строка «3» после <code>&amp;=</code> стала числом 2: результат побитового оператора — всегда
+    число или BigInt.</p>
+
+    <h2 id="trunc">12. x | 0 против Math.trunc</h2>
+
+    <p>Каждая страница MDN дня предупреждает: <code>| 0</code>, <code>~~</code>, <code>&lt;&lt; 0</code>,
+    <code>&gt;&gt; 0</code> и <code>^ 0</code> иногда пишут, чтобы отбросить дробь, а это не то же, что
+    <code>Math.trunc</code>. Теперь мы знаем почему: это ToInt32, и он не только отбрасывает дробь, но и берёт остаток
+    от деления на 2<sup>32</sup>. Практика дня — сравнить около 2<sup>31</sup>:</p>
+
+    <pre class="code js">const values = [2147483647.9, 2147483648, -2147483649, 3e9, 1e21, NaN, -Infinity];
+for (const v of values) console.log(v, v | 0, Math.trunc(v));</pre>
+
+    <div class="result-box">
+        2147483647.9 2147483647 2147483647<br>
+        2147483648 -2147483648 2147483648<br>
+        -2147483649 2147483647 -2147483649<br>
+        3000000000 -1294967296 3000000000<br>
+        1e+21 -559939584 1e+21<br>
+        NaN 0 NaN<br>
+        -Infinity 0 -Infinity
+    </div>
+
+    <p>До 2147483647 включительно — одно и то же; на единицу дальше — разные знаки. NaN и бесконечности
+    <code>| 0</code> молча превращает в 0, а <code>Math.trunc</code> оставляет как есть, и ошибка не прячется. Где
+    граница встречается в жизни? Время в секундах от 1 января 1970 года влезает в 32 разряда недолго:</p>
+
+    <pre class="code js">const now = Date.UTC(2026, 9, 30) / 1000;              // секунды с 1970 года
+const edge = Date.UTC(2038, 0, 19, 3, 14, 8) / 1000;
+console.log(now, now | 0);
+console.log(edge - 1, (edge - 1) | 0, edge, edge | 0);
+console.log(new Date((edge - 1) * 1000).toISOString());</pre>
+
+    <div class="result-box">
+        1793318400 1793318400<br>
+        2147483647 2147483647 2147483648 -2147483648<br>
+        2038-01-19T03:14:07.000Z
+    </div>
+
+    <p>19 января 2038 года в 03:14:08 по UTC секунды перестанут влезать в 31 разряд — это «проблема 2038 года»
+    старых программ на C. <code>Date</code> хранит миллисекунды в 64-битной дроби и её не знает — пока кто-нибудь
+    не напишет <code>| 0</code>. Вывод: <code>| 0</code> и <code>~~</code> — только для чисел, которые точно
+    32-битные (индексы, коды символов, цвета). Для остальных — <code>Math.trunc</code>.</p>
+
+    <h2 id="masks">13. Маски: права, чётность, цвет</h2>
+
+    <p>Где побитовые операторы действительно нужны — там, где число — это набор флажков. Каждому флажку — свой
+    разряд, <code>1 &lt;&lt; k</code>. Права ученика в группе курса:</p>
+
+    <pre class="code js">const VIEW = 1 &lt;&lt; 0, ANSWER = 1 &lt;&lt; 1, EDIT = 1 &lt;&lt; 2, SHARE = 1 &lt;&lt; 3;
+const show = (r) =&gt; r.toString(2).padStart(4, "0");
+let rights = VIEW | ANSWER;
+console.log(show(rights), (rights &amp; EDIT) !== 0, (rights &amp; ANSWER) !== 0);
+rights |= EDIT;
+console.log(show(rights));
+rights &amp;= ~ANSWER;
+console.log(show(rights));
+rights ^= SHARE;
+console.log(show(rights), (rights &amp; (VIEW | EDIT)) === (VIEW | EDIT));
+console.log(1 &lt;&lt; 30, 1 &lt;&lt; 31, (1 &lt;&lt; 31) &gt;&gt;&gt; 0);</pre>
+
+    <div class="result-box">
+        0011 false true<br>
+        0111<br>
+        0101<br>
+        1101 true<br>
+        1073741824 -2147483648 2147483648
+    </div>
+
+    <p>Четыре приёма: <code>|=</code> ставит флажок, <code>&amp;= ~</code> снимает (маска со всеми единицами, кроме
+    одной), <code>^=</code> переключает, <code>&amp;</code> проверяет — в скобках, раздел 6. Проверка «есть оба» —
+    сравнить пересечение с маской целиком. Флажков в числе 32, но 32-й, <code>1 &lt;&lt; 31</code>, делает число
+    отрицательным — его читают через <code>&gt;&gt;&gt; 0</code>. Нужно больше флажков — BigInt.</p>
+
+    <p>Чётность: <code>n &amp; 1</code> — младший разряд. С <code>% 2</code> есть разница:</p>
+
+    <pre class="code js">const numbers = [4, 7, -3, -4, 2 ** 53 - 1, 2.5];
+console.log(numbers.map((n) =&gt; n % 2).join(" "));
+console.log(numbers.map((n) =&gt; n &amp; 1).join(" "));</pre>
+
+    <div class="result-box">
+        0 1 -1 0 1 0.5<br>
+        0 1 1 0 1 0
+    </div>
+
+    <p>У −3 остаток −1, и проверка <code>n % 2 === 1</code> назовёт нечётное −3 чётным. <code>&amp; 1</code> даёт 1:
+    в дополнительном коде младший разряд нечётного — 1 при любом знаке, а остаток по модулю 2<sup>32</sup>
+    чётность не меняет, поэтому проходит и 2<sup>53</sup> − 1. Зато 2.5 <code>&amp; 1</code> молча называет чётным:
+    дробь отброшена на шаге 3.</p>
+
+    <p>И цвет организации Shapak-Apps — <code>#FF851B</code>. Шесть шестнадцатеричных цифр — три байта: красный,
+    зелёный, синий. Достать их — сдвинуть нужный байт вниз и отрезать остальное маской <code>0xFF</code>:</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 250" role="img" aria-label="Цвет 0xFF851B как три байта: FF — красный 255, 85 — зелёный 133, 1B — синий 27; с прозрачностью 0xFF851BCC сдвиг >> 24 даёт -1, а >>> 24 даёт 255">
+            <rect x="10" y="10" width="60" height="40" rx="8" fill="#FF851B" stroke="#c2410c" stroke-width="1.5"/>
+            <text x="84" y="28" font-family="Consolas, monospace" font-size="13" font-weight="700" fill="#334155">const color = 0xFF851B;</text>
+            <text x="84" y="46" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">одно число 16745755 — три байта по 8 разрядов</text>
+
+            <rect x="10" y="64" width="200" height="72" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+            <text x="110" y="84" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#991b1b">11111111</text>
+            <text x="110" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#991b1b">FF — красный, 255</text>
+            <text x="110" y="124" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#991b1b">color &gt;&gt; 16</text>
+
+            <rect x="220" y="64" width="200" height="72" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="320" y="84" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#065f46">10000101</text>
+            <text x="320" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#065f46">85 — зелёный, 133</text>
+            <text x="320" y="124" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#065f46">(color &gt;&gt; 8) &amp; 0xFF</text>
+
+            <rect x="430" y="64" width="200" height="72" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+            <text x="530" y="84" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#1e40af">00011011</text>
+            <text x="530" y="104" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#1e40af">1B — синий, 27</text>
+            <text x="530" y="124" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#1e40af">color &amp; 0xFF</text>
+
+            <text x="10" y="160" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Обратно — сдвинуть каждый байт на место и сложить разряды: (r &lt;&lt; 16) | (g &lt;&lt; 8) | b.</text>
+
+            <rect x="10" y="174" width="620" height="66" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="22" y="194" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">С прозрачностью — четвёртый байт: 0xFF851BCC = 4286913484, больше 2³¹ − 1</text>
+            <text x="22" y="213" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412">rgba &gt;&gt; 24 даёт −1: ToInt32 сделал число отрицательным, слева вдвинулись единицы</text>
+            <text x="22" y="231" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412">rgba &gt;&gt;&gt; 24 даёт 255: ToUint32 и нули слева — верхний байт целиком</text>
+        </svg>
+        <figcaption>Цвет #FF851B по байтам</figcaption>
+    </figure>
+
+    <pre class="code js">const color = 0xFF851B;
+const r = color &gt;&gt; 16, g = (color &gt;&gt; 8) &amp; 0xFF, b = color &amp; 0xFF;
+console.log(color, r, g, b, parseInt("FF851B", 16) === color);
+console.log(`#${((r &lt;&lt; 16) | (g &lt;&lt; 8) | b).toString(16).padStart(6, "0").toUpperCase()}`);
+const rgba = 0xFF851BCC;
+console.log(rgba | 0, rgba &gt;&gt; 24, rgba &gt;&gt;&gt; 24, rgba &amp; 0xFF);</pre>
+
+    <div class="result-box">
+        16745755 255 133 27 true<br>
+        #FF851B<br>
+        -8053812 -1 255 204
+    </div>
+
+    <p>У трёх байтов старший разряд — 23-й, до знака далеко, и <code>&gt;&gt;</code> работает. С четвёртым байтом
+    число переходит за 2<sup>31</sup>, и верхнему байту нужен <code>&gt;&gt;&gt;</code>. Частая ошибка разбора цветов
+    и заголовков файлов: с тремя байтами работало, с четырьмя — минус.</p>
+
+    <h2 id="void">14. Оператор void</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-void-operator">Раздел 13.5.2</a> и его вычисление
+    <a href="https://tc39.es/ecma262/2026/#sec-void-operator-runtime-semantics-evaluation">13.5.2.1</a> — три шага:
+    вычислить операнд, сделать <code>GetValue</code>, вернуть <code>undefined</code>. Примечание объясняет второй
+    шаг: значение не нужно, но <code>GetValue</code> всё равно зовут — у него могут быть видимые последствия.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(void 0, void "kitap", void (2 === "2"), void 2 === "2");
+const card = { get word() { console.log("геттер"); return "kitap"; } };
+console.log(void card.word);
+console.log(attempt(() =&gt; void nope), typeof nope);
+(function () {
+  const undefined = 5;
+  console.log(undefined, void 0);
+})();</pre>
+
+    <div class="result-box">
+        undefined undefined undefined false<br>
+        геттер<br>
+        undefined<br>
+        ReferenceError: nope is not defined undefined<br>
+        5 undefined
+    </div>
+
+    <p><code>void 2 === "2"</code> — это <code>(void 2) === "2"</code>: унарный оператор связывает сильнее
+    сравнения. Геттер вызвался — это и есть «видимые последствия» <code>GetValue</code>. Необъявленное имя:
+    <code>typeof</code> перед <code>GetValue</code> проверяет, разрешилась ли ссылка, а <code>void</code> — нет, и
+    GetValue бросает <code>ReferenceError</code> (день 4). И почему писали <code>void 0</code>:
+    <code>undefined</code> — имя, а не слово языка (день 3), в функции его можно занять, а <code>void 0</code> —
+    <code>undefined</code> всегда. Сжиматели кода так пишут до сих пор: это короче.</p>
+
+    <p>Страница MDN <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/void">void</a>
+    называет ещё три применения. Первое — немедленный вызов функции: <code>function</code> в начале инструкции —
+    это объявление, и вызов после него — ошибка; любой унарный оператор делает из неё выражение, а
+    <code>void</code> заодно говорит читателю «результат не нужен». Со стрелкой так нельзя — у неё свой приоритет:</p>
+
+    <pre class="code js">const parse = (code) =&gt; {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("function () {}();"));
+console.log(parse("void function () {}();"));
+console.log(parse("void () =&gt; {}();"));
+void function () {
+  console.log("выполнилась сразу");
+}();</pre>
+
+    <div class="result-box">
+        SyntaxError: Function statements require a function name<br>
+        ok<br>
+        SyntaxError: Malformed arrow function parameter list<br>
+        выполнилась сразу
+    </div>
+
+    <p>Второе — ссылки <code>javascript:void(0)</code> в старой разметке: браузер, переходя по такой ссылке, заменяет
+    страницу результатом кода, если он не <code>undefined</code>. Сегодня вместо таких ссылок вешают обработчики
+    (Essentials, день 27). Третье применение живое — стрелка, которая не должна ничего возвращать:</p>
+
+    <pre class="code js">const log = [];
+const add = (word) =&gt; log.push(word);
+const addQuiet = (word) =&gt; void log.push(word);
+console.log(add("kitap"), addQuiet("galam"), log);
+const box = document.createElement("input");
+box.type = "checkbox";
+const check = () =&gt; false;          // проверка вдруг стала возвращать false
+box.onclick = () =&gt; check();
+box.click();
+console.log(box.checked);
+box.onclick = () =&gt; void check();
+box.click();
+console.log(box.checked);</pre>
+
+    <div class="result-box">
+        1 undefined (2) ['kitap', 'galam']<br>
+        false<br>
+        true
+    </div>
+
+    <p>Стрелка без фигурных скобок возвращает значение выражения. Для обработчика в свойстве <code>onclick</code>
+    возврат <code>false</code> — это отмена действия по умолчанию (как <code>preventDefault</code>, день 27
+    Essentials): флажок не
+    отметился. Функция <code>check</code> поменялась где-то в другом файле — и сломала флажок. С <code>void</code>
+    стрелка возвращает <code>undefined</code> при любой <code>check</code>, и флажок отмечается.</p>
+
+    <h2 id="cards">15. «Карточки 2.0»: шаг повторения</h2>
+
+    <p>В «Карточках 2.0» каждое «Знаю» удваивает шаг повторения (день 34 курса 2):</p>
+
+    <pre class="code js">// deck.js, день 34 курса 2 — метод know
+  know(id, today) {
+    if (!this.#cards.has(id)) throw new CardsError(`в колоде нет карточки ${id}`);
+    const step = this.#progress.get(id)?.step ?? 1;
+    this.#progress.set(id, { next: today.add({ days: step * 2 }), step: step * 2 });
+  }</pre>
+
+    <p>Шаг — всегда степень двойки: 1, 2, 4, 8… Соблазн — написать <code>step &lt;&lt; 1</code>: «быстрее, по-взрослому».
+    Проверим, где пути расходятся:</p>
+
+    <pre class="code js">let byTimes = 1;
+let byShift = 1;
+for (let i = 1; i &lt;= 32; i++) {
+  byTimes *= 2;
+  byShift &lt;&lt;= 1;
+  if (i === 10 || i &gt;= 30) console.log(i, byTimes, byShift);
+}</pre>
+
+    <div class="result-box">
+        10 1024 1024<br>
+        30 1073741824 1073741824<br>
+        31 2147483648 -2147483648<br>
+        32 4294967296 0
+    </div>
+
+    <p>Тридцать «Знаю» подряд — одинаково. На 31-м сдвиг даёт отрицательный шаг: повтор «в прошлом». На 32-м — ноль:
+    карточка навсегда «на сегодня». До 2<sup>31</sup> дней (шесть миллионов лет) ни одна карточка не доживёт, но
+    <code>&lt;&lt;</code> верен, только пока число гарантированно в 32 разрядах, а <code>* 2</code> — всегда. И
+    быстрее сдвиг не будет: умножение на 2 V8 оптимизирует сам. В «Карточках» остаётся <code>* 2</code>.</p>
+
+    <p>А вот где биты к месту — чтение: «уровень» карточки, то есть сколько раз её уже удвоили. Для степени двойки
+    это номер единственного единичного разряда, и его даёт <code>Math.clz32</code> — сколько нулей перед ним:</p>
+
+    <pre class="code js">const level = (step) =&gt; 31 - Math.clz32(step);
+console.log([1, 2, 4, 8, 1024].map(level).join(" "), Math.log2(1024));
+console.log(level(2 ** 31), level(2 ** 32), level(3), level(6));</pre>
+
+    <div class="result-box">
+        0 1 2 3 10 10<br>
+        31 -1 1 2
+    </div>
+
+    <p>Для степеней двойки — как <code>Math.log2</code>, но без дробей: для 3 и 6 — номер старшего разряда, 1 и 2.
+    Граница та же: 2<sup>32</sup> для ToUint32 — 0, уровень −1. Для звёздочек на кнопке колоды — с запасом.</p>
+
+    <h2 id="next">16. Что будет завтра</h2>
+
+    <p>Сегодня мы закончили с операциями над значениями. Завтра, на дне 7, — последний день модуля: операции над
+    объектами и итераторами из глав 7.3 и 7.4 — <code>Get</code>, <code>Set</code>, <code>Call</code>,
+    <code>Construct</code> и записи итераторов, то есть то, что стоит за каждой точкой, каждым вызовом и каждым
+    <code>for...of</code>.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Источник</th><th>Что там</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_AND">MDN: Bitwise AND (&amp;)</a></td><td>оба разряда — 1</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_OR">MDN: Bitwise OR (|)</a></td><td>хотя бы один — 1</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_XOR">MDN: Bitwise XOR (^)</a></td><td>ровно один — 1</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_NOT">MDN: Bitwise NOT (~)</a></td><td>−x − 1; <code>~~</code> — не <code>Math.trunc</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Left_shift">MDN: Left shift (&lt;&lt;)</a></td><td>умножение на 2<sup>k</sup>, счётчик по модулю 32</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Right_shift">MDN: Right shift (&gt;&gt;)</a></td><td>знак копируется</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift">MDN: Unsigned right shift (&gt;&gt;&gt;)</a></td><td>нули слева; у BigInt нет</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/void">MDN: void</a></td><td><code>undefined</code>; немедленный вызов, стрелки</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_AND_assignment">MDN: &amp;=</a></td><td><code>x = x &amp; y</code>, <code>x</code> вычисляется один раз</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_OR_assignment">MDN: |=</a></td><td>поставить флажок</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_XOR_assignment">MDN: ^=</a></td><td>переключить флажок</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Left_shift_assignment">MDN: &lt;&lt;=</a></td><td>сдвиг на месте</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Right_shift_assignment">MDN: &gt;&gt;=</a></td><td>сдвиг на месте со знаком</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift_assignment">MDN: &gt;&gt;&gt;=</a></td><td>с BigInt — <code>TypeError</code> (пример страницы неверен)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toint32">7.1.6 ToInt32</a></td><td>пять шагов, итог от −2<sup>31</sup> до 2<sup>31</sup> − 1</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-touint32">7.1.7 ToUint32</a></td><td>без шага 5, от 0 до 2<sup>32</sup> − 1</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toint16">7.1.8 ToInt16</a></td><td>16 разрядов со знаком</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-touint16">7.1.9 ToUint16</a></td><td>16 без знака; <code>fromCharCode</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-toint8">7.1.10 ToInt8</a></td><td>8 разрядов со знаком</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-touint8">7.1.11 ToUint8</a></td><td>8 без знака</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-touint8clamp">7.1.12 ToUint8Clamp</a></td><td>зажим 0…255, округление к чётному</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tobigint64">7.1.15 ToBigInt64</a></td><td>64 разряда BigInt со знаком</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tobiguint64">7.1.16 ToBigUint64</a></td><td>64 без знака</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-void-operator">13.5.2 The void Operator</a></td><td>вычислить, GetValue, <code>undefined</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-bitwise-not-operator">13.5.6 Bitwise NOT Operator</a></td><td>ToNumeric, потом bitwiseNOT</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-bitwise-shift-operators">13.9 Bitwise Shift Operators</a></td><td>грамматика: сдвиг слабее сложения</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-left-shift-operator">13.9.1 Left Shift</a></td><td>через ApplyStringOrNumericBinaryOperator</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-signed-right-shift-operator">13.9.2 Signed Right Shift</a></td><td>то же, знак копируется</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-unsigned-right-shift-operator">13.9.3 Unsigned Right Shift</a></td><td>то же, нули слева</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators">13.12 Binary Bitwise Operators</a></td><td>грамматика: <code>&amp;</code> слабее <code>===</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators-runtime-semantics-evaluation">13.12.1 Evaluation</a></td><td>все три — EvaluateStringOrNumericBinaryExpression</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// &amp; | ^ ~ &lt;&lt; &gt;&gt; &gt;&gt;&gt;: ToNumeric; два BigInt — без обрезки, BigInt с числом — TypeError
+// ToInt32: ToNumber; NaN ±Infinity ±0 → 0; дробь прочь; modulo 2**32 (≥ 0); ≥ 2**31 → минус 2**32
+// ToUint32 — без последнего шага: x &gt;&gt;&gt; 0; −9 → 4294967287; ~x = −x − 1, разряд 31 весит −2**31
+// x &lt;&lt; k: счётчик ToUint32 % 32 (1 &lt;&lt; 32 = 1); 1 &lt;&lt; 31 — уже минус
+// x &gt;&gt; k: деление на 2**k вниз (−9 &gt;&gt; 2 = −3); x &gt;&gt;&gt; k: нули слева, всегда ≥ 0
+// BigInt: 1n &lt;&lt; 64n честно, отрицательный счётчик — в другую сторону; 5n &gt;&gt;&gt; 1n — TypeError
+// приоритет: + − сильнее &lt;&lt;; == === сильнее &amp; ^ |: n &amp; 1 === 0 — это n &amp; false
+// x | 0 и ~~x — ToInt32, а не Math.trunc: 3e9 | 0 = −1294967296, NaN | 0 = 0
+
+// флажки: r |= F ставит, r &amp;= ~F снимает, r ^= F переключает, (r &amp; F) !== 0 проверяет
+// чётность: n &amp; 1 (−3 → 1), а не n % 2 (−3 → −1)
+// байты: (c &gt;&gt; 16) &amp; 0xFF; верхний байт 32-битного — c &gt;&gt;&gt; 24
+// void x: вычислить x, GetValue (геттер сработает, необъявленное — ReferenceError), вернуть undefined</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>3e9 | 0</code> — отрицательное число?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>|</code> переводит операнды ToInt32. 3000000000 — целое и меньше 2<sup>32</sup>, остаток по
+                    модулю 2<sup>32</sup> — оно само, но это больше 2<sup>31</sup>, и шаг 5 вычитает 2<sup>32</sup>:
+                    −1294967296.
+                </details>
+            </li>
+            <li>Чем <code>-9 &gt;&gt; 2</code> отличается от <code>-9 &gt;&gt;&gt; 2</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>&gt;&gt;</code> переводит −9 ToInt32 и вдвигает слева копии знакового разряда — −3, как
+                    ⌊−9/4⌋. <code>&gt;&gt;&gt;</code> переводит ToUint32 и вдвигает нули — 1073741821.
+                </details>
+            </li>
+            <li>Почему проверка <code>if (n &amp; 1 === 0)</code> никогда не срабатывает?
+                <details class="answer"><summary>Ответ</summary>
+                    По грамматике 13.12 операнд <code>&amp;</code> — выражение равенства, поэтому сначала
+                    <code>1 === 0</code>, то есть <code>false</code>, а <code>n &amp; false</code> — 0. Нужны скобки:
+                    <code>(n &amp; 1) === 0</code>.
+                </details>
+            </li>
+            <li>Что даёт <code>1 &lt;&lt; 32</code> и что — <code>1n &lt;&lt; 32n</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    1: у чисел счётчик сдвига берётся по модулю 32, и сдвиг на 32 — сдвиг на 0. У BigInt модуля нет,
+                    ответ — 4294967296n.
+                </details>
+            </li>
+            <li>Зачем <code>void</code> вычисляет операнд, если всё равно возвращает <code>undefined</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Вычисление и <code>GetValue</code> могут иметь видимые последствия: сработает геттер, вызовется
+                    функция, а необъявленное имя бросит <code>ReferenceError</code>. Спецификация обязывает выполнить их,
+                    отбрасывается только значение.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_AND">MDN Web Docs</a>
+        (страницы побитовых операторов, сдвигов, их присваиваний и <code>void</code>, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

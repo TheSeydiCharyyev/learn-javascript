@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-08');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -42,11 +42,90 @@ const show = (a) => {
 const echo = (a) => (a.type === 'string' ? q(a.value) : show(a));
 
 // a block without a result-box: its output by "page #index" or by the first line; the tasks ask to predict these
-const EXPECT = {};
+const EXPECT = {
+  'tasks #0': ["let a; { var a; } → SyntaxError: Identifier 'a' has already been declared", 'var b; let c; { let b; } → ok', 'function g() { var g; } → ok',
+    'function h(h) { let x; } → ok', "const [k, k] = []; → SyntaxError: Identifier 'k' has already been declared",
+    'if (true) let z = 1; → SyntaxError: Lexical declaration cannot appear in a single-statement context', "{ class C {} var C; } → SyntaxError: Identifier 'C' has already been declared",
+    'for (var i of []) { let i; } → ok', '(function () { let arguments; }) → ok'],
+  'tasks #1': ['undefined function ReferenceError undefined ReferenceError 2'],
+  'tasks #2': ['"b" "c" "d" "e" "f" "" "j" "" "bound "'],
+  'tasks #6': ['outer: for (;;) { inner: for (;;) { continue outer; } } → ok', "a: { a: ; } → SyntaxError: Label 'a' has already been declared",
+    "x: while (0) { function f() { break x; } } → SyntaxError: Undefined label 'x'", 'class A { static { super.x; } } → ok', '({ m() { super.x; } }) → ok', 'f()++; → ok',
+    'a + b = 1; → SyntaxError: Invalid left-hand side in assignment'],
+  'tasks #8': ["function f(a, b) { 'use strict'; } → ok", "function f(a = 1) { 'use strict'; } → SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list",
+    "function f({ a }) { 'use strict'; } → SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list",
+    "function f(...a) { 'use strict'; } → SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list",
+    'function f(a, a = 1) {} → SyntaxError: Duplicate parameter name not allowed in this context', '(function (a, a) {}) → ok', 'внешний'],
+};
 
 // Examples of the tasks call functions the student writes. These reference solutions make every
 // "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
-const SOLUTIONS = {};
+const SOLUTIONS = {
+  earlyError: `function lexNames(list, top) {
+  const names = [];
+  for (const [kind, name] of list) {
+    if (kind === "let" || kind === "const") names.push(name);
+    else if (kind === "function" && !top) names.push(name);
+  }
+  return names;
+}
+function varNames(list, top) {
+  const names = [];
+  for (const [kind, a, b] of list) {
+    if (kind === "var") names.push(a);
+    else if (kind === "function" && top) names.push(a);
+    else if (kind === "block") names.push(...varNames(a, false));
+    else if (kind === "if") names.push(...varNames(a, false), ...varNames(b ?? [], false));
+  }
+  return names;
+}
+function earlyError(list, top) {
+  const lex = lexNames(list, top);
+  const vars = varNames(list, top);
+  const dup = lex.find((n, i) => lex.indexOf(n) !== i);
+  if (dup !== undefined) return dup;
+  const both = lex.find((n) => vars.includes(n));
+  if (both !== undefined) return both;
+  for (const [kind, a, b] of list) {
+    const inner = kind === "block" ? [a] : kind === "if" ? [a, b ?? []] : [];
+    for (const l of inner) { const e = earlyError(l, false); if (e !== null) return e; }
+  }
+  return null;
+}`,
+  setFunctionName: `function setFunctionName(fn, name, prefix) {
+  if (typeof name === "symbol") name = name.description === undefined ? "" : "[" + name.description + "]";
+  if (prefix !== undefined) name = prefix + " " + name;
+  Object.defineProperty(fn, "name", { value: name, writable: false, enumerable: false, configurable: true });
+  return fn;
+}`,
+  listen: `function setFunctionName(fn, name) {
+  Object.defineProperty(fn, "name", { value: name, writable: false, enumerable: false, configurable: true });
+  return fn;
+}
+const registry = new WeakMap();
+function unlisten(element, type, name) {
+  const map = registry.get(element);
+  const handler = map && map.get(type + ":" + name);
+  if (!handler) return;
+  element.removeEventListener(type, handler);
+  map.delete(type + ":" + name);
+}
+function listen(element, type, name, handler) {
+  unlisten(element, type, name);
+  setFunctionName(handler, name);
+  element.addEventListener(type, handler);
+  if (!registry.has(element)) registry.set(element, new Map());
+  registry.get(element).set(type + ":" + name, handler);
+}
+function names(element) {
+  return [...(registry.get(element)?.values() ?? [])].map((h) => h.name);
+}`,
+  contains: `function contains(node, symbol) {
+  if (node.type === "Function") return false;
+  if (node.type === "Arrow" && !["This", "Super", "NewTarget"].includes(symbol)) return false;
+  return (node.children ?? []).some((child) => child.type === symbol || contains(child, symbol));
+}`,
+};
 const checkable = (code) => {
   const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
   const lines = code.split('\n').map((line) => {
@@ -223,6 +302,27 @@ console.log(parse("'use strict'; { function f() {} function f() {} }"), [a, c, (
     check(JSON.stringify(out) === JSON.stringify(["SyntaxError: Identifier 'f' has already been declared \"b\" \"c\" \"x1\" \"\" \"d\""]),
       `student homework 1, 2: strict code forbids the two functions; b, c, x1, "", d ${JSON.stringify(out)}`);
   }
+  // tasks 4–6: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${PARSE}${SOLUTIONS.earlyError}
+${SOLUTIONS.setFunctionName}
+const programs = [[[["let", "x"], ["let", "x"]], "let x; let x;"], [[["var", "x"], ["var", "x"]], "var x; var x;"], [[["block", [["var", "x"]]], ["let", "x"]], "{ var x; } let x;"],
+  [[["var", "x"], ["block", [["let", "x"]]]], "var x; { let x; }"], [[["function", "f"], ["var", "f"]], "function f() {} var f;"], [[["block", [["function", "f"], ["var", "f"]]]], "{ function f() {} var f; }"]];
+console.log(programs.every(([list, code]) => (earlyError(list, true) === null) === (parse(code) === "ok")));
+const sym = Symbol("tag");
+console.log(setFunctionName(() => {}, "size", "get").name === Object.getOwnPropertyDescriptor({ get size() { return 1; } }, "size").get.name, setFunctionName(() => {}, sym).name === { [sym]: () => {} }[sym].name);`, 'tasks-criteria-1.html');
+    check(JSON.stringify(out) === JSON.stringify(['true', 'true true']), `tasks 4, 5: earlyError agrees with parse on the six programs; setFunctionName agrees with a getter and a symbol key ${JSON.stringify(out)}`);
+  }
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.listen}
+const button = document.createElement("button");
+let clicks = 0;
+listen(button, "click", "onAgain", () => clicks++);
+listen(button, "click", "onAgain", () => clicks++);
+button.click();
+console.log(clicks, names(button).join());`, 'tasks-criteria-2.html');
+    check(JSON.stringify(out) === '["1 onAgain"]', `tasks 6: a second listen with the same name replaces the listener ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -296,6 +396,12 @@ console.log(parse("'use strict'; { function f() {} function f() {} }"), [a, c, (
     && f('sec-static-semantics-propname').includes('PropertyDefinition : IdentifierReference Return the StringValue of IdentifierReference') && f('sec-static-semantics-propname').includes('ComputedPropertyName : [ AssignmentExpression ] Return empty'),
   'lecture 14: 13.2.5.1 counts only "key: value" entries; PropName — a shorthand has its name, a computed key is empty');
 
+  check(f('sec-setfunctionname').includes('DefinePropertyOrThrow (F, "name", PropertyDescriptor { [[Value]] : name, [[Writable]] : false, [[Enumerable]] : false, [[Configurable]] : true })'),
+    'tasks 5: SetFunctionName defines name read-only, not enumerable, configurable');
+  check(f('sec-static-semantics-issimpleparameterlist').includes('15.1.3 Static Semantics: IsSimpleParameterList') && f('sec-static-semantics-containsexpression').includes('15.1.2 Static Semantics: ContainsExpression')
+    && f('sec-function-definitions-static-semantics-early-errors').includes('It is a Syntax Error if FunctionBodyContainsUseStrict of FunctionBody is true and IsSimpleParameterList of FormalParameters is false')
+    && f('sec-functiondeclarationinstantiation').includes('Let hasParameterExpressions be ContainsExpression of formals'),
+  'tasks 9: 15.1.2–15.1.3; "use strict" needs a simple list (15.2.1); FunctionDeclarationInstantiation asks ContainsExpression');
   check(f('sec-block-static-semantics-early-errors').includes('IsStrict (this production) is false. The duplicate entries are only bound by FunctionDeclarations'),
     'student homework 1: the exception of 14.2.1 — non-strict code and only function declarations');
   const mdnName = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/global_objects/function/name/index.md'], { encoding: 'utf8' });

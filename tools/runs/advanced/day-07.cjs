@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-07');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -41,12 +41,89 @@ const show = (a) => {
 // what the console prints after an input: strings in quotes, the rest as in console.log
 const echo = (a) => (a.type === 'string' ? q(a.value) : show(a));
 
-// a block without a result-box: its output by the first line; the tasks ask to predict these, the answers live here
-const EXPECT = {};
+// a block without a result-box: its output by "page #index" (tasks 1–3 start with the same line) or by the first line;
+// the tasks ask to predict these, the answers live here
+const EXPECT = {
+  'tasks #0': ['false false true 0 7 set kitap | set alma', 'TypeError'],
+  'tasks #1': ['0,1,2,10,a,b get a | set a 2', '2,10,b,a 0 get a'],
+  'tasks #2': ['iter next body 1 next body 2 next', 'iter next next return', '1 2 iter next next return', '1 2 iter next next next'],
+  'tasks #6': ['2 x false true false', 'TypeError TypeError true false true'],
+  'tasks #8': ['function function false', 'TypeError ok true 5', 'ok [object Моё] [object Array Iterator]', 'TypeError TypeError', 'TypeError 1'],
+};
 
 // Examples of the tasks call functions the student writes. These reference solutions make every
 // "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
-const SOLUTIONS = {};
+const SOLUTIONS = {
+  copyData: `function copyData(target, source, excluded = []) {
+  if (source === undefined || source === null) return target;
+  const from = Object(source);
+  const keys = [...Object.getOwnPropertyNames(from), ...Object.getOwnPropertySymbols(from)];
+  for (const key of keys) {
+    if (excluded.some((e) => Object.is(e, key))) continue;
+    const desc = Object.getOwnPropertyDescriptor(from, key);
+    if (desc !== undefined && desc.enumerable) {
+      Object.defineProperty(target, key, { value: from[key], writable: true, enumerable: true, configurable: true });
+    }
+  }
+  return target;
+}`,
+  groupObject: `function groupBy(items, callback, keyCoercion) {
+  if (items === undefined || items === null) throw new TypeError("items is null or undefined");
+  if (typeof callback !== "function") throw new TypeError("callback is not a function");
+  const groups = [];
+  let k = 0;
+  for (const value of items) {
+    let key = callback(value, k);
+    if (keyCoercion === "property") key = typeof key === "symbol" ? key : String(key);
+    else if (Object.is(key, -0)) key = 0;
+    const group = groups.find((g) => Object.is(g.key, key));
+    if (group) group.elements.push(value);
+    else groups.push({ key, elements: [value] });
+    k++;
+  }
+  return groups;
+}
+function groupObject(items, callback) {
+  const obj = Object.create(null);
+  for (const g of groupBy(items, callback, "property")) obj[g.key] = g.elements;
+  return obj;
+}
+function groupMap(items, callback) {
+  return new Map(groupBy(items, callback, "collection").map((g) => [g.key, g.elements]));
+}`,
+  mergeSettings: `function mergeSettings(defaults, text) {
+  let saved;
+  try { saved = JSON.parse(text); } catch { saved = {}; }
+  if (saved === null || typeof saved !== "object") saved = {};
+  const result = { ...defaults };
+  for (const key of Object.keys(defaults)) if (Object.hasOwn(saved, key)) result[key] = saved[key];
+  return result;
+}`,
+  forOf: `function forOf(iterable, body) {
+  if (iterable === undefined || iterable === null) throw new TypeError("not iterable");
+  const method = iterable[Symbol.iterator];
+  if (method === undefined || method === null || typeof method !== "function") throw new TypeError("not iterable");
+  const iterator = method.call(iterable);
+  if (iterator === null || (typeof iterator !== "object" && typeof iterator !== "function")) throw new TypeError("iterator is not an object");
+  const next = iterator.next;
+  const close = (bodyError) => {
+    const ret = iterator.return;
+    if (ret === undefined || ret === null) { if (bodyError) throw bodyError.error; return; }
+    let result;
+    try { result = ret.call(iterator); } catch (e) { if (bodyError) throw bodyError.error; throw e; }
+    if (bodyError) throw bodyError.error;
+    if (result === null || (typeof result !== "object" && typeof result !== "function")) throw new TypeError("return result is not an object");
+  };
+  while (true) {
+    const step = next.call(iterator);
+    if (step === null || (typeof step !== "object" && typeof step !== "function")) throw new TypeError("iterator result is not an object");
+    if (step.done) return;
+    let signal;
+    try { signal = body(step.value); } catch (error) { close({ error }); }
+    if (signal === "break") { close(null); return; }
+  }
+}`,
+};
 const checkable = (code) => {
   const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
   const lines = code.split('\n').map((line) => {
@@ -166,7 +243,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
       }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
-      else if (EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
+      else if (EXPECT[`${name} #${i}`] ?? EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[`${name} #${i}`] ?? EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
   }
@@ -215,6 +292,31 @@ try { for (const x of it) {} } catch (e) { log.push(e.message); }
 console.log(log.join());`, 'hw.html');
     check(JSON.stringify(out) === JSON.stringify(['TypeError: Cannot add property 0, object is not extensible', 'true false true true', 'next']),
       `student homework 1, 2, 4: push on a frozen [] — "Cannot add property 0"; isFrozen/isSealed by TestIntegrityLevel; a throwing next() is not closed ${JSON.stringify(out)}`);
+  }
+  // tasks 4–6 and 8: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.copyData}
+${SOLUTIONS.groupObject}
+${SOLUTIONS.mergeSettings}
+${SOLUTIONS.forOf}
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+const log = [];
+const src = { b: 1, 2: "two", get g() { return "getter"; }, [Symbol.for("s")]: true };
+const { b, ...real } = src;
+const withSetter = () => ({ set g(v) { log.push("set " + v); } });
+const copied = copyData(withSetter(), src, ["b"]);
+Object.assign(withSetter(), src);
+console.log(JSON.stringify(Object.keys(real)) === JSON.stringify(Object.keys(copyData({}, src, ["b"]))), Object.getOwnPropertyDescriptor(copied, "g").value, log.join());
+const samples = [[["kitap", "alma", "galam", "at"], (w) => w.length], [[1, "1", 1.5], (x) => x], [[], (x) => x]];
+console.log(attempt(() => groupObject(null, (x) => x)), attempt(() => groupObject([], 5)), samples.every(([items, f]) => JSON.stringify(groupObject(items, f)) === JSON.stringify(Object.groupBy(items, f))));
+const defaults = { theme: "light", perDay: 20 };
+const naive = (text) => Object.assign({}, defaults, JSON.parse(text));
+console.log(naive('{"__proto__": {"admin": true}}').admin, Object.getPrototypeOf(naive('{"__proto__": {}}')) === Object.prototype, mergeSettings(defaults, '{"perDay": 30}') !== defaults, JSON.stringify(defaults));
+const closing = { [Symbol.iterator]() { return { next: () => ({ value: 1, done: false }), return: () => { throw new Error("return"); } }; } };
+const bad = { [Symbol.iterator]() { return { next: () => ({ value: 1, done: false }), return: () => 5 }; } };
+console.log(attempt(() => forOf(5, () => {})), attempt(() => forOf(closing, () => { throw new RangeError("тело"); })), attempt(() => forOf(bad, () => "break")));`, 'tasks-criteria.html');
+    check(JSON.stringify(out) === JSON.stringify(['true getter set getter', 'TypeError TypeError true', 'true false true {"theme":"light","perDay":20}', 'TypeError RangeError TypeError']),
+      `tasks 4–6, 8: copyData keys = rest, a setter target gets a value, Object.assign calls the setter; groupObject throws early and equals Object.groupBy; Object.assign lets "__proto__" in, defaults stay; forOf errors like for...of ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -288,6 +390,15 @@ console.log(log.join());`, 'hw.html');
   const push = f('sec-array.prototype.push');
   check(push.includes('23.1.3.23 Array.prototype.push') && (push.match(/Perform \? Set \(O, /g) || []).length === 2 && push.includes('Perform ? Set (O, ! ToString (𝔽 (len)), E, true)')
     && push.includes('Perform ? Set (O, "length", 𝔽 (len), true)'), 'student homework 1: push is 23.1.3.23 with two Set calls, both with true');
+  check(f('sec-object.assign').includes('20.1.2.1 Object.assign') && f('sec-copydataproperties').includes('7.3.25 CopyDataProperties') && f('sec-groupby').includes('7.3.35 GroupBy')
+    && f('sec-add-value-to-keyed-group').includes('7.3.34 AddValueToKeyedGroup') && f('sec-setintegritylevel').includes('7.3.15 SetIntegrityLevel') && f('sec-testintegritylevel').includes('7.3.16 TestIntegrityLevel')
+    && f('sec-object.isfrozen').includes('20.1.2.17 Object.isFrozen (O) This function performs the following steps when called: If O is not an Object, return true')
+    && f('sec-getiterator').includes('7.4.4 GetIterator') && f('sec-iteratorclose').includes('7.4.11 IteratorClose'), 'tasks 2, 4, 5, 7, 8: the sections are where the tasks say; isFrozen of a primitive is true');
+  const ignoring = f('sec-SetterThatIgnoresPrototypeProperties');
+  check(inOrder(ignoring, ['7.3.37 SetterThatIgnoresPrototypeProperties', 'If thisValue is not an Object, then Throw a TypeError exception', 'If SameValue (thisValue, home) is true, then NOTE: Throwing here emulates assignment to a non-writable data property on the home object in strict mode code',
+    'If desc is undefined, then Perform ? CreateDataPropertyOrThrow (thisValue, p, v)', 'Else, Perform ? Set (thisValue, p, v, true)'])
+    && f('sec-set-iterator.prototype.constructor').includes('SetterThatIgnoresPrototypeProperties (this'),
+  'tasks 9: 7.3.37 — not an object, the home object (the note about strict mode), define, else Set with true; the constructor setter uses it');
   const mdn = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/iteration_protocols/index.md'], { encoding: 'utf8' });
   check(mdn.includes('### Errors during iteration') && mdn.includes('the iteration in progress is aborted without retrying or cleanup')
     && mdn.includes('The `return()` method is only called for premature exits'), 'student homework 4: MDN — a throwing next() is not cleaned up, return() only for premature exits');

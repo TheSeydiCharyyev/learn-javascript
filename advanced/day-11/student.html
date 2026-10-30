@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 11 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 11</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 11. Инструкции и объявления по спецификации</h1>
+    <p class="subtitle">Выжимка лекции: окружения блоков и циклов, мёртвая зона, порядок <code>for-in</code>, закрытие
+    итератора, метки, <code>switch</code> и записи <code>try</code>.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        Инструкция возвращает Completion Record: обычную запись или внезапную — <code>break</code>,
+        <code>continue</code>, <code>return</code>, <code>throw</code>. Блок, цикл, <code>switch</code> и
+        <code>catch</code> создают окружения, а <code>let</code>, <code>const</code> и <code>class</code> в них до своей
+        строки остаются <strong>без значения</strong> — это мёртвая зона.
+    </div>
+
+    <h2>Мёртвая зона и for</h2>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return e.name; } };
+let x = "внешний";
+{
+  console.log(attempt(() =&gt; x));        // ReferenceError — внутренний x уже есть, но без значения
+  let x = "внутренний";
+}
+const fns = [];
+for (let i = 0; i &lt; 3; i++) fns.push(() =&gt; i);
+console.log(fns.map((f) =&gt; f()).join());  // 0,1,2 — копия окружения на каждом шаге
+let init;
+for (let i = 0, f = () =&gt; i; i &lt; 3; i++) init = f;
+console.log(init());                      // 0 — окружение заголовка не меняется</pre>
+
+    <table>
+        <thead><tr><th>Инструкция</th><th>Окружения</th></tr></thead>
+        <tbody>
+            <tr><td>блок <code>{ … }</code></td><td>новое на каждый вход; функции готовы сразу, остальное — со своей строки</td></tr>
+            <tr><td><code>for (let …)</code></td><td>заголовок и копия перед условием и перед шагом</td></tr>
+            <tr><td><code>for (var …)</code>, <code>for (const …)</code></td><td>копий нет: одна привязка; у <code>const</code> шаг бросает</td></tr>
+            <tr><td><code>for (const … of …)</code></td><td>новое на каждую итерацию; голова — в мёртвой зоне</td></tr>
+            <tr><td><code>switch</code>, <code>catch (e)</code></td><td>одно на все ветки; своё для параметра</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        <code>var x;</code> ничего не делает, <code>var x = v</code> — обычная запись. Мёртвая зона — по времени
+        обращения: функция, созданная раньше <code>let</code>, может читать его позже. Запись в <code>const</code> бросает
+        и в нестрогом коде.
+    </div>
+
+    <h2>for-in и for-of</h2>
+
+    <pre class="code js">const proto = { p: 1 };
+const obj = Object.create(proto);
+obj.b = 1; obj[2] = 1; obj.a = 1;
+const keys = [];
+for (const k in obj) keys.push(k);
+console.log(keys.join(" "));       // 2 b a p — индексы, строки по порядку, потом прототип
+const log = [];
+function* gen() { try { yield 1; yield 2; } finally { log.push("finally"); } }
+for (const v of gen()) { log.push(v); break; }
+console.log(log.join(" "));        // 1 finally — break закрыл итератор
+let count = 0;
+for (const k in null) count++;
+console.log(count);                // 0 — for-in по null: ни одной итерации</pre>
+
+    <div class="remember">
+        <code>for-in</code>: только строковые ключи, своё неперечисляемое прячет прототип, удалённый ключ не придёт.
+        <code>for-of</code>: <code>break</code>, <code>return</code> и <code>throw</code> закрывают итератор, исчерпание —
+        нет; <code>for-of</code> по <code>null</code> — TypeError. Метка: <code>break</code> своей метки — обычная
+        запись, <code>continue</code> метки — к своему циклу, сквозь <code>switch</code>.
+    </div>
+
+    <h2>switch и try</h2>
+
+    <pre class="code js">const log = [];
+const sel = (name, v) =&gt; { log.push(name); return v; };
+switch (9) {
+  case sel("a", 1): log.push("тело a");
+  default: log.push("default");
+  case sel("b", 2): log.push("тело b");
+}
+console.log(log.join(", "));        // a, b, default, тело b — селекторы после default считаются до него
+let x = 1;
+function f() { try { return x; } finally { x = 2; } }
+console.log(f(), x);                // 1 2 — запись return готова до finally
+function g() { try { return "try"; } finally { return "finally"; } }
+console.log(g());                   // finally — внезапная F побеждает</pre>
+
+    <div class="remember">
+        <code>switch</code>: селекторы по очереди, пока не совпадёт (<code>===</code>), потом тела насквозь до
+        <code>break</code>; ветки делят одно окружение. <code>try</code>: B, потом C (если B — throw), потом F; F
+        обычная — ответ C, иначе F. Уборку — в <code>finally</code>, бросать — <code>Error</code>.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Предскажите, что вернут замыкания из <code>for (let i = 0; i &lt; 4; i++) { fns.push(() =&gt; i); i++; }</code>
+                и из того же цикла с <code>var</code>. Нарисуйте окружения по шагам 14.7.4.3.</li>
+            <li>Предскажите, что запишет <code>switch</code>, у которого <code>default</code> — первым:
+                <code>default: log.push("d"); case 1: log.push("1"); break; case 2: log.push("2");</code> — для входа 2, 3
+                и 1.</li>
+            <li>Прочитайте EnumerateObjectProperties (14.7.5.9) и предскажите <code>for-in</code> для
+                <code>Object.create({ a: 1, b: 2 })</code>, у которого своё неперечисляемое <code>a</code>.</li>
+            <li>Прочитайте разделы «The finally block» и «Returning from a finally block» страницы MDN
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/try...catch">try...catch</a>
+                и объясните их примеры записями B, C, F раздела 14.15.3.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for">MDN Web Docs</a>
+        (for, for...in, for...of, switch, try...catch, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

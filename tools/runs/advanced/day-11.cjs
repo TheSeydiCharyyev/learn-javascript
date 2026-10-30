@@ -5,7 +5,8 @@
 // The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-11.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-11.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted lines of main.js (day 34 of course 2) are the
+// Checks: a result-box right after a block equals its output; in the notes the output equals the comments of the lines
+// that print it; the homework of the notes; the quoted lines of main.js (day 34 of course 2) are the
 // real ones; the cheatsheet runs without an error; the experiments the lecture only tells about (an error inside
 // finally hides the first one, break in for await closes an async generator, early errors of a catch parameter, of a
 // labelled function and of const); what the lecture says about the text of ECMA-262 2026 (chapter 14 and the
@@ -22,7 +23,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-11');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -121,7 +125,8 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[`${name} #${i}`] ?? EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[`${name} #${i}`] ?? EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: neither a result-box nor EXPECT`);
     }
@@ -143,6 +148,29 @@ async function* source() { try { yield 1; yield 2; } finally { log.push("finally
       "ok | SyntaxError: In strict mode code, functions can only be declared at top level or inside a block. | SyntaxError: Missing initializer in const declaration",
       '1, finally async-генератора']),
     `lecture 3, 10, 14, 15: an error in finally hides the first; catch parameter names (var e is allowed by Annex B); a labelled function only in non-strict code; const needs a value; break in for await closes an async generator ${JSON.stringify(out)}`);
+  }
+  // notes, homework 1–3: closures of a loop that changes i itself, a switch with default first, a shadowing own key
+  {
+    const out = await runScript(ctx, `const byLet = [];
+for (let i = 0; i < 4; i++) { byLet.push(() => i); i++; }
+const byVar = [];
+for (var j = 0; j < 4; j++) { byVar.push(() => j); j++; }
+const run = (input) => {
+  const log = [];
+  switch (input) {
+    default: log.push("d");
+    case 1: log.push("1"); break;
+    case 2: log.push("2");
+  }
+  return log.join(" ");
+};
+const o = Object.create({ a: 1, b: 2 });
+Object.defineProperty(o, "a", { value: 0, enumerable: false });
+const keys = [];
+for (const k in o) keys.push(k);
+console.log(byLet.map((f) => f()).join(), "|", byVar.map((f) => f()).join(), "|", run(2), "|", run(3), "|", run(1), "|", keys.join(" "));`, 'hw.html');
+    check(JSON.stringify(out) === JSON.stringify(['1,3 | 4,4 | 2 | d 1 | 1 | b']),
+      `student homework 1–3: let gives 1,3 and var 4,4; default first — 2, "d 1", 1; the own non-enumerable a hides the prototype a ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -224,6 +252,10 @@ async function* source() { try { yield 1; yield 2; } finally { log.push("finally
   // the MDN pages of the footer
   check(['for', 'for...in', 'for...of', 'switch', 'try...catch'].every((p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/statements/${p}/index.md`], { encoding: 'utf8' }).startsWith('---\ntitle:')),
     'footer: the MDN pages for, for...in, for...of, switch, try...catch are in the cache');
+  const tryPage = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/statements/try...catch/index.md'], { encoding: 'utf8' });
+  check(hasAll(tryPage, ['### The finally block', '### Returning from a finally block']) && /> 14\.7\.4\.3 ForBodyEvaluation/.test(f('sec-forbodyevaluation'))
+    && /> 14\.7\.5\.9 EnumerateObjectProperties/.test(f('sec-enumerate-object-properties')),
+  'student homework 1, 3, 4: 14.7.4.3 and 14.7.5.9 are where the notes say; MDN try...catch has The finally block and Returning from a finally block');
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

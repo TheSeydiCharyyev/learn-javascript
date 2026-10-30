@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 7 — Операции над объектами и итераторами: Get, Set, Call, Construct</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #8b5cf6; }
+        h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+        h3 { color: #6d28d9; }
+        .step-number { background: #8b5cf6; }
+        .toc a { color: #7c3aed; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 7</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 7 &bull; урок 1</span>
+        <h1>Операции над объектами и итераторами: Get, Set, Call, Construct</h1>
+        <p>Курс 3, Advanced. Модуль «Типы и абстрактные операции» — последний день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>узнавать за встроенной функцией операции главы 7.3 и внутренние методы под ними;</li>
+            <li>различать запись свойства (Set) и его определение (CreateDataProperty);</li>
+            <li>объяснять флажок Throw и семейство «…OrThrow»;</li>
+            <li>предсказывать, кто вызовет геттер, сеттер и <code>return</code> итератора;</li>
+            <li>проходить <code>Object.groupBy</code> и <code>for...of</code> по шагам 7.3.35 и 7.4;</li>
+            <li>находить любую из 55 операций в таблице «где мы её уже видели».</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#bridge">Мост между кодом и внутренними методами</a></li>
+            <li><a href="#get">Get и GetV: кто получатель</a></li>
+            <li><a href="#set">Set и флажок Throw</a></li>
+            <li><a href="#define">Запись против определения</a></li>
+            <li><a href="#copy">CopyDataProperties: spread и остаток</a></li>
+            <li><a href="#call">Call, Invoke и GetMethod</a></li>
+            <li><a href="#construct">Construct и newTarget</a></li>
+            <li><a href="#integrity">freeze и isFrozen по шагам</a></li>
+            <li><a href="#instanceof">OrdinaryHasInstance</a></li>
+            <li><a href="#fields">Поля и приватные элементы</a></li>
+            <li><a href="#groupby">GroupBy по шагам</a></li>
+            <li><a href="#records">Записи итераторов</a></li>
+            <li><a href="#closing">Закрытие итератора</a></li>
+            <li><a href="#lists">Длины, списки и ошибки</a></li>
+            <li><a href="#cards">«Карточки 2.0»: поиск повторов</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="bridge">1. Мост между кодом и внутренними методами</h2>
+
+    <p>На дне 4 мы видели внутренние методы объектов: <code>[[Get]]</code>, <code>[[Set]]</code>,
+    <code>[[DefineOwnProperty]]</code>, <code>[[Call]]</code> и другие. Встроенные функции зовут их не напрямую, а
+    через операции разделов <a href="https://tc39.es/ecma262/2026/#sec-operations-on-objects">7.3</a> (над объектами)
+    и <a href="https://tc39.es/ecma262/2026/#sec-operations-on-iterator-objects">7.4</a> (над итераторами). Каждая
+    операция — короткая обёртка: вызвать внутренний метод и добавить проверку — «функция ли это», «удалось ли»,
+    «объект ли вернулся». Это словарь, на котором написана вся глава встроенных объектов: прочитав сегодня полсотни
+    коротких алгоритмов, вы будете читать алгоритм любого метода как обычный текст.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 262" role="img" aria-label="Код, операция главы 7 и внутренний метод под ней: шесть примеров от Object.keys до for...of">
+            <text x="20" y="20" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#5b21b6">код</text>
+            <text x="230" y="20" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#5b21b6">операция 7.3 / 7.4</text>
+            <text x="440" y="20" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#5b21b6">внутренний метод (день 4)</text>
+
+            <rect x="10" y="30" width="620" height="32" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="20" y="51" font-family="Consolas, monospace" font-size="11.5" fill="#334155">Object.keys(o)</text>
+            <text x="230" y="51" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">EnumerableOwnProperties</text>
+            <text x="440" y="51" font-family="Consolas, monospace" font-size="11" fill="#334155">[[OwnPropertyKeys]]</text>
+
+            <rect x="10" y="68" width="620" height="32" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="1.5"/>
+            <text x="20" y="89" font-family="Consolas, monospace" font-size="11.5" fill="#334155">Object.assign(t, s)</text>
+            <text x="230" y="89" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Get, затем Set(…, true)</text>
+            <text x="440" y="89" font-family="Consolas, monospace" font-size="11" fill="#334155">[[Get]], [[Set]]</text>
+
+            <rect x="10" y="106" width="620" height="32" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5"/>
+            <text x="20" y="127" font-family="Consolas, monospace" font-size="11.5" fill="#334155">{ ...s }</text>
+            <text x="230" y="127" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">CopyDataProperties</text>
+            <text x="440" y="127" font-family="Consolas, monospace" font-size="11" fill="#334155">[[Get]], [[DefineOwnProperty]]</text>
+
+            <rect x="10" y="144" width="620" height="32" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="20" y="165" font-family="Consolas, monospace" font-size="11.5" fill="#334155">[1, 2].map(f)</text>
+            <text x="230" y="165" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Call</text>
+            <text x="440" y="165" font-family="Consolas, monospace" font-size="11" fill="#334155">[[Call]]</text>
+
+            <rect x="10" y="182" width="620" height="32" rx="8" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="20" y="203" font-family="Consolas, monospace" font-size="11.5" fill="#334155">Words.from(list)</text>
+            <text x="230" y="203" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Construct</text>
+            <text x="440" y="203" font-family="Consolas, monospace" font-size="11" fill="#334155">[[Construct]]</text>
+
+            <rect x="10" y="220" width="620" height="32" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="1.5"/>
+            <text x="20" y="241" font-family="Consolas, monospace" font-size="11.5" fill="#334155">for (x of it)</text>
+            <text x="230" y="241" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">GetIterator, IteratorStepValue</text>
+            <text x="440" y="241" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">вызовы next и return</text>
+        </svg>
+        <figcaption>Встроенная функция → операция главы 7 → внутренний метод</figcaption>
+    </figure>
+
+    <p>Подробно разберём шесть операций — <code>Get</code>, <code>Set</code>, <code>Call</code>, <code>Construct</code>
+    и записи итераторов 7.4.1, — а остальные увидим в опытах. Все 55 — в справочнике в конце, у каждой отмечено, где
+    мы её уже встречали.</p>
+
+    <h2 id="get">2. Get и GetV: кто получатель</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-get-o-p">Get(O, P)</a> (7.3.2) — один шаг: <code>O.[[Get]](P, O)</code>.
+    Второй аргумент — <strong>получатель</strong> (receiver), он станет <code>this</code> геттера, даже если геттер
+    найден в прототипе. <a href="https://tc39.es/ecma262/2026/#sec-getv">GetV(V, P)</a> (7.3.3) делает то же для любого
+    значения: ищет свойство в обёртке ToObject (день 5), но получателем передаёт само значение, без обёртки.</p>
+
+    <pre class="code js">Object.defineProperty(String.prototype, "kindStrict", { get() { "use strict"; return typeof this; }, configurable: true });
+Object.defineProperty(String.prototype, "kindSloppy", { get() { return typeof this; }, configurable: true });
+console.log("kitap".kindStrict, "kitap".kindSloppy);
+delete String.prototype.kindStrict;
+delete String.prototype.kindSloppy;
+const base = { get who() { return this.name; } };
+const child = { __proto__: base, name: "child" };
+console.log(child.who, base.who);</pre>
+
+    <div class="result-box">
+        string object<br>
+        child undefined
+    </div>
+
+    <p>Строгий геттер получил строку «как есть» — это и есть получатель GetV. Нестрогий завернул её в объект сам: так
+    нестрогие функции поступают с примитивным <code>this</code> (день 2 курса 2). Вторая строка — получатель при
+    наследовании: геттер живёт в <code>base</code>, а <code>this</code> у него — <code>child</code>. Встроенный
+    прототип мы меняли только ради опыта и сразу вернули на место.</p>
+
+    <h2 id="set">3. Set и флажок Throw</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-set-o-p-v-throw">Set(O, P, V, Throw)</a> (7.3.4) зовёт
+    <code>O.[[Set]](P, V, O)</code>. Внутренний метод не бросает ошибку, а отвечает <code>true</code> или
+    <code>false</code>. Что делать с <code>false</code>, решает флажок: <code>Throw = true</code> — <code>TypeError</code>.
+    Присваивание <code>a[0] = 9</code> идёт мимо Set, через PutValue (день 4), и там бросает только строгий код. А
+    встроенные функции зовут Set с <code>true</code> — и бросают всегда, в строгом коде и в нестрогом:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const a = Object.freeze([1, 2]);
+a[0] = 9;
+console.log(a[0], attempt(() =&gt; a.push(3)));
+console.log(attempt(() =&gt; Object.assign(a, { 0: 9 })));
+console.log(attempt(() =&gt; a.pop()));
+console.log(attempt(() =&gt; Object.defineProperty(a, "x", { value: 1 })));</pre>
+
+    <div class="result-box">
+        1 TypeError: Cannot add property 2, object is not extensible<br>
+        TypeError: Cannot assign to read only property '0' of object '[object Array]'<br>
+        TypeError: Cannot delete property '1' of [object Array]<br>
+        TypeError: Cannot define property x, object is not extensible
+    </div>
+
+    <p>Скрипт нестрогий, и <code>a[0] = 9</code> молча не сработал. <code>push</code> и <code>Object.assign</code>
+    зовут Set с <code>true</code>. Тот же приём у семейства «…OrThrow»: <code>pop</code> удаляет последний элемент
+    через <a href="https://tc39.es/ecma262/2026/#sec-deletepropertyorthrow">DeletePropertyOrThrow</a>,
+    <code>Object.defineProperty</code> — через <a href="https://tc39.es/ecma262/2026/#sec-definepropertyorthrow">DefinePropertyOrThrow</a>.
+    Имя операции подсказывает поведение: «OrThrow» — ответ <code>false</code> превращается в ошибку.</p>
+
+    <h2 id="define">4. Запись против определения</h2>
+
+    <p>Свойство можно <strong>записать</strong> — Set, <code>[[Set]]</code>: он идёт по цепочке прототипов, находит
+    сеттер и зовёт его, натыкается на унаследованное свойство только для чтения и отказывает. А можно
+    <strong>определить</strong> — <a href="https://tc39.es/ecma262/2026/#sec-createdataproperty">CreateDataProperty</a>
+    (7.3.5), <code>[[DefineOwnProperty]]</code>: собственное свойство-значение на самом объекте, прототип не
+    спрашивается. Первое делает присваивание, второе — литералы, spread, поля классов и
+    <code>Object.defineProperty</code>.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const proto = Object.freeze({ step: 1 });
+const card = Object.create(proto);
+card.step = 2;
+console.log(card.step, Object.hasOwn(card, "step"));
+console.log(attempt(() =&gt; Object.assign(Object.create(proto), { step: 4 })));
+Object.defineProperty(card, "step", { value: 3, writable: true, enumerable: true, configurable: true });
+console.log(card.step, Object.hasOwn(card, "step"), { ...proto, step: 5 }.step);</pre>
+
+    <div class="result-box">
+        1 false<br>
+        TypeError: Cannot assign to read only property 'step' of object '#&lt;Object&gt;'<br>
+        3 true 5
+    </div>
+
+    <p>Унаследованное свойство только для чтения запрещает <em>записать</em> своё свойство с тем же именем — шаги
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinarysetwithowndescriptor">OrdinarySetWithOwnDescriptor</a>
+    (10.1.9.2): у найденного в прототипе свойства <code>[[Writable]]</code> — <code>false</code>, ответ
+    <code>false</code>. Но <em>определить</em> его можно. Практика дня — кто что вызывает, если у получателя есть
+    сеттер, а у источника — геттер:</p>
+
+    <pre class="code js">const log = [];
+class Card {
+  set word(v) { log.push("set " + v); }
+}
+const source = { get word() { log.push("get word"); return "kitap"; }, extra: 1 };
+const a = Object.assign(new Card(), source);
+console.log(Object.keys(a), log.join(" | "));
+log.length = 0;
+const b = { ...source };
+console.log(Object.keys(b), Object.getOwnPropertyDescriptor(b, "word").value, log.join(" | "));</pre>
+
+    <div class="result-box">
+        (1) ['extra'] get word | set kitap<br>
+        (2) ['word', 'extra'] kitap get word
+    </div>
+
+    <p>Геттер источника вызвали оба: и <a href="https://tc39.es/ecma262/2026/#sec-object.assign">Object.assign</a>
+    (20.1.2.1), и spread читают через Get. Дальше пути расходятся: <code>Object.assign</code> пишет через Set — и
+    сеттер класса проглотил слово, своего свойства <code>word</code> у <code>a</code> нет; spread определяет —
+    в <code>b</code> лежит обычное значение «kitap». Самый неожиданный сеттер — унаследованный
+    <code>__proto__</code> (день 7 курса 2). Вспомните JSON с таким ключом из дня 31 курса 2:</p>
+
+    <pre class="code js">const data = JSON.parse('{"__proto__": {"admin": true}, "name": "Aman"}');
+const viaAssign = Object.assign({}, data);
+const viaSpread = { ...data };
+console.log(viaAssign.admin, Object.keys(viaAssign), viaSpread.admin, Object.keys(viaSpread));</pre>
+
+    <div class="result-box">
+        true (1) ['name'] undefined (2) ['__proto__', 'name']
+    </div>
+
+    <p><code>Object.assign</code> записал ключ «__proto__» через Set — сработал сеттер из <code>Object.prototype</code>,
+    и у нового объекта сменился прототип: он «стал админом». Spread определил обычное свойство с таким именем.
+    Копируя чужие данные, выбирайте spread.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 214" role="img" aria-label="Object.assign записывает через Set и задевает сеттеры и прототип получателя; spread определяет собственные свойства нового объекта">
+            <rect x="10" y="10" width="300" height="150" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="160" y="34" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#9a3412">Object.assign(target, src)</text>
+            <text x="160" y="58" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412">Get из src, потом Set(target, key, v, true)</text>
+            <text x="160" y="80" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412">[[Set]] идёт по прототипам target:</text>
+            <text x="160" y="100" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412">сеттер — зовёт его (и __proto__ тоже),</text>
+            <text x="160" y="120" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#9a3412">«только чтение» — false, и Throw — TypeError</text>
+            <text x="160" y="146" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">запись</text>
+
+            <rect x="330" y="10" width="300" height="150" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="480" y="34" text-anchor="middle" font-family="Consolas, monospace" font-size="12.5" font-weight="700" fill="#065f46">{ ...src }</text>
+            <text x="480" y="58" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">Get из src, потом CreateDataPropertyOrThrow</text>
+            <text x="480" y="80" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">[[DefineOwnProperty]] на новом объекте:</text>
+            <text x="480" y="100" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">прототип не спрашивают,</text>
+            <text x="480" y="120" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#065f46">всегда своё свойство-значение</text>
+            <text x="480" y="146" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">определение</text>
+
+            <text x="10" y="186" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Так же делятся и другие места языка: присваивание this.x = … — запись,</text>
+            <text x="10" y="204" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">поле класса x = …, литерал { x: 1 } и Object.defineProperty — определение.</text>
+        </svg>
+        <figcaption>Set и CreateDataProperty: два способа получить свойство</figcaption>
+    </figure>
+
+    <h2 id="copy">5. CopyDataProperties: spread и остаток</h2>
+
+    <p>Spread в литерале объекта и остаток в деструктуризации (Essentials, день 22) — одна операция,
+    <a href="https://tc39.es/ecma262/2026/#sec-copydataproperties">CopyDataProperties</a> (7.3.25). Её шаги:
+    <code>null</code> и <code>undefined</code> — ничего не копировать; остальное — ToObject; ключи — в порядке
+    <code>[[OwnPropertyKeys]]</code> (сначала индексы, день 4); каждое собственное перечисляемое свойство, кроме
+    исключённых, — Get и CreateDataPropertyOrThrow. Символы тоже копируются.</p>
+
+    <pre class="code js">const log = [];
+const src = { b: 1, 2: "two", a: 1, [Symbol("s")]: 1, get g() { log.push("g"); return 0; } };
+Object.defineProperty(src, "hidden", { value: 1, enumerable: false });
+const { a, ...rest } = src;
+console.log(Object.keys(rest), Object.getOwnPropertySymbols(rest).length, "hidden" in rest, log.join());
+console.log({ ...null, ..."ab", ...[7] });</pre>
+
+    <div class="result-box">
+        (3) ['2', 'b', 'g'] 1 false g<br>
+        {0: 7, 1: 'b'}
+    </div>
+
+    <p>Ключ <code>a</code> исключён — его забрала деструктуризация. Индекс «2» стал первым, неперечисляемый
+    <code>hidden</code> пропущен, геттер вызван один раз и превратился в значение. <code>...null</code> — пусто, строка
+    раскладывается на индексы, а массив <code>[7]</code> записал свой индекс 0 поверх «a».</p>
+
+    <h2 id="call">6. Call, Invoke и GetMethod</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-call">Call(F, V, argumentsList)</a> (7.3.13): нет списка — пустой;
+    <code>IsCallable(F)</code> ложно — <code>TypeError</code>; иначе <code>F.[[Call]](V, argumentsList)</code>, где
+    <code>V</code> — <code>this</code>. <a href="https://tc39.es/ecma262/2026/#sec-invoke">Invoke(V, P)</a> (7.3.20) —
+    GetV и Call: взять метод у значения и вызвать на нём же. <a href="https://tc39.es/ecma262/2026/#sec-getmethod">GetMethod(V, P)</a>
+    (7.3.10) — для «необязательных» методов: <code>undefined</code> и <code>null</code> означают «метода нет», а
+    любое другое не-функциональное значение — <code>TypeError</code>.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() =&gt; [1, 2].map(5)));
+console.log(attempt(() =&gt; [...{ [Symbol.iterator]: 5 }]));
+console.log(attempt(() =&gt; [...{ [Symbol.iterator]: null }]));
+console.log(attempt(() =&gt; [...{ [Symbol.iterator]() { return 5; } }]));
+console.log([{ toLocaleString() { return "a"; } }, { toLocaleString() { return "b"; } }].toLocaleString());
+console.log(JSON.stringify({ toJSON: 5, a: 1 }));</pre>
+
+    <div class="result-box">
+        TypeError: number 5 is not a function<br>
+        TypeError: {(intermediate value)} is not iterable<br>
+        TypeError: {(intermediate value)} is not iterable<br>
+        TypeError: Result of the Symbol.iterator method is not an object<br>
+        a,b<br>
+        {"toJSON":5,"a":1}
+    </div>
+
+    <p><code>map</code> проверяет колбэк IsCallable до первого вызова. Для <code>Symbol.iterator</code> спецификация
+    различает два случая: <code>null</code> — «метода нет», 5 — «метод не функция», но V8 пишет одно и то же
+    сообщение. Метод вернул не объект — ошибку бросает GetIteratorFromMethod (раздел 12). <code>toLocaleString</code>
+    массива зовёт Invoke у каждого элемента. А <code>JSON.stringify</code> берёт <code>toJSON</code> через Get и
+    молча пропускает не-функцию — у него свои шаги, без GetMethod.</p>
+
+    <h2 id="construct">7. Construct и newTarget</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-construct">Construct(F, argumentsList, newTarget)</a> (7.3.14):
+    <code>F.[[Construct]](argumentsList, newTarget)</code>; без <code>newTarget</code> — это просто
+    <code>new F(...argumentsList)</code>, как сказано в примечании. Третий аргумент нужен наследованию:
+    <code>super()</code> зовёт Construct родителя, но передаёт <code>newTarget</code> наследника — это и есть
+    <code>new.target</code> (день 10 курса 2), и прототип объекта берётся у него.</p>
+
+    <pre class="code js">const log = [];
+class Deck { constructor() { log.push(new.target.name); } }
+class SchoolDeck extends Deck {}
+new Deck();
+new SchoolDeck();
+class Words extends Array {}
+const w = Words.from(["a", "b"]);
+console.log(log.join(" "), w instanceof Words, w.map((x) =&gt; x) instanceof Words, w.length);
+class MyPromise extends Promise {}
+console.log(MyPromise.resolve(1).then((x) =&gt; x) instanceof MyPromise);</pre>
+
+    <div class="result-box">
+        Deck SchoolDeck true true 2<br>
+        true
+    </div>
+
+    <p>Конструктор <code>Deck</code> выполнился оба раза, но во втором <code>new.target</code> — <code>SchoolDeck</code>.
+    <code>Words.from</code> зовёт Construct от <code>this</code>, то есть от <code>Words</code>. <code>map</code>
+    наследника создаёт наследника через ArraySpeciesCreate (10.4.2.3), а <code>then</code> наследника
+    <code>Promise</code> — через <a href="https://tc39.es/ecma262/2026/#sec-speciesconstructor">SpeciesConstructor</a>
+    (7.3.22): она смотрит <code>constructor</code> объекта и его <code>Symbol.species</code> (день 17).</p>
+
+    <h2 id="integrity">8. freeze и isFrozen по шагам</h2>
+
+    <p><code>Object.freeze</code> (день 6 курса 2) — это <a href="https://tc39.es/ecma262/2026/#sec-setintegritylevel">SetIntegrityLevel(O, frozen)</a>
+    (7.3.15): <code>[[PreventExtensions]]</code>, а потом каждому ключу DefinePropertyOrThrow с
+    <code>configurable: false</code>, и только свойствам-значениям ещё <code>writable: false</code>. У аксессора
+    нет <code>[[Writable]]</code> — его сеттер продолжает работать. <a href="https://tc39.es/ecma262/2026/#sec-testintegritylevel">TestIntegrityLevel</a>
+    (7.3.16) проверяет обратное: объект нерасширяемый и ни одного настраиваемого или записываемого свойства.</p>
+
+    <pre class="code js">const log = [];
+const frozen = Object.freeze({ set word(v) { log.push(v); }, get word() { return "kitap"; } });
+frozen.word = "galam";
+console.log(log.join(), frozen.word, Object.isFrozen(frozen), Object.getOwnPropertyDescriptor(frozen, "word").configurable);
+console.log(Object.isFrozen({}), Object.isFrozen(Object.preventExtensions({})), Object.isFrozen(Object.preventExtensions({ a: 1 })));</pre>
+
+    <div class="result-box">
+        galam kitap true false<br>
+        false true false
+    </div>
+
+    <p>Сеттер «замороженного» объекта получил «galam». А пустой нерасширяемый объект — уже замороженный: проверять
+    у него нечего, и TestIntegrityLevel отвечает <code>true</code>.</p>
+
+    <h2 id="instanceof">9. OrdinaryHasInstance</h2>
+
+    <p><code>instanceof</code> (день 7 курса 2) сначала ищет у правой стороны метод <code>Symbol.hasInstance</code>
+    через GetMethod, а у функций он ведёт в <a href="https://tc39.es/ecma262/2026/#sec-ordinaryhasinstance">OrdinaryHasInstance(C, O)</a>
+    (7.3.21): у привязанной функции — проверить её цель; иначе взять <code>Get(C, "prototype")</code> и идти по
+    цепочке прототипов <code>O</code>, сравнивая SameValue (день 5).</p>
+
+    <pre class="code js">function Card() {}
+const c = new Card();
+const Bound = Card.bind(null);
+console.log(c instanceof Card, c instanceof Bound, Object.create(Card.prototype) instanceof Card);
+Card.prototype = {};
+console.log(c instanceof Card);</pre>
+
+    <div class="result-box">
+        true true true<br>
+        false
+    </div>
+
+    <p><code>instanceof</code> не спрашивает, кто создал объект, — только чей <code>prototype</code> лежит в цепочке
+    <em>сейчас</em>. Замените свойство <code>prototype</code> — и старый объект перестаёт быть «экземпляром».</p>
+
+    <h2 id="fields">10. Поля и приватные элементы</h2>
+
+    <p>Когда конструктор доходит до своего тела (у наследника — после <code>super()</code>),
+    <a href="https://tc39.es/ecma262/2026/#sec-initializeinstanceelements">InitializeInstanceElements</a> (7.3.33)
+    добавляет сначала приватные методы, потом поля по порядку объявления. Публичное поле —
+    <a href="https://tc39.es/ecma262/2026/#sec-definefield">DefineField</a> (7.3.32), а внутри —
+    CreateDataPropertyOrThrow. Значит, поле класса <em>определяется</em>, а не записывается:</p>
+
+    <pre class="code js">const log = [];
+class Base { set word(v) { log.push("setter " + v); } }
+class Card extends Base { word = "kitap"; }
+class Card2 extends Base { constructor() { super(); this.word = "galam"; } }
+const c1 = new Card(), c2 = new Card2();
+console.log(Object.keys(c1), Object.keys(c2), log.join());</pre>
+
+    <div class="result-box">
+        (1) ['word'] (0) [] setter galam
+    </div>
+
+    <p>Поле обошло сеттер родителя, присваивание в конструкторе — нет. Приватные элементы живут в отдельном списке
+    объекта: <a href="https://tc39.es/ecma262/2026/#sec-privateelementfind">PrivateElementFind</a> ищет в нём,
+    <a href="https://tc39.es/ecma262/2026/#sec-privatefieldadd">PrivateFieldAdd</a> добавляет и бросает, если элемент
+    уже есть, <a href="https://tc39.es/ecma262/2026/#sec-privateget">PrivateGet</a> и
+    <a href="https://tc39.es/ecma262/2026/#sec-privateset">PrivateSet</a> бросают, если его нет (день 9 курса 2). Трюк:
+    родитель, чей конструктор возвращает чужой объект, позволяет «приклеить» приватное поле к любому объекту — но
+    только один раз:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+class Stamp extends class { constructor(o) { return o; } } {
+  #id = 1;
+  static has(o) { return #id in o; }
+  static id(o) { return o.#id; }
+}
+const plain = {};
+new Stamp(plain);
+console.log(Stamp.has(plain), Stamp.id(plain), attempt(() =&gt; new Stamp(plain)));
+console.log(attempt(() =&gt; Stamp.id({})));
+class Box { #m() {} static set(o) { o.#m = 1; } }
+console.log(attempt(() =&gt; Box.set(new Box())));</pre>
+
+    <div class="result-box">
+        true 1 TypeError: Cannot initialize #id twice on the same object<br>
+        TypeError: Cannot read private member #id from an object whose class did not declare it<br>
+        TypeError: Private method '#m' is not writable
+    </div>
+
+    <p>Хозяин вправе запретить такое приклеивание для своих объектов: перед добавлением PrivateFieldAdd спрашивает
+    <a href="https://tc39.es/ecma262/2026/#sec-hostensurecanaddprivateelement">HostEnsureCanAddPrivateElement</a>
+    (7.3.29). Chrome 156 разрешает его даже для <code>window</code> и <code>location</code>.</p>
+
+    <h2 id="groupby">11. GroupBy по шагам</h2>
+
+    <p><code>Object.groupBy</code> (Essentials, день 21) и <code>Map.groupBy</code> (день 14 курса 2) — две обёртки над
+    одной операцией <a href="https://tc39.es/ecma262/2026/#sec-groupby">GroupBy(items, callback, keyCoercion)</a>
+    (7.3.35). Её шаги: RequireObjectCoercible, IsCallable колбэка, GetIterator — значит, подойдёт любой перебираемый
+    объект, не только массив; дальше цикл: IteratorStepValue, <code>Call(callback, undefined, «value, k»)</code>,
+    ключ — ToPropertyKey для объекта или CanonicalizeKeyedCollectionKey для <code>Map</code> (−0 → +0, день 5),
+    и <a href="https://tc39.es/ecma262/2026/#sec-add-value-to-keyed-group">AddValueToKeyedGroup</a> (7.3.34) — найти
+    группу по SameValue или завести новую. Практика дня — пройти это с журналом:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const log = [];
+function* cards() {
+  try {
+    yield { word: "kitap", deck: "school" };
+    yield { word: "alma", deck: "food" };
+    yield { word: "galam", deck: "school" };
+  } finally {
+    log.push("finally");
+  }
+}
+const groups = Object.groupBy(cards(), (card, i) =&gt; {
+  log.push(i + ":" + card.word);
+  return card.deck;
+});
+console.log(log.join(" "), Object.getPrototypeOf(groups), Object.keys(groups));
+log.length = 0;
+console.log(attempt(() =&gt; Object.groupBy(cards(), (card) =&gt; { if (card.deck === "food") throw new Error("стоп"); return card.deck; })), log.join(" "));
+console.log(Object.keys(Object.groupBy([1, "1", 1.0, -0, 0], (x) =&gt; x)), Map.groupBy([1, "1", -0, 0], (x) =&gt; x).size);</pre>
+
+    <div class="result-box">
+        0:kitap 1:alma 2:galam finally null (2) ['school', 'food']<br>
+        Error: стоп finally<br>
+        (2) ['0', '1'] 3
+    </div>
+
+    <p>Колбэк получил элемент и номер, группы появились в порядке первой встречи. Результат
+    <code>Object.groupBy</code> — объект без прототипа: так написан 20.1.2.13, чтобы ключ «toString» не спорил с
+    наследством. Ошибка в колбэке не бросила генератор открытым: шаг IfAbruptCloseIterator закрыл его, и
+    <code>finally</code> выполнился. Последняя строка — разница двух видов ключей: для объекта 1, «1» и 1.0 — один
+    ключ «1», а для <code>Map</code> число и строка — разные ключи, нули слились в один.</p>
+
+    <h2 id="records">12. Записи итераторов</h2>
+
+    <p>Перебор в спецификации держится на <a href="https://tc39.es/ecma262/2026/#sec-iterator-records">Iterator Record</a>
+    (7.4.1) — записи из трёх полей: <code>[[Iterator]]</code> — сам итератор, <code>[[NextMethod]]</code> — его метод
+    <code>next</code>, <code>[[Done]]</code> — закончен ли он. Запись создаёт GetIterator: GetMethod
+    (<code>Symbol.iterator</code>), вызов, проверка «объект ли», и GetIteratorDirect — <code>next</code> читается
+    <strong>один раз</strong>, при создании записи.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 236" role="img" aria-label="for...of по шагам 7.4: GetIterator создаёт запись, IteratorStepValue на каждом шаге зовёт next, читает done и value; при выходе раньше конца IteratorClose зовёт return">
+            <rect x="10" y="10" width="300" height="58" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+            <text x="160" y="32" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#5b21b6">GetIterator(obj, sync)</text>
+            <text x="160" y="52" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#5b21b6">[Symbol.iterator](), объект?, next — один раз</text>
+
+            <rect x="10" y="88" width="300" height="78" rx="10" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="160" y="110" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#075985">IteratorStepValue — каждый шаг</text>
+            <text x="160" y="130" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">Call([[NextMethod]]), результат — объект?</text>
+            <text x="160" y="148" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">ToBoolean(done), потом value</text>
+
+            <line x1="160" y1="68" x2="160" y2="86" stroke="#8b5cf6" stroke-width="2"/>
+
+            <rect x="330" y="10" width="300" height="58" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="480" y="32" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#334155">{ [[Iterator]], [[NextMethod]],</text>
+            <text x="480" y="52" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" font-weight="700" fill="#334155">[[Done]] }</text>
+
+            <rect x="330" y="88" width="300" height="36" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="480" y="111" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">done истинно — цикл кончился, return не зовут</text>
+
+            <rect x="330" y="130" width="300" height="36" rx="10" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="480" y="153" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">break, return, throw — IteratorClose: return()</text>
+
+            <text x="10" y="196" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Тело цикла бросило — ошибка тела важнее любой ошибки из return; вышли тихо,</text>
+            <text x="10" y="214" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">а return вернул не объект — TypeError. Так же закрывает и деструктуризация [first] = it.</text>
+        </svg>
+        <figcaption>Iterator Record и шаги for...of</figcaption>
+    </figure>
+
+    <p>Подсмотрим порядок шагов — объект результата с геттерами записывает каждое чтение:</p>
+
+    <pre class="code js">const log = [];
+const steps = {
+  [Symbol.iterator]() {
+    log.push("@@iterator");
+    let n = 0;
+    return {
+      next() {
+        log.push("next " + n);
+        n++;
+        return {
+          get done() { log.push("done"); return n &gt; 2; },
+          get value() { log.push("value"); return n; },
+        };
+      },
+    };
+  },
+};
+for (const x of steps) log.push("body " + x);
+console.log(log.join(" | "));</pre>
+
+    <div class="result-box">
+        @@iterator | next 0 | done | value | body 1 | next 1 | done | value | body 2 | next 2 | done
+    </div>
+
+    <p>Это шаги <a href="https://tc39.es/ecma262/2026/#sec-iteratorstepvalue">IteratorStepValue</a> (7.4.10):
+    <a href="https://tc39.es/ecma262/2026/#sec-iteratornext">IteratorNext</a>, потом
+    <a href="https://tc39.es/ecma262/2026/#sec-iteratorcomplete">IteratorComplete</a> — чтение <code>done</code>, и
+    только если не готово — <a href="https://tc39.es/ecma262/2026/#sec-iteratorvalue">IteratorValue</a>. На последнем
+    шаге <code>value</code> не читали вовсе. А <code>next</code>, однажды прочитанный, уже не меняется:</p>
+
+    <pre class="code js">const it = { n: 0, next() { return { value: ++this.n, done: this.n &gt; 3 }; }, [Symbol.iterator]() { return this; } };
+const seen = [];
+for (const x of it) {
+  seen.push(x);
+  it.next = () =&gt; ({ done: true });
+}
+console.log(seen.join(" "));</pre>
+
+    <div class="result-box">
+        1 2 3
+    </div>
+
+    <p>Подмена <code>it.next</code> в теле цикла ничего не изменила: цикл зовёт <code>[[NextMethod]]</code> записи. И
+    два правила о результате: <code>done</code> проходит через ToBoolean, а результат-не-объект — ошибка:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const counter = (doneAt) =&gt; ({ [Symbol.iterator]() { let i = 0; return { next() { i++; return { value: i, done: doneAt(i) }; } }; } });
+console.log([...counter((i) =&gt; (i &gt; 2 ? "нет" : 0))].join(), [...counter(() =&gt; new Boolean(false))].length);
+console.log(attempt(() =&gt; [...{ [Symbol.iterator]() { return { next() { return 5; } }; } }]));</pre>
+
+    <div class="result-box">
+        1,2 0<br>
+        TypeError: Iterator result 5 is not an object
+    </div>
+
+    <p>Строка «нет» истинна — перебор кончился на третьем шаге; объект <code>new Boolean(false)</code> тоже истинен
+    (день 5) — перебор кончился сразу.</p>
+
+    <h2 id="closing">13. Закрытие итератора</h2>
+
+    <p>Если цикл выходит раньше конца, <a href="https://tc39.es/ecma262/2026/#sec-iteratorclose">IteratorClose</a>
+    (7.4.11) зовёт <code>return</code> итератора — так генератор выполняет свой <code>finally</code> (день 12 курса 2).
+    Шаги: GetMethod <code>return</code> — нет метода, ничего не делать; вызвать; если тело цикла бросило — вернуть
+    <em>его</em> ошибку, что бы ни случилось в <code>return</code>; иначе — <code>return</code> обязан вернуть объект.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const log = [];
+const make = (ret) =&gt; ({
+  [Symbol.iterator]() {
+    return { next: () =&gt; ({ value: 1, done: false }), return: () =&gt; { log.push("return"); return ret; } };
+  },
+});
+for (const x of make({})) break;
+console.log(log.join());
+console.log(attempt(() =&gt; { for (const x of make(5)) break; }));
+console.log(attempt(() =&gt; { for (const x of make(5)) throw new Error("тело"); }));
+const [first] = make({});
+console.log(first, log.length);</pre>
+
+    <div class="result-box">
+        return<br>
+        TypeError: Iterator result 5 is not an object<br>
+        Error: тело<br>
+        1 4
+    </div>
+
+    <p>Во втором цикле <code>return</code> вернул 5 — ошибка. В третьем вернул то же 5, но тело уже бросило «тело», и
+    оно важнее. Деструктуризация <code>[first]</code> взяла один элемент, итератор не кончился — она тоже закрыла
+    его: всего четыре вызова. Для <code>for await...of</code> (день 29 курса 2) то же делает AsyncIteratorClose.</p>
+
+    <h2 id="lists">14. Длины, списки и ошибки</h2>
+
+    <p>Ещё три операции, которые встречаются в каждом втором алгоритме.
+    <a href="https://tc39.es/ecma262/2026/#sec-lengthofarraylike">LengthOfArrayLike</a> (7.3.18) — ToLength от
+    <code>Get(obj, "length")</code> (день 5). <a href="https://tc39.es/ecma262/2026/#sec-createlistfromarraylike">CreateListFromArrayLike</a>
+    (7.3.19) — из похожего на массив делает List, им пользуется <code>apply</code> (день 4).
+    <a href="https://tc39.es/ecma262/2026/#sec-createnonenumerabledatapropertyorthrow">CreateNonEnumerableDataPropertyOrThrow</a>
+    (7.3.7) создаёт <code>message</code> и <code>cause</code> ошибки (день 26 курса 2) неперечисляемыми:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(Array.from({ length: "2", 0: "a" }), Math.max.apply(null, { length: 2, 0: 5, 1: 7 }));
+console.log(attempt(() =&gt; Math.max.apply(null, 5)));
+const e = new Error("x", { cause: 1 });
+console.log(Object.keys(e), Object.getOwnPropertyNames(e).join());</pre>
+
+    <div class="result-box">
+        (2) ['a', undefined] 7<br>
+        TypeError: CreateListFromArrayLike called on non-object<br>
+        (0) [] stack,message,cause
+    </div>
+
+    <p>V8 назвал в сообщении саму операцию спецификации — редкий случай, когда её имя видно из кода. Свойство
+    <code>stack</code> — не из стандарта, его добавляет V8 (день 26 курса 2).</p>
+
+    <h2 id="cards">15. «Карточки 2.0»: поиск повторов</h2>
+
+    <p>На дне 33 курса 2 мы искали карточки с одинаковым номером в разных файлах колод одной строкой:</p>
+
+    <pre class="code js">// tests.js, день 33 курса 2 — поиск повторов
+const twins = [...Map.groupBy(cards, (c) =&gt; c.id)].filter(([, list]) =&gt; list.length &gt; 1);</pre>
+
+    <p>Прочитаем её операциями главы 7. GroupBy: GetIterator массива, на каждом шаге Call колбэка и
+    AddValueToKeyedGroup. Spread <code>[...map]</code>: GetIterator <code>Map</code> и IteratorStepValue до конца —
+    пары «ключ, список». <code>filter</code>: Call для каждой пары, а деструктуризация <code>[, list]</code> внутри —
+    свой GetIterator у каждой пары. Ключи <code>Map</code> — CanonicalizeKeyedCollectionKey, без перевода в строку.
+    Что, если в одном файле номер записан числом, а в другом — строкой?</p>
+
+    <pre class="code js">const cards = [{ id: 3, word: "lesson" }, { id: "3", word: "water" }, { id: 4, word: "book" }];
+const twins = [...Map.groupBy(cards, (c) =&gt; c.id)].filter(([, list]) =&gt; list.length &gt; 1);
+const twinsObj = Object.entries(Object.groupBy(cards, (c) =&gt; c.id)).filter(([, list]) =&gt; list.length &gt; 1);
+console.log(twins.length, twinsObj.length, JSON.stringify(twinsObj.map(([id, list]) =&gt; [id, list.map((c) =&gt; c.word)])));</pre>
+
+    <div class="result-box">
+        0 1 [["3",["lesson","water"]]]
+    </div>
+
+    <p><code>Map.groupBy</code> повтора не нашёл: 3 и «3» для него разные ключи — та же развилка, что на дне 5 с
+    <code>dataset</code>. А прогресс «Карточек» хранится в <code>Map</code> по номеру, значит, и там эти карточки
+    разные. Проверка честная: она ищет повторы ровно так, как их увидит прогресс. <code>Object.groupBy</code> перевёл
+    ключи ToPropertyKey и нашёл «повтор», которого для <code>Map</code> нет. Выбирая операцию, выбираешь и правило
+    ключей.</p>
+
+    <h2 id="next">16. Что будет завтра</h2>
+
+    <p>Модуль «Типы и абстрактные операции» закончен: типы, преобразования, сравнения, биты и операции над объектами.
+    Завтра, на дне 8, начинается модуль «Выполнение кода»: синтаксически управляемые операции —
+    <code>Evaluation</code> и объявленные имена, то есть как спецификация проходит по дереву разбора программы.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Раздел</th><th>Что делает и где мы это видели</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-operations-on-objects">7.3 Operations on Objects</a></td><td>операции над объектами — обёртки внутренних методов</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-makebasicobject">7.3.1 MakeBasicObject</a></td><td>рождение любого объекта: слоты, <code>[[Extensible]]</code> (день 4)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-get-o-p">7.3.2 Get</a></td><td><code>[[Get]]</code> с получателем O</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getv">7.3.3 GetV</a></td><td>свойство примитива, получатель без обёртки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-set-o-p-v-throw">7.3.4 Set</a></td><td><code>[[Set]]</code> и флажок Throw</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createdataproperty">7.3.5 CreateDataProperty</a></td><td>определить свойство-значение; им кончается <code>[[Set]]</code> нового свойства и reviver <code>JSON.parse</code> (день 31 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createdatapropertyorthrow">7.3.6 CreateDataPropertyOrThrow</a></td><td>то же с ошибкой; spread, литерал массива</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createnonenumerabledatapropertyorthrow">7.3.7 CreateNonEnumerableDataPropertyOrThrow</a></td><td><code>message</code> и <code>cause</code> ошибки (день 26 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-definepropertyorthrow">7.3.8 DefinePropertyOrThrow</a></td><td><code>Object.defineProperty</code> (день 5 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-deletepropertyorthrow">7.3.9 DeletePropertyOrThrow</a></td><td><code>pop</code> замороженного массива (Essentials, 19)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getmethod">7.3.10 GetMethod</a></td><td>необязательный метод: <code>Symbol.iterator</code>, <code>Symbol.hasInstance</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-hasproperty">7.3.11 HasProperty</a></td><td>оператор <code>in</code> (Essentials, 21)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-hasownproperty">7.3.12 HasOwnProperty</a></td><td><code>Object.hasOwn</code> (Essentials, 21)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-call">7.3.13 Call</a></td><td>IsCallable и <code>[[Call]]</code>; любой колбэк</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-construct">7.3.14 Construct</a></td><td><code>[[Construct]]</code> и newTarget; <code>super()</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-setintegritylevel">7.3.15 SetIntegrityLevel</a></td><td><code>Object.freeze</code>, <code>seal</code> (день 6 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-testintegritylevel">7.3.16 TestIntegrityLevel</a></td><td><code>Object.isFrozen</code>, <code>isSealed</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createarrayfromlist">7.3.17 CreateArrayFromList</a></td><td>массив из списка: результаты <code>Object.keys</code>, группы <code>groupBy</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-lengthofarraylike">7.3.18 LengthOfArrayLike</a></td><td>ToLength длины; <code>Array.from({ length })</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createlistfromarraylike">7.3.19 CreateListFromArrayLike</a></td><td>аргументы <code>apply</code> (день 2 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-invoke">7.3.20 Invoke</a></td><td>GetV и Call: <code>toLocaleString</code> массива</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinaryhasinstance">7.3.21 OrdinaryHasInstance</a></td><td><code>instanceof</code> (день 7 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-speciesconstructor">7.3.22 SpeciesConstructor</a></td><td><code>then</code> наследника <code>Promise</code>; <code>Symbol.species</code> — день 17</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-enumerableownproperties">7.3.23 EnumerableOwnProperties</a></td><td><code>Object.keys</code>, <code>values</code>, <code>entries</code> (Essentials, 21)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getfunctionrealm">7.3.24 GetFunctionRealm</a></td><td>реалм функции — день 9</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-copydataproperties">7.3.25 CopyDataProperties</a></td><td>spread и остаток объекта (Essentials, 22)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privateelementfind">7.3.26 PrivateElementFind</a></td><td>поиск <code>#x</code>; <code>#x in o</code> (день 9 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privatefieldadd">7.3.27 PrivateFieldAdd</a></td><td>приватное поле; второй раз — <code>TypeError</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privatemethodoraccessoradd">7.3.28 PrivateMethodOrAccessorAdd</a></td><td>приватные методы и аксессоры — раньше полей</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-hostensurecanaddprivateelement">7.3.29 HostEnsureCanAddPrivateElement</a></td><td>право хозяина запретить; Chrome 156 разрешает и для <code>window</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privateget">7.3.30 PrivateGet</a></td><td>чтение <code>o.#x</code>; нет элемента — <code>TypeError</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-privateset">7.3.31 PrivateSet</a></td><td>запись <code>o.#x</code>; метод не записать</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-definefield">7.3.32 DefineField</a></td><td>поле класса — определение (день 8 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-initializeinstanceelements">7.3.33 InitializeInstanceElements</a></td><td>методы, потом поля — после <code>super()</code> (день 10 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-add-value-to-keyed-group">7.3.34 AddValueToKeyedGroup</a></td><td>группа по SameValue</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-groupby">7.3.35 GroupBy</a></td><td><code>Object.groupBy</code>, <code>Map.groupBy</code> (день 14 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getoptionsobject">7.3.36 GetOptionsObject</a></td><td>объект настроек у base64 <code>Uint8Array</code> — день 21</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-SetterThatIgnoresPrototypeProperties">7.3.37 SetterThatIgnoresPrototypeProperties</a></td><td>сеттеры <code>constructor</code> и <code>Symbol.toStringTag</code> у <code>Iterator.prototype</code> (день 13 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-operations-on-iterator-objects">7.4 Operations on Iterator Objects</a></td><td>операции над итераторами</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iterator-records">7.4.1 Iterator Records</a></td><td><code>[[Iterator]]</code>, <code>[[NextMethod]]</code>, <code>[[Done]]</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getiteratordirect">7.4.2 GetIteratorDirect</a></td><td>запись из итератора, <code>next</code> — один раз; помощники <code>Iterator</code> (день 13 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getiteratorfrommethod">7.4.3 GetIteratorFromMethod</a></td><td>вызвать метод, проверить «объект»</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getiterator">7.4.4 GetIterator</a></td><td><code>for...of</code>, spread, деструктуризация (день 11 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getiteratorflattenable">7.4.5 GetIteratorFlattenable</a></td><td><code>Iterator.from</code>, <code>flatMap</code> (день 13 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratornext">7.4.6 IteratorNext</a></td><td>вызов <code>next</code>; не объект — <code>TypeError</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratorcomplete">7.4.7 IteratorComplete</a></td><td>ToBoolean от <code>done</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratorvalue">7.4.8 IteratorValue</a></td><td>Get <code>value</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratorstep">7.4.9 IteratorStep</a></td><td><code>next</code> и <code>done</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratorstepvalue">7.4.10 IteratorStepValue</a></td><td>шаг <code>for...of</code>: <code>next</code>, <code>done</code>, <code>value</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratorclose">7.4.11 IteratorClose</a></td><td><code>break</code> зовёт <code>return</code>; <code>finally</code> генератора (день 12 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratorcloseall">7.4.12 IteratorCloseAll</a></td><td>закрыть несколько итераторов: <code>return</code> помощников <code>Iterator</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ifabruptcloseiterator">7.4.13 IfAbruptCloseIterator</a></td><td>ошибка колбэка закрывает итератор: <code>groupBy</code>, <code>Array.from</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-asynciteratorclose">7.4.14 AsyncIteratorClose</a></td><td><code>break</code> в <code>for await...of</code> (день 29 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ifabruptcloseasynciterator">7.4.15 IfAbruptCloseAsyncIterator</a></td><td>то же для асинхронного: <code>Array.fromAsync</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createiterresultobject">7.4.16 CreateIteratorResultObject</a></td><td><code>{ value, done }</code> генератора (день 11 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createlistiteratorRecord">7.4.17 CreateListIteratorRecord</a></td><td>итератор по внутреннему списку — из кода не виден</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-iteratortolist">7.4.18 IteratorToList</a></td><td>весь итератор в список: <code>new AggregateError(errors)</code> (день 27 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// Get(O, P) = O.[[Get]](P, O): получатель — this геттера; GetV — для примитива, получатель без обёртки
+// Set(O, P, V, Throw): [[Set]] отвечает false, Throw = true — TypeError; встроенные функции всегда с true
+// «…OrThrow»: false → TypeError (push, pop, Object.assign, defineProperty на замороженном)
+// запись (Set): присваивание, Object.assign — сеттеры и прототип; определение: литерал, spread, поле класса
+// CopyDataProperties: свои перечисляемые, с символами, порядок [[OwnPropertyKeys]], Get у источника
+// Call: IsCallable, потом [[Call]](this, args); Invoke = GetV + Call; GetMethod: null и undefined — «нет»
+// Construct(F, args, newTarget): super() передаёт newTarget наследника — new.target
+// freeze: нерасширяемый + configurable false + writable false (у аксессоров сеттер жив)
+// instanceof: Symbol.hasInstance → OrdinaryHasInstance → цепочка против C.prototype сейчас
+// поле класса — DefineField (определение); this.x = в конструкторе — запись
+// GroupBy: GetIterator, Call(cb, undefined, «v, k»), ключ ToPropertyKey (объект) или как есть (Map)
+
+// Iterator Record: [[Iterator]], [[NextMethod]] (читается один раз), [[Done]]
+// шаг: next() → объект? → ToBoolean(done) → value; досрочный выход — return(), ошибка тела важнее</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>a[0] = 9</code> у замороженного массива в нестрогом коде молчит, а <code>a.push(3)</code> бросает?
+                <details class="answer"><summary>Ответ</summary>
+                    Присваивание идёт через PutValue, а он бросает только в строгом коде. <code>push</code> зовёт
+                    Set с флажком Throw = <code>true</code>, и отказ <code>[[Set]]</code> становится <code>TypeError</code>.
+                </details>
+            </li>
+            <li>Чем <code>Object.assign({}, src)</code> отличается от <code>{ ...src }</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Оба читают источник через Get. <code>Object.assign</code> записывает через Set — работают сеттеры
+                    получателя и его прототипов, в том числе <code>__proto__</code>. Spread определяет свойства
+                    через CreateDataPropertyOrThrow — всегда собственные свойства-значения.
+                </details>
+            </li>
+            <li>Почему сеттер родителя не сработал для поля класса <code>word = "kitap"</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Поле добавляет DefineField через CreateDataPropertyOrThrow — это определение собственного
+                    свойства, прототип не спрашивают. Сеттер вызвало бы только присваивание <code>this.word = …</code>.
+                </details>
+            </li>
+            <li>Что произойдёт, если в теле <code>for...of</code> заменить <code>next</code> у итератора?
+                <details class="answer"><summary>Ответ</summary>
+                    Ничего: GetIteratorDirect прочитал <code>next</code> один раз и сохранил в
+                    <code>[[NextMethod]]</code>, цикл зовёт сохранённый.
+                </details>
+            </li>
+            <li>Когда <code>for...of</code> вызывает <code>return</code> итератора и чья ошибка побеждает?
+                <details class="answer"><summary>Ответ</summary>
+                    При досрочном выходе — <code>break</code>, <code>return</code>, ошибка в теле; при естественном
+                    конце — нет. Если тело бросило, побеждает ошибка тела; иначе <code>return</code> обязан вернуть
+                    объект, иначе <code>TypeError</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols">MDN Web Docs</a>
+        (Iteration protocols, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

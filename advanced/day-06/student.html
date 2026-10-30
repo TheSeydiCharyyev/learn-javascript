@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 6 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #8b5cf6; }
+        h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 6</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 6. Числа как биты</h1>
+    <p class="subtitle">Выжимка лекции: ToInt32 и ToUint32, дополнительный код, побитовые операторы и сдвиги,
+    приоритет, BigInt, маски и оператор <code>void</code>.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>ToInt32</strong> (7.1.6): ToNumber; NaN, ±Infinity и ±0 — сразу +0; отбросить дробь; взять остаток
+        <em>modulo</em> 2<sup>32</sup> (он всегда ≥ 0); если 2<sup>31</sup> и больше — вычесть 2<sup>32</sup>.
+        <strong>ToUint32</strong> — то же без последнего шага. Отрицательное число в 32 разрядах —
+        дополнительный код: разряд 31 весит −2<sup>31</sup>, а <code>~x</code> = −x − 1.
+    </div>
+
+    <div class="key-point">
+        Приоритет от сильного к слабому: <code>+ -</code>, сдвиги, <code>&lt; &gt;</code>, <code>== ===</code>,
+        <code>&amp;</code>, <code>^</code>, <code>|</code>, <code>&amp;&amp; ||</code>. Побитовое рядом со сравнением —
+        всегда в скобках.
+    </div>
+
+    <h2>ToInt32 и сдвиги</h2>
+
+    <pre class="code js">console.log(3e9 | 0, 2 ** 32 | 0, 2.9 | 0, NaN | 0);   // -1294967296 0 2 0 — ToInt32
+console.log(-1 &gt;&gt;&gt; 0, -9 &gt;&gt;&gt; 2, -9 &gt;&gt; 2);             // 4294967295 1073741821 -3 — ToUint32 и сдвиги
+console.log(1 &lt;&lt; 31, 1 &lt;&lt; 32, ~9, ~~-2.7);            // -2147483648 1 -10 -2 — счётчик по модулю 32</pre>
+
+    <table>
+        <thead><tr><th>Оператор</th><th>Операнды</th><th>Что делает</th></tr></thead>
+        <tbody>
+            <tr><td><code>&amp;</code> <code>|</code> <code>^</code></td><td>ToInt32 и ToInt32</td><td>по разрядам: оба — 1 / хотя бы один / ровно один</td></tr>
+            <tr><td><code>~</code></td><td>ToInt32</td><td>переворачивает все разряды</td></tr>
+            <tr><td><code>&lt;&lt;</code></td><td>ToInt32 и ToUint32 % 32</td><td>влево, справа нули</td></tr>
+            <tr><td><code>&gt;&gt;</code></td><td>ToInt32 и ToUint32 % 32</td><td>вправо, слева копии знака: деление вниз</td></tr>
+            <tr><td><code>&gt;&gt;&gt;</code></td><td>ToUint32 и ToUint32 % 32</td><td>вправо, слева нули: всегда ≥ 0</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        <code>x | 0</code> и <code>~~x</code> — это ToInt32, а не <code>Math.trunc</code>: за 2<sup>31</sup> знак
+        меняется, NaN молча становится 0. Секунды с 1970 года перестанут влезать 19 января 2038 года.
+    </div>
+
+    <h2>Приоритет и маски</h2>
+
+    <pre class="code js">const n = 4, EDIT = 1 &lt;&lt; 2;
+let rights = 0b0011;
+rights |= EDIT;
+console.log(n &amp; 1 === 0, (n &amp; 1) === 0, rights.toString(2), (rights &amp; EDIT) !== 0);   // 0 true 111 true — скобки!
+console.log(-3 % 2, -3 &amp; 1, (0xFF851B &gt;&gt; 8) &amp; 0xFF);        // -1 1 133 — чётность и байт цвета</pre>
+
+    <div class="remember">
+        Флажок <code>F = 1 &lt;&lt; k</code>: <code>|=</code> ставит, <code>&amp;= ~F</code> снимает, <code>^=</code>
+        переключает, <code>(r &amp; F) !== 0</code> проверяет. Чётность — <code>n &amp; 1</code>: у −3 остаток −1, а
+        младший разряд — 1. Верхний байт 32-битного числа — <code>&gt;&gt;&gt; 24</code> или
+        <code>(x &gt;&gt; 24) &amp; 0xFF</code>, но не голый <code>&gt;&gt; 24</code>.
+    </div>
+
+    <h2>BigInt и void</h2>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return f(); } catch (e) { return e.name; } };
+console.log(1n &lt;&lt; 64n, -1n &amp; 0xFFn, attempt(() =&gt; 5n &gt;&gt;&gt; 1n));   // 18446744073709551616n 255n TypeError — разрядов без конца
+console.log(void 0, void 2 === "2", attempt(() =&gt; void nope));      // undefined false ReferenceError — void зовёт GetValue</pre>
+
+    <div class="remember">
+        У BigInt разрядов бесконечно много: нет обрезки и модуля у счётчика, а <code>&gt;&gt;&gt;</code> бросает
+        <code>TypeError</code>; BigInt с числом смешивать нельзя. <code>void x</code> вычисляет <code>x</code> (геттер
+        сработает) и возвращает <code>undefined</code>; <code>() =&gt; void f()</code> ничего не возвращает.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Пройдите шаги ToInt32 для <code>4294967295.7</code> и <code>-2147483649</code>, записывая каждый, и
+                проверьте ответ через <code>| 0</code>.</li>
+            <li>Прочитайте шаги <code>Number::leftShift</code> (6.1.6.1.9) и объясните, почему
+                <code>1 &lt;&lt; -1</code> отрицательное, а <code>1 &lt;&lt; 33</code> — 2.</li>
+            <li>Найдите в своих «Карточках 2.0» числа, которые могут перейти 2<sup>31</sup> (миллисекунды, номера,
+                суммы), и проверьте, не проходят ли они через побитовый оператор.</li>
+            <li>Откройте на MDN страницу
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift_assignment">Unsigned right shift assignment</a>,
+                найдите пример с BigInt и выполните его в Chrome. Что обещает страница и что происходит на самом
+                деле?</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_AND">MDN Web Docs</a>
+        (страницы побитовых операторов, сдвигов, их присваиваний и <code>void</code>, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

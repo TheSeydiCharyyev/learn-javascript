@@ -5,7 +5,8 @@
 // A block with setTimeout gets 700 ms before its page closes. The context is Ashgabat time and Russian, as in course 2.
 //   node tools/runs/advanced/day-06.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-06.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted lines of the method know (day 34 of course 2,
+// Checks: a result-box right after a block equals its output, in the notes the comments of console.log lines do and the
+// homework has its answers; the quoted lines of the method know (day 34 of course 2,
 // a block with data-page) are the real ones; the cheatsheet runs without an error; the experiments the lecture only
 // tells about (the table of ToInt8 … ToBigUint64 through typed arrays, which the lecture may not use before day 20);
 // what the lecture says about the text of ECMA-262 2026 is checked against tools/.cache/ecma262-2026.html and what it
@@ -21,7 +22,7 @@ const ROOT = path.join(__dirname, '../../..');
 const DAY = path.join(ROOT, 'advanced/day-06');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -211,6 +212,14 @@ console.log(big.every((x) => [0n, 1n, 2n, 5n].every((k) => (x >> k) === (x << -k
     const out = await runScript(ctx, 'console.log(Math.round(2 ** 31 / 365.25 / 1e6), (2 ** 31 / 365.25 / 1e6).toFixed(2));', 'told-5.html');
     check(JSON.stringify(out) === '["6 5.88"]', `lecture 15: 2^31 days are about six million years ${JSON.stringify(out)}`);
   }
+  // notes, homework 1, 2 and 4: the two values through ToInt32, the counts −1 and 33, the BigInt example of MDN
+  {
+    const out = await runScript(ctx, `const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+let c = 5n;
+console.log(4294967295.7 | 0, -2147483649 | 0, 1 << -1, 1 << 33, attempt(() => { c >>>= 2n; return c; }), c);`, 'hw.html');
+    check(JSON.stringify(out) === '["-1 2147483647 -2147483648 2 TypeError 5n"]',
+      `student homework 1, 2, 4: 4294967295.7 → −1, −2147483649 → 2147483647; 1 << −1 and 1 << 33; c >>>= 2n throws ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -258,6 +267,7 @@ console.log(big.every((x) => [0n, 1n, 2n, 5n].every((k) => (x >> k) === (x << -k
   check(not.includes('Let oldValue be ? ToNumeric (? GetValue (expr)). If oldValue is a Number, return Number::bitwiseNOT (oldValue)') && not.includes('Return BigInt::bitwiseNOT (oldValue)')
     && f('sec-numeric-types-number-bitwiseNOT').includes('Let oldValue be ! ToInt32 (x). Return the bitwise complement of oldValue') && f('sec-numeric-types-bigint-bitwiseNOT').includes('Return - x - 1 ℤ'),
   'lecture 7: ~ — ToNumeric; Number: ToInt32 and complement; BigInt: −x − 1');
+  check(f('sec-numeric-types-number-leftShift').includes('6.1.6.1.9 Number::leftShift (x, y)'), 'student homework 2: Number::leftShift is 6.1.6.1.9');
   check(f('sec-numeric-types-number-leftShift').includes('Let lNum be ! ToInt32 (x). Let rNum be ! ToUint32 (y). Let shiftCount be ℝ (rNum) modulo 32')
     && hasAll(f('sec-numeric-types-number-signedRightShift'), ['Let lNum be ! ToInt32 (x). Let rNum be ! ToUint32 (y). Let shiftCount be ℝ (rNum) modulo 32', 'The most significant bit is propagated']),
   'lecture 8: << and >> — the left operand ToInt32, the count ToUint32 modulo 32, >> copies the top bit');

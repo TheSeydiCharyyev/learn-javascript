@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 8 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 8</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 8. Синтаксически управляемые операции</h1>
+    <p class="subtitle">Выжимка лекции: операции по дереву разбора, списки объявленных имён, подъём, метки,
+    Contains и вывод имени функции.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <strong>Синтаксически управляемая операция</strong> задана кусками — по одному на правило грамматики; у правила
+        «A : B» без своего куска она передаётся к B. <strong>Статические</strong> работают до выполнения, на них стоят
+        ранние ошибки; <strong>выполнения</strong> — Evaluation и его помощники.
+    </div>
+
+    <h2>Имена и подъём</h2>
+
+    <pre class="code js">const parse = (code) =&gt; { try { new Function(code); return "ok"; } catch (e) { return e.name; } };
+console.log(parse("let x; var x;"), parse("var x; var x;"), parse("{ var x; } let x;"));   // SyntaxError ok SyntaxError — лексические против var
+console.log(parse("function f() {} var f;"), parse("{ function f() {} var f; }"));      // ok SyntaxError — наверху функция как var
+console.log(typeof later, typeof ready);                                                // undefined function — подъём
+var later = 1;
+function ready() {}</pre>
+
+    <table>
+        <thead><tr><th>Список (8.2)</th><th>Что в нём</th><th>Докуда</th></tr></thead>
+        <tbody>
+            <tr><td>BoundNames</td><td>имена объявления, шаблона, параметров</td><td>одно объявление</td></tr>
+            <tr><td>LexicallyDeclaredNames</td><td><code>let</code>, <code>const</code>, <code>class</code>, функции в блоке</td><td>свой блок</td></tr>
+            <tr><td>VarDeclaredNames</td><td><code>var</code></td><td>сквозь блоки до функции или скрипта</td></tr>
+            <tr><td>TopLevel…</td><td>функции наверху тела — как <code>var</code></td><td>верх функции и скрипта</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Ошибка — повтор среди лексических имён, имя и в лексических, и в <code>var</code> одной области, параметр среди
+        лексических имён тела. <code>var</code> + <code>var</code> — можно. В модуле функция — лексическое имя.
+        Подъём: <code>var</code> — <code>undefined</code>, <code>let</code>/<code>const</code> — мёртвая зона, функция —
+        готова. Блок при каждом входе получает новое окружение.
+    </div>
+
+    <h2>Имя функции</h2>
+
+    <pre class="code js">const arrow = () =&gt; {};
+const paren = (function () {});
+const comma = (0, function () {});
+const obj = { method() {}, get size() { return 1; } };
+obj.later = () =&gt; {};
+const show = (list) =&gt; list.map((f) =&gt; JSON.stringify(f.name)).join(" ");
+console.log(show([arrow, paren, comma]));   // "arrow" "paren" "" — скобки пропускают, запятая нет
+console.log(show([obj.method, Object.getOwnPropertyDescriptor(obj, "size").get, obj.later]));   // "method" "get size" "" — obj.x не имя</pre>
+
+    <div class="remember">
+        Имя даёт NamedEvaluation: безымянное определение функции или класса там, где известно имя, — инициализатор
+        <code>let</code>/<code>const</code>/<code>var</code>, <code>=</code> и <code>&amp;&amp;=</code>, <code>||=</code>,
+        <code>??=</code> простому имени, ключ, значение по умолчанию, поле класса, <code>export default</code>.
+        Приставки «get», «bound» и <code>[символ]</code> добавляет SetFunctionName.
+    </div>
+
+    <h2>Метки, super и цели присваивания</h2>
+
+    <pre class="code js">const parse = (code) =&gt; { try { new Function(code); return "ok"; } catch (e) { return e.name; } };
+console.log(parse("a: { continue a; }"), parse("a: for (;;) { (() =&gt; { break a; }); }"));   // SyntaxError SyntaxError — continue к циклу, метка не видна в функции
+console.log(parse("class A extends B { constructor() { () =&gt; super(); } }"), parse("f() = 1;"), parse("(a, b) = 1;"));   // ok ok SyntaxError — стрелка прозрачна, вызов — web-compat</pre>
+
+    <div class="remember">
+        Contains не заглядывает в функции, но стрелку проходит насквозь для <code>this</code>, <code>super</code>,
+        <code>new.target</code>. <code>f() = 1</code> в нестрогом коде — ошибка только при выполнении, после вызова
+        <code>f</code>; по тексту 2026 в строгом коде — ранняя ошибка, но Chrome 156 и там ждёт выполнения.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Прочитайте ранние ошибки блока (14.2.1) и найдите условие, при котором
+                <code>{ function f() {} function f() {} }</code> разрешено. Проверьте его в строгом коде.</li>
+            <li>Предскажите и проверьте <code>name</code>: <code>const a = function b() {}</code>,
+                <code>let c; c = class {}</code>, <code>({ ["x" + 1]: () =&gt; {} }).x1</code>, <code>[() =&gt; {}][0]</code>,
+                <code>const { d = function () {} } = {}</code>.</li>
+            <li>Найдите в своём <code>main.js</code> «Карточек 2.0» безымянные слушатели. Какой из них может понадобиться
+                снять через <code>removeEventListener</code>? Дайте ему имя константой.</li>
+            <li>Прочитайте на MDN раздел «JavaScript compressors and minifiers» страницы
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/name">Function: name</a>
+                и объясните через NamedEvaluation, почему имя меняется при сжатии кода.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/name">MDN Web Docs</a>
+        (Function: name, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

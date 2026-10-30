@@ -15,11 +15,13 @@
 const { chromium } = require('playwright');
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '../../..');
+const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-08');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -211,6 +213,16 @@ console.log(n);`, 'told-3.html');
     check(JSON.stringify(out) === JSON.stringify(['true undefined true undefined false true', '1', 'function']),
       `lecture 14, 15: the shorthand and the computed key make an own "__proto__", the quoted key sets the prototype; a module function is ready before its line; another equal arrow does not remove a listener ${JSON.stringify(out)}`);
   }
+  // notes, homework 1 and 2: two functions in a block in strict code; five names
+  {
+    const out = await runScript(ctx, `${PARSE}const a = function b() {};
+let c;
+c = class {};
+const { d = function () {} } = {};
+console.log(parse("'use strict'; { function f() {} function f() {} }"), [a, c, ({ ["x" + 1]: () => {} }).x1, [() => {}][0], d].map((f) => JSON.stringify(f.name)).join(" "));`, 'hw.html');
+    check(JSON.stringify(out) === JSON.stringify(["SyntaxError: Identifier 'f' has already been declared \"b\" \"c\" \"x1\" \"\" \"d\""]),
+      `student homework 1, 2: strict code forbids the two functions; b, c, x1, "", d ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -283,6 +295,12 @@ console.log(n);`, 'told-3.html');
   check(hasAll(f('sec-object-initializer-static-semantics-early-errors'), ['13.2.5.1 Static Semantics: Early Errors', 'contains any duplicate entries for "__proto__" and at least two of those entries were obtained from productions of the form PropertyDefinition : PropertyName : AssignmentExpression'])
     && f('sec-static-semantics-propname').includes('PropertyDefinition : IdentifierReference Return the StringValue of IdentifierReference') && f('sec-static-semantics-propname').includes('ComputedPropertyName : [ AssignmentExpression ] Return empty'),
   'lecture 14: 13.2.5.1 counts only "key: value" entries; PropName — a shorthand has its name, a computed key is empty');
+
+  check(f('sec-block-static-semantics-early-errors').includes('IsStrict (this production) is false. The duplicate entries are only bound by FunctionDeclarations'),
+    'student homework 1: the exception of 14.2.1 — non-strict code and only function declarations');
+  const mdnName = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/global_objects/function/name/index.md'], { encoding: 'utf8' });
+  check(mdnName.includes('### JavaScript compressors and minifiers') && mdnName.includes("Such transformations often change a function's name at build time"),
+    'student homework 4: MDN Function: name has the section about compressors that change names');
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

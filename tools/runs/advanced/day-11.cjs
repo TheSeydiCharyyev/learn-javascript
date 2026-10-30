@@ -6,7 +6,8 @@
 //   node tools/runs/advanced/day-11.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-11.cjs --quiet    only the checks
 // Checks: a result-box right after a block equals its output; in the notes the output equals the comments of the lines
-// that print it; the homework of the notes; the quoted lines of main.js (day 34 of course 2) are the
+// that print it; the homework of the notes; the examples of the tasks run with reference solutions, the predictions of
+// the tasks and what their criteria ask to find; the quoted lines of main.js (day 34 of course 2) are the
 // real ones; the cheatsheet runs without an error; the experiments the lecture only tells about (an error inside
 // finally hides the first one, break in for await closes an async generator, early errors of a catch parameter, of a
 // labelled function and of const); what the lecture says about the text of ECMA-262 2026 (chapter 14 and the
@@ -23,7 +24,7 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-11');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -41,8 +42,99 @@ const show = (a) => {
   return String(a.value ?? a.unserializableValue ?? a.description);
 };
 
-// a block without a result-box: its output by "page #index" or by the first line
-const EXPECT = {};
+// a block without a result-box: its output by "page #index" or by the first line; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['ReferenceError', 'есть', 'ReferenceError 1 ReferenceError'],
+  'tasks #1': ['0,1,2', '0.5,2', '3,3,3', '10,20,30', '10,10'],
+  'tasks #2': ['case 1 case 2 два | case 1 case 2 case 3 три | case 1 case 2 case 3 иначе три', '21'],
+  'tasks #8': ['из var | undefined', "ok | SyntaxError: Identifier 'e' has already been declared"],
+};
+
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  forLet: `function forLet(header, test, step, body) {
+  let env = { ...header };
+  while (true) {
+    if (!test(env)) return;
+    body(env);
+    env = { ...env };
+    step(env);
+  }
+}`,
+  caseBlock: `function caseBlock(input, clauses) {
+  const d = clauses.findIndex((c) => !c.selector);
+  const A = d === -1 ? clauses : clauses.slice(0, d);
+  const B = d === -1 ? [] : clauses.slice(d + 1);
+  const runFrom = (list, start) => {
+    for (let k = start; k < list.length; k++) if (list[k].body()) return true;
+    return false;
+  };
+  for (let k = 0; k < A.length; k++) {
+    if (A[k].selector() === input) {
+      if (runFrom(A, k) || d === -1) return;
+      if (clauses[d].body()) return;
+      runFrom(B, 0);
+      return;
+    }
+  }
+  if (d === -1) return;
+  for (let k = 0; k < B.length; k++) {
+    if (B[k].selector() === input) {
+      runFrom(B, k);
+      return;
+    }
+  }
+  if (clauses[d].body()) return;
+  runFrom(B, 0);
+}`,
+  tryStatement: `function tryStatement(block, catcher, finalizer) {
+  const B = block();
+  const C = B.type === "throw" && catcher ? catcher(B.value) : B;
+  if (!finalizer) return C;
+  const F = finalizer();
+  return F.type === "normal" ? C : F;
+}`,
+  openDeck: `async function openDeck(ui, load) {
+  ui.loading = true;
+  try {
+    try {
+      await load();
+    } catch (err) {
+      if (!err.cause) throw err;
+      ui.error = \`\${err.message}: \${err.cause.message}\`;
+    }
+  } finally {
+    ui.loading = false;
+  }
+}`,
+  enumerate: `function* enumerate(obj) {
+  const visited = new Set();
+  for (const key of Object.getOwnPropertyNames(obj)) {
+    const desc = Object.getOwnPropertyDescriptor(obj, key);
+    if (desc) {
+      visited.add(key);
+      if (desc.enumerable) yield key;
+    }
+  }
+  const proto = Object.getPrototypeOf(obj);
+  if (proto === null) return;
+  for (const key of enumerate(proto)) if (!visited.has(key)) yield key;
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 // a block that is only a quotation: it does not run, its code lines must be found in the quoted page
 const QUOTES = {
@@ -103,6 +195,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -119,12 +212,18 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(!out.some((l) => l.startsWith('Uncaught')), `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && !out.some((l) => l.startsWith('Uncaught')), `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(JSON.stringify(out) === JSON.stringify(commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(JSON.stringify(out) === JSON.stringify(blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else if (EXPECT[`${name} #${i}`] ?? EXPECT[first]) check(JSON.stringify(out) === JSON.stringify(EXPECT[`${name} #${i}`] ?? EXPECT[first]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
@@ -171,6 +270,50 @@ for (const k in o) keys.push(k);
 console.log(byLet.map((f) => f()).join(), "|", byVar.map((f) => f()).join(), "|", run(2), "|", run(3), "|", run(1), "|", keys.join(" "));`, 'hw.html');
     check(JSON.stringify(out) === JSON.stringify(['1,3 | 4,4 | 2 | d 1 | 1 | b']),
       `student homework 1–3: let gives 1,3 and var 4,4; default first — 2, "d 1", 1; the own non-enumerable a hides the prototype a ${JSON.stringify(out)}`);
+  }
+  // tasks 4–8: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.forLet}
+${SOLUTIONS.caseBlock}
+${SOLUTIONS.tryStatement}
+const fns = [];
+forLet({ i: 0 }, (e) => e.i < 3, (e) => { e.i++; }, (e) => { fns.push(() => e.i); e.i += 0.5; });
+const envs = new Set();
+forLet({ i: 0 }, (e) => { envs.add(e); return e.i < 2; }, (e) => { e.i++; }, () => {});
+console.log(fns.map((f) => f()).join(), envs.size);
+const log = [];
+const clause = (name, value, stop) => ({ selector: () => { log.push("?" + name); return value; }, body: () => { log.push(name); return stop; } });
+const clauses = [clause("a", 1, false), { body: () => { log.push("default"); return false; } }, clause("b", 2, true), clause("c", 3, false)];
+const sel = (name, v) => { log.push("?" + name); return v; };
+const real = (input) => { log.length = 0; switch (input) { case sel("a", 1): log.push("a"); default: log.push("default"); case sel("b", 2): log.push("b"); break; case sel("c", 3): log.push("c"); } return log.join(" "); };
+const model = (input) => { log.length = 0; caseBlock(input, clauses); return log.join(" "); };
+console.log([1, 2, 3, 9].every((x) => real(x) === model(x)));
+const kind = (f) => { try { return "return " + f(); } catch (e) { return "throw " + e; } };
+const f1 = () => { try { return 1; } finally { "уборка"; } };
+const f3 = () => { try { return 1; } finally { return 2; } };
+const f4 = () => { try { throw "x"; } catch { throw "из catch"; } finally { 0; } };
+const normal = (value) => ({ type: "normal", value });
+const ret = (value) => ({ type: "return", value });
+const thr = (value) => ({ type: "throw", value });
+const show = (c) => c.type + " " + c.value;
+console.log(kind(f1) === show(tryStatement(() => ret(1), null, () => normal("уборка"))), kind(f3) === show(tryStatement(() => ret(1), null, () => ret(2))),
+  kind(f4) === show(tryStatement(() => thr("x"), () => thr("из catch"), () => normal(0))));`, 'tasks-criteria-1.html');
+    check(JSON.stringify(out) === JSON.stringify(['0.5,2 3', 'true', 'true true true']),
+      `tasks 4–6: forLet gives 0.5,2 like the language and makes three copies for two passes; caseBlock = switch on 1, 2, 3, 9; tryStatement = real try in functions ${JSON.stringify(out)}`);
+  }
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.openDeck}
+${SOLUTIONS.enumerate}
+const ui = { loading: false, error: "" };
+openDeck(ui, () => { throw new TypeError("опечатка"); }).catch((e) => console.log("наружу:", e.message, ui.loading));
+const forIn = (obj) => { const keys = []; for (const k in obj) keys.push(k); return keys.join(" "); };
+const arr = [7, 8];
+const withProto = Object.create({ x: 1, y: 2 });
+withProto.z = 3;
+Object.defineProperty(withProto, "x", { value: 0, enumerable: false });
+console.log([{ b: 1, 1: 2, a: 3 }, arr, withProto].every((o) => [...enumerate(o)].join(" ") === forIn(o)));`, 'tasks-criteria-2.html');
+    check(JSON.stringify(out) === JSON.stringify(['true', 'наружу: опечатка false']),
+      `tasks 7, 8: the error without cause itself goes out (catch rethrows it) and the loading is off; enumerate agrees with for-in on three objects ${JSON.stringify(out)}`);
   }
   await b.close();
 
@@ -252,6 +395,10 @@ console.log(byLet.map((f) => f()).join(), "|", byVar.map((f) => f()).join(), "|"
   // the MDN pages of the footer
   check(['for', 'for...in', 'for...of', 'switch', 'try...catch'].every((p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/statements/${p}/index.md`], { encoding: 'utf8' }).startsWith('---\ntitle:')),
     'footer: the MDN pages for, for...in, for...of, switch, try...catch are in the cache');
+  check(f('sec-variablestatements-in-catch-blocks').includes('They do not shadow the same-named bindings introduced by the CatchParameter and hence the Initializer for such var declarations will assign to the corresponding catch parameter rather than the var binding')
+    && f('sec-try-statement-static-semantics-early-errors').includes('unless CatchParameter is CatchParameter : BindingIdentifier and the host is a web browser or otherwise supports VariableStatements in Catch Blocks')
+    && f('sec-enumerate-object-properties').includes('function * EnumerateObjectProperties (obj) { const visited = new Set ()'),
+  'tasks 8, 9: the note of 14.7.5.9 has the generator; B.3.4 — var in catch assigns to the parameter; 14.15.1 allows it only for a plain name');
   const tryPage = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/statements/try...catch/index.md'], { encoding: 'utf8' });
   check(hasAll(tryPage, ['### The finally block', '### Returning from a finally block']) && /> 14\.7\.4\.3 ForBodyEvaluation/.test(f('sec-forbodyevaluation'))
     && /> 14\.7\.5\.9 EnumerateObjectProperties/.test(f('sec-enumerate-object-properties')),

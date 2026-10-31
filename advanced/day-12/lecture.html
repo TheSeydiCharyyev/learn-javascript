@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 12 — Функции и классы по спецификации</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+        h3 { color: #075985; }
+        .step-number { background: #0ea5e9; }
+        .toc a { color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 12</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 12 &bull; урок 1</span>
+        <h1>Функции и классы по спецификации</h1>
+        <p>Курс 3, Advanced. Модуль «Выполнение кода» — пятый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>читать список параметров и объяснять, что видят умолчания;</li>
+            <li>различать шаги создания объявления, выражения, стрелки и метода;</li>
+            <li>проходить ClassDefinitionEvaluation и предсказывать порядок создания класса;</li>
+            <li>находить хвостовой вызов и заменять такую рекурсию циклом.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#chapter">Глава 15</a></li>
+            <li><a href="#params">Списки параметров</a></li>
+            <li><a href="#paramenv">Окружение параметров</a></li>
+            <li><a href="#defaults">Что видят умолчания</a></li>
+            <li><a href="#generators">Генераторы и async-функции</a></li>
+            <li><a href="#declaration">Объявление функции</a></li>
+            <li><a href="#expression">Выражение функции и его имя</a></li>
+            <li><a href="#arrows">Стрелочные функции</a></li>
+            <li><a href="#methods">Методы</a></li>
+            <li><a href="#classerr">Классы: ранние ошибки</a></li>
+            <li><a href="#classdef">ClassDefinitionEvaluation по шагам</a></li>
+            <li><a href="#order">Практика: порядок создания класса</a></li>
+            <li><a href="#classname">Имя класса и extends</a></li>
+            <li><a href="#defaultctor">Конструктор по умолчанию</a></li>
+            <li><a href="#fields">Поля и статические блоки</a></li>
+            <li><a href="#tail">Хвостовые вызовы</a></li>
+            <li><a href="#cards">«Карточки 2.0»: шаблон в параметрах Card</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="chapter">1. Глава 15</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-functions-and-classes">Глава 15</a> — функции и
+    классы. Примечание к ней: всё, что здесь описано, создаёт функцию-объект (10.2, день 14). Разделы главы устроены
+    одинаково: ранние ошибки, операция Instantiate… («создать функцию») и Evaluation. Каждая Instantiate… зовёт
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinaryfunctioncreate">OrdinaryFunctionCreate</a> (10.2.3): прототип
+    функции, исходный текст, параметры, тело, режим <code>this</code> (lexical-this у стрелок), окружение и приватное
+    окружение. Остальное решают добавки: SetFunctionName (день 8), MakeConstructor ([[Construct]] и
+    <code>prototype</code>) и MakeMethod ([[HomeObject]] для <code>super</code>):</p>
+
+    <pre class="code js">const canNew = (F) =&gt; { try { new F(); return "да"; } catch { return "нет"; } };
+const kinds = {
+  "function f() {}": function f() {},
+  "function* g() {}": function* g() {},
+  "async function a() {}": async function a() {},
+  "async function* ag() {}": async function* ag() {},
+  "() =&gt; {}": () =&gt; {},
+  "{ m() {} }.m": { m() {} }.m,
+  "class C {}": class C {},
+};
+for (const [src, fn] of Object.entries(kinds)) {
+  console.log(src, "|", Object.getPrototypeOf(fn).constructor.name, "|", "prototype" in fn, "|", canNew(fn));
+}</pre>
+
+    <div class="result-box">
+        function f() {} | Function | true | да<br>
+        function* g() {} | GeneratorFunction | true | нет<br>
+        async function a() {} | AsyncFunction | false | нет<br>
+        async function* ag() {} | AsyncGeneratorFunction | true | нет<br>
+        () =&gt; {} | Function | false | нет<br>
+        { m() {} }.m | Function | false | нет<br>
+        class C {} | Function | true | да
+    </div>
+
+    <p>Третья и четвёртая колонки — MakeConstructor: его зовут только <code>function</code> и класс. Из обещанной вчера
+    FunctionDeclarationInstantiation сегодня — окружения параметров (целиком — день 14), а OrdinaryCallBindThis дня 9
+    объяснит стрелки.</p>
+
+    <h2 id="params">2. Списки параметров</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-parameter-lists">15.1</a>. Параметры идут через запятую, остаток
+    <code>...rest</code> — последним; каждый параметр — имя или шаблон (как у <code>let</code>, день 11), с умолчанием
+    или без. Раздел задаёт четыре статические операции:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-issimpleparameterlist">IsSimpleParameterList</a>
+            (15.1.3) — только имена, без умолчаний, шаблонов и остатка;</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hasinitializer">HasInitializer</a> (15.1.4) —
+            есть ли умолчание;</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsexpression">ContainsExpression</a>
+            (15.1.2) — есть ли в списке код: умолчание или вычисляемый ключ. У шаблона <code>{ a }</code> кода нет;</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-expectedargumentcount">ExpectedArgumentCount</a>
+            (15.1.5) — параметры до первого умолчания или остатка; OrdinaryFunctionCreate делает из него
+            <code>length</code> (день 4 курса 2).</li>
+    </ul>
+
+    <p>Ранние ошибки <a href="https://tc39.es/ecma262/2026/#sec-parameter-lists-static-semantics-early-errors">15.1.1</a>:
+    повтор имён — только в простом списке нестрогой функции (день 8). Там же и <code>arguments</code>, связанный с
+    параметрами (день 4 курса 2).</p>
+
+    <pre class="code js">const lengths = [function (a, b) {}, function (a, b = 1, c) {}, function (...rest) {}, function ({ a, b }, [c]) {}, (a, b = a) =&gt; {}, function (a, { b } = {}, c) {}];
+console.log(lengths.map((f) =&gt; f.length).join(" "));
+function mapped(a) { a = "новое"; return arguments[0]; }
+function pattern({ a }) { arguments[0] = null; return a; }
+console.log(mapped("старое"), pattern({ a: 1 }));</pre>
+
+    <div class="result-box">
+        2 1 0 2 1 1<br>
+        новое 1
+    </div>
+
+    <p><code>c</code> после умолчания в счёт не идёт — примечание 15.1.5 называет такие параметры необязательными;
+    шаблон считается одним. У <code>pattern</code> список не простой, и запись в <code>arguments[0]</code> до
+    <code>a</code> не дошла.</p>
+
+    <h2 id="paramenv">3. Окружение параметров</h2>
+
+    <p>Значения параметрам раздаёт
+    <a href="https://tc39.es/ecma262/2026/#sec-functiondeclarationinstantiation">FunctionDeclarationInstantiation</a>
+    (10.2.11) — её зовёт EvaluateFunctionBody (15.2.3) до первой инструкции тела. Шаги про окружения:</p>
+
+    <ol>
+        <li>привязки имён параметров — пока без значений, и рядом <code>arguments</code> (у стрелок его нет);</li>
+        <li>IteratorBindingInitialization (день 8): аргументы раскладываются слева направо, умолчания вычисляются
+            <em>сейчас</em>, в этом окружении;</li>
+        <li>ContainsExpression ложно — имена <code>var</code> тела ложатся туда же;</li>
+        <li>истинно — для <code>var</code> тела создаётся <em>новое</em> окружение, и <code>var</code> с именем
+            параметра получает его значение;</li>
+        <li>функции тела — в окружении <code>var</code>; <code>let</code> и <code>const</code> — ещё ниже (у строгой
+            функции — там же).</li>
+    </ol>
+
+    <p>Примечание к шагу 4: замыкания из списка параметров не должны видеть объявлений тела. (У нестрогой функции с
+    кодом в параметрах есть ещё окружение — для <code>eval</code> в умолчаниях, день 13.)</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 140" role="img" aria-label="Окружения вызова one: внешнее с var x = внешний; окружение параметров со стрелкой a и arguments, умолчания считаются здесь; окружение var тела с x = тело, только если в параметрах есть код; окружение let и const. Стрелка a видит параметры и всё левее, var x тела — нет">
+            <defs>
+                <marker id="d12-outer" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+                </marker>
+            </defs>
+            <rect x="10" y="10" width="140" height="92" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">внешнее</text>
+            <text x="22" y="52" font-family="Consolas, monospace" font-size="11" fill="#334155">x = "внешний"</text>
+            <text x="22" y="72" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">стрелка нашла x</text>
+            <text x="22" y="88" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">здесь</text>
+
+            <rect x="170" y="10" width="140" height="92" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="182" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#075985">параметры</text>
+            <text x="182" y="52" font-family="Consolas, monospace" font-size="11" fill="#075985">a = () =&gt; x</text>
+            <text x="182" y="72" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#075985">и arguments;</text>
+            <text x="182" y="88" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#075985">умолчания — здесь</text>
+
+            <rect x="330" y="10" width="140" height="92" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="342" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">var тела</text>
+            <text x="342" y="52" font-family="Consolas, monospace" font-size="11" fill="#9a3412">x = "тело"</text>
+            <text x="342" y="72" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9a3412">отдельно, только</text>
+            <text x="342" y="88" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9a3412">если в параметрах код</text>
+
+            <rect x="490" y="10" width="140" height="92" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="502" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">let и const тела</text>
+            <text x="502" y="52" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#065f46">у строгой функции —</text>
+            <text x="502" y="68" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#065f46">окружение var</text>
+
+            <path d="M 168 56 L 153 56" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-outer)"/>
+            <path d="M 328 56 L 313 56" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-outer)"/>
+            <path d="M 488 56 L 473 56" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-outer)"/>
+
+            <text x="10" y="128" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Окружения вызова one() (10.2.11); стрелки — [[OuterEnv]]: a видит всё левее себя, var x тела — нет.</text>
+        </svg>
+        <figcaption>Окружения вызова функции с кодом в параметрах</figcaption>
+    </figure>
+
+    <pre class="code js">var x = "внешний";
+function one(a = () =&gt; x) { var x = "тело"; return a(); }
+function two(a = () =&gt; x, x = "параметр") { var x = "тело"; return [a(), x].join(" / "); }
+function three(x) { var x; return x; }
+function four(x = "умолчание") { var x; return x; }
+console.log(one(), "|", two(), "|", three("аргумент"), "|", four());</pre>
+
+    <div class="result-box">
+        внешний | параметр / тело | аргумент | умолчание
+    </div>
+
+    <p><code>one</code> — задание 9 дня 8 по шагам: <code>var x</code> лёг правее стрелки, и она нашла внешний
+    <code>x</code>. В <code>two</code> стрелка видит параметр, а тело пишет в копию. У <code>three</code> окружение
+    одно (день 11). <code>four</code> — шаг 4: копия получила значение параметра.</p>
+
+    <h2 id="defaults">4. Что видят умолчания</h2>
+
+    <p>Практика плана. Из шагов выше: умолчание видит параметры левее, внешние имена, <code>this</code> и
+    <code>arguments</code>. Не видит параметры правее (мёртвая зона), <code>var</code>, <code>let</code> и функции
+    тела. Считается при каждом вызове и только для <code>undefined</code> — как в шаблонах дня 11. Предскажите:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function order(a = b, b = 1) { return a + b; }
+function sees(a, b = a * 2, c = typeof inner) { function inner() {} return [a, b, c].join(); }
+function counter(n = ++counter.calls) { return n; }
+counter.calls = 0;
+console.log(attempt(() =&gt; order()), "|", order(5), "|", sees(3));
+console.log(counter(), counter(), counter(10), counter(undefined), counter(null));
+function who(a = this === globalThis, n = arguments.length) { return [a, n].join(); }
+console.log(who(), who.call("строка", undefined, undefined, 3));</pre>
+
+    <div class="result-box">
+        ReferenceError: Cannot access 'b' before initialization | 6 | 3,6,undefined<br>
+        1 2 10 3 null<br>
+        true,0 false,3
+    </div>
+
+    <p><code>inner</code> ещё не создана, когда считается <code>c</code>. Счётчик вырос трижды: <code>10</code> и
+    <code>null</code> — не <code>undefined</code>. В последней строке <code>this</code> — обёртка строки
+    (OrdinaryCallBindThis дня 9).</p>
+
+    <h2 id="generators">5. Генераторы и async-функции</h2>
+
+    <p>Разделы <a href="https://tc39.es/ecma262/2026/#sec-generator-function-definitions">15.5</a>,
+    <a href="https://tc39.es/ecma262/2026/#sec-async-generator-function-definitions">15.6</a>,
+    <a href="https://tc39.es/ecma262/2026/#sec-async-function-definitions">15.8</a> и
+    <a href="https://tc39.es/ecma262/2026/#sec-async-arrow-function-definitions">15.9</a> повторяют 15.2–15.4 с тремя
+    отличиями: свой прототип функции (первый блок дня); <code>prototype</code> генераторов создан без MakeConstructor,
+    а у async-функций его нет; и порядок.
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluategeneratorbody">EvaluateGeneratorBody</a>
+    (15.5.2) сначала выполняет FunctionDeclarationInstantiation, потом создаёт объект-генератор: параметры считаются
+    при вызове, а не при первом <code>next()</code>, и ошибка в них бросается сразу; так же у async-генератора
+    (15.6.2). У async-функции
+    (<a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateasyncfunctionbody">15.8.4</a>) и async-стрелки
+    (15.9.3) этот шаг завёрнут в Completion: ошибка отклоняет промис, который функция вернёт.</p>
+
+    <pre class="code js">const log = [];
+function* gen(x = log.push("умолчание генератора")) { log.push("тело генератора"); yield x; }
+const it = gen();
+log.push("генератор создан");
+it.next();
+console.log(log.join(" → "));
+const boom = (where) =&gt; { throw new Error("умолчание " + where); };
+const tryCall = (f) =&gt; {
+  try {
+    const r = f();
+    if (r instanceof Promise) { r.catch(() =&gt; {}); return "вернула отклонённый промис"; }
+    return "вернула объект";
+  } catch (e) { return "бросила сразу: " + e.message; }
+};
+console.log(tryCall(function* (x = boom("генератора")) {}));
+console.log(tryCall(async function* (x = boom("async-генератора")) {}));
+console.log(tryCall(async function (x = boom("async-функции")) {}));
+console.log(tryCall(async (x = boom("async-стрелки")) =&gt; {}));</pre>
+
+    <div class="result-box">
+        умолчание генератора → генератор создан → тело генератора<br>
+        бросила сразу: умолчание генератора<br>
+        бросила сразу: умолчание async-генератора<br>
+        вернула отклонённый промис<br>
+        вернула отклонённый промис
+    </div>
+
+    <p><code>.catch()</code> на результате поймает ошибку умолчания у async-функции, но не у async-генератора: тот
+    бросает раньше, чем вернул объект. Отсюда и ранние ошибки: <code>yield</code> и <code>await</code> в параметрах
+    запрещены — параметры считаются раньше, чем функция сможет приостановиться (примечание 2 к 15.5). А объект,
+    который вернул генератор, наследует от <code>gen.prototype</code>, поэтому <code>gen() instanceof gen</code> —
+    <code>true</code>, хотя <code>new gen()</code> бросает.</p>
+
+    <h2 id="declaration">6. Объявление функции</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-function-definitions">15.2</a>. Объявление создают заранее, при входе
+    в функцию, скрипт или блок (FunctionDeclarationInstantiation, GlobalDeclarationInstantiation дня 13,
+    BlockDeclarationInstantiation дня 11), поэтому его Evaluation
+    (<a href="https://tc39.es/ecma262/2026/#sec-function-definitions-runtime-semantics-evaluation">15.2.6</a>) — пустое
+    значение. Создаёт функцию
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateordinaryfunctionobject">InstantiateOrdinaryFunctionObject</a>
+    (15.2.4): OrdinaryFunctionCreate с %Function.prototype%, non-lexical-this и окружением, <em>где стоит
+    объявление</em>, — это и есть замыкание (день 1 курса 2); SetFunctionName (у <code>export default function ()
+    {}</code> — <code>"default"</code>); <a href="https://tc39.es/ecma262/2026/#sec-makeconstructor">MakeConstructor</a>
+    (10.2.5) — [[Construct]] и <code>prototype</code> с <code>constructor</code> внутри.</p>
+
+    <p>Тело выполняет <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluatefunctionbody">EvaluateFunctionBody</a>
+    (15.2.3): FunctionDeclarationInstantiation, инструкции, в конце — <code>return undefined</code>. Ранние ошибки
+    <a href="https://tc39.es/ecma262/2026/#sec-function-definitions-static-semantics-early-errors">15.2.1</a>: параметр
+    не повторяется в <code>let</code> тела (в <code>var</code> — можно), в строгом коде нет функций <code>eval</code> и
+    <code>arguments</code>, нет <code>super</code>, а <code>"use strict"</code>
+    (<a href="https://tc39.es/ecma262/2026/#sec-static-semantics-functionbodycontainsusestrict">FunctionBodyContainsUseStrict</a>,
+    15.2.2) — только при простом списке (день 3 курса 2).</p>
+
+    <pre class="code js">const parse = (code) =&gt; { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+function card(word) { /* слово */ return word; }
+const d = Object.getOwnPropertyDescriptor(card, "prototype");
+console.log(d.writable, d.enumerable, d.configurable, card.prototype.constructor === card);
+console.log(Object.keys(card.prototype).length, card.toString());
+console.log(parse("function f(a) { let a; }"), "|", parse("function f(a) { var a; }"));
+console.log(parse("function f(a = 1) { 'use strict'; }"));</pre>
+
+    <div class="result-box">
+        true false false true<br>
+        0 function card(word) { /* слово */ return word; }<br>
+        SyntaxError: Identifier 'a' has already been declared | ok<br>
+        SyntaxError: Illegal 'use strict' directive in function with non-simple parameter list
+    </div>
+
+    <p>Флаги — из MakeConstructor; <code>constructor</code> тоже не перечисляется, и <code>Object.keys</code> пуст.
+    <code>toString</code> вернул [[SourceText]] с комментарием (день 4 курса 2).</p>
+
+    <h2 id="expression">7. Выражение функции и его имя</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateordinaryfunctionexpression">InstantiateOrdinaryFunctionExpression</a>
+    (15.2.5). Безымянное выражение получает имя от того, кому его присвоили, — NamedEvaluation дня 8. У именованного
+    между внешним окружением и функцией встаёт окружение funcEnv с одной неизменяемой привязкой — именем функции. Флаг
+    strict у неё false: запись в имя в нестрогом коде молча пропадает, в строгом — TypeError (у <code>const</code>
+    флаг true, и та бросает всегда, день 11). Класс устроен похоже, но привязок имени у объявления две:</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 226" role="img" aria-label="Две схемы: выражение function factorial — внешнее окружение с fact, окружение funcEnv с неизменяемым factorial, strict false, окружение вызова с n; объявление class Card — внешняя привязка Card как let, окружение classEnv с неизменяемым Card, strict true, без значения до шага 8, и методы и поля класса">
+            <defs>
+                <marker id="d12-name" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+                </marker>
+            </defs>
+            <text x="10" y="20" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">const fact = function factorial(n) { … }</text>
+            <rect x="10" y="30" width="190" height="62" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="52" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">внешнее</text>
+            <text x="22" y="72" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">fact; factorial здесь нет</text>
+            <rect x="225" y="30" width="190" height="62" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="237" y="52" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#075985">funcEnv: factorial</text>
+            <text x="237" y="72" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">неизменяемая, strict = false</text>
+            <rect x="440" y="30" width="190" height="62" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="452" y="52" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">вызов</text>
+            <text x="452" y="72" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">n, arguments</text>
+            <path d="M 223 61 L 203 61" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-name)"/>
+            <path d="M 438 61 L 418 61" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-name)"/>
+
+            <text x="10" y="118" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">class Card { … }</text>
+            <rect x="10" y="128" width="190" height="62" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="150" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">внешнее: Card</text>
+            <text x="22" y="170" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">как let — можно переписать</text>
+            <rect x="225" y="128" width="190" height="62" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="237" y="150" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">classEnv: Card</text>
+            <text x="237" y="170" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">неизменяемая, strict = true</text>
+            <rect x="440" y="128" width="190" height="62" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="452" y="150" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">методы и поля</text>
+            <text x="452" y="170" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">видят внутреннее Card</text>
+            <path d="M 223 159 L 203 159" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-name)"/>
+            <path d="M 438 159 L 418 159" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-name)"/>
+
+            <text x="10" y="216" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Имя выражения и имя класса живут в своём окружении между внешним и телом.</text>
+        </svg>
+        <figcaption>Своё окружение у имени выражения функции и у имени класса</figcaption>
+    </figure>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const fact = function factorial(n) { return n &lt;= 1 ? 1 : n * factorial(n - 1); };
+console.log(fact(5), typeof factorial, fact.name);
+const sloppy = function rename() { rename = 0; return typeof rename; };
+const strict = function rename() { "use strict"; rename = 0; return typeof rename; };
+console.log(sloppy(), "|", attempt(strict));
+let outer = "внешнее";
+const shadow = function outer() { return typeof outer; };
+console.log(shadow(), outer);</pre>
+
+    <div class="result-box">
+        120 undefined factorial<br>
+        function | TypeError: Assignment to constant variable.<br>
+        function внешнее
+    </div>
+
+    <p>Примечание 15.2.5: имя выражения видно из тела — для рекурсии, — но не снаружи, а внешнюю область не меняет;
+    внутри <code>shadow</code> оно закрыло внешнее <code>outer</code>. <code>fact.name</code> —
+    <code>"factorial"</code>: NamedEvaluation — только для безымянных (день 8).</p>
+
+    <h2 id="arrows">8. Стрелочные функции</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-arrow-function-definitions">15.3</a>. Перед <code>=&gt;</code> нельзя
+    переводить строку; тело-выражение не может начинаться с <code>{</code>, поэтому объект берут в скобки. Повтор имён
+    параметров запрещён всегда
+    (<a href="https://tc39.es/ecma262/2026/#sec-arrow-function-definitions-static-semantics-early-errors">15.3.1</a>).
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiatearrowfunctionexpression">InstantiateArrowFunctionExpression</a>
+    (15.3.4) отличается от функции двумя аргументами: lexical-this и нет MakeConstructor. Примечание: своих
+    <code>arguments</code>, <code>super</code>, <code>this</code> и <code>new.target</code> у стрелки нет, они ищутся
+    снаружи. Механика — день 9: OrdinaryCallBindThis для lexical сразу возвращается, и ResolveThisBinding идёт мимо
+    окружения стрелки наружу. Тело-выражение выполняет
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateconcisebody">EvaluateConciseBody</a> (15.3.3):
+    FunctionDeclarationInstantiation, и значение сразу уходит в ReturnCompletion.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const parse = (code) =&gt; { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const empty = () =&gt; {};
+const object = () =&gt; ({});
+console.log(empty(), object());
+console.log(parse("const f = x\n=&gt; x;"), "|", parse("const f = (a, a) =&gt; a;"));
+const arrow = () =&gt; 1;
+console.log("prototype" in arrow, attempt(() =&gt; new arrow()));
+function outerFn() { const inner = () =&gt; [this.name, arguments.length, new.target === undefined]; return inner.call({ name: "чужой" }); }
+console.log(outerFn.call({ name: "внешний" }, 1, 2).join());</pre>
+
+    <div class="result-box">
+        undefined {}<br>
+        SyntaxError: Unexpected token '=&gt;' | SyntaxError: Duplicate parameter name not allowed in this context<br>
+        false TypeError: arrow is not a constructor<br>
+        внешний,2,true
+    </div>
+
+    <p><code>{}</code> без скобок — пустой блок, а не объект. <code>call</code> не поменял <code>this</code> стрелки:
+    все три имени нашлись в окружении <code>outerFn</code>.</p>
+
+    <h2 id="methods">9. Методы</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-method-definitions">15.4</a> — методы объектов и классов, геттеры и
+    сеттеры. <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-definemethod">DefineMethod</a> (15.4.4):
+    вычислить ключ, OrdinaryFunctionCreate — и MakeMethod вместо MakeConstructor. Функция запоминает [[HomeObject]],
+    объект с методом, — отсюда работает <code>super</code> (день 10 курса 2); [[Construct]] ей не дали — <code>new</code>
+    нельзя. <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-methoddefinitionevaluation">MethodDefinitionEvaluation</a>
+    (15.4.5) кладёт метод с флагом enumerable, который ей передали: литерал объекта (13.2.5) — true, класс (15.7.13) —
+    false. Имя геттера — с приставкой: SetFunctionName (closure, propKey, "get").</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const obj = { m() { return "метод"; }, get word() { return "kitap"; }, f: function () {} };
+const m = obj.m;
+console.log("prototype" in obj.m, "prototype" in obj.f, attempt(() =&gt; new m()));
+console.log(Object.getOwnPropertyDescriptor(obj, "word").get.name, Object.keys(obj).join());
+const base = { hello() { return "привет от base"; } };
+const child = { __proto__: base, hello() { return super.hello() + " через super"; } };
+console.log(child.hello());</pre>
+
+    <div class="result-box">
+        false true TypeError: m is not a constructor<br>
+        get word m,word,f<br>
+        привет от base через super
+    </div>
+
+    <p><code>f: function () {}</code> — не метод, а функция в свойстве, с <code>prototype</code>. Ранние ошибки
+    <a href="https://tc39.es/ecma262/2026/#sec-method-definitions-static-semantics-early-errors">15.4.1</a> — как у
+    функций; <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hasdirectsuper">HasDirectSuper</a> (15.4.2)
+    ищет <code>super()</code> — он разрешён только в конструкторе наследника;
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-specialmethod">SpecialMethod</a> (15.4.3) запрещает
+    геттеру, сеттеру, генератору и async-методу называться <code>constructor</code>.</p>
+
+    <pre class="code js">const parse = (code) =&gt; { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(parse("({ m() { super(); } })"), "|", parse("({ f: function () { super.x; } })"));
+console.log(parse("class A { get constructor() {} }"), "|", parse("class A { *constructor() {} }"));</pre>
+
+    <div class="result-box">
+        SyntaxError: 'super' keyword unexpected here | SyntaxError: 'super' keyword unexpected here<br>
+        SyntaxError: Class constructor may not be an accessor | SyntaxError: Class constructor may not be a generator
+    </div>
+
+    <p>Текст в первой строке одинаков, а правила разные: слева <code>super()</code> в методе литерала (13.2.5), справа
+    <code>super.x</code> в обычной функции (15.2.1), хоть она и лежит в объекте.</p>
+
+    <h2 id="classerr">10. Классы: ранние ошибки</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-class-definitions">15.7</a>. Класс — голова <code>extends</code> и
+    тело: методы, поля, статические блоки, <code>static</code> и пустые <code>;</code>; класс — всегда строгий код.
+    Тело раскладывают <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-classelementkind">ClassElementKind</a>
+    (15.7.2), <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-constructormethod">ConstructorMethod</a>
+    (15.7.3), <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-nonconstructorelements">NonConstructorElements</a>
+    (15.7.5) и <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isstatic">IsStatic</a> (15.7.4): конструктор
+    отдельно, остальное по порядку. Прочие операции работают на ранние ошибки
+    <a href="https://tc39.es/ecma262/2026/#sec-class-definitions-static-semantics-early-errors">15.7.1</a> — один
+    <code>constructor</code>, приватные имена без повторов, <code>#имя</code> только в своём классе, без
+    <code>arguments</code> в полях. Предскажите, что пропустит разбор:</p>
+
+    <pre class="code js">const parse = (code) =&gt; { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+["class A { constructor() { super(); } }", "class A { constructor() {} constructor() {} }",
+  "class A { get #x() {} set #x(v) {} }", "class A { #constructor; }", "class A { x = arguments; }",
+  "class A { m() { return this.#y; } }", "class A { static { await 1; } }"].forEach((c, i) =&gt; console.log(i + 1, parse(c)));</pre>
+
+    <div class="result-box">
+        1 SyntaxError: 'super' keyword unexpected here<br>
+        2 SyntaxError: A class may only have one constructor<br>
+        3 ok<br>
+        4 SyntaxError: Classes may not have a field named 'constructor'<br>
+        5 SyntaxError: 'arguments' is not allowed in class field initializer or static initialization block<br>
+        6 SyntaxError: Private field '#y' must be declared in an enclosing class<br>
+        7 SyntaxError: Unexpected reserved word
+    </div>
+
+    <p>Третий — пара геттер и сеттер, единственный разрешённый повтор <code>#x</code>. В четвёртом текст V8 общий с
+    обычным полем. Седьмой: статический блок разбирается как [+Await, ~Return], <code>await</code> там ключевое слово,
+    и 15.7.1 его запрещает — блок выполняется синхронно.</p>
+
+    <h2 id="classdef">11. ClassDefinitionEvaluation по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-classdefinitionevaluation">ClassDefinitionEvaluation</a>
+    (15.7.14) — главный алгоритм дня. День 8 курса 2 пересказал его четырьмя шагами, теперь — по тексту:</p>
+
+    <ol>
+        <li>окружение classEnv; у класса с именем — неизменяемая привязка имени <em>без значения</em>;</li>
+        <li>приватное окружение: по Private Name на каждое <code>#имя</code> тела;</li>
+        <li><code>extends</code> вычисляется в classEnv (имя класса — в мёртвой зоне); не конструктор и не
+            <code>null</code> — TypeError, <code>prototype</code> родителя не объект и не <code>null</code> — тоже;</li>
+        <li><code>proto</code>, будущий <code>prototype</code>, с родителем <code>Parent.prototype</code> (без
+            <code>extends</code> — Object.prototype);</li>
+        <li>конструктор F: свой — DefineMethod, MakeClassConstructor (без <code>new</code> — TypeError), MakeConstructor
+            с <em>незаписываемым</em> <code>prototype</code>; своего нет — встроенный по умолчанию;</li>
+        <li>в <code>proto</code> — неперечисляемое <code>constructor</code> = F;</li>
+        <li>элементы по порядку — ClassElementEvaluation (15.7.13): метод ложится в <code>proto</code> или в F, у поля
+            вычисляется только ключ, значение и статический блок становятся скрытыми функциями;</li>
+        <li>привязка имени класса получает значение F;</li>
+        <li>статические приватные методы — на F, затем статические поля и блоки по порядку, вперемешку;</li>
+        <li>поля экземпляра ([[Fields]]) ждут каждого <code>new</code> (InitializeInstanceElements, день 7).</li>
+    </ol>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 228" role="img" aria-label="Шаги ClassDefinitionEvaluation: 1–3 classEnv и extends, имя класса без значения; 4–6 proto и F; 7 элементы по порядку, ключи и методы сразу, поля и блоки отложены; 8 имя класса получает значение F; 9 static поля и блоки по порядку, this — сам класс; позже, на каждом new, поля экземпляра и тело конструктора">
+            <defs>
+                <marker id="d12-step" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+                </marker>
+            </defs>
+            <rect x="10" y="10" width="200" height="72" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">1–3. classEnv и extends</text>
+            <text x="22" y="52" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">имя класса — без значения</text>
+            <text x="22" y="70" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">extends считается здесь</text>
+
+            <rect x="220" y="10" width="200" height="72" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="232" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#075985">4–6. proto и F</text>
+            <text x="232" y="52" font-family="Consolas, monospace" font-size="11" fill="#075985">F.prototype = proto</text>
+            <text x="232" y="70" font-family="Consolas, monospace" font-size="11" fill="#075985">proto.constructor = F</text>
+
+            <rect x="430" y="10" width="200" height="72" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="442" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#075985">7. элементы по порядку</text>
+            <text x="442" y="52" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">ключи и методы — сразу</text>
+            <text x="442" y="70" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">поля и блоки — отложены</text>
+
+            <path d="M 210 46 L 218 46" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-step)"/>
+            <path d="M 420 46 L 428 46" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-step)"/>
+            <path d="M 530 82 L 530 98 L 110 98 L 110 116" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-step)"/>
+
+            <rect x="10" y="118" width="200" height="72" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="22" y="140" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">8. имя класса</text>
+            <text x="22" y="160" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">получает значение F</text>
+            <text x="22" y="178" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">дальше обращаться можно</text>
+
+            <rect x="220" y="118" width="200" height="72" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="232" y="140" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">9. static по порядку</text>
+            <text x="232" y="160" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">поля и блоки вперемешку</text>
+            <text x="232" y="178" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">this — сам класс</text>
+
+            <rect x="430" y="118" width="200" height="72" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4"/>
+            <text x="442" y="140" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">позже, на каждом new</text>
+            <text x="442" y="160" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">поля экземпляра,</text>
+            <text x="442" y="178" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">потом тело конструктора</text>
+
+            <path d="M 210 154 L 218 154" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-step)"/>
+            <path d="M 420 154 L 428 154" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d12-step)" stroke-dasharray="4 3"/>
+
+            <text x="10" y="216" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Шаги ClassDefinitionEvaluation (15.7.14): 1–9 — один раз, когда вычисляется class.</text>
+        </svg>
+        <figcaption>Порядок создания класса</figcaption>
+    </figure>
+
+    <h2 id="order">12. Практика: порядок создания класса</h2>
+
+    <p>Практика плана. <code>say</code> пишет в журнал и возвращает значение. Предскажите обе строки:</p>
+
+    <pre class="code js">const log = [];
+const say = (text, value) =&gt; { log.push(text); return value; };
+class Base { static base = say("static base", 0); }
+class Card extends say("extends", Base) {
+  [say("ключ метода", "show")]() {}
+  word = say("поле word", "kitap");
+  static [say("ключ static", "count")] = say("значение static", 0);
+  static { say("блок: " + this.name); }
+  [say("ключ поля", "id")] = say("поле id", 1);
+  constructor() { super(); say("тело конструктора"); }
+}
+say("класс готов");
+console.log(log.join(" → "));
+log.length = 0;
+new Card();
+console.log(log.join(" → "));</pre>
+
+    <div class="result-box">
+        static base → extends → ключ метода → ключ static → ключ поля → значение static → блок: Card → класс готов<br>
+        поле word → поле id → тело конструктора
+    </div>
+
+    <p>Первая строка — шаги 3, 7 и 9. <code>static base</code> — это создание <code>Base</code> целиком. Затем
+    <code>extends</code>, потом элементы по порядку: три ключа вычислены, значения полей и блок отложены. После шага 8
+    — статические элементы по порядку: значение <code>count</code>, затем блок, где <code>this.name</code> — уже
+    <code>"Card"</code>. Вторая строка — <code>new</code>: после <code>super()</code> на объект встали поля экземпляра,
+    потом выполнился остаток тела.</p>
+
+    <h2 id="classname">13. Имя класса и extends</h2>
+
+    <p>У объявления класса две привязки имени (схема раздела 7): внутренняя в classEnv, неизменяемая, и внешняя — её
+    ставит <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-bindingclassdeclarationevaluation">BindingClassDeclarationEvaluation</a>
+    (15.7.15) как <code>let</code>. У выражения класса (15.7.16) — только внутренняя; значение она получает на шаге 8.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+class A { static rename() { A = 1; } }
+console.log(attempt(() =&gt; A.rename()));
+const Expr = class Inner { who() { return Inner.name; } };
+console.log(new Expr().who(), typeof Inner);
+console.log(attempt(() =&gt; { class B { [B.name]() {} } }), "|", attempt(() =&gt; { class C extends C {} }));
+class E { m() { return E; } }
+const keep = E;
+E = null;
+console.log(new keep().m() === keep);</pre>
+
+    <div class="result-box">
+        TypeError: Assignment to constant variable.<br>
+        Inner undefined<br>
+        ReferenceError: Cannot access 'B' before initialization | ReferenceError: Cannot access 'C' before initialization<br>
+        true
+    </div>
+
+    <p>Внешнее <code>E</code> переписали — оно как <code>let</code>, — а метод <code>m</code> всё равно вернул класс:
+    внутри тела имя ищется в classEnv. <code>[B.name]</code> — шаг 7, раньше шага 8; <code>extends C</code> — шаг 3. Голова
+    <code>extends</code> бывает любым выражением, и шаг 3 проверяет результат:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(attempt(() =&gt; class extends 1 {}), "|", attempt(() =&gt; { function F() {} F.prototype = 1; return class extends F {}; }));
+class Null extends null {}
+console.log(Object.getPrototypeOf(Null.prototype), attempt(() =&gt; new Null()));</pre>
+
+    <div class="result-box">
+        TypeError: Class extends value 1 is not a constructor or null | TypeError: Class extends value does not have valid prototype property 1<br>
+        null TypeError: Super constructor null of Null is not a constructor
+    </div>
+
+    <p><code>extends null</code> разрешён: у <code>proto</code> нет родителя, но родитель конструктора —
+    Function.prototype, а он не конструктор. Поэтому <code>new Null()</code> падает в конструкторе по умолчанию.</p>
+
+    <h2 id="defaultctor">14. Конструктор по умолчанию</h2>
+
+    <p>Если своего <code>constructor</code> нет, шаг 5 создаёт встроенную функцию с длиной 0 и именем класса. Её шаги:
+    без <code>new</code> — TypeError; у наследника — Construct родителя с теми же аргументами и NewTarget; у базового —
+    объект с прототипом из NewTarget; потом поля экземпляра. Примечание: наследник ведёт себя почти как
+    <code>constructor(...args) { super(...args); }</code>, но такой текст зовёт итератор массива (spread в вызове), а
+    встроенная функция — нет. Это видно, если подменить итератор:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+class A { constructor(...args) { this.args = args.join(); } }
+class Implicit extends A {}
+class Explicit extends A { constructor(...args) { super(...args); } }
+const original = Array.prototype[Symbol.iterator];
+const calls = [];
+Array.prototype[Symbol.iterator] = function () { calls.push("итератор"); return original.call(this); };
+const i1 = new Implicit(1, 2);
+const n1 = calls.length;
+const e1 = new Explicit(1, 2);
+const n2 = calls.length - n1;
+Array.prototype[Symbol.iterator] = original;
+console.log(i1.args, n1, "|", e1.args, n2);
+console.log(Implicit.length, Implicit.name, Implicit.toString(), "|", attempt(() =&gt; Implicit()));</pre>
+
+    <div class="result-box">
+        1,2 0 | 1,2 1<br>
+        0 Implicit class Implicit extends A {} | TypeError: Class constructor Implicit cannot be invoked without 'new'
+    </div>
+
+    <p>У явного конструктора итератор позвали один раз — для <code>super(...args)</code>; остаток <code>...args</code>
+    в параметрах собирается без итератора. <code>toString</code> вернул текст всего класса: шаг 5 записал его в
+    [[SourceText]] конструктора.</p>
+
+    <h2 id="fields">15. Поля и статические блоки</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-classfielddefinitionevaluation">ClassFieldDefinitionEvaluation</a>
+    (15.7.10): ключ вычисляется сразу, а инициализатор становится функцией без параметров с MakeMethod; её
+    [[HomeObject]] — <code>proto</code> или сам класс. По примечанию, коду эта функция не доступна, но видна по
+    поведению: в инициализаторе есть <code>this</code> и <code>super</code>. Статический блок —
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-classstaticblockdefinitionevaluation">ClassStaticBlockDefinitionEvaluation</a>
+    (15.7.11): тоже скрытая функция, её зовут на шаге 9 с <code>this</code> = F. Тело выполняет
+    <a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateclassstaticblockbody">EvaluateClassStaticBlockBody</a>
+    (15.7.12) через FunctionDeclarationInstantiation — у блока своё окружение, и <code>var</code> из него не выходит:</p>
+
+    <pre class="code js">class Base { static greeting = "привет"; }
+class Child extends Base {
+  static reply = super.greeting + " от наследника";
+  self = this;
+  static { var local = "в блоке"; this.local = local; }
+}
+const c = new Child();
+console.log(Child.reply, c.self === c, Child.local, typeof local);
+class Counter {
+  static count = 0;
+  static { this.count += 10; }
+  static next = () =&gt; ++this.count;
+}
+console.log(Counter.next(), Counter.next());</pre>
+
+    <div class="result-box">
+        привет от наследника true в блоке undefined<br>
+        11 12
+    </div>
+
+    <p><code>super.greeting</code> нашёл свойство родителя: [[HomeObject]] инициализатора — <code>Child</code>, его
+    прототип — <code>Base</code> (день 10 курса 2). Стрелка в <code>next</code> взяла <code>this</code> инициализатора
+    — класс — и считает от 10, добавленных блоком.</p>
+
+    <h2 id="tail">16. Хвостовые вызовы</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-tail-position-calls">15.10</a>. День 9 показал: хвостовой вызов по
+    стандарту занимает место текущего контекста, а V8 этого не делает. Кто решает, что вызов хвостовой?
+    <a href="https://tc39.es/ecma262/2026/#sec-isintailposition">IsInTailPosition</a> (15.10.1): строгий код, тело
+    функции или стрелки — не генератора и не async; дальше
+    <a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hascallintailposition">HasCallInTailPosition</a> (15.10.2)
+    по дереву тела. Её спрашивают вызов, необязательная цепочка и тег шаблона (13.3); ответ true — EvaluateCall
+    выполняет <a href="https://tc39.es/ecma262/2026/#sec-preparefortailcall">PrepareForTailCall</a> (15.10.3) и
+    освобождает контекст. Её же зовут встроенные <code>call</code> и <code>apply</code>.</p>
+
+    <table>
+        <thead><tr><th>Где вызов</th><th>Хвостовой?</th></tr></thead>
+        <tbody>
+            <tr><td><code>return f(x);</code>, <code>(n) =&gt; f(n)</code></td><td>да</td></tr>
+            <tr><td><code>return c ? f() : g();</code></td><td>обе ветки — да</td></tr>
+            <tr><td><code>return a &amp;&amp; f();</code>, <code>a || f()</code>, <code>a ?? f()</code>, <code>(log(), f())</code></td><td>правая часть — да</td></tr>
+            <tr><td><code>return f() + 1;</code>, <code>return await f();</code></td><td>нет: после вызова есть работа; async исключены</td></tr>
+            <tr><td><code>try { return f(); } catch { return g(); }</code></td><td><code>g</code> — да; при <code>finally</code> — только в нём</td></tr>
+            <tr><td>тело <code>for (… of …)</code></td><td>нет: после него бывает IteratorClose</td></tr>
+        </tbody>
+    </table>
+
+    <p>Практика плана: рекурсия глубиной 10⁶ в хвостовой позиции и та же задача циклом — длина списка из миллиона
+    звеньев:</p>
+
+    <pre class="code js">"use strict";
+let list = null;
+for (let i = 0; i &lt; 1e6; i++) list = { value: i, next: list };
+const size = (node, total = 0) =&gt; (node === null ? total : size(node.next, total + 1));
+try { console.log(size(list)); } catch (e) { console.log(e.name + ": " + e.message); }
+function sizeLoop(node, total = 0) {
+  while (node !== null) { total = total + 1; node = node.next; }
+  return total;
+}
+console.log(sizeLoop(list));</pre>
+
+    <div class="result-box">
+        RangeError: Maximum call stack size exceeded<br>
+        1000000
+    </div>
+
+    <p>Вызов <code>size(node.next, total + 1)</code> хвостовой по всем правилам, но Chrome кладёт на стек каждый
+    контекст (по MDN, Safari — нет). Цикл — та же функция, переписанная механически: параметры стали переменными,
+    хвостовой вызов — присваиванием и переходом к началу.</p>
+
+    <h2 id="cards">17. «Карточки 2.0»: шаблон в параметрах Card</h2>
+
+    <p>Конструктор <code>Card</code> «Карточек 2.0» разбирает объект шаблоном прямо в списке параметров:</p>
+
+    <pre class="code js">// card.js, день 33 курса 2 — конструктор Card
+  constructor({ id, word, translation }) {
+    if (!Number.isInteger(id)) throw new CardsError(`у карточки «${word}» нет номера`);</pre>
+
+    <p>Сторож стоит в теле, а шаблон разбирается раньше — в FunctionDeclarationInstantiation (раздел 3). Если в файле
+    колоды на месте удалённой карточки остался <code>null</code>, до сторожа очередь не дойдёт. Модель и
+    исправление — принять объект целиком и разобрать после проверки:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+class CardsError extends Error { constructor(message, options) { super(message, options); this.name = "CardsError"; } }
+class Card {
+  constructor({ id, word }) {
+    if (!Number.isInteger(id)) throw new CardsError(`у карточки «${word}» нет номера`);
+  }
+}
+class SafeCard {
+  constructor(data) {
+    if (typeof data !== "object" || data === null) throw new CardsError(`карточка — не объект: ${data}`);
+    const { id, word } = data;
+    if (!Number.isInteger(id)) throw new CardsError(`у карточки «${word}» нет номера`);
+  }
+}
+for (const data of [{ word: "kitap" }, null, undefined]) console.log(attempt(() =&gt; new Card(data)), "|", attempt(() =&gt; new SafeCard(data)));</pre>
+
+    <div class="result-box">
+        CardsError: у карточки «kitap» нет номера | CardsError: у карточки «kitap» нет номера<br>
+        TypeError: Cannot destructure property 'id' of 'object null' as it is null. | CardsError: карточка — не объект: null<br>
+        TypeError: Cannot destructure property 'id' of 'undefined' as it is undefined. | CardsError: карточка — не объект: undefined
+    </div>
+
+    <p><code>loadDeck</code> всё равно завернёт TypeError в CardsError с причиной (день 33 курса 2), но вместо «нет
+    номера» ученик увидит текст движка. Умолчание <code>= {}</code> не помогло бы: оно только для <code>undefined</code>
+    (раздел 4). Правило: параметр, который нужно проверить, не разбирают шаблоном в списке параметров.</p>
+
+    <h2 id="next">18. Что будет завтра</h2>
+
+    <p>Сегодня — функции и классы изнутри: параметры и их окружение, создание каждого вида функции,
+    ClassDefinitionEvaluation и хвостовые вызовы. Завтра, на дне 13, — скрипты и модули изнутри:
+    GlobalDeclarationInstantiation, семантика модулей и <code>eval</code>, прямой и косвенный, — с окружением для
+    <code>eval</code> в умолчаниях.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Раздел</th><th>Что делает и где мы это видели</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-functions-and-classes">15 Functions and Classes</a></td><td>глава; функции-объекты — день 14</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-parameter-lists">15.1 Parameter Lists</a></td><td>параметры, их окружение и умолчания</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-parameter-lists-static-semantics-early-errors">15.1.1 Early Errors</a></td><td>повтор имён — простой список, нестрогий код (день 8)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsexpression">15.1.2 ContainsExpression</a></td><td>код в параметрах — своё окружение <code>var</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-issimpleparameterlist">15.1.3 IsSimpleParameterList</a></td><td>только имена</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hasinitializer">15.1.4 HasInitializer</a></td><td>есть ли умолчание</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-expectedargumentcount">15.1.5 ExpectedArgumentCount</a></td><td><code>length</code>: до первого умолчания или остатка</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-function-definitions">15.2 Function Definitions</a></td><td>объявление и выражение <code>function</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-function-definitions-static-semantics-early-errors">15.2.1 Early Errors</a></td><td>параметр и <code>let</code> тела, <code>super</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-functionbodycontainsusestrict">15.2.2 FunctionBodyContainsUseStrict</a></td><td>директива в теле</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluatefunctionbody">15.2.3 EvaluateFunctionBody</a></td><td>параметры, тело, <code>undefined</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateordinaryfunctionobject">15.2.4 InstantiateOrdinaryFunctionObject</a></td><td>OrdinaryFunctionCreate, SetFunctionName, MakeConstructor</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateordinaryfunctionexpression">15.2.5 InstantiateOrdinaryFunctionExpression</a></td><td>имя — в своём окружении</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-function-definitions-runtime-semantics-evaluation">15.2.6 Evaluation</a></td><td>объявление — пустое значение (день 11)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-arrow-function-definitions">15.3 Arrow Function Definitions</a></td><td>стрелки</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-arrow-function-definitions-static-semantics-early-errors">15.3.1 Early Errors</a></td><td>повтор имён запрещён всегда</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-concisebodycontainsusestrict">15.3.2 ConciseBodyContainsUseStrict</a></td><td>директива — в теле-блоке</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateconcisebody">15.3.3 EvaluateConciseBody</a></td><td>выражение — сразу <code>return</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiatearrowfunctionexpression">15.3.4 InstantiateArrowFunctionExpression</a></td><td>lexical-this, без MakeConstructor</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-arrow-function-definitions-runtime-semantics-evaluation">15.3.5 Evaluation</a></td><td>создаётся на своей строке</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-method-definitions">15.4 Method Definitions</a></td><td>методы, геттеры и сеттеры</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-method-definitions-static-semantics-early-errors">15.4.1 Early Errors</a></td><td>как у функций</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hasdirectsuper">15.4.2 HasDirectSuper</a></td><td>есть ли <code>super()</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-specialmethod">15.4.3 SpecialMethod</a></td><td>такой метод — не <code>constructor</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-definemethod">15.4.4 DefineMethod</a></td><td>MakeMethod: [[HomeObject]] для <code>super</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-methoddefinitionevaluation">15.4.5 MethodDefinitionEvaluation</a></td><td>перечисляемый — только в литерале</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-generator-function-definitions">15.5 Generator Function Definitions</a></td><td>генераторы (день 12 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-generator-function-definitions-static-semantics-early-errors">15.5.1 Early Errors</a></td><td><code>yield</code> в параметрах запрещён</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluategeneratorbody">15.5.2 EvaluateGeneratorBody</a></td><td>параметры — при вызове</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiategeneratorfunctionobject">15.5.3 InstantiateGeneratorFunctionObject</a></td><td><code>prototype</code> без [[Construct]]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiategeneratorfunctionexpression">15.5.4 InstantiateGeneratorFunctionExpression</a></td><td>как 15.2.5</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-generator-function-definitions-runtime-semantics-evaluation">15.5.5 Evaluation</a></td><td><code>yield</code> и <code>yield*</code> (день 12 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-generator-function-definitions">15.6 Async Generator Function Definitions</a></td><td>async-генераторы (день 29 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-generator-function-definitions-static-semantics-early-errors">15.6.1 Early Errors</a></td><td><code>yield</code>, <code>await</code> в параметрах</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateasyncgeneratorbody">15.6.2 EvaluateAsyncGeneratorBody</a></td><td>ошибка параметров — сразу</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateasyncgeneratorfunctionobject">15.6.3 InstantiateAsyncGeneratorFunctionObject</a></td><td>прототип — %AsyncGeneratorFunction.prototype%</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateasyncgeneratorfunctionexpression">15.6.4 InstantiateAsyncGeneratorFunctionExpression</a></td><td>как 15.2.5</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-asyncgenerator-definitions-evaluation">15.6.5 Evaluation</a></td><td>выражение async-генератора</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-class-definitions">15.7 Class Definitions</a></td><td>классы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-class-definitions-static-semantics-early-errors">15.7.1 Early Errors</a></td><td>один <code>constructor</code>, без <code>arguments</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-classelementkind">15.7.2 ClassElementKind</a></td><td>конструктор или другой элемент</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-constructormethod">15.7.3 ConstructorMethod</a></td><td>найти <code>constructor</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-isstatic">15.7.4 IsStatic</a></td><td>признак <code>static</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-nonconstructorelements">15.7.5 NonConstructorElements</a></td><td>остальное по порядку</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-prototypepropertynamelist">15.7.6 PrototypePropertyNameList</a></td><td>имена в <code>prototype</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-allprivateidentifiersvalid">15.7.7 AllPrivateIdentifiersValid</a></td><td><code>#имя</code> — в своём классе</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-privateboundidentifiers">15.7.8 PrivateBoundIdentifiers</a></td><td>приватные имена тела</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-containsarguments">15.7.9 ContainsArguments</a></td><td><code>arguments</code> в поле</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-classfielddefinitionevaluation">15.7.10 ClassFieldDefinitionEvaluation</a></td><td>значение — скрытая функция</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-classstaticblockdefinitionevaluation">15.7.11 ClassStaticBlockDefinitionEvaluation</a></td><td>блок — скрытая функция</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateclassstaticblockbody">15.7.12 EvaluateClassStaticBlockBody</a></td><td>своё окружение блока</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-classelementevaluation">15.7.13 ClassElementEvaluation</a></td><td>один элемент</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-classdefinitionevaluation">15.7.14 ClassDefinitionEvaluation</a></td><td>шаги создания класса (день 8 курса 2)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-bindingclassdeclarationevaluation">15.7.15 BindingClassDeclarationEvaluation</a></td><td>внешняя привязка имени — как <code>let</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-class-definitions-runtime-semantics-evaluation">15.7.16 Evaluation</a></td><td>объявление и выражение</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-function-definitions">15.8 Async Function Definitions</a></td><td>async-функции (день 28 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-function-definitions-static-semantics-early-errors">15.8.1 Early Errors</a></td><td><code>await</code> в параметрах запрещён</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateasyncfunctionobject">15.8.2 InstantiateAsyncFunctionObject</a></td><td>без <code>prototype</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateasyncfunctionexpression">15.8.3 InstantiateAsyncFunctionExpression</a></td><td>как 15.2.5</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateasyncfunctionbody">15.8.4 EvaluateAsyncFunctionBody</a></td><td>ошибка параметров — в промис</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-function-definitions-runtime-semantics-evaluation">15.8.5 Evaluation</a></td><td><code>await</code> — Await (день 28 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-arrow-function-definitions">15.9 Async Arrow Function Definitions</a></td><td>async-стрелки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-arrow-function-definitions-static-semantics-early-errors">15.9.1 Early Errors</a></td><td>как у стрелок</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-asyncconcisebodycontainsusestrict">15.9.2 AsyncConciseBodyContainsUseStrict</a></td><td>директива — в теле-блоке</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluateasyncconcisebody">15.9.3 EvaluateAsyncConciseBody</a></td><td>ошибка параметров — в промис</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-instantiateasyncarrowfunctionexpression">15.9.4 InstantiateAsyncArrowFunctionExpression</a></td><td>lexical-this, %AsyncFunction.prototype%</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-async-arrow-function-definitions-runtime-semantics-evaluation">15.9.5 Evaluation</a></td><td>создаётся на своей строке</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-tail-position-calls">15.10 Tail Position Calls</a></td><td>хвостовые вызовы (день 9)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-isintailposition">15.10.1 IsInTailPosition</a></td><td>строгий код, не генератор и не async</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-static-semantics-hascallintailposition">15.10.2 HasCallInTailPosition</a></td><td>правила по дереву тела</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-preparefortailcall">15.10.3 PrepareForTailCall</a></td><td>освободить контекст</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// Instantiate… = OrdinaryFunctionCreate + SetFunctionName + MakeConstructor или MakeMethod
+// length — параметры до первого умолчания или остатка; не простой список — без "use strict" и повторов
+// умолчания: при вызове, слева направо, для undefined; видят левых соседей, this, arguments
+// код в параметрах — у var тела своё окружение, замыкания умолчаний его не видят
+// генератор: ошибка параметров — сразу; async-функция — отклонённый промис
+// имя выражения функции — своё окружение, неизменяемое, снаружи не видно
+// стрелка: lexical-this, без prototype и new; метод: [[HomeObject]], без new
+// класс: classEnv → extends → proto и F → элементы → имя → static поля и блоки; поля — на new
+// хвостовой вызов: строгий код, последний шаг; V8 его не делает — глубокую рекурсию в цикл</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>function one(a = () =&gt; x) { var x = "тело"; return a(); }</code> возвращает внешний
+                <code>x</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    В параметрах есть код (ContainsExpression), поэтому FunctionDeclarationInstantiation кладёт
+                    <code>var x</code> тела в новое окружение. Стрелка создана в окружении параметров, его
+                    [[OuterEnv]] — внешнее: тела она не видит.
+                </details>
+            </li>
+            <li>Чему равен <code>length</code> у <code>function (a, b = 1, c) {}</code> и почему?
+                <details class="answer"><summary>Ответ</summary>
+                    1. ExpectedArgumentCount считает параметры до первого умолчания; <code>c</code> после него считается
+                    необязательным.
+                </details>
+            </li>
+            <li>Чем отличается ошибка в умолчании у <code>function*</code> и у <code>async function</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    EvaluateGeneratorBody выполняет FunctionDeclarationInstantiation с <code>?</code> — генератор бросает
+                    прямо при вызове. EvaluateAsyncFunctionBody заворачивает её в Completion и отклоняет промис,
+                    который функция возвращает.
+                </details>
+            </li>
+            <li>Почему запись в имя внутри выражения <code>function rename() { rename = 0; }</code> молчит, а
+                <code>A = 1</code> в методе класса <code>A</code> бросает?
+                <details class="answer"><summary>Ответ</summary>
+                    Обе привязки неизменяемые, но у выражения функции strict = false, и в нестрогом коде запись просто
+                    пропадает. Код класса всегда строгий, а привязка имени класса создана со strict = true — TypeError.
+                </details>
+            </li>
+            <li>В каком порядке выполнятся ключ метода, значение статического поля, ключ поля экземпляра и
+                статический блок, если они стоят в тексте именно так?
+                <details class="answer"><summary>Ответ</summary>
+                    Ключ метода, ключ поля (шаг 7, по порядку текста), затем значение статического поля и блок (шаг 9,
+                    тоже по порядку). Значение поля экземпляра — только при <code>new</code>.
+                </details>
+            </li>
+            <li>Хвостовые ли вызовы в <code>return f() + 1</code> и в <code>try { return f(); } catch { return g(); }</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>f() + 1</code> — нет: после вызова ещё сложение. В <code>try</code> вызов <code>f</code> — нет,
+                    <code>g</code> в <code>catch</code> — да (если нет <code>finally</code>).
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions">MDN Web Docs</a>
+        (Functions, Default parameters, Arrow function expressions, Classes, Static initialization blocks, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

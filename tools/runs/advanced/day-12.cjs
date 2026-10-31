@@ -23,7 +23,7 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-12');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -42,11 +42,94 @@ const show = (a) => {
 };
 
 // a block without a result-box: its output by "page #index" or by the first line; the tasks ask to predict these
-const EXPECT = {};
+const EXPECT = {
+  'tasks #0': ['снаружи снаружи! | снаружи | ReferenceError', '3,6 | ,0 | 3,0'],
+  'tasks #1': ['m 2 false | get word 0 false | gen 0 true | arrow 0 false', 'Box 1 true | make 0 false | named 1 false | g 1 true'],
+  'tasks #2': ['ключ static, ключ поля, значение static, блок', 'до super, поле Base, тело Base, поле Child, после super'],
+  'tasks #8': ['ok SyntaxError ok ok SyntaxError'],
+};
 
 // Examples of the tasks call functions the student writes. These reference solutions make every
 // "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
-const SOLUTIONS = {};
+const SOLUTIONS = {
+  paramInfo: `function paramInfo(list) {
+  const top = (item) => {
+    let s = item;
+    while (/\\{[^{}]*\\}|\\[[^\\[\\]]*\\]/.test(s)) s = s.replace(/\\{[^{}]*\\}|\\[[^\\[\\]]*\\]/, "_");
+    return s;
+  };
+  const stop = list.findIndex((item) => top(item).includes("=") || item.startsWith("..."));
+  return {
+    length: stop === -1 ? list.length : stop,
+    simple: list.every((item) => /^[\\w$]+$/.test(item)),
+    code: list.some((item) => item.includes("=") || /\\{[^}]*\\[/.test(item)),
+  };
+}`,
+  instantiate: `function instantiate(outer, params, args, body) {
+  const paramScope = Object.create(outer);
+  params.forEach(([name, init], i) => {
+    let value = args[i];
+    if (value === undefined && init) value = init(paramScope);
+    paramScope[name] = value;
+  });
+  const hasCode = params.some(([, init]) => init);
+  const bodyScope = hasCode ? Object.create(paramScope) : paramScope;
+  for (const v of body.vars) {
+    if (hasCode) bodyScope[v] = Object.hasOwn(paramScope, v) ? paramScope[v] : undefined;
+    else if (!Object.hasOwn(paramScope, v)) paramScope[v] = undefined;
+  }
+  return body.run(bodyScope);
+}`,
+  trampoline: `function trampoline(f) {
+  return (...args) => {
+    let r = f(...args);
+    while (typeof r === "function") r = r();
+    return r;
+  };
+}`,
+  fromList: `class Card {
+  #id;
+  #word;
+  #translation;
+  constructor(data) {
+    if (typeof data !== "object" || data === null) throw new CardsError(\`не объект: \${data}\`);
+    const { id, word, translation } = data;
+    if (!Number.isInteger(id)) throw new CardsError(\`у карточки «\${word}» нет номера\`);
+    if (!word || !translation) throw new CardsError(\`у карточки \${id} нет слова или перевода\`);
+    this.#id = id;
+    this.#word = word;
+    this.#translation = translation;
+  }
+  get word() { return this.#word; }
+  static fromList(list) {
+    return list.map((item, i) => {
+      try {
+        return new this(item);
+      } catch (cause) {
+        throw new CardsError(\`карточка \${i + 1} из \${list.length}: \${cause.message}\`, { cause });
+      }
+    });
+  }
+}`,
+  createClass: `function createClass(elements) {
+  const fields = [];
+  const statics = [];
+  const F = function () {
+    if (!new.target) throw new TypeError("без new");
+    for (const f of fields) this[f.key] = f.value.call(this);
+  };
+  for (const e of elements) {
+    if (e.kind === "method") (e.isStatic ? F : F.prototype)[e.key()] = e.value;
+    else if (e.kind === "field") (e.isStatic ? statics : fields).push({ key: e.key(), value: e.value });
+    else statics.push({ block: e.value });
+  }
+  for (const s of statics) {
+    if (s.block) s.block.call(F);
+    else F[s.key] = s.value.call(F);
+  }
+  return F;
+}`,
+};
 const checkable = (code) => {
   const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
   const lines = code.split('\n').map((line) => {
@@ -226,6 +309,67 @@ console.log(f.length, "|", two(), "|", before, "|", log.join(" "), "|", Object.h
     check(JSON.stringify(out) === JSON.stringify(['1 | 2,3 | e k b s | e k b s | false true']),
       `student homework 1, 2 and the table: length 1 and the var copy 2,3; extends, key, block, static field, nothing on new; no own constructor on gen.prototype ${JSON.stringify(out)}`);
   }
+  // tasks 4, 5: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.paramInfo}
+${SOLUTIONS.instantiate}
+const lists = [["a", "b"], ["a", "b = 1", "c"], ["{ a = 1 }", "[b]"], ["{ a }", "...rest"], ["{ [key]: a }"], ["a", "{ b } = {}", "...c"], ["x", "y", "z = x"]];
+const strictOk = (list) => { try { new Function(...list, '"use strict"'); return true; } catch { return false; } };
+console.log(lists.every((l) => paramInfo(l).length === new Function(...l, "").length && paramInfo(l).simple === strictOk(l)));
+var x = "внешний";
+function one(a = () => x) { var x = "тело"; return a(); }
+function two(a = () => x, x = "параметр") { var x = "тело"; return [a(), x].join(" / "); }
+function three(x) { var x; return x; }
+function four(x = "умолчание") { var x; return x; }
+const outer = { x: "внешний" };
+const model = [
+  instantiate(outer, [["a", (s) => () => s.x]], [], { vars: ["x"], run: (s) => { s.x = "тело"; return s.a(); } }),
+  instantiate(outer, [["a", (s) => () => s.x], ["x", () => "параметр"]], [], { vars: ["x"], run: (s) => { s.x = "тело"; return [s.a(), s.x].join(" / "); } }),
+  instantiate(outer, [["x"]], ["аргумент"], { vars: ["x"], run: (s) => s.x }),
+  instantiate(outer, [["x", () => "умолчание"]], [], { vars: ["x"], run: (s) => s.x }),
+];
+console.log(JSON.stringify(model) === JSON.stringify([one(), two(), three("аргумент"), four()]), JSON.stringify(model));`, 'tasks-criteria-1.html');
+    check(JSON.stringify(out) === JSON.stringify(['true', 'true ["внешний","параметр / тело","аргумент","умолчание"]']),
+      `tasks 4, 5: paramInfo agrees with the real length and with "use strict" on seven lists; instantiate gives what the real one–four give ${JSON.stringify(out)}`);
+  }
+  // tasks 6–8: what the criteria ask to find, with the reference solutions
+  {
+    const out = await runScript(ctx, `${SOLUTIONS.trampoline}
+function sumTo(n, acc = 0) { return n === 0 ? acc : () => sumTo(n - 1, acc + n); }
+function sumRec(n, acc) { "use strict"; return n === 0 ? acc : sumRec(n - 1, acc + n); }
+function sumLoop(n) { let acc = 0; while (n !== 0) { acc += n; n -= 1; } return acc; }
+let rec;
+try { rec = sumRec(1e6, 0); } catch (e) { rec = e.name; }
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return e.name; } };
+console.log(trampoline(sumTo)(1e6) === sumLoop(1e6), rec, parse('function sumRec(n, acc = 0) { "use strict"; }'));
+class CardsError extends Error { constructor(message, options) { super(message, options); this.name = "CardsError"; } }
+${SOLUTIONS.fromList}
+class BigCard extends Card {}
+let err;
+try { Card.fromList([{ id: 1, word: "kitap", translation: "книга" }, { id: 2, word: "galam" }]); } catch (e) { err = e; }
+console.log(err.message, "|", err.cause instanceof CardsError, err.cause.message, BigCard.fromList([{ id: 3, word: "suw", translation: "вода" }])[0] instanceof BigCard);
+${SOLUTIONS.createClass}
+const log = [];
+const say = (t, v) => { log.push(t); return v; };
+const M = createClass([
+  { kind: "method", key: () => say("ключ метода", "show"), value() { return "метод"; } },
+  { kind: "field", key: () => say("ключ поля", "word"), value: () => say("поле", "kitap") },
+  { kind: "field", isStatic: true, key: () => say("ключ static", "count"), value: () => say("значение static", 0) },
+  { kind: "block", value() { say("блок"); this.ready = true; } },
+]);
+const model = log.join(", ");
+log.length = 0;
+class R {
+  [say("ключ метода", "show")]() { return "метод"; }
+  [say("ключ поля", "word")] = say("поле", "kitap");
+  static [say("ключ static", "count")] = say("значение static", 0);
+  static { say("блок"); this.ready = true; }
+}
+console.log(model === log.join(", "), Object.keys(M.prototype).join(), Object.keys(R.prototype).length);`, 'tasks-criteria-2.html');
+    check(JSON.stringify(out) === JSON.stringify(['true RangeError SyntaxError',
+      'карточка 2 из 2: у карточки 2 нет слова или перевода | true у карточки 2 нет слова или перевода true', 'true show 0']),
+    `tasks 6–8: the trampoline equals the loop, strict recursion overflows, "use strict" with acc = 0 is an error; the cause is the card's CardsError, a subclass gets its own cards; createClass writes the log of a real class, its method is enumerable ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -370,6 +514,17 @@ console.log(f.length, "|", two(), "|", before, "|", log.join(" "), "|", Object.h
     && /> 15\.10\.2 Static Semantics: HasCallInTailPosition/.test(f('sec-static-semantics-hascallintailposition'))
     && /> 15\.7\.14 Runtime Semantics: ClassDefinitionEvaluation/.test(f('sec-runtime-semantics-classdefinitionevaluation')),
   'student homework 3: an expression statement such as cleanup() is never a tail call, return passes the check to its expression; 15.10.2 and 15.7.14 are where the notes say');
+  {
+    const ca = f('sec-static-semantics-containsarguments');
+    check(inOrder(ca, ['IdentifierReference : Identifier If the StringValue of Identifier is "arguments", return true', 'FunctionExpression : function BindingIdentifier opt (FormalParameters) { FunctionBody }',
+      'AsyncFunctionBody } Return false', 'MethodDefinition : ClassElementName (UniqueFormalParameters) { FunctionBody }', 'Return ContainsArguments of ClassElementName']) && !ca.includes('ArrowFunction')
+      && f('sec-class-definitions-static-semantics-early-errors').includes('It is a Syntax Error if ContainsArguments of ClassStaticBlockStatementList is true'),
+    'task 9: ContainsArguments stops at functions, looks only at the key of a method, has no rule for arrows; 15.7.1 asks it for a static block');
+  }
+  check(f('sec-runtime-semantics-methoddefinitionevaluation').includes('Let prototype be OrdinaryObjectCreate (%GeneratorPrototype%). Perform ! DefinePropertyOrThrow (closure, "prototype"')
+    && f('sec-runtime-semantics-propertydefinitionevaluation').includes('If IsAnonymousFunctionDefinition (AssignmentExpression) is true and isProtoSetter is false, then Let propValue be ? NamedEvaluation of AssignmentExpression with argument propKey')
+    && f('sec-array.prototype.join').includes('If element is neither undefined nor null, then Let S be ? ToString (element)'),
+  'tasks 1, 2: join skips null; a generator method gets prototype by DefinePropertyOrThrow; an arrow in a property is named by NamedEvaluation');
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

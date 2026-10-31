@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 12 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 12</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 12. Функции и классы по спецификации</h1>
+    <p class="subtitle">Выжимка лекции: параметры и их окружение, создание каждого вида функции, порядок создания класса
+    и хвостовые вызовы.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        Каждая функция рождается в OrdinaryFunctionCreate: прототип, текст, параметры, тело, режим <code>this</code> и
+        окружение. Вид функции решают добавки: <strong>MakeConstructor</strong> (<code>prototype</code> и
+        <code>new</code>) у <code>function</code> и класса, <strong>MakeMethod</strong> ([[HomeObject]] для
+        <code>super</code>) у методов. Параметры получают значения в FunctionDeclarationInstantiation — до первой
+        инструкции тела.
+    </div>
+
+    <h2>Параметры и их окружение</h2>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return e.name; } };
+const len = [function (a, b = 1, c) {}, function ({ a }, ...rest) {}].map((f) =&gt; f.length);
+console.log(len.join());                  // 1,1 — до первого умолчания или остатка; шаблон — один
+var x = "внешний";
+function one(a = () =&gt; x) { var x = "тело"; return a(); }
+console.log(one());                       // внешний — у var тела своё окружение
+function order(a = b, b = 1) { return a + b; }
+console.log(attempt(() =&gt; order()));      // ReferenceError — b правее, ещё в мёртвой зоне
+const boom = () =&gt; { throw new Error("умолчание"); };
+console.log(attempt(() =&gt; (function* (y = boom()) {})()));   // Error — генератор бросает при вызове
+const p = (async (y = boom()) =&gt; {})();
+p.catch(() =&gt; {});
+console.log(p instanceof Promise);        // true — async-функция вернула отклонённый промис</pre>
+
+    <div class="remember">
+        Параметры — слева направо, умолчание — при каждом вызове и только для <code>undefined</code>. Умолчание видит
+        левых соседей, <code>this</code> и <code>arguments</code>, но не <code>var</code>, <code>let</code> и функции
+        тела. Есть код в параметрах — у <code>var</code> тела своё окружение. Не простой список — без
+        <code>"use strict"</code>, без повторов имён, и <code>arguments</code> не связан с параметрами.
+    </div>
+
+    <h2>Функции, стрелки и методы</h2>
+
+    <pre class="code js">const fact = function factorial(n) { return n &lt;= 1 ? 1 : n * factorial(n - 1); };
+console.log(fact(4), typeof factorial);   // 24 undefined — имя видно только внутри
+const rename = function r() { r = 0; return typeof r; };
+console.log(rename());                    // function — запись в имя молча пропала
+const obj = { m() {}, f: function () {} };
+console.log("prototype" in obj.m, "prototype" in obj.f);   // false true — метод не конструктор
+function outer() { return (() =&gt; this.name)(); }
+console.log(outer.call({ name: "снаружи" }));   // снаружи — у стрелки нет своего this</pre>
+
+    <table>
+        <thead><tr><th>Вид</th><th><code>prototype</code></th><th><code>new</code></th><th><code>this</code></th></tr></thead>
+        <tbody>
+            <tr><td><code>function f() {}</code></td><td>есть, записываемый</td><td>да</td><td>свой</td></tr>
+            <tr><td><code>class C {}</code></td><td>есть, не записываемый</td><td>только с <code>new</code></td><td>свой</td></tr>
+            <tr><td>стрелка</td><td>нет</td><td>нет</td><td>снаружи</td></tr>
+            <tr><td>метод <code>{ m() {} }</code></td><td>нет</td><td>нет</td><td>свой, и <code>super</code></td></tr>
+            <tr><td><code>function*</code>, <code>async function*</code></td><td>есть, без своего <code>constructor</code></td><td>нет</td><td>свой</td></tr>
+            <tr><td><code>async function</code></td><td>нет</td><td>нет</td><td>свой</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Объявление создаётся заранее, при входе в функцию, скрипт или блок; выражение — на своей строке. Имя выражения
+        живёт в своём окружении: неизменяемое, но запись в него бросает только в строгом коде. Генератор считает
+        параметры при вызове и бросает ошибку сразу; async-функция отклоняет промис.
+    </div>
+
+    <h2>Классы и хвостовые вызовы</h2>
+
+    <pre class="code js">const log = [];
+const say = (text, v) =&gt; { log.push(text); return v; };
+class Card {
+  [say("ключ", "show")]() {}
+  word = say("поле", "kitap");
+  static count = say("static", 0);
+  static { say("блок"); }
+}
+console.log(log.join(", "));    // ключ, static, блок — поле ждёт new
+new Card();
+console.log(log.join(", "));    // ключ, static, блок, поле — поле на каждом new
+const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return e.name; } };
+console.log(attempt(() =&gt; { class B { [B.name]() {} } }));   // ReferenceError — имя класса до шага 8 без значения
+function countdown(n) { "use strict"; return n === 0 ? "дно" : countdown(n - 1); }
+console.log(attempt(() =&gt; countdown(1e6)));                    // RangeError — V8 не делает хвостовые вызовы</pre>
+
+    <div class="remember">
+        ClassDefinitionEvaluation: classEnv (имя без значения) → <code>extends</code> → <code>proto</code> и F →
+        элементы по порядку (ключи и методы сразу) → имя получает F → статические поля и блоки по порядку. Поля
+        экземпляра — на каждом <code>new</code>. Хвостовой вызов — последний шаг строгой обычной функции:
+        <code>return f()</code>, ветки <code>?:</code>, правая часть <code>&amp;&amp;</code>, <code>||</code>,
+        <code>??</code>. V8 его не делает — глубокую рекурсию пишут циклом.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Предскажите <code>length</code> у <code>function f(a, { b } = {}, ...c) {}</code> и результат
+                <code>two()</code> для <code>function two(a = () =&gt; x, x = 2) { var x = 3; return [a(), x].join(); }</code>.
+                Объясните шагами FunctionDeclarationInstantiation.</li>
+            <li>Предскажите журнал для
+                <code>class A extends say("e", Object) { static { say("b"); } [say("k", "m")]() {} static s = say("s", 1); }</code>
+                и найдите каждую строку среди шагов 15.7.14.</li>
+            <li>По правилам HasCallInTailPosition (15.10.2) решите, какие вызовы хвостовые в строгой функции:
+                <code>return a ? f() : g() + 1;</code>, <code>return (log(), k());</code>,
+                <code>for (const x of xs) return f(x);</code>, <code>try { return f(); } finally { cleanup(); }</code>.</li>
+            <li>Прочитайте раздел «Evaluation order» страницы MDN
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes">Classes</a> и
+                сопоставьте его семь пунктов с шагами 15.7.14. Почему MDN называет пункты 2 и 4 ненаблюдаемыми?</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions">MDN Web Docs</a>
+        (Functions, Default parameters, Arrow function expressions, Classes, Static initialization blocks, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

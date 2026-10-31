@@ -23,7 +23,7 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-12');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -211,6 +211,21 @@ console.log(attempt(() => ag().next().catch(() => "не дойдёт")));`, 'tol
       'catch поймал: умолчание']),
     `lecture 5, 10, 17: more early errors of 15.7.1; a default {} saves from undefined only, length 0; .catch() catches the default of an async function, an async generator throws before it ${JSON.stringify(out)}`);
   }
+  // notes, homework 1–2 and the table: length and a var copy of a parameter; the order of a class with extends and a
+  // static block before a key; a generator's prototype has no own constructor
+  {
+    const out = await runScript(ctx, `function f(a, { b } = {}, ...c) {}
+function two(a = () => x, x = 2) { var x = 3; return [a(), x].join(); }
+const log = [];
+const say = (text, v) => { log.push(text); return v; };
+class A extends say("e", Object) { static { say("b"); } [say("k", "m")]() {} static s = say("s", 1); }
+const before = log.join(" ");
+new A();
+function* gen() {}
+console.log(f.length, "|", two(), "|", before, "|", log.join(" "), "|", Object.hasOwn(gen.prototype, "constructor"), gen.prototype.constructor === Object.getPrototypeOf(gen));`, 'hw.html');
+    check(JSON.stringify(out) === JSON.stringify(['1 | 2,3 | e k b s | e k b s | false true']),
+      `student homework 1, 2 and the table: length 1 and the var copy 2,3; extends, key, block, static field, nothing on new; no own constructor on gen.prototype ${JSON.stringify(out)}`);
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -343,6 +358,18 @@ console.log(attempt(() => ag().next().catch(() => "не дойдёт")));`, 'tol
   check(['reference/functions', 'reference/functions/default_parameters', 'reference/functions/arrow_functions', 'reference/classes', 'reference/classes/static_initialization_blocks'].every((p) => mdn(p).startsWith('---\ntitle:')),
     'footer: the MDN pages Functions, Default parameters, Arrow function expressions, Classes, Static initialization blocks are in the cache');
   check(mdn('reference/execution_model').includes('Currently, only Safari (JavaScriptCore) implements PTC'), 'lecture 16: MDN — only Safari has tail calls');
+  {
+    const classes = mdn('reference/classes');
+    const order = classes.slice(classes.indexOf('### Evaluation order'), classes.indexOf('## Examples'));
+    check([1, 2, 3, 4, 5, 6, 7].every((n) => order.includes(`\n${n}. `)) && !order.includes('\n8. ')
+      && order.includes('However, because the `constructor` definition is only a method definition, this step is not observable')
+      && order.includes('Private instance methods and accessors are saved to be installed on the instance directly later. This step is not observable'),
+    'student homework 4: MDN Classes, Evaluation order — seven points, the 2nd and the 4th "not observable"');
+  }
+  check(hasAll(tail, ['Statement : VariableStatement EmptyStatement ExpressionStatement', 'ReturnStatement : return Expression ; Return HasCallInTailPosition of Expression with argument call'])
+    && /> 15\.10\.2 Static Semantics: HasCallInTailPosition/.test(f('sec-static-semantics-hascallintailposition'))
+    && /> 15\.7\.14 Runtime Semantics: ClassDefinitionEvaluation/.test(f('sec-runtime-semantics-classdefinitionevaluation')),
+  'student homework 3: an expression statement such as cleanup() is never a tail call, return passes the check to its expression; 15.10.2 and 15.7.14 are where the notes say');
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

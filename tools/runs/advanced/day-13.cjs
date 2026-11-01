@@ -8,7 +8,9 @@
 // The notes have no result-boxes: a js block prints what the comments of its console.log lines say ("// 3 — why"); a
 // page prints what the "<!-- … -->" comments at the ends of its lines say; the files of a section run at the end of the
 // section and print what the comments of their console.log lines say, file after file (the notes list them in the
-// order they run).
+// order they run). In the tasks a folder is the files of one task; a block without a result-box prints what EXPECT
+// says for "tasks #N"; an example (".example") runs with the reference solutions of SOLUTIONS, and every
+// "expression;   // value" line must give its comment; the experiments of the criteria run after the pages.
 // Output is the console as DevTools shows it: console calls rebuilt from Chrome's preview objects, uncaught errors as
 // "Uncaught SyntaxError: …" and the browser's own error messages. Every run gets a fresh browser context.
 // The context is Ashgabat time and Russian, as in course 2.
@@ -35,7 +37,97 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-13');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
+// a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ["Uncaught SyntaxError: Identifier 'a' has already been declared", "Uncaught SyntaxError: Identifier 'b' has already been declared", '40 4', 'новая c',
+    "Uncaught SyntaxError: Identifier 'c' has already been declared", '1 2 новая c 40'],
+  'tasks #1': ['метод,глобальная,глобальная,метод', 'внешняя глобальная глобальная', 'undefined,object'],
+  'tasks #2': ['1 0 SyntaxError number function', 'умолчание/тело undefined'],
+  'tasks #5': ['16 42 kitap'],
+  'tasks #10': ["Uncaught ReferenceError: Cannot access 'Deck' before initialization"],
+  'tasks #12': ['ok SyntaxError ok SyntaxError SyntaxError SyntaxError'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  declare: `function declare(record, script) {
+  const { props, lex } = record;
+  for (const n of script.lex) if (lex.has(n) || (props[n] && !props[n].configurable)) return \`SyntaxError: \${n}\`;
+  for (const n of [...script.vars, ...script.functions]) if (lex.has(n)) return \`SyntaxError: \${n}\`;
+  for (const n of [...script.functions].reverse()) {
+    const p = props[n];
+    if (p && !p.configurable && !(p.writable && p.enumerable)) return \`TypeError: \${n}\`;
+  }
+  for (const n of script.lex) lex.add(n);
+  for (const n of script.functions) if (!props[n] || props[n].configurable) props[n] = { configurable: false, writable: true, enumerable: true };
+  for (const n of script.vars) if (!props[n]) props[n] = { configurable: false, writable: true, enumerable: true };
+  return "ok";
+}`,
+  evaluationOrder: `function evaluationOrder(graph, entry) {
+  const marked = new Set();
+  const order = [];
+  const visit = (name) => {
+    if (marked.has(name)) return;
+    marked.add(name);
+    for (const dep of graph[name]) visit(dep);
+    order.push(name);
+  };
+  visit(entry);
+  return order;
+}`,
+  getSetting: `function getSetting(settings, path) {
+  return path.split(".").reduce((o, key) => o?.[key], settings);
+}`,
+  calc: `const OPS = { "+": (a, b) => a + b, "-": (a, b) => a - b, "*": (a, b) => a * b, "/": (a, b) => a / b };
+function calc(a, op, b) {
+  if (!Object.hasOwn(OPS, op)) throw new Error(\`нет операции «\${op}»\`);
+  return OPS[op](a, b);
+}`,
+  parseDeck: `function parseDeck(text) {
+  return JSON.parse(text);
+}`,
+  resolveExport: `function resolveExport(mods, name, exportName, resolveSet = []) {
+  if (resolveSet.some(([m, n]) => m === name && n === exportName)) return null;
+  resolveSet.push([name, exportName]);
+  const m = mods[name];
+  if ((m.local ?? []).includes(exportName)) return \`\${name}.\${exportName}\`;
+  const forwarded = (m.indirect ?? {})[exportName];
+  if (forwarded) return forwarded[1] === "*" ? \`\${forwarded[0]}.*\` : resolveExport(mods, forwarded[0], forwarded[1], resolveSet);
+  if (exportName === "default") return null;
+  let found = null;
+  for (const star of m.star ?? []) {
+    const r = resolveExport(mods, star, exportName, resolveSet);
+    if (r === "ambiguous") return "ambiguous";
+    if (r !== null) { if (found === null) found = r; else if (found !== r) return "ambiguous"; }
+  }
+  return found;
+}`,
+  namespaceKeys: `function exportedNames(mods, name, seen = []) {
+  if (seen.includes(name)) return [];
+  seen.push(name);
+  const m = mods[name];
+  const names = [...(m.local ?? []), ...Object.keys(m.indirect ?? {})];
+  for (const star of m.star ?? []) for (const n of exportedNames(mods, star, seen)) if (n !== "default" && !names.includes(n)) names.push(n);
+  return names;
+}
+function namespaceKeys(mods, name) {
+  return exportedNames(mods, name).filter((n) => !["ambiguous", null].includes(resolveExport(mods, name, n))).sort();
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split(LF).map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join(LF)}
+${lines.join(LF)}`;
+};
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -160,6 +252,8 @@ const callersOf = (spec, op) => {
         section: heads.filter((h) => h.compareDocumentPosition(pre) & Node.DOCUMENT_POSITION_FOLLOWING).length,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
+        task: pre.closest('.task')?.querySelector('.task-title')?.textContent ?? null,
       };
     }));
     await ctx.close();
@@ -180,7 +274,10 @@ const callersOf = (spec, op) => {
     };
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split(LF)[0];
-      if (blk.section !== section) { await closeSection(); site = {}; section = blk.section; }
+      // the files of a task make one folder; elsewhere a folder is a section
+      const where = name === 'tasks' ? blk.task : blk.section;
+      if (where !== section) { await closeSection(); site = {}; section = where; }
+      const want = EXPECT[`${name} #${i}`];
       if (QUOTES[first]) {
         const quoted = fs.readFileSync(path.join(ROOT, QUOTES[first]), 'utf8');
         const code = [...quoted.matchAll(/<pre class="code js"[^>]*>([\s\S]*?)<\/pre>/g)].map((m) => textOf(m[1])).join(LF);
@@ -200,9 +297,9 @@ const callersOf = (spec, op) => {
         site[file] = blk.code;
         unused.add(file);
         if (name === 'student') order.push(blk.code);
-        if (!blk.box) { if (!quiet) console.log(`\n--- ${name} #${i}: file ${file} of section ${section}`); continue; }
+        if (!blk.box && !want) { if (!quiet) console.log(`\n--- ${name} #${i}: file ${file} of section ${section}`); continue; }
       }
-      const files = file ? { ...site } : { 'index.html': `<script>${LF}${blk.code}${LF}</script>` };
+      const files = file ? { ...site } : { 'index.html': `<script>${LF}${blk.example ? checkable(blk.code) : blk.code}${LF}</script>` };
       const out = await runSite(b, files);
       if (file) for (const f of Object.keys(files)) unused.delete(f);
       if (!quiet) {
@@ -210,7 +307,14 @@ const callersOf = (spec, op) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && lines.length === out.length, `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
+      if (want) check(same(out, want), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
+      else if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
       else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
@@ -225,6 +329,78 @@ const callersOf = (spec, op) => {
   await extra(scripts(`var v = "глобальная";
 function f() { var v = "местная"; return [eval("v"), (eval)("v"), window.eval("v"), [eval][0]("v"), eval?.("v")].join(); }
 console.log(f());`), ['местная,местная,глобальная,глобальная,глобальная'], 'student homework 3 and the table: only eval(…) and (eval)(…) are direct');
+
+  // the tasks: what the criteria ask to find, with the reference solutions
+  await extra(scripts('function c() {}', 'const d = Object.getOwnPropertyDescriptor(globalThis, "c"); console.log(d.writable, d.enumerable, d.configurable);'), ['true true false'],
+    'task 1: a global function is writable, enumerable, not configurable — CanDeclareGlobalFunction lets it be declared again, a let cannot shadow it');
+  {
+    // task 4: the seven scripts of the example as a real page; Chrome agrees with the model except function NaN
+    const specs = [{ lex: ['b'], vars: ['a'], functions: ['c'] }, { lex: ['a'], vars: [], functions: [] }, { lex: [], vars: ['b'], functions: [] }, { lex: ['d'], vars: [], functions: [] },
+      { lex: [], vars: [], functions: ['c'] }, { lex: ['fresh', 'c'], vars: [], functions: [] }, { lex: [], vars: [], functions: ['NaN'] }];
+    const text = (s) => [...s.lex.map((n) => `let ${n} = 0;`), ...s.vars.map((n) => `var ${n};`), ...s.functions.map((n) => `function ${n}() {}`), 'console.log("ok");'].join(' ');
+    const out = await runSite(b, scripts('globalThis.d = 4;', ...specs.map(text), 'console.log(typeof fresh);'));
+    const chrome = out.slice(0, -1).map((l) => l.replace(/^Uncaught (\w+): Identifier '(\w+)' has already been declared$/, '$1: $2'));
+    const model = new Function(`${SOLUTIONS.declare}
+const hard = { configurable: false, writable: false, enumerable: false };
+const win = { props: { undefined: hard, NaN: hard, d: { configurable: true, writable: true, enumerable: true } }, lex: new Set() };
+return ${JSON.stringify(specs)}.map((s) => declare(win, s));`)();
+    check(same(chrome.slice(0, 6), model.slice(0, 6)) && model[6] === 'TypeError: NaN' && chrome[6] === 'SyntaxError: NaN' && out.at(-1) === 'undefined',
+      `task 4: Chrome gives the model's answers to six scripts, SyntaxError instead of TypeError for function NaN; fresh was not made ${JSON.stringify(chrome)} ${JSON.stringify(model)}`);
+  }
+  {
+    // task 5: the graphs of the example as folders, every module prints its name
+    const graphs = [{ main: ['a', 'b'], a: ['c'], b: ['c'], c: [] }, { main: ['a'], a: ['b', 'c'], b: ['c'], c: ['a'] },
+      { main: ['storage', 'load'], load: ['deck', 'card', 'errors'], card: ['errors'], deck: ['errors'], errors: [], storage: [] }];
+    const order = new Function(`${SOLUTIONS.evaluationOrder}\nreturn evaluationOrder;`)();
+    for (const g of graphs) {
+      const files = Object.fromEntries(Object.entries(g).map(([n, deps]) => [`${n}.js`, `${deps.map((d) => `import "./${d}.js";`).join(LF)}\nconsole.log("${n}");`]));
+      await extra(files, order(g, 'main'), `task 5: the folder of ${Object.keys(g).join(',')} runs in the model's order`);
+    }
+  }
+  await extra({ 'index.html': `<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline'">\n<script>
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+function oldSetting(settings, path) { return eval(\`settings.\${path}\`); }
+function oldCalc(a, op, b) { return eval(\`\${a} \${op} \${b}\`); }
+function oldDeck(text) { return eval(\`(\${text})\`); }
+${SOLUTIONS.getSetting}
+${SOLUTIONS.calc}
+${SOLUTIONS.parseDeck}
+const OPS_NO_CHECK = OPS;
+const calcNoCheck = (a, op, b) => OPS_NO_CHECK[op](a, b);
+console.log(attempt(() => oldSetting({ a: 1 }, "a")), attempt(() => oldCalc(6, "*", 7)), attempt(() => oldDeck("[1]")));
+console.log(getSetting({ a: 1 }, "a"), calc(6, "*", 7), parseDeck("[1]").length, typeof calcNoCheck(1, "constructor", 2), attempt(() => calc(1, "constructor", 2)));
+</script>` }, ['EvalError EvalError EvalError', '1 42 1 object Error'], 'task 6: under CSP the eval versions throw EvalError, the new ones work; without Object.hasOwn the "constructor" of the table answers');
+  {
+    // task 7: the two fixes
+    const base = { 'deck.js': 'import { Card } from "./card.js";\nexport class Deck { constructor(words) { this.cards = words.map((w) => new Card(w)); } }\nconsole.log("deck.js");', 'main.js': 'import "./load.js";\nconsole.log("main.js");' };
+    const eager = 'import { Deck } from "./deck.js";\nexport class Card { constructor(word) { this.word = word; } }\nexport const EMPTY = new Deck([]);\nconsole.log("card.js: пустая колода готова");';
+    const lazy = 'import { Deck } from "./deck.js";\nexport class Card { constructor(word) { this.word = word; } }\nexport function emptyDeck() { return new Deck([]); }\nconsole.log("card.js", emptyDeck instanceof Function);';
+    const deckFirst = 'import "./deck.js";\nimport "./card.js";\nconsole.log("load.js");';
+    const cardFirst = 'import "./card.js";\nimport "./deck.js";\nconsole.log("load.js");';
+    await extra({ ...base, 'card.js': eager, 'load.js': cardFirst }, ['deck.js', 'card.js: пустая колода готова', 'load.js', 'main.js'], 'task 7, fix 1: card.js first — deck.js runs first, Deck is ready');
+    await extra({ ...base, 'card.js': lazy, 'load.js': deckFirst }, ['card.js true', 'deck.js', 'load.js', 'main.js'], 'task 7, fix 2: a function instead of EMPTY works with deck.js first');
+    await extra({ ...base, 'card.js': lazy, 'load.js': cardFirst }, ['deck.js', 'card.js true', 'load.js', 'main.js'], 'task 7, fix 2: and with card.js first');
+    await extra({ ...base, 'card.js': eager, 'load.js': cardFirst, 'main.js': 'import "./deck.js";\nimport "./load.js";\nconsole.log("main.js");' },
+      ["Uncaught ReferenceError: Cannot access 'Deck' before initialization"], 'task 7: fix 1 breaks when another file imports deck.js before load.js');
+  }
+  {
+    // task 8: the modules of the example as files; every local export holds its "module.name"
+    const mods = { ru: { local: ['hello', 'yes', 'default'] }, tk: { local: ['hello', 'bye'] }, base: { local: ['hello'] }, a: { star: ['base'] }, b: { star: ['base'] }, all: { star: ['ru', 'tk'] },
+      same: { star: ['a', 'b'] }, mine: { local: ['hello'], star: ['ru'] }, ns: { indirect: { ru: ['ru', '*'] } }, loop1: { star: ['loop2'] }, loop2: { star: ['loop1'] } };
+    const files = Object.fromEntries(Object.entries(mods).map(([n, m]) => [`${n}.js`, [...(m.local ?? []).map((x) => (x === 'default' ? `export default "${n}.default";` : `export const ${x} = "${n}.${x}";`)),
+      ...Object.entries(m.indirect ?? {}).map(([x, [from]]) => `export * as ${x} from "./${from}.js";`), ...(m.star ?? []).map((s) => `export * from "./${s}.js";`)].join(LF)]));
+    const model = new Function(`${SOLUTIONS.resolveExport}\n${SOLUTIONS.namespaceKeys}\nreturn [resolveExport, namespaceKeys];`)();
+    const cases = [['all', 'bye'], ['all', 'hello'], ['same', 'hello'], ['mine', 'hello'], ['ns', 'ru'], ['loop1', 'x']];
+    const said = [], got = [];
+    for (const [m, x] of cases) {
+      const r = model[0](mods, m, x);
+      said.push(r);
+      const out = await runSite(b, { ...files, 'main.js': `import { ${x} } from "./${m}.js";\nconsole.log(typeof ${x} === "object" ? "${x === 'ru' ? 'ru' : '?'}.*" : ${x});` });
+      got.push(/conflicting star exports/.test(out[0]) ? 'ambiguous' : /does not provide an export named/.test(out[0]) ? null : out[0]);
+    }
+    const keys = await runSite(b, { ...files, 'main.js': 'import * as all from "./all.js";\nconsole.log(Object.keys(all).join());' });
+    check(same(said, got) && same(keys, [model[1](mods, 'all').join()]), `task 8: Chrome agrees with resolveExport on six cases and with namespaceKeys on all ${JSON.stringify(got)} ${JSON.stringify(keys)}`);
+  }
 
   // what the lecture only tells about: scripts and the global record
   await extra(scripts(`${ATTEMPT}console.log(attempt(() => Object.preventExtensions(globalThis)));`, 'console.log("один"); null.x; console.log("не дойдём");', 'console.log("два");'),
@@ -370,6 +546,12 @@ console.log(test());`), ['локальная | глобальная | локал
     && /> 15\.7\.15 Runtime Semantics: BindingClassDeclarationEvaluation/.test(f('sec-runtime-semantics-bindingclassdeclarationevaluation'))
     && /> 16\.2\.3\.7 Runtime Semantics: Evaluation/.test(f('sec-exports-runtime-semantics-evaluation')),
   'lecture 10: tables 54 and 56 for the nine forms; "default" — SetFunctionName in 15.2.4, ClassDefinitionEvaluation in 15.7.15, NamedEvaluation in 16.2.3.7');
+  check(hasAll(f('sec-exports-static-semantics-early-errors'), ['ExportDeclaration : export NamedExports ; It is a Syntax Error if the ReferencedBindings of NamedExports contains any StringLiteral',
+    'It is a Syntax Error if the StringValue of n is a ReservedWord or the StringValue of n is one of "implements", "interface", "let", "package", "private", "protected", "public", or "static"',
+    'each ReferencedBindings of NamedExports is treated as an IdentifierReference'])
+    && f('sec-exports').includes('ExportSpecifier : ModuleExportName ModuleExportName as ModuleExportName')
+    && /> 16\.2\.1\.7\.2\.2 ResolveExport/.test(f('sec-resolveexport')) && /> 16\.2\.3\.1 Static Semantics: Early Errors/.test(f('sec-exports-static-semantics-early-errors')),
+  'task 9: 16.2.3.1 — no string as a local reference, no reserved word (and static) as a reference, the note; the name after as is any ModuleExportName; the undeclared name is 16.2.1.1; task 8 is 16.2.1.7.2.2');
   check(['import defer', 'import source', 'AbstractModuleSource', 'TrustedScript', 'HostGetCodeForEval'].every((w) => !spec.includes(w)),
     'lecture 10, 15: the text of 2026 has no import defer, import source, AbstractModuleSource and no rule for TrustedScript');
   check(hasAll(f('sec-function-calls-runtime-semantics-evaluation'), ['If ref is a Reference Record, IsPropertyReference (ref) is false, and ref. [[ReferencedName]] is "eval", then If SameValue (func, %eval%) is true',

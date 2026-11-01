@@ -5,7 +5,9 @@
 //   node tools/runs/advanced/day-14.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-14.cjs --quiet    only the checks
 // Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
-// console.log lines say, and the homework (1–3 in Chrome, 4 in the text of MDN); the quoted getters of card.js (day 33 of course 2) are
+// console.log lines say, and the homework (1–3 in Chrome, 4 in the text of MDN); a block of the tasks without a
+// result-box prints what EXPECT says, an example runs with the reference solutions of SOLUTIONS ("expression;   //
+// value"), and the criteria are checked against real objects and real classes; the quoted getters of card.js (day 33 of course 2) are
 // the real ones; the cheatsheet runs without an error; the experiments the lecture only tells about (the table of
 // section 9 seen live through the traps of a Proxy — the run may use what the lecture may not; a cycle through a Proxy
 // is not caught by [[SetPrototypeOf]]; a descriptor is a copy; a strict write to a read-only property of the prototype;
@@ -24,7 +26,102 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-14');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
+// a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['rw,_acc 1 прото 3! прото', 'снова rw,_acc,ro'],
+  'tasks #1': ['ok TypeError ok ok TypeError ok TypeError TypeError ok'],
+  'tasks #2': ['2 10 z a | 2 10 z a hidden | 2 10 z a 1 p2 | {"2":1,"10":1,"z":1,"a":1}'],
+  'tasks #8': ['SyntaxError TypeError TypeError ok ok'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  validate: `function validate(current, desc, extensible) {
+  const isAccessor = (d) => "get" in d || "set" in d;
+  const isData = (d) => "value" in d || "writable" in d;
+  if (current === undefined) return extensible;
+  if (Object.keys(desc).length === 0) return true;
+  if (current.configurable === false) {
+    if (desc.configurable === true) return false;
+    if ("enumerable" in desc && desc.enumerable !== current.enumerable) return false;
+    if ((isAccessor(desc) || isData(desc)) && isAccessor(desc) !== isAccessor(current)) return false;
+    if (isAccessor(current)) {
+      if ("get" in desc && !Object.is(desc.get, current.get)) return false;
+      if ("set" in desc && !Object.is(desc.set, current.set)) return false;
+    } else if (current.writable === false) {
+      if (desc.writable === true) return false;
+      if ("value" in desc) return Object.is(desc.value, current.value);
+    }
+  }
+  return true;
+}`,
+  ordinarySet: `function ordinarySet(O, P, V, Receiver) {
+  let ownDesc = Object.getOwnPropertyDescriptor(O, P);
+  if (ownDesc === undefined) {
+    const parent = Object.getPrototypeOf(O);
+    if (parent !== null) return ordinarySet(parent, P, V, Receiver);
+    ownDesc = { value: undefined, writable: true, enumerable: true, configurable: true };
+  }
+  if ("value" in ownDesc) {
+    if (!ownDesc.writable) return false;
+    if (Receiver === null || (typeof Receiver !== "object" && typeof Receiver !== "function")) return false;
+    const existing = Object.getOwnPropertyDescriptor(Receiver, P);
+    if (existing !== undefined) {
+      if (!("value" in existing) || !existing.writable) return false;
+      Object.defineProperty(Receiver, P, { value: V });
+      return true;
+    }
+    if (!Object.isExtensible(Receiver)) return false;
+    Object.defineProperty(Receiver, P, { value: V, writable: true, enumerable: true, configurable: true });
+    return true;
+  }
+  if (ownDesc.set === undefined) return false;
+  ownDesc.set.call(Receiver, V);
+  return true;
+}`,
+  ownKeysOrder: `function ownKeysOrder(keys) {
+  const isIndex = (k) => typeof k === "string" && String(Number(k)) === k && Number.isInteger(Number(k)) && Number(k) >= 0 && Number(k) <= 2 ** 32 - 2;
+  const indices = keys.filter(isIndex).sort((a, b) => Number(a) - Number(b));
+  const strings = keys.filter((k) => typeof k === "string" && !isIndex(k));
+  const symbols = keys.filter((k) => typeof k === "symbol");
+  return [...indices, ...strings, ...symbols];
+}`,
+  Card: `class Card {
+  #word;
+  constructor(word) {
+    this.#word = word;
+    if (new.target === Card) Object.freeze(this);
+  }
+  get word() { return this.#word; }
+}
+class BigCard extends Card {
+  level = 2;
+  constructor(word) {
+    super(word);
+    if (new.target === BigCard) Object.freeze(this);
+  }
+}`,
+  construct: `function construct(F, args, newTarget = F) {
+  const proto = newTarget.prototype;
+  const obj = Object.create(typeof proto === "object" && proto !== null || typeof proto === "function" ? proto : Object.prototype);
+  const result = F.apply(obj, args);
+  return typeof result === "object" && result !== null || typeof result === "function" ? result : obj;
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -111,6 +208,7 @@ const callersOf = (spec, op) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -126,13 +224,20 @@ const callersOf = (spec, op) => {
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && lines.length === out.length, `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (EXPECT[`${name} #${i}`]) check(same(out, EXPECT[`${name} #${i}`]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
@@ -216,6 +321,66 @@ console.log(Object.keys({ 3: 1, b: 1, "007": 1, 0: 1, a: 1, 4294967294: 1, 42949
 function g(x, y) { var x; function y() {} return [typeof x, typeof y].join(); }
 console.log(g(1, 2));`, ['_x false x', '0 3 4294967294 b 007 a 4294967295', 'number,function'],
   'student homework 1–3: a setter of the prototype writes _x on the Receiver; 4294967295 is a string key; var keeps the parameter, a function replaces it', 'homework.html');
+  // the tasks: what the criteria ask to find, with the reference solutions
+  await told(`${SOLUTIONS.validate}
+const data = (v, w, e, c) => ({ value: v, writable: w, enumerable: e, configurable: c });
+const cases = [[undefined, { value: 1 }, true], [undefined, { value: 1 }, false], [data(1, true, true, false), { value: 2 }, true], [data(1, false, true, false), { value: 2 }, true],
+  [data(NaN, false, true, false), { value: NaN }, true], [data(0, false, true, false), { value: -0 }, true], [data(1, true, true, false), { get() {} }, true], [data(1, true, true, true), { get() {} }, true],
+  [data(1, true, true, false), {}, true]];
+const real = cases.map(([current, desc, extensible]) => {
+  const o = {};
+  if (current) Object.defineProperty(o, "p", current);
+  if (!extensible) Object.preventExtensions(o);
+  try { Object.defineProperty(o, "p", desc); return true; } catch { return false; }
+});
+console.log(JSON.stringify(real) === JSON.stringify(cases.map((c) => validate(...c))), JSON.stringify(real));`, ['true [true,false,true,false,true,false,false,true,true]'],
+  'task 4: validate agrees with Object.defineProperty on the nine cases', 'task4.html');
+  await told(`"use strict";
+${SOLUTIONS.ordinarySet}
+const make = () => {
+  const proto = {};
+  Object.defineProperty(proto, "ro", { value: 1, writable: false });
+  Object.defineProperty(proto, "acc", { set(v) { this.log = v; } });
+  proto.rw = 0;
+  return [proto, Object.create(proto)];
+};
+const real = (P, V) => { const [, a] = make(); try { a[P] = V; return [true, a[P === "acc" ? "log" : P]]; } catch { return [false]; } };
+const model = (P, V) => { const [, a] = make(); return ordinarySet(a, P, V, a) ? [true, a[P === "acc" ? "log" : P]] : [false]; };
+const same = ["rw", "ro", "acc", "fresh"].every((P) => JSON.stringify(real(P, 5)) === JSON.stringify(model(P, 5)));
+const [proto] = make();
+const obj = Object.create(proto);
+Object.defineProperty(obj, "rw", { get() { return "своё"; }, configurable: true });
+console.log(same, ordinarySet(proto, "rw", 9, obj));`, ['true false'],
+  'task 5: in strict code a real write agrees with ordinarySet (true — no error, false — TypeError); super.x = with an own accessor of the Receiver is false', 'task5.html');
+  await told(`${SOLUTIONS.ownKeysOrder}
+const s = Symbol("s");
+const lists = [["b", "10", s, "a", "2", "01", "4294967295", "4294967294"], ["-0", "0", "1.5", "1e3", "7"]];
+console.log(lists.every((keys) => { const o = {}; for (const k of keys) o[k] = 1; return JSON.stringify([...Object.getOwnPropertyNames(o), ...Object.getOwnPropertySymbols(o)].map(String)) === JSON.stringify(ownKeysOrder(keys).map(String)); }));`,
+  ['true'], 'task 6: a real object made in the same order agrees with ownKeysOrder', 'task6.html');
+  await told(`"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return \`\${e.name}: \${e.message}\`; } };
+${SOLUTIONS.Card}
+class HugeCard extends BigCard { size = 3; }
+const huge = new HugeCard("suw");
+class FrozenHuge extends BigCard { size = 3; constructor(word) { super(word); if (new.target === FrozenHuge) Object.freeze(this); } }
+const frozenHuge = new FrozenHuge("suw");
+class Plain { #w; constructor(w) { this.#w = w; Object.freeze(this); } }
+class PlainBig extends Plain { level = 2; }
+class OnlyCard { constructor() { if (new.target === OnlyCard) Object.freeze(this); } }
+class OnlyBig extends OnlyCard { level = 2; constructor() { super(); Object.freeze(this); } }
+class OnlyHuge extends OnlyBig { size = 3; }
+console.log(huge.size, huge.level, Object.isFrozen(huge), Object.isFrozen(frozenHuge), "|", run(() => new PlainBig("x")), "|", run(() => new OnlyHuge()));`,
+  ['3 2 false true | TypeError: Cannot define property level, object is not extensible | TypeError: Cannot define property size, object is not extensible'],
+  'task 7: HugeCard is made but not frozen — nobody has new.target === HugeCard; its own check freezes it; freeze in Card breaks the field of BigCard; an unconditional freeze in BigCard breaks a third level', 'task7.html');
+  await told(`${SOLUTIONS.construct}
+function Point(x) { this.x = x; }
+function Other() {}
+Point.prototype = null;
+const viaModel = construct(Point, [1]);
+const viaNew = new Point(1);
+Point.prototype = { kind: "точка" };
+console.log(Object.getPrototypeOf(viaModel) === Object.prototype, Object.getPrototypeOf(viaNew) === Object.prototype, Object.getPrototypeOf(Reflect.construct(Point, [1], Other)) === Object.getPrototypeOf(construct(Point, [1], Other)));`,
+  ['true true true'], 'task 8: with prototype null the model and new give Object.prototype; the model with newTarget agrees with Reflect.construct', 'task8.html');
   await told(`"use strict";
 class Card { #word; constructor(word) { this.#word = word; Object.freeze(this); } get word() { return this.#word; } set w(v) { this.#word = v; } }
 const card = new Card("kitap");
@@ -351,6 +516,13 @@ console.log(card.word, Object.isFrozen(card));`, ['galam true'], 'lecture 17: fr
     && hasAll(f('sec-createbuiltinfunction'), ['Perform SetFunctionLength (func, length)', 'Perform SetFunctionName (func, name)']) && !f('sec-createbuiltinfunction').includes('"prototype"')
     && f('sec-function.prototype.tostring').includes('if func has an [[InitialName]] internal slot and func. [[InitialName]] is a String, the portion of the returned String that would be matched by NativeFunctionAccessor opt PropertyName must be func. [[InitialName]]'),
   'lecture 16: built-in functions — [[Realm]], [[InitialName]] (20.2.3.5), [[Async]]; [[Construct]] only for constructors; BuiltinCallOrConstruct without ScriptOrModule; CreateBuiltinFunction sets length and name, no prototype');
+  check(f('sec-definemethodproperty').includes('DefinePropertyOrThrow only returns an abrupt completion when attempting to define a class static method whose key is "prototype"')
+    && inOrder(f('sec-class-definitions-static-semantics-early-errors'), ['ClassElement : static MethodDefinition', 'It is a Syntax Error if the PropName of MethodDefinition is "prototype"'])
+    && f('sec-iscompatiblepropertydescriptor').includes('Return ValidateAndApplyPropertyDescriptor (undefined, "", Extensible, Desc, Current)')
+    && callers('IsCompatiblePropertyDescriptor').some((c) => /proxy/i.test(c))
+    && f('sec-definefield').includes('Perform ? CreateDataPropertyOrThrow (receiver, fieldName, initValue)')
+    && /> 10\.2\.8 DefineMethodProperty/.test(f('sec-definemethodproperty')) && /> 10\.1\.6\.2 IsCompatiblePropertyDescriptor/.test(f('sec-iscompatiblepropertydescriptor')),
+  `tasks 4, 9: IsCompatiblePropertyDescriptor (10.1.6.2) is the version without an object, used by Proxy; the note of 10.2.8 on a static "prototype"; the early error of 15.7.1; a static field goes through DefineField ${JSON.stringify(callers('IsCompatiblePropertyDescriptor'))}`);
   check(spec.includes('id="sec-array-exotic-objects-defineownproperty-p-desc"') && spec.includes('id="sec-bound-function-exotic-objects-call-thisargument-argumentslist"')
     && spec.includes('id="sec-bound-function-exotic-objects-construct-argumentslist-newtarget"') && f('sec-array-exotic-objects-defineownproperty-p-desc').includes('If P is "length", return ? ArraySetLength (A, Desc)'),
   'lecture 1: an array has its own [[DefineOwnProperty]] (length), a bound function its own [[Call]] and [[Construct]]');

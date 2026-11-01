@@ -4,7 +4,8 @@
 // prints it; an uncaught error is printed as "Uncaught TypeError: …". The context is Ashgabat time and Russian.
 //   node tools/runs/advanced/day-14.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-14.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted getters of card.js (day 33 of course 2) are
+// Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
+// console.log lines say, and the homework (1–3 in Chrome, 4 in the text of MDN); the quoted getters of card.js (day 33 of course 2) are
 // the real ones; the cheatsheet runs without an error; the experiments the lecture only tells about (the table of
 // section 9 seen live through the traps of a Proxy — the run may use what the lecture may not; a cycle through a Proxy
 // is not caught by [[SetPrototypeOf]]; a descriptor is a copy; a strict write to a read-only property of the prototype;
@@ -23,7 +24,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-14');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -128,7 +132,8 @@ const callersOf = (spec, op) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
   }
@@ -202,6 +207,15 @@ console.log(Object.hasOwn(function f() {}, "caller"), Object.getOwnPropertyNames
   await told(`${RUN}console.log(run(() => new Function("a", "a", '"use strict";')), "|", run(() => new Function("a", "a = 1", "")));`,
     ['SyntaxError: Duplicate parameter name not allowed in this context | SyntaxError: Duplicate parameter name not allowed in this context'],
     'lecture 15: duplicate parameters in strict code or with a default are an early error', 'dup.html');
+  // the notes: the homework, in Chrome
+  await told(`const proto = { set x(v) { this._x = v; } };
+const o = Object.create(proto);
+o.x = 1;
+console.log(Object.keys(o).join(), Object.hasOwn(o, "x"), Object.keys(proto).join());
+console.log(Object.keys({ 3: 1, b: 1, "007": 1, 0: 1, a: 1, 4294967294: 1, 4294967295: 1 }).join(" "));
+function g(x, y) { var x; function y() {} return [typeof x, typeof y].join(); }
+console.log(g(1, 2));`, ['_x false x', '0 3 4294967294 b 007 a 4294967295', 'number,function'],
+  'student homework 1–3: a setter of the prototype writes _x on the Receiver; 4294967295 is a string key; var keeps the parameter, a function replaces it', 'homework.html');
   await told(`"use strict";
 class Card { #word; constructor(word) { this.#word = word; Object.freeze(this); } get word() { return this.#word; } set w(v) { this.#word = v; } }
 const card = new Card("kitap");
@@ -345,6 +359,13 @@ console.log(card.word, Object.isFrozen(card));`, ['galam true'], 'lecture 17: fr
   const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/${p}/index.md`], { encoding: 'utf8' });
   check(['guide/inheritance_and_the_prototype_chain', 'reference/global_objects/object/defineproperty', 'guide/enumerability_and_ownership_of_properties'].every((p) => mdn(p).startsWith('---\ntitle:')),
     'footer: the MDN pages Inheritance and the prototype chain, Object.defineProperty(), Enumerability and ownership of properties are in the cache');
+  {
+    const en = mdn('guide/enumerability_and_ownership_of_properties');
+    const querying = en.slice(en.indexOf('## Querying object properties'), en.indexOf('## Traversing object properties'));
+    const traversing = en.slice(en.indexOf('## Traversing object properties'), en.indexOf('## Obtaining properties'));
+    check(querying.includes('[`in`]') && querying.includes('[`Object.hasOwn()`]') && traversing.includes('[`Object.keys`]') && traversing.includes('[`for...in`]') && traversing.includes('[Object spread]'),
+      'student homework 4: MDN — the tables «Querying» (in, Object.hasOwn) and «Traversing» (Object.keys, for...in, spread)');
+  }
   {
     const caller = mdn('reference/global_objects/function/caller');
     check(caller.includes('status:\n  - deprecated\n  - non-standard') && mdn('reference/global_objects/function/arguments').includes('  - deprecated')

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 13 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 13</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 13. Скрипты и модули изнутри, eval</h1>
+    <p class="subtitle">Выжимка лекции: как скрипт получает имена в глобальной записи, как граф модулей связывается и
+    выполняется, чем прямой <code>eval</code> отличается от косвенного.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        Скрипт и модуль — два вида исходного текста. Скрипт: ParseScript → ScriptEvaluation →
+        <strong>GlobalDeclarationInstantiation</strong> (сначала все проверки, потом все имена) → текст. Модуль: весь граф
+        сначала связывается — <strong>InitializeEnvironment</strong> создаёт привязки, — потом выполняется обходом в
+        глубину. <code>eval</code> разбирает строку как скрипт: прямой — в окружении вызывающего, косвенный — в глобальном.
+    </div>
+
+    <h2>Скрипты и глобальная запись</h2>
+
+    <p>Вывод каждого скрипта — в комментарии в конце его строки.</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script&gt;let count = 1; var total = 10; globalThis.label = "свойство";&lt;/script&gt;
+&lt;script&gt;let total = 20;&lt;/script&gt;                &lt;!-- Uncaught SyntaxError: Identifier 'total' has already been declared — шаг 1 --&gt;
+&lt;script&gt;var before = 1; var count = 2;&lt;/script&gt; &lt;!-- Uncaught SyntaxError: Identifier 'count' has already been declared — шаг 2 --&gt;
+&lt;script&gt;let label = "let"; console.log(label, globalThis.label);&lt;/script&gt;    &lt;!-- let свойство — свойство окна затенено --&gt;
+&lt;script&gt;let broken = nothing();&lt;/script&gt;        &lt;!-- Uncaught ReferenceError: nothing is not defined --&gt;
+&lt;script&gt;try { broken = 1; } catch (e) { console.log(e.message); }&lt;/script&gt;   &lt;!-- Cannot access 'broken' before initialization --&gt;
+&lt;script&gt;console.log("before" in window, count, total);&lt;/script&gt;          &lt;!-- true 1 10 — before создал Chrome, по тексту — нет --&gt;</pre>
+
+    <div class="remember">
+        Ранняя ошибка (16.1.1) — скрипт не выполнится ни на строку. Ошибка при выполнении останавливает его на месте.
+        GlobalDeclarationInstantiation проверяет имена против общей глобальной записи: <code>let</code> против
+        <code>let</code> и против неудаляемого свойства окна (<code>var</code>, <code>undefined</code>, <code>top</code>),
+        <code>var</code> и функция против <code>let</code> — SyntaxError. Конфликт — по тексту ни одного имени (Chrome
+        создаёт стоящие раньше). <code>let</code> без значения после ошибки — мёртвая зона до перезагрузки.
+    </div>
+
+    <h2>Модули: связывание и выполнение</h2>
+
+    <p>Файлы — в порядке выполнения: <code>main.js</code> ведёт в <code>first.js</code>, тот — в
+    <code>second.js</code>, который снова просит <code>first.js</code>, а он уже на стеке.</p>
+
+    <pre class="code js">// second.js
+import { count, hello, MAX } from "./first.js";
+const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return e.name; } };
+console.log(count, hello(), attempt(() =&gt; MAX));   // undefined привет ReferenceError — var, функция, const</pre>
+
+    <pre class="code js">// first.js
+import "./second.js";
+export var count = 1;
+export function hello() { return "привет"; }
+export const MAX = 3;
+console.log(count, MAX);                           // 1 3 — теперь всё со значениями</pre>
+
+    <pre class="code js">// bad.js
+throw new Error("сбой");</pre>
+
+    <pre class="code js">// main.js
+import "./first.js";
+const one = await import("./bad.js").catch((e) =&gt; e);
+const two = await import("./bad.js").catch((e) =&gt; e);
+console.log(one === two, one.message);             // true сбой — ошибка выполнения запомнена</pre>
+
+    <div class="remember">
+        Связывание — до первой строки любого модуля: <code>var</code> — <code>undefined</code>, функции готовы,
+        <code>let</code>, <code>const</code>, <code>class</code> — без значения. Выполнение — обход в глубину по
+        запросам в порядке текста; в цикле первым выполняется самый глубокий. <code>export *</code> не пересылает
+        <code>default</code>; имя из двух звёздочек с разными привязками выпадает из объекта модуля, а импорт его по
+        имени — SyntaxError. Модуль с <code>await</code> наверху выполняется асинхронно, импортёр его ждёт, сосед — нет.
+    </div>
+
+    <h2>eval: прямой и косвенный</h2>
+
+    <pre class="code js">var where = "глобальная";
+function test() {
+  var where = "локальная";
+  console.log(eval("where"), (0, eval)("where"));   // локальная глобальная — прямой видит функцию
+  eval("var x = 1");
+  console.log(typeof x);                            // number — нестрогий прямой: var в функцию
+}
+test();
+function strict() { "use strict"; eval("var y = 1"); return typeof y; }
+console.log(strict(), eval("let z = 1; typeof z"), typeof z);   // undefined number undefined — строгий и let внутри
+(0, eval)("var g = 1");
+console.log(delete globalThis.g, eval(42), eval("2; var q = 3"));   // true 42 2 — удаляемый var, не строка, значение
+const settings = { size: { font: 16 } };
+console.log("size.font".split(".").reduce((o, key) =&gt; o?.[key], settings));   // 16 — путь без eval</pre>
+
+    <table>
+        <thead><tr><th>Вызов</th><th>Вид</th><th>Что видит строка</th><th><code>var</code> нестрогой строки</th></tr></thead>
+        <tbody>
+            <tr><td><code>eval(s)</code>, <code>(eval)(s)</code></td><td>прямой</td><td>окружения вызывающего</td><td>в его VariableEnvironment</td></tr>
+            <tr><td><code>(0, eval)(s)</code>, <code>eval?.(s)</code>, <code>obj.eval(s)</code></td><td>косвенный</td><td>только глобальное</td><td>свойство окна, удаляемое</td></tr>
+            <tr><td>любой строгий</td><td>—</td><td>как выше</td><td>в новом окружении eval</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Прямой eval — вызов по имени <code>eval</code> без свойства, со значением %eval% (13.3.6.1). Строгость
+        наследует только прямой. <code>let</code>, <code>const</code>, <code>class</code> из eval всегда остаются внутри.
+        Не строка возвращается как есть. Ранние ошибки — при вызове: <code>new.target</code> не в функции,
+        <code>super</code> не в методе, <code>arguments</code> в поле. Под CSP без <code>'unsafe-eval'</code> eval и
+        <code>Function</code> бросают EvalError. Замены: <code>obj[key]</code>, таблица функций, <code>JSON.parse</code>,
+        <code>Function</code> с параметрами.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Страница: <code>&lt;script&gt;globalThis.x = 1; var y = 2;&lt;/script&gt;</code>,
+                <code>&lt;script&gt;let x = 10; let y = 20;&lt;/script&gt;</code>,
+                <code>&lt;script&gt;console.log(x, y);&lt;/script&gt;</code>. Что напечатает третий скрипт? Найдите шаг 16.1.7,
+                на котором бросил второй, и объясните, почему <code>let x</code> не создан.</li>
+            <li>Модули: <code>main.js</code> импортирует <code>a.js</code>; <code>a.js</code> — <code>b.js</code> и
+                <code>c.js</code>; <code>b.js</code> — <code>c.js</code>; <code>c.js</code> — <code>a.js</code>. Каждый
+                первой строкой печатает своё имя. Предскажите порядок по шагам InnerModuleEvaluation.</li>
+            <li>Внутри <code>function f() { var v = "местная"; … }</code> при глобальном <code>var v = "глобальная"</code>
+                что вернут <code>eval("v")</code>, <code>(eval)("v")</code>, <code>window.eval("v")</code>,
+                <code>[eval][0]("v")</code>, <code>eval?.("v")</code>? Для каждого назовите условие 13.3.6.1, которое
+                выполнено или нет.</li>
+            <li>Прочитайте страницу MDN
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/defer">import defer</a>.
+                Почему у неё только форма <code>import defer * as ns</code> и что будет с модулем, у которого
+                <code>await</code> наверху? Свяжите ответ с HasTLA из InnerModuleEvaluation.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval">MDN Web Docs</a>
+        (eval(), import defer, import source, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

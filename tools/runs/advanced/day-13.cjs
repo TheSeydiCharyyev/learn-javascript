@@ -5,6 +5,10 @@
 //   - a block whose first line is "// name.js", or a block with data-file="name.json", is a file of the folder of its
 //     section (a section is an h2; a later file with the same name replaces the earlier one), and a result-box after it
 //     runs the folder with a page <script type="module" src="main.js"> (as the run of day 30 of course 2 does).
+// The notes have no result-boxes: a js block prints what the comments of its console.log lines say ("// 3 — why"); a
+// page prints what the "<!-- … -->" comments at the ends of its lines say; the files of a section run at the end of the
+// section and print what the comments of their console.log lines say, file after file (the notes list them in the
+// order they run).
 // Output is the console as DevTools shows it: console calls rebuilt from Chrome's preview objects, uncaught errors as
 // "Uncaught SyntaxError: …" and the browser's own error messages. Every run gets a fresh browser context.
 // The context is Ashgabat time and Russian, as in course 2.
@@ -31,7 +35,12 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-13');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
+// a page of the notes: "<script>…</script>   <!-- output — why -->", the first line names the file
+const htmlCommented = (code) => code.split(LF).slice(1).map((l) => l.match(/<!-- (.*) -->\s*$/)).filter(Boolean).map((m) => m[1].split(' — ')[0].trim());
 const ORIGIN = 'http://127.0.0.1:5500';
 const LF = String.fromCharCode(10);
 const DEFAULT_PAGE = '<!doctype html><meta charset="utf-8"><title>run</title><body><script type="module" src="main.js"></script></body>';
@@ -156,12 +165,22 @@ const callersOf = (spec, op) => {
     await ctx.close();
     if (!quiet) console.log(`\n===== ${name}: ${blocks.length} blocks`);
 
-    let site = {}, section = -1;
+    let site = {}, section = -1, order = [];
     const unused = new Set();
-    const closeSection = () => { for (const f of unused) check(false, `${name}, section ${section}: the file ${f} is used by no run`); unused.clear(); };
+    const closeSection = async () => {
+      if (name === 'student' && order.length) {
+        const out = await runSite(b, { ...site });
+        if (!quiet) { console.log(`\n--- ${name}, section ${section} [${Object.keys(site).join(' ')}]`); for (const l of out) console.log(`    > ${l}`); }
+        check(same(out, order.flatMap(commented)), `${name}, section ${section}: the files print what their comments say ${JSON.stringify(out)}`);
+        unused.clear();
+      }
+      for (const f of unused) check(false, `${name}, section ${section}: the file ${f} is used by no run`);
+      unused.clear();
+      order = [];
+    };
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split(LF)[0];
-      if (blk.section !== section) { closeSection(); site = {}; section = blk.section; }
+      if (blk.section !== section) { await closeSection(); site = {}; section = blk.section; }
       if (QUOTES[first]) {
         const quoted = fs.readFileSync(path.join(ROOT, QUOTES[first]), 'utf8');
         const code = [...quoted.matchAll(/<pre class="code js"[^>]*>([\s\S]*?)<\/pre>/g)].map((m) => textOf(m[1])).join(LF);
@@ -171,9 +190,16 @@ const callersOf = (spec, op) => {
         continue;
       }
       const file = blk.dataFile ?? fileName(blk.code);
+      if (name === 'student' && file === 'index.html') {
+        const out = await runSite(b, { 'index.html': blk.code });
+        if (!quiet) { console.log(`\n--- ${name} #${i}: ${first}`); for (const l of out) console.log(`    > ${l}`); }
+        check(same(out, htmlCommented(blk.code)), `${name} #${i}: the page prints what its comments say ${JSON.stringify(out)}`);
+        continue;
+      }
       if (file) {
         site[file] = blk.code;
         unused.add(file);
+        if (name === 'student') order.push(blk.code);
         if (!blk.box) { if (!quiet) console.log(`\n--- ${name} #${i}: file ${file} of section ${section}`); continue; }
       }
       const files = file ? { ...site } : { 'index.html': `<script>${LF}${blk.code}${LF}</script>` };
@@ -184,11 +210,21 @@ const callersOf = (spec, op) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
-    closeSection();
+    await closeSection();
   }
+
+  // the notes: the homework, in Chrome
+  await extra(scripts('globalThis.x = 1; var y = 2;', 'let x = 10; let y = 20;', 'console.log(x, y);'), ["Uncaught SyntaxError: Identifier 'y' has already been declared", '1 2'],
+    'student homework 1: let y meets a non-configurable var (step 1), so let x is not made either; the third script reads the property x and var y');
+  await extra({ 'a.js': 'import "./b.js";\nimport "./c.js";\nconsole.log("a.js");', 'b.js': 'import "./c.js";\nconsole.log("b.js");', 'c.js': 'import "./a.js";\nconsole.log("c.js");', 'main.js': 'import "./a.js";\nconsole.log("main.js");' },
+    ['c.js', 'b.js', 'a.js', 'main.js'], 'student homework 2: main → a → b → c → a (evaluating): c, b, a, main');
+  await extra(scripts(`var v = "глобальная";
+function f() { var v = "местная"; return [eval("v"), (eval)("v"), window.eval("v"), [eval][0]("v"), eval?.("v")].join(); }
+console.log(f());`), ['местная,местная,глобальная,глобальная,глобальная'], 'student homework 3 and the table: only eval(…) and (eval)(…) are direct');
 
   // what the lecture only tells about: scripts and the global record
   await extra(scripts(`${ATTEMPT}console.log(attempt(() => Object.preventExtensions(globalThis)));`, 'console.log("один"); null.x; console.log("не дойдём");', 'console.log("два");'),
@@ -383,6 +419,9 @@ console.log(test());`), ['локальная | глобальная | локал
     && hasAll(mdn('reference/statements/import/source'), ['`source` is not a reserved word', 'the source code is parsed and compiled but remains unlinked and unevaluated'])
     && mdn('reference/global_objects/abstractmodulesource').includes('### AbstractModuleSource objects\n\n- [`WebAssembly.Module`]'),
   'lecture 10: MDN — defer: linked, not evaluated; source: compiled, not evaluated; neither word is reserved; AbstractModuleSource — only WebAssembly.Module');
+  check(hasAll(mdn('reference/statements/import/defer').replace(/\s+/g, ' '), ['only the "namespace import" syntax is supported', 'because the execution is triggered by property access on the namespace object',
+    'Reading a namespace property is synchronous, so it cannot wait for asynchronous module evaluation', 'are evaluated eagerly']),
+  'student homework 4: MDN import defer — only a namespace import, as evaluation starts on a property access; a property read is synchronous, so modules with top-level await run eagerly');
 
   // the days and the modules of «Карточки» it points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

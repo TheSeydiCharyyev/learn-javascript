@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 13 — Скрипты и модули изнутри, eval</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #0ea5e9; }
+        h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+        h3 { color: #075985; }
+        .step-number { background: #0ea5e9; }
+        .toc a { color: #0369a1; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 13</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 13 &bull; урок 1</span>
+        <h1>Скрипты и модули изнутри, eval</h1>
+        <p>Курс 3, Advanced. Модуль «Выполнение кода» — последний день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>проходить ScriptEvaluation и GlobalDeclarationInstantiation и объяснять ошибки между скриптами;</li>
+            <li>читать связывание и выполнение графа модулей: InitializeEnvironment, ResolveExport, InnerModuleEvaluation;</li>
+            <li>отличать прямой <code>eval</code> от косвенного и предсказывать, куда попадут его имена;</li>
+            <li>заменять <code>eval</code> подходящим средством.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#chapter">Глава 16: скрипт и модуль</a></li>
+            <li><a href="#parse">Разбор скрипта и ранние ошибки</a></li>
+            <li><a href="#scripteval">ScriptEvaluation</a></li>
+            <li><a href="#gdi">GlobalDeclarationInstantiation по шагам</a></li>
+            <li><a href="#pages">Практика: скрипты страницы и одна глобальная запись</a></li>
+            <li><a href="#records">Записи модулей</a></li>
+            <li><a href="#link">Связывание: InitializeEnvironment</a></li>
+            <li><a href="#resolve">ResolveExport и export *</a></li>
+            <li><a href="#evaluate">Выполнение: InnerModuleEvaluation</a></li>
+            <li><a href="#entries">Импорты и экспорты как записи</a></li>
+            <li><a href="#direct">eval: прямой и косвенный</a></li>
+            <li><a href="#performeval">PerformEval по шагам</a></li>
+            <li><a href="#evalvar">Практика: var из eval</a></li>
+            <li><a href="#evaldecl">EvalDeclarationInstantiation</a></li>
+            <li><a href="#host">Хозяин может запретить</a></li>
+            <li><a href="#instead">Практика: чем заменить eval</a></li>
+            <li><a href="#cards">«Карточки 2.0»: порядок модулей</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="chapter">1. Глава 16: скрипт и модуль</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-scripts-and-modules">Глава 16</a> — два вида
+    исходного текста. Чем разобрать текст, решает хозяин: целью Script (тег <code>&lt;script&gt;</code>, строка
+    <code>eval</code>) или Module (<code>type="module"</code>, <code>import()</code>). Дальше пути расходятся:</p>
+
+    <table>
+        <thead><tr><th>Что</th><th>Скрипт (16.1)</th><th>Модуль (16.2)</th></tr></thead>
+        <tbody>
+            <tr><td>запись</td><td>Script Record</td><td>Source Text Module Record</td></tr>
+            <tr><td>строгий режим</td><td>только с директивой (ScriptIsStrict)</td><td>всегда</td></tr>
+            <tr><td>имена верхнего уровня</td><td>в глобальную запись — GlobalDeclarationInstantiation</td><td>в свою запись модуля — InitializeEnvironment</td></tr>
+            <tr><td>когда создаются</td><td>перед своим выполнением</td><td>при связывании всего графа</td></tr>
+            <tr><td>выполнение</td><td>ScriptEvaluation, сразу</td><td>Evaluate: сначала зависимости</td></tr>
+            <tr><td><code>this</code> наверху</td><td>глобальный объект</td><td><code>undefined</code> — GetThisBinding записи модуля</td></tr>
+            <tr><td><code>await</code> наверху</td><td>SyntaxError</td><td>можно: модуль станет асинхронным</td></tr>
+        </tbody>
+    </table>
+
+    <p>Как это выглядит снаружи, мы видели на дне 30 курса 2. Сегодня — шаги алгоритмов, которые к этому приводят.
+    Последняя часть дня — <code>eval</code>: строка, которую код сам отдаёт разбору как скрипт.</p>
+
+    <h2 id="parse">2. Разбор скрипта и ранние ошибки</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-scripts">16.1</a>: скрипт — список инструкций, где
+    <code>return</code> запрещён, а <code>yield</code> и <code>await</code> — не операторы.
+    <a href="https://tc39.es/ecma262/2026/#sec-parse-script">ParseScript</a> (16.1.5) разбирает текст. Ошибки —
+    вернуть их список, и скрипт не выполнится ни на строку. Нет ошибок — вернуть
+    <a href="https://tc39.es/ecma262/2026/#sec-script-records">Script Record</a> (16.1.4, таблица 34): реалм (день 9),
+    дерево разбора, загруженные модули (для <code>import()</code> из скрипта) и поле хозяина.</p>
+
+    <p>Ранние ошибки <a href="https://tc39.es/ecma262/2026/#sec-scripts-static-semantics-early-errors">16.1.1</a>: повтор
+    лексического имени, лексическое имя совпало с именем <code>var</code>, <code>super</code> и <code>new.target</code>
+    вне прямого <code>eval</code>, повтор меток, <code>break</code> и <code>continue</code> без цели,
+    <code>#имя</code> вне класса.
+    <a href="https://tc39.es/ecma262/2026/#sec-scriptisstrict">ScriptIsStrict</a> (16.1.2) ищет
+    <code>"use strict"</code> в начале (день 3 курса 2).</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script&gt;console.log("один"); let a = 1;&lt;/script&gt;
+&lt;script&gt;console.log("два"); let b = 1; let b = 2;&lt;/script&gt;
+&lt;script&gt;console.log("три", typeof b, a);&lt;/script&gt;</pre>
+
+    <div class="result-box">
+        один<br>
+        Uncaught SyntaxError: Identifier 'b' has already been declared<br>
+        три undefined 1
+    </div>
+
+    <p>«Два» не напечатано: ошибка найдена до первой строки. Примечание к 16.1.5 разрешает искать ошибки и раньше,
+    но сообщать — только когда до этого скрипта дошла очередь. Ошибка при выполнении — другое: скрипт встаёт на ней,
+    а строки до неё уже выполнены. Соседние скрипты от этого не зависят.</p>
+
+    <h2 id="scripteval">3. ScriptEvaluation</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-scriptevaluation">ScriptEvaluation</a> (16.1.6)
+    выполняет Script Record:</p>
+
+    <ol>
+        <li>новый контекст выполнения (день 9): Function — null, Realm и ScriptOrModule — из записи, оба окружения —
+            глобальная запись реалма;</li>
+        <li>контекст — на вершину стека;</li>
+        <li>GlobalDeclarationInstantiation (16.1.7) создаёт имена скрипта; бросила — текст не выполняется;</li>
+        <li>Evaluation текста; пустое значение завершения становится <code>undefined</code> (у пустого скрипта — сразу,
+            <a href="https://tc39.es/ecma262/2026/#sec-script-semantics-runtime-semantics-evaluation">16.1.3</a>);</li>
+        <li>контекст снимается, результат уходит хозяину.</li>
+    </ol>
+
+    <p>ScriptOrModule нужен <code>import()</code>: <a href="https://tc39.es/ecma262/2026/#sec-HostLoadImportedModule">HostLoadImportedModule</a>
+    (16.2.1.10) получает, кто просит модуль, — Script Record, запись модуля или, по примечанию 1, просто реалм,
+    если <code>import()</code> стоит в атрибуте <code>onclick</code>. По нему хозяин решает, откуда грузить.</p>
+
+    <p>Значение завершения скрипта браузер выбрасывает, консоль DevTools печатает (день 4). <code>eval</code> отдаёт
+    его как результат:</p>
+
+    <pre class="code js">let ready = true;
+console.log(eval("2 + 2"), eval("var y = 2; y * 10"), eval("let s = 1"), eval("if (ready) { 'да' } else { 'нет' }"), eval("{}"), eval("({})"));</pre>
+
+    <div class="result-box">
+        4 20 undefined да undefined {}
+    </div>
+
+    <p>У объявлений значение пустое — отсюда <code>undefined</code>. <code>{}</code> — пустой блок (день 11),
+    <code>({})</code> — объект.</p>
+
+    <h2 id="gdi">4. GlobalDeclarationInstantiation по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-globaldeclarationinstantiation">16.1.7</a>. Глобальная запись —
+    две половины (день 3 курса 2): объектная — само окно (<code>var</code>, <code>function</code>, встроенные),
+    декларативная — <code>let</code>, <code>const</code>, <code>class</code>. Операция берёт LexicallyDeclaredNames и
+    VarDeclaredNames скрипта (день 8):</p>
+
+    <ol>
+        <li>каждое лексическое имя: уже есть лексическое (HasLexicalDeclaration) — SyntaxError; есть неудаляемое
+            свойство окна (HasRestrictedGlobalProperty) — тоже SyntaxError;</li>
+        <li>каждое имя <code>var</code> и функции: есть лексическое — SyntaxError;</li>
+        <li>функции — с конца списка, из одноимённых побеждает последняя; CanDeclareGlobalFunction ложно — TypeError;</li>
+        <li>имена <code>var</code>: CanDeclareGlobalVar ложно — TypeError. Так бывает только у нерасширяемого глобального
+            объекта, а окно таким не сделать: <code>Object.preventExtensions(globalThis)</code> — TypeError;</li>
+        <li>создание: лексические — без значения, функции — сразу объектами, <code>var</code> — со значением
+            <code>undefined</code>.</li>
+    </ol>
+
+    <p>Шаги 1–4 только проверяют. Примечание 2: если проверка нашла конфликт, скрипт не получает ни одного имени.
+    Проверки нужны при выполнении: ранние ошибки 16.1.1 видят один скрипт, а глобальная запись у страницы общая.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 236" role="img" aria-label="GlobalDeclarationInstantiation: сначала проверки — let, const, class без лексического и неудаляемого свойства, var и function без лексического, функцию и var можно объявить; потом создание: лексические без значения, функции объектами, var со значением undefined. Лексические имена идут в декларативную половину глобальной записи, var и function — в объектную, то есть в окно">
+            <defs>
+                <marker id="d13-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+                </marker>
+            </defs>
+            <rect x="10" y="10" width="290" height="112" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="22" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9a3412">проверки — ничего не создано</text>
+            <text x="22" y="52" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">1. let, const, class: нет лексического</text>
+            <text x="22" y="68" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">и неудаляемого свойства окна</text>
+            <text x="22" y="86" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">2. var и function: нет лексического</text>
+            <text x="22" y="104" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">3–4. функцию и var можно объявить</text>
+
+            <path d="M 155 124 L 155 141" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+
+            <rect x="10" y="144" width="290" height="58" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="22" y="164" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#065f46">5. создание</text>
+            <text x="22" y="180" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">let, const, class — без значения;</text>
+            <text x="22" y="195" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">функции — объектами, var — undefined</text>
+
+            <rect x="330" y="10" width="300" height="192" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="342" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">глобальная запись страницы</text>
+            <rect x="345" y="44" width="270" height="66" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="357" y="64" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#075985">объектная половина = окно</text>
+            <text x="357" y="82" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">var, function; NaN, undefined, top</text>
+            <text x="357" y="98" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">и свойства вида globalThis.x = 1</text>
+            <rect x="345" y="124" width="270" height="66" rx="8" fill="#fefce8" stroke="#eab308" stroke-width="2"/>
+            <text x="357" y="144" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#854d0e">декларативная половина</text>
+            <text x="357" y="162" font-family="Segoe UI, sans-serif" font-size="11" fill="#854d0e">let, const, class</text>
+            <text x="357" y="178" font-family="Segoe UI, sans-serif" font-size="11" fill="#854d0e">всех скриптов страницы</text>
+
+            <path d="M 302 160 L 341 160" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 302 152 L 318 152 L 318 77 L 341 77" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+
+            <text x="10" y="226" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Конфликт на шагах 1–4 — SyntaxError или TypeError; по тексту скрипт не получает ни одного имени.</text>
+        </svg>
+        <figcaption>GlobalDeclarationInstantiation: сначала все проверки, потом все имена</figcaption>
+    </figure>
+
+    <p>Между шагами 4 и 5 — вставка Normative Optional приложения B (B.3.2, день 31): функция в блоке нестрогого
+    скрипта получает ещё и имя <code>var</code> со значением <code>undefined</code>, а сам объект — когда выполнение
+    дойдёт до блока. У строгого скрипта вставки нет:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script&gt;console.log("inBlock" in window, typeof inBlock); { function inBlock() {} } console.log(typeof inBlock);&lt;/script&gt;
+&lt;script&gt;"use strict"; { function strictBlock() {} } console.log("strictBlock" in window);&lt;/script&gt;</pre>
+
+    <div class="result-box">
+        true undefined<br>
+        function<br>
+        false
+    </div>
+
+    <h2 id="pages">5. Практика: скрипты страницы и одна глобальная запись</h2>
+
+    <p>Практика плана — день 3 курса 2 по шагам 16.1.7. Шесть скриптов одной страницы:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script&gt;let count = 1; var total = 10; globalThis.label = "свойство";&lt;/script&gt;
+&lt;script&gt;let total = 20;&lt;/script&gt;
+&lt;script&gt;console.log("третий"); var count = 2;&lt;/script&gt;
+&lt;script&gt;let label = "let"; console.log(label, globalThis.label);&lt;/script&gt;
+&lt;script&gt;let undefined = 1;&lt;/script&gt;
+&lt;script&gt;console.log(count, total);&lt;/script&gt;</pre>
+
+    <div class="result-box">
+        Uncaught SyntaxError: Identifier 'total' has already been declared<br>
+        Uncaught SyntaxError: Identifier 'count' has already been declared<br>
+        let свойство<br>
+        Uncaught SyntaxError: Identifier 'undefined' has already been declared<br>
+        1 10
+    </div>
+
+    <p>Второй — шаг 1: <code>var total</code> дал неудаляемое свойство окна. Третий — шаг 2, «третий» не напечатан.
+    Четвёртый прошёл: <code>label</code> создан присваиванием, свойство удаляемое, и <code>let</code> его затеняет —
+    примечание 2 говорит об этом прямо. Пятый — шаг 1: <code>undefined</code> — неудаляемое свойство, как
+    <code>NaN</code> и <code>top</code>. А <code>let name</code> можно: у окна оно удаляемое.</p>
+
+    <h3 id="dead">Имя без значения навсегда</h3>
+
+    <p>Шаг 5 создаёт лексическое имя до выполнения, значение даёт только строка объявления. Если она бросит:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script&gt;let broken = JSON.parse("{");&lt;/script&gt;
+&lt;script&gt;
+  const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+  console.log(attempt(() =&gt; broken = 1));
+&lt;/script&gt;
+&lt;script&gt;let broken = 2;&lt;/script&gt;</pre>
+
+    <div class="result-box">
+        Uncaught SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)<br>
+        ReferenceError: Cannot access 'broken' before initialization<br>
+        Uncaught SyntaxError: Identifier 'broken' has already been declared
+    </div>
+
+    <p><code>broken</code> в мёртвой зоне до перезагрузки страницы: ни записать, ни объявить заново.</p>
+
+    <h3 id="chrome">Chrome против текста: имена до конфликта</h3>
+
+    <p>Примечание 2 обещает: конфликт — ни одного имени. Проверим, и заодно шаг 3 с неудаляемым <code>NaN</code>:</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;script&gt;let a = 1;&lt;/script&gt;
+&lt;script&gt;var before = 1; function made() {} var a = 2; var after = 3;&lt;/script&gt;
+&lt;script&gt;function NaN() {}&lt;/script&gt;
+&lt;script&gt;
+  console.log("before" in window, typeof made, "after" in window);
+  try { (0, eval)("function NaN() {}"); } catch (e) { console.log(`${e.name}: ${e.message}`); }
+&lt;/script&gt;</pre>
+
+    <div class="result-box">
+        Uncaught SyntaxError: Identifier 'a' has already been declared<br>
+        Uncaught SyntaxError: Identifier 'NaN' has already been declared<br>
+        true function false<br>
+        TypeError: Identifier 'NaN' has already been declared
+    </div>
+
+    <p>По тексту третья строка — <code>false undefined false</code>. Chrome 156 проверяет и создаёт имена
+    <code>var</code> и функций по порядку текста, и всё, что стояло до <code>a</code>, осталось: <code>before</code> со
+    значением <code>undefined</code>, <code>made</code> — готовая функция. Второе расхождение — тип ошибки: у
+    <code>NaN</code> свойство неудаляемое и незаписываемое, CanDeclareGlobalFunction ложно, по шагу 3 — TypeError.
+    Chrome в скрипте бросает SyntaxError, а в <code>eval</code> — TypeError, как в тексте.</p>
+
+    <h2 id="records">6. Записи модулей</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-modules">16.2</a> — модули: грамматика и
+    <a href="https://tc39.es/ecma262/2026/#sec-module-semantics">16.2.1</a> «семантика модулей», в которой почти всё.
+    Её ранние ошибки — как у скрипта плюс экспорты: повтор имени экспорта (отсюда запрет двух
+    <code>export default</code>), экспорт необъявленного имени; <code>super</code> и <code>new.target</code> наверху
+    запрещены всегда. Остальные конфликты ловит связывание. Модуль описан иерархией записей:</p>
+
+    <ul>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-abstract-module-records">Module Record</a> (16.2.1.5) — общая:
+            Realm, Environment (появляется при связывании), Namespace; методы LoadRequestedModules, GetExportedNames,
+            ResolveExport, Link, Evaluate;</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-cyclic-module-records">Cyclic Module Record</a> (16.2.1.6) —
+            модуль, который может стоять в цикле: Status (new → unlinked → linking → linked → evaluating →
+            evaluating-async → evaluated), EvaluationError, DFSAncestorIndex, RequestedModules в порядке текста,
+            CycleRoot, HasTLA;</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-source-text-module-records">Source Text Module Record</a>
+            (16.2.1.7) — модуль из текста: дерево разбора, контекст, ImportMeta и списки импортов и экспортов;</li>
+        <li><a href="https://tc39.es/ecma262/2026/#sec-synthetic-module-records">Synthetic Module Record</a> (16.2.1.8) —
+            модуль без текста и без импортов. ParseJSONModule (16.2.1.8.2) делает из JSON такой модуль с одним
+            экспортом <code>default</code> (день 31 курса 2).</li>
+    </ul>
+
+    <p>Загрузка — у хозяина: <a href="https://tc39.es/ecma262/2026/#sec-HostLoadImportedModule">HostLoadImportedModule</a>
+    (16.2.1.10) и <a href="https://tc39.es/ecma262/2026/#sec-FinishLoadingImportedModule">FinishLoadingImportedModule</a>
+    (16.2.1.11). Найти загруженное — <a href="https://tc39.es/ecma262/2026/#sec-GetImportedModule">GetImportedModule</a>
+    (16.2.1.9). Синтетический модуль виден по объекту модуля — в нём один ключ:</p>
+
+    <pre class="code js" data-file="words.json">["kitap", "suw"]</pre>
+
+    <pre class="code js">// main.js
+import words from "./words.json" with { type: "json" };
+import * as ns from "./words.json" with { type: "json" };
+console.log(words, Object.keys(ns), ns.default === words);</pre>
+
+    <div class="result-box">
+        (2) ['kitap', 'suw'] (1) ['default'] true
+    </div>
+
+    <p>Именованный импорт из JSON — <code>import { length } from "./words.json"</code> — ошибка связывания: ResolveExport
+    синтетической записи знает только свои [[ExportNames]]. Дальше — два метода циклических записей: Link и
+    Evaluate.</p>
+
+    <h2 id="link">7. Связывание: InitializeEnvironment</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-moduledeclarationlinking">Link</a> (16.2.1.6.1.2) зовёт
+    <a href="https://tc39.es/ecma262/2026/#sec-innermoduleinstantiation">InnerModuleLinking</a> — обход в глубину:
+    модуль получает linking и номер, связываются его запросы по порядку, затем его InitializeEnvironment. Модули
+    одного цикла переходят в linked вместе. Ошибка — все модули стека снова unlinked, и ничего не выполнено: даже
+    зависимость, которая связалась без ошибок, не напечатает ни строки (день 30 курса 2).</p>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-source-text-module-record-initialize-environment">InitializeEnvironment</a>
+    (16.2.1.7.3.1):</p>
+
+    <ol>
+        <li>каждый пересылаемый экспорт (<code>export { x } from</code>) — ResolveExport; нет ответа — SyntaxError;</li>
+        <li>новая <a href="https://tc39.es/ecma262/2026/#sec-module-environment-records">запись модуля</a> поверх
+            глобальной;</li>
+        <li>импорты: <code>import * as</code> — объект модуля, именованный — ResolveExport и
+            <a href="https://tc39.es/ecma262/2026/#sec-createimportbinding">CreateImportBinding</a> (косвенная привязка,
+            день 30 курса 2);</li>
+        <li><code>var</code> — сразу <code>undefined</code>, функции — сразу объектами, <code>let</code>,
+            <code>const</code>, <code>class</code> — без значения.</li>
+    </ol>
+
+    <p>Всё это — до первой строки любого модуля графа. Цикл показывает шаг 4:</p>
+
+    <pre class="code js">// first.js
+import "./second.js";
+export var count = 1;
+export function hello() { return "привет"; }
+export const MAX = 3;
+console.log("first.js:", count, MAX);</pre>
+
+    <pre class="code js">// second.js
+import { count, hello, MAX } from "./first.js";
+const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log("second.js:", count, hello(), attempt(() =&gt; MAX));</pre>
+
+    <pre class="code js">// main.js
+import "./first.js";</pre>
+
+    <div class="result-box">
+        second.js: undefined привет ReferenceError: Cannot access 'MAX' before initialization<br>
+        first.js: 1 3
+    </div>
+
+    <p><code>first.js</code> сначала выполняет зависимость, а та читает его привязки: <code>var</code> уже есть со
+    значением <code>undefined</code>, функция работает, <code>const</code> в мёртвой зоне. С экспортом по умолчанию так
+    же: <code>export default function () {}</code> — объявление (местное имя <code>*default*</code>) и готово при
+    связывании, а <code>export default () =&gt; {}</code> получит значение, когда выполнение дойдёт до строки.</p>
+
+    <h2 id="resolve">8. ResolveExport и export *</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-resolveexport">ResolveExport</a> (16.2.1.7.2.2) ищет модуль и
+    привязку за именем экспорта:</p>
+
+    <ol>
+        <li>пара «модуль, имя» уже встречалась — круг, null;</li>
+        <li>свой экспорт с этим именем — найдено;</li>
+        <li>пересылаемый — спросить тот модуль (у <code>export * as ns</code> ответ — его объект модуля);</li>
+        <li>имя <code>"default"</code> дальше не ищется: <code>export *</code> его не пересылает;</li>
+        <li>спросить каждый <code>export *</code>: два ответа с разными привязками — ambiguous.</li>
+    </ol>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-getexportednames">GetExportedNames</a> (16.2.1.7.2.1) собирает имена
+    так же, без <code>"default"</code>, неоднозначных не отсеивает. Отсеивает
+    <a href="https://tc39.es/ecma262/2026/#sec-getmodulenamespace">GetModuleNamespace</a> (16.2.1.13): в объект модуля
+    попадают только имена с ответом.</p>
+
+    <pre class="code js">// ru.js
+export const hello = "привет";
+export const yes = "да";
+export default "ru";</pre>
+
+    <pre class="code js">// tk.js
+export const hello = "salam";
+export const bye = "hoş gal";</pre>
+
+    <pre class="code js">// all.js
+export * from "./ru.js";
+export * from "./tk.js";
+export * as ru from "./ru.js";</pre>
+
+    <pre class="code js">// main.js
+import * as all from "./all.js";
+console.log(Object.keys(all), "default" in all, "hello" in all, all.ru.default);</pre>
+
+    <div class="result-box">
+        (3) ['bye', 'ru', 'yes'] false false ru
+    </div>
+
+    <p><code>hello</code> выпал, <code>default</code> не пришёл. А <code>export * as ru</code> — шаг 3: ответ —
+    объект модуля <code>ru.js</code>, и в нём <code>default</code> есть.</p>
+
+    <p>Попросить <code>hello</code> по имени — уже ошибка связывания (шаг 3 InitializeEnvironment):</p>
+
+    <pre class="code js">// main.js
+import { hello } from "./all.js";
+console.log(hello);</pre>
+
+    <div class="result-box">
+        Uncaught SyntaxError: The requested module './all.js' contains conflicting star exports for name 'hello'
+    </div>
+
+    <p>Неоднозначны только разные привязки: если <code>ru.js</code> и <code>tk.js</code> оба пересылают
+    <code>export *</code> из одного <code>base.js</code>, ответ один. А свой экспорт <code>all.js</code> сильнее
+    звёздочки: шаг 2 раньше шага 5.</p>
+
+    <h2 id="evaluate">9. Выполнение: InnerModuleEvaluation</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-moduleevaluation">Evaluate</a> (16.2.1.6.1.3) возвращает промис,
+    работу делает <a href="https://tc39.es/ecma262/2026/#sec-innermoduleevaluation">InnerModuleEvaluation</a> — тот же
+    обход:</p>
+
+    <ol>
+        <li>модуль уже evaluated или evaluating-async — вернуть запомненную ошибку или ничего; evaluating (он на стеке,
+            это цикл) — вернуться;</li>
+        <li>иначе — evaluating, номер, на стек; выполнить каждый запрос по порядку текста;</li>
+        <li>есть асинхронные зависимости или свой <code>await</code> — получить номер AsyncEvaluationOrder и ждать
+            зависимостей или выполниться асинхронно (ExecuteAsyncModule); иначе ExecuteModule: тело в контексте
+            модуля;</li>
+        <li>модуль — корень своего цикла: модули цикла снимаются со стека, получают evaluated (или evaluating-async) и
+            общий CycleRoot.</li>
+    </ol>
+
+    <p>Ошибку Evaluate записывает в EvaluationError всем модулям стека. Новый запрос того же модуля получит её же, а тело
+    второй раз не выполнится:</p>
+
+    <pre class="code js">// a.js
+import "./b.js";
+console.log("a.js");</pre>
+
+    <pre class="code js">// b.js
+import "./a.js";
+console.log("b.js");</pre>
+
+    <pre class="code js">// bad.js
+console.log("bad.js выполняется");
+throw new Error("сбой в bad.js");</pre>
+
+    <pre class="code js">// main.js
+import "./a.js";
+const one = await import("./bad.js").catch((e) =&gt; e);
+const two = await import("./bad.js").catch((e) =&gt; e);
+console.log("main.js:", one === two, one.message);</pre>
+
+    <div class="result-box">
+        b.js<br>
+        a.js<br>
+        bad.js выполняется<br>
+        main.js: true сбой в bad.js
+    </div>
+
+    <p>main → a → b → снова a: он evaluating, обход возвращается, и <code>b.js</code> выполняется первым — в цикле
+    первым выполняется самый глубокий модуль. Ошибка зависимости при статическом импорте останавливает обход: модули
+    после неё в порядке запросов не выполнятся.</p>
+
+    <p>Шаг 3 — <code>await</code> верхнего уровня. Модуль с HasTLA выполняется асинхронно, его импортёр считает
+    его в PendingAsyncDependencies и записывается к нему в AsyncParentModules. Соседний синхронный модуль ждать
+    не будет:</p>
+
+    <pre class="code js">// slow.js
+await new Promise((resolve) =&gt; setTimeout(resolve, 300));
+console.log("slow.js");</pre>
+
+    <pre class="code js">// quick.js
+console.log("quick.js");</pre>
+
+    <pre class="code js">// main.js
+import "./slow.js";
+import "./quick.js";
+console.log("main.js");</pre>
+
+    <div class="result-box">
+        quick.js<br>
+        slow.js<br>
+        main.js
+    </div>
+
+    <p>У <code>main.js</code> счётчик — 1. Когда <code>slow.js</code> закончит, AsyncModuleExecutionFulfilled
+    (16.2.1.6.1.3.4) через GatherAvailableAncestors уменьшит его до нуля, и <code>main.js</code> выполнится. Готовые одновременно родители
+    выполняются по своим номерам AsyncEvaluationOrder — в порядке обхода, а не по времени.</p>
+
+    <h2 id="entries">10. Импорты и экспорты как записи</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-imports">16.2.2</a> и
+    <a href="https://tc39.es/ecma262/2026/#sec-exports">16.2.3</a> — грамматика <code>import</code> и
+    <code>export</code> и операции, которые раскладывают их в записи. ImportEntry — запрос, имя у источника, местное
+    имя (таблица 54); ExportEntry — ещё и имя экспорта (таблица 56):</p>
+
+    <table>
+        <thead><tr><th>Форма</th><th>Запись</th></tr></thead>
+        <tbody>
+            <tr><td><code>import v from "mod"</code></td><td>ImportName <code>"default"</code>, LocalName <code>"v"</code></td></tr>
+            <tr><td><code>import { x as v } from "mod"</code></td><td>ImportName <code>"x"</code>, LocalName <code>"v"</code></td></tr>
+            <tr><td><code>import * as ns from "mod"</code></td><td>ImportName namespace-object</td></tr>
+            <tr><td><code>import "mod"</code></td><td>записи нет, только запрос</td></tr>
+            <tr><td><code>export { v as x }</code></td><td>ExportName <code>"x"</code>, LocalName <code>"v"</code> — свой экспорт</td></tr>
+            <tr><td><code>export { x } from "mod"</code></td><td>ImportName <code>"x"</code>, LocalName null — пересылаемый</td></tr>
+            <tr><td><code>export default 42</code></td><td>ExportName <code>"default"</code>, LocalName <code>"*default*"</code></td></tr>
+            <tr><td><code>export * from "mod"</code></td><td>ImportName all-but-default</td></tr>
+            <tr><td><code>export * as ns from "mod"</code></td><td>ImportName all</td></tr>
+        </tbody>
+    </table>
+
+    <p>Имя <code>"default"</code> получают все три анонимные формы, каждая своим путём: <code>export default function
+    () {}</code> — при создании (15.2.4), <code>export default class {}</code> — в BindingClassDeclarationEvaluation
+    (15.7.15), <code>export default () =&gt; {}</code> — через NamedEvaluation (день 8) в Evaluation экспорта
+    (16.2.3.7).</p>
+
+    <p>MDN описывает ещё две формы, обе экспериментальные. <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/defer">import defer</a>
+    и <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/defer">import.defer()</a>:
+    модуль загружается и связывается, а выполняется при первом обращении к объекту.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/source">import source</a>
+    и <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/source">import.source()</a>:
+    скомпилированный модуль без выполнения; его класс-предок —
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AbstractModuleSource">AbstractModuleSource</a>,
+    пока только у <code>WebAssembly.Module</code>. В тексте 2026 их нет, в Chrome 156 тоже: <code>import defer * as ns
+    from "./x.js"</code> — SyntaxError: Unexpected token '*'. А слова не зарезервированы:
+    <code>import defer from "./x.js"</code> — обычный импорт по умолчанию.</p>
+
+    <h2 id="direct">11. eval: прямой и косвенный</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval">MDN</a>: прямой
+    вызов — <code>eval(...)</code> по имени, всё остальное — косвенный: через переменную, свойство, запятую,
+    <code>?.</code>. Правило — <a href="https://tc39.es/ecma262/2026/#sec-function-calls-runtime-semantics-evaluation">13.3.6.1</a>:
+    ссылка не на свойство, имя <code>"eval"</code>, значение — сама %eval%. Тогда это прямой eval:
+    PerformEval(строка, строгий ли вызов, true). Иначе — обычный вызов функции
+    <a href="https://tc39.es/ecma262/2026/#sec-eval-x">19.2.1</a>: PerformEval(x, false, false).</p>
+
+    <pre class="code js">var where = "глобальная";
+const myEval = eval;
+function test() {
+  var where = "локальная";
+  const src = "where";
+  console.log(eval(src), (eval)(src), (0, eval)(src), globalThis.eval(src), eval?.(src), myEval(src));
+}
+test();</pre>
+
+    <div class="result-box">
+        локальная локальная глобальная глобальная глобальная глобальная
+    </div>
+
+    <p><code>(eval)(src)</code> — тоже прямой: скобки не теряют ссылку (13.2.9, день 10), а запятая отдаёт уже значение.
+    <code>eval?.()</code> идёт через ChainEvaluation (13.3.9.2) прямо в EvaluateCall, проверки на <code>eval</code> там
+    нет. Тегированный шаблон (13.3.11.1) — тоже EvaluateCall, и строки ему не достаётся:</p>
+
+    <pre class="code js">const parts = eval`2 + 2`;
+console.log(Array.isArray(parts), parts[0], Object.isFrozen(parts));</pre>
+
+    <div class="result-box">
+        true 2 + 2 true
+    </div>
+
+    <p>Вызов косвенный, а аргумент — замороженный массив строк шаблона (GetTemplateObject, день 9), не строка: eval вернул его как есть.
+    MDN сравнивает косвенный eval с отдельным тегом <code>&lt;script&gt;</code> — почти так, разница в разделе 13.</p>
+
+    <h2 id="performeval">12. PerformEval по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-performeval">PerformEval</a> (19.2.1.1):</p>
+
+    <ol>
+        <li><code>x</code> не строка — вернуть как есть: <code>eval(42)</code> — 42, <code>eval(new String("2 + 2"))</code>
+            — сам объект;</li>
+        <li>HostEnsureCanCompileStrings — спросить хозяина (раздел 15);</li>
+        <li>у прямого — найти окружение <code>this</code> (GetThisEnvironment, день 9): функция ли это, метод,
+            производный конструктор, инициализатор поля;</li>
+        <li>разобрать как Script; ошибка — SyntaxError. Ещё SyntaxError: <code>new.target</code> не в функции,
+            <code>super.x</code> не в методе, <code>super()</code> не в производном конструкторе, <code>arguments</code> в
+            поле;</li>
+        <li>строгий ли eval: прямой из строгого кода — всегда, иначе — по своей директиве;</li>
+        <li>окружения (схема): прямой — новое лексическое поверх LexicalEnvironment вызывающего, <code>var</code> — в его
+            VariableEnvironment; косвенный — новое поверх глобальной записи, <code>var</code> — в неё; строгий —
+            <code>var</code> в то же новое;</li>
+        <li>новый контекст, EvalDeclarationInstantiation, Evaluation; пустое значение — <code>undefined</code>.</li>
+    </ol>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 196" role="img" aria-label="Окружения eval. Прямой нестрогий: новое лексическое окружение для let, const, class, над ним окружения вызывающего, var идёт в его VariableEnvironment. Прямой строгий: новое окружение для let, const, class и var, окружения вызывающего видны, но var туда не идёт. Косвенный нестрогий: новое окружение для let, const, class, над ним глобальная запись, var становится удаляемым свойством окна. Строгий косвенный: var в новом окружении, над ним глобальная запись">
+            <text x="20" y="24" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">прямой, нестрогий</text>
+            <rect x="10" y="36" width="196" height="54" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="22" y="56" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#065f46">новое лексическое</text>
+            <text x="22" y="74" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">let, const, class</text>
+            <rect x="10" y="116" width="196" height="54" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="22" y="136" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#075985">окружения вызывающего</text>
+            <text x="22" y="154" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">var — в VariableEnvironment</text>
+            <path d="M 108 92 L 108 113" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+
+            <text x="232" y="24" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">прямой, строгий</text>
+            <rect x="222" y="36" width="196" height="54" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="234" y="56" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#065f46">новое лексическое</text>
+            <text x="234" y="74" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">let, const, class и var</text>
+            <rect x="222" y="116" width="196" height="54" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="234" y="136" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#075985">окружения вызывающего</text>
+            <text x="234" y="154" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">видны, но var туда не идёт</text>
+            <path d="M 320 92 L 320 113" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+
+            <text x="444" y="24" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">косвенный, нестрогий</text>
+            <rect x="434" y="36" width="196" height="54" rx="8" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+            <text x="446" y="56" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#065f46">новое лексическое</text>
+            <text x="446" y="74" font-family="Segoe UI, sans-serif" font-size="11" fill="#065f46">let, const, class</text>
+            <rect x="434" y="116" width="196" height="54" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+            <text x="446" y="136" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#9a3412">глобальная запись</text>
+            <text x="446" y="154" font-family="Segoe UI, sans-serif" font-size="11" fill="#9a3412">var — удаляемое свойство окна</text>
+            <path d="M 532 92 L 532 113" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+
+            <text x="10" y="188" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Стрелка — [[OuterEnv]] (19.2.1.1). Строгий косвенный: var в новом, над ним глобальная запись.</text>
+        </svg>
+        <figcaption>Куда eval кладёт свои имена</figcaption>
+    </figure>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function Ctor() { this.seen = eval("new.target === Ctor"); }
+const box = { show() { return eval("super.toString === Object.prototype.toString"); } };
+class Item { label = attempt(() =&gt; eval("arguments")); }
+console.log(new Ctor().seen, box.show(), attempt(() =&gt; eval("new.target")));
+console.log(new Item().label);</pre>
+
+    <div class="result-box">
+        true true SyntaxError: new.target expression is not allowed here<br>
+        SyntaxError: 'arguments' is not allowed in class field initializer or static initialization block
+    </div>
+
+    <p>Шаг 4 — те же запреты, что днём 8 были ранними ошибками (Contains: <code>super</code> и
+    <code>new.target</code>), только проверяются при вызове: текст строки до вызова неизвестен.</p>
+
+    <p>Шаги 5 и 6: прямой eval наследует строгость и <code>this</code> вызывающего, косвенный — нет (MDN показывает
+    это на <code>with</code> — день 31):</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function strictCaller() {
+  "use strict";
+  return `${attempt(() =&gt; eval("delete Object.prototype"))} | ${attempt(() =&gt; (0, eval)("delete Object.prototype"))}`;
+}
+function whoIsThis() { return [eval("this") === globalThis, (0, eval)("this") === globalThis].join(); }
+console.log(strictCaller());
+console.log(whoIsThis.call({}));</pre>
+
+    <div class="result-box">
+        TypeError: Cannot delete property 'prototype' of function Object() { [native code] } | false<br>
+        false,true
+    </div>
+
+    <p>Удалить <code>Object.prototype</code> нельзя: свойство неудаляемое. Строгий код бросает, нестрогий тихо
+    отвечает <code>false</code> (день 3 курса 2). Косвенный eval работает в глобальном окружении, и его
+    <code>this</code> — окно.</p>
+
+    <h2 id="evalvar">13. Практика: var из eval</h2>
+
+    <p>Практика плана: <code>var</code> из <code>eval</code> в функции и в строгом режиме.</p>
+
+    <pre class="code js">function sloppy() { eval("var x = 1"); return typeof x; }
+function strict() { "use strict"; eval("var x = 1"); return typeof x; }
+function strictCode() { eval('"use strict"; var x = 1'); return typeof x; }
+function lexical() { eval("let x = 1"); return typeof x; }
+function indirect() { (0, eval)("var shared = 1"); return typeof shared; }
+console.log(sloppy(), strict(), strictCode(), lexical(), indirect());</pre>
+
+    <div class="result-box">
+        number undefined undefined undefined number
+    </div>
+
+    <p>Шаг 6: нестрогий прямой кладёт <code>var</code> в окружение функции; строгий — по вызову или по своей
+    директиве — в новое, которое исчезнет вместе с eval; <code>let</code> — всегда в новое (примечание к 19.2.1.1);
+    косвенный — в глобальную запись. И ещё одно отличие от отдельного скрипта:</p>
+
+    <pre class="code js">function f() { var own = 1; eval("var fromEval = 2"); return [delete fromEval, typeof fromEval, delete own].join(); }
+(0, eval)("var globalFromEval = 1; let globalLet = 1");
+var globalFromScript = 1;
+console.log(f(), delete globalFromEval, delete globalFromScript, typeof globalLet);</pre>
+
+    <div class="result-box">
+        true,undefined,false true false undefined
+    </div>
+
+    <p>EvalDeclarationInstantiation создаёт имена с флагом «удаляемое», GlobalDeclarationInstantiation и
+    FunctionDeclarationInstantiation — без него. А <code>let</code> из косвенного eval в глобальную запись не попадает
+    вовсе, хотя <code>let</code> отдельного скрипта виден всей странице.</p>
+
+    <p>В модуле прямой eval видит область модуля, а <code>var</code> не выпускает: код модуля строгий, и строгость
+    наследуется (шаг 5). Строку eval по-прежнему разбирает как Script — <code>import</code> в ней запрещён:</p>
+
+    <pre class="code js">// main.js
+const secret = "из модуля";
+const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(eval("secret"), eval("var leak = 1; leak"), typeof leak);
+console.log(attempt(() =&gt; eval('import x from "./x.js"')));</pre>
+
+    <div class="result-box">
+        из модуля 1 undefined<br>
+        SyntaxError: Cannot use import statement outside a module
+    </div>
+
+    <h2 id="evaldecl">14. EvalDeclarationInstantiation</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-evaldeclarationinstantiation">19.2.1.3</a> — родственница 16.1.7. У
+    нестрогого eval проверяет: имя <code>var</code> не совпадает с глобальным лексическим (если <code>var</code> идёт в
+    глобальную запись), и ни одно окружение между новым лексическим и окружением <code>var</code> этого имени не
+    держит — иначе <code>var</code> «перепрыгнул» бы <code>let</code>. Исключение приложения B — параметр
+    <code>catch</code>. Потом функции с конца и <code>var</code>, как у скрипта.</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function clash() { let n = 1; eval("var n = 2"); }
+function strictOk() { let n = 1; eval('"use strict"; var n = 2'); return n; }
+function caught() { try { throw 1; } catch (n) { eval("var n = 2"); return n; } }
+console.log(attempt(clash), "|", attempt(strictOk), "|", attempt(caught));</pre>
+
+    <div class="result-box">
+        SyntaxError: Identifier 'n' has already been declared | 1 | 2
+    </div>
+
+    <p>Отсюда шаг FunctionDeclarationInstantiation, обещанный днём 12. У нестрогой функции <code>let</code> и
+    <code>const</code> тела лежат в своём окружении — чтобы eval нашёл такой конфликт. А при коде в параметрах есть ещё
+    окружение — для eval в умолчаниях: <code>var</code> из него встаёт снаружи параметров, в окружение функции, и не
+    смешивается с <code>var</code> тела:</p>
+
+    <pre class="code js">const attempt = (f) =&gt; { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function f(a = eval("var z = 'из eval'"), b = () =&gt; z) { var z = "тело"; return `${b()} / ${z}`; }
+function g(a = eval("var a = 1")) {}
+console.log(f(), "|", attempt(g));</pre>
+
+    <div class="result-box">
+        из eval / тело | SyntaxError: Identifier 'a' has already been declared
+    </div>
+
+    <p>Стрелка <code>b</code> нашла <code>z</code> из eval: он в окружении функции, следующем за окружением параметров
+    (схема раздела 3 дня 12). У <code>g</code> <code>var a</code> из eval упёрся в параметр.</p>
+
+    <h2 id="host">15. Хозяин может запретить</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-hostensurecancompilestrings">HostEnsureCanCompileStrings</a> (19.2.1.2)
+    по умолчанию ничего не делает. Браузер через неё применяет Content Security Policy: если в
+    <code>script-src</code> нет <code>'unsafe-eval'</code>, <code>eval</code> и конструктор <code>Function</code>
+    (CreateDynamicFunction спрашивает ту же операцию) бросают EvalError. Тот самый, о котором
+    <a href="https://tc39.es/ecma262/2026/#sec-native-error-types-used-in-this-standard-evalerror">20.5.5.1</a> говорит:
+    в спецификации не используется. Бросает хозяин.</p>
+
+    <pre class="code html">&lt;!-- index.html --&gt;
+&lt;meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline'"&gt;
+&lt;script&gt;
+  for (const run of [() =&gt; eval("1 + 1"), () =&gt; new Function("return 2")(), () =&gt; JSON.parse("3")]) {
+    try { console.log(run()); } catch (e) { console.log(e.name, e.message.includes("'unsafe-eval'")); }
+  }
+&lt;/script&gt;</pre>
+
+    <div class="result-box">
+        EvalError true<br>
+        EvalError true<br>
+        3
+    </div>
+
+    <p><code>JSON.parse</code> строку не выполняет — ему разрешено. Строка вместо функции в <code>setTimeout</code> —
+    тоже код из строки: на такой странице Chrome её не выполнит и напишет в консоль «The action has been blocked».</p>
+
+    <h3 id="trusted">Chrome против текста: TrustedScript</h3>
+
+    <p>MDN советует передавать в <code>eval</code> не строку, а объект TrustedScript (Trusted Types — курс 4). По
+    шагу 1 PerformEval 2026 года объект вернётся как есть. Chrome 156 его выполняет: <code>eval</code> от
+    TrustedScript с текстом <code>"1 + 1"</code> — 2. В тексте ECMA-262 2026 такого правила нет.</p>
+
+    <h2 id="instead">16. Практика: чем заменить eval</h2>
+
+    <p>Практика плана. MDN: прямой eval медленнее замен — движку приходится искать имена во время выполнения, а
+    программы сжатия кода сдаются. И он выполнит чужую строку с правами страницы. Первый совет MDN — хотя бы
+    косвенный eval со строгой директивой: строка видит только глобальное. Пример оттуда — «нестрогий JSON» и местный
+    класс с именем <code>Map</code>:</p>
+
+    <pre class="code js">function looseParse(text) {
+  class Map {}
+  return [eval(`(${text})`).c instanceof Map, eval?.(`"use strict"; (${text})`).c instanceof Map].join();
+}
+console.log(looseParse("{ a: 4 - 1, c: new Map() }"));</pre>
+
+    <div class="result-box">
+        true,false
+    </div>
+
+    <p>Прямой нашёл местный <code>Map</code>, косвенный — встроенный. Замена лучше eval — своя у каждой задачи:</p>
+
+    <pre class="code js">const settings = { theme: "dark", size: { font: 16 } };
+const read = (obj, path) =&gt; path.split(".").reduce((o, key) =&gt; o?.[key], obj);
+console.log(eval("settings.size.font"), read(settings, "size.font"));
+const ops = { "+": (a, b) =&gt; a + b, "*": (a, b) =&gt; a * b };
+console.log(eval("3 * 4"), ops["*"](3, 4));
+console.log(JSON.parse('{"word": "kitap"}').word);
+const scale = Function("k", '"use strict"; return (x) =&gt; x * k;');
+console.log(scale(10)(5));
+const path = "theme; console.log('чужой код')";
+console.log(eval(`settings.${path}`), read(settings, path));</pre>
+
+    <div class="result-box">
+        16 16<br>
+        12 12<br>
+        kitap<br>
+        50<br>
+        чужой код<br>
+        undefined undefined
+    </div>
+
+    <p>Путь к свойству — квадратные скобки и <code>split</code>; действие — таблица функций; данные —
+    <code>JSON.parse</code>; код с параметрами — конструктор <code>Function</code>: тело разбирается в глобальной
+    области, местных имён не видит, значения приходят параметрами. Последние две строки — зачем всё это: eval выполнил
+    «путь» из чужих данных как код.</p>
+
+    <h2 id="cards">17. «Карточки 2.0»: порядок модулей</h2>
+
+    <p>Начало <code>main.js</code> «Карточек 2.0»:</p>
+
+    <pre class="code js">// main.js, день 33 курса 2 — импорты
+import decks from "./data/decks.json" with { type: "json" };
+import { save, load } from "./storage.js";
+import { loadDeck } from "./load.js";</pre>
+
+    <p><code>load.js</code> импортирует <code>card.js</code>, <code>deck.js</code> и <code>errors.js</code>;
+    <code>card.js</code> и <code>deck.js</code> — <code>errors.js</code>; <code>storage.js</code> — ничего. Пройдём
+    InnerModuleEvaluation от <code>main.js</code>. <code>decks.json</code> — Synthetic Module Record, не циклическая:
+    выполняется сразу (EvaluateModuleSync). Потом <code>storage.js</code>. <code>load.js</code> ведёт в
+    <code>card.js</code>, тот — в <code>errors.js</code>, и он выполняется третьим, за ним <code>card.js</code>.
+    <code>deck.js</code> находит <code>errors.js</code> уже evaluated. Затем <code>load.js</code> и последним
+    <code>main.js</code>, через ExecuteAsyncModule: у него <code>await</code> наверху (HasTLA).</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 232" role="img" aria-label="Граф модулей Карточек 2.0 с порядком выполнения: 1 decks.json, 2 storage.js, 3 errors.js, 4 card.js, 5 deck.js, 6 load.js, 7 main.js. main.js импортирует decks.json, storage.js и load.js; load.js — card.js, deck.js и errors.js; card.js и deck.js — errors.js">
+            <rect x="264" y="10" width="112" height="34" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="328" y="32" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">main.js</text>
+            <circle cx="280" cy="27" r="9" fill="#0369a1"/><text x="280" y="31" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">7</text>
+
+            <rect x="59" y="80" width="112" height="34" rx="8" fill="#fefce8" stroke="#eab308" stroke-width="2"/>
+            <text x="123" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#854d0e">decks.json</text>
+            <circle cx="75" cy="97" r="9" fill="#0369a1"/><text x="75" y="101" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">1</text>
+
+            <rect x="264" y="80" width="112" height="34" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="328" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">storage.js</text>
+            <circle cx="280" cy="97" r="9" fill="#0369a1"/><text x="280" y="101" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">2</text>
+
+            <rect x="454" y="80" width="112" height="34" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="518" y="102" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">load.js</text>
+            <circle cx="470" cy="97" r="9" fill="#0369a1"/><text x="470" y="101" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">6</text>
+
+            <rect x="369" y="135" width="112" height="34" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="433" y="157" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">card.js</text>
+            <circle cx="385" cy="152" r="9" fill="#0369a1"/><text x="385" y="156" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">4</text>
+
+            <rect x="520" y="135" width="112" height="34" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="584" y="157" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">deck.js</text>
+            <circle cx="536" cy="152" r="9" fill="#0369a1"/><text x="536" y="156" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">5</text>
+
+            <rect x="444" y="190" width="112" height="34" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="508" y="212" text-anchor="middle" font-family="Consolas, monospace" font-size="11.5" fill="#075985">errors.js</text>
+            <circle cx="460" cy="207" r="9" fill="#0369a1"/><text x="460" y="211" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">3</text>
+
+            <path d="M 300 46 L 140 78" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 320 46 L 320 77" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 345 46 L 490 78" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 495 116 L 440 132" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 530 116 L 565 132" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 505 116 L 501 187" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 440 171 L 470 187" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+            <path d="M 565 171 L 535 187" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d13-arrow)"/>
+
+            <text x="20" y="160" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">номер — порядок выполнения;</text>
+            <text x="20" y="176" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">стрелка — import;</text>
+            <text x="20" y="192" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">decks.json — Synthetic Module Record</text>
+        </svg>
+        <figcaption>InnerModuleEvaluation от main.js «Карточек 2.0»</figcaption>
+    </figure>
+
+    <p>Модель — пустые модули с той же сеткой импортов, без <code>decks.json</code>:</p>
+
+    <pre class="code js">// errors.js
+console.log("errors.js");</pre>
+
+    <pre class="code js">// card.js
+import "./errors.js";
+console.log("card.js");</pre>
+
+    <pre class="code js">// deck.js
+import "./errors.js";
+console.log("deck.js");</pre>
+
+    <pre class="code js">// load.js
+import "./card.js";
+import "./deck.js";
+import "./errors.js";
+console.log("load.js");</pre>
+
+    <pre class="code js">// storage.js
+console.log("storage.js");</pre>
+
+    <pre class="code js">// main.js
+import "./storage.js";
+import "./load.js";
+console.log("main.js");</pre>
+
+    <div class="result-box">
+        storage.js<br>
+        errors.js<br>
+        card.js<br>
+        deck.js<br>
+        load.js<br>
+        main.js
+    </div>
+
+    <p>Все модули выполнены раньше первой строки <code>main.js</code>: к <code>await openDeck()</code> класс
+    <code>CardsError</code> уже есть во всех файлах. И порядок задают только RequestedModules: переставьте импорты
+    в <code>load.js</code> — изменится и порядок вывода.</p>
+
+    <h2 id="next">18. Что будет завтра</h2>
+
+    <p>Сегодня — скрипты и модули изнутри и <code>eval</code>; модуль «Выполнение кода» закончен. Завтра, на дне 14,
+    начинается модуль «Объекты изнутри»: внутренние методы обычных объектов и функций — [[Get]], [[Set]],
+    [[DefineOwnProperty]], [[Call]], [[Construct]] — и FunctionDeclarationInstantiation целиком.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Раздел</th><th>Что делает и где мы это видели</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-language-scripts-and-modules">16 Scripts and Modules</a></td><td>глава: два вида исходного текста</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-scripts">16.1 Scripts</a></td><td>разбор, запись и выполнение скрипта</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-scripts-static-semantics-early-errors">16.1.1 Early Errors</a></td><td>повторы имён, <code>super</code> и <code>new.target</code> вне eval</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-scriptisstrict">16.1.2 ScriptIsStrict</a></td><td>директива (день 3 курса 2)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-script-semantics-runtime-semantics-evaluation">16.1.3 Evaluation</a></td><td>пустой скрипт — <code>undefined</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-script-records">16.1.4 Script Records</a></td><td>реалм, дерево, модули, поле хозяина</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-parse-script">16.1.5 ParseScript</a></td><td>ранняя ошибка — ни строки</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-runtime-semantics-scriptevaluation">16.1.6 ScriptEvaluation</a></td><td>контекст, имена, текст</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-globaldeclarationinstantiation">16.1.7 GlobalDeclarationInstantiation</a></td><td>сначала проверки, потом имена</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-modules">16.2 Modules</a></td><td>грамматика модуля</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-module-semantics">16.2.1 Module Semantics</a></td><td>записи, связывание, выполнение (день 30 курса 2)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-imports">16.2.2 Imports</a></td><td>ImportEntry, таблица 54</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-exports">16.2.3 Exports</a></td><td>ExportEntry, таблица 56; имя <code>default</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-eval-x">19.2.1 eval ( x )</a></td><td>PerformEval и EvalDeclarationInstantiation</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval">MDN: eval()</a></td><td>прямой и косвенный; замены; обещан в дне 3 курса 2</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/defer">MDN: import defer</a></td><td>выполнить при первом обращении; в Chrome 156 нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/defer">MDN: import.defer()</a></td><td>то же, с промисом</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/source">MDN: import source</a></td><td>модуль без выполнения; в Chrome 156 нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/source">MDN: import.source()</a></td><td>то же, с промисом</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AbstractModuleSource">MDN: AbstractModuleSource</a></td><td>предок <code>WebAssembly.Module</code>; в Chrome 156 нет</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// скрипт: ParseScript — ранняя ошибка, ни строки; ScriptEvaluation — контекст, GDI, текст
+// GDI: проверки (let/let, let/var, неудаляемое свойство окна), потом имена; конфликт — ни одного (Chrome — до конфликта)
+// let, у которого бросил инициализатор, — мёртвая зона до перезагрузки
+// модуль: Link — var undefined, функции готовы, let/const/class без значения; потом Evaluate
+// обход в глубину: запросы по порядку, в цикле первым — самый глубокий; ошибка запоминается
+// export * — без default; имя из двух звёздочек — нет в объекте модуля, по имени — SyntaxError
+// прямой eval — eval(...) и (eval)(...); остальное — косвенный, глобальная область
+// var из eval: прямой нестрогий — в функцию, строгий — внутри, косвенный — глобальный, удаляемый; let — всегда внутри
+// вместо eval: obj[key], таблица функций, JSON.parse, Function с параметрами</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему второй скрипт с <code>let b = 1; let b = 2;</code> не печатает ничего, а скрипт с
+                <code>null.x</code> в середине печатает строки до неё?
+                <details class="answer"><summary>Ответ</summary>
+                    Первое — ранняя ошибка 16.1.1: ParseScript возвращает список ошибок, и ScriptEvaluation не
+                    вызывается. Второе — ошибка при выполнении: текст уже идёт, и он останавливается на ней.
+                </details>
+            </li>
+            <li>Первый скрипт — <code>var total = 10</code>, второй — <code>let total = 20</code>. Какой шаг 16.1.7 бросит и
+                почему <code>globalThis.label = 1</code> перед <code>let label</code> не мешает?
+                <details class="answer"><summary>Ответ</summary>
+                    Шаг 1: HasRestrictedGlobalProperty — <code>var</code> дал неудаляемое свойство окна. Свойство,
+                    созданное присваиванием, удаляемое, и <code>let</code> его затеняет (примечание 2).
+                </details>
+            </li>
+            <li>В цикле модулей <code>second.js</code> читает импорты из <code>first.js</code> до его выполнения. Что
+                он увидит у <code>var</code>, функции и <code>const</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    InitializeEnvironment уже дал <code>var</code> значение <code>undefined</code> и создал функцию;
+                    <code>const</code> без значения — ReferenceError «Cannot access … before initialization».
+                </details>
+            </li>
+            <li>Какие из вызовов прямые: <code>eval(s)</code>, <code>(eval)(s)</code>, <code>(0, eval)(s)</code>,
+                <code>eval?.(s)</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Первые два: ссылка не на свойство с именем <code>eval</code> и значением %eval% (скобки ссылку не
+                    теряют). Запятая отдаёт значение, <code>?.</code> зовёт EvaluateCall без проверки — косвенные.
+                </details>
+            </li>
+            <li>Куда попадёт <code>var x</code> из <code>eval("var x = 1")</code> в нестрогой функции, в строгой и при
+                косвенном вызове?
+                <details class="answer"><summary>Ответ</summary>
+                    В окружение функции; в новое окружение eval (снаружи не видно); в глобальную запись — свойством окна,
+                    которое можно удалить.
+                </details>
+            </li>
+            <li>Чем заменить <code>eval(`obj.${path}`)</code> и почему?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>path.split(".").reduce((o, k) =&gt; o?.[k], obj)</code>: путь остаётся данными. eval выполнил бы
+                    чужую строку как код и заставил движок держать все местные имена.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval">MDN Web Docs</a>
+        (eval(), import defer, import source, import.defer(), import.source(), AbstractModuleSource, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

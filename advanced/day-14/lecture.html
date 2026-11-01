@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 14 — Внутренние методы обычных объектов и функций</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #ec4899; }
+        h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+        h3 { color: #9d174d; }
+        .step-number { background: #ec4899; }
+        .toc a { color: #be185d; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 14</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 14 &bull; урок 1</span>
+        <h1>Внутренние методы обычных объектов и функций</h1>
+        <p>Курс 3, Advanced. Модуль «Объекты изнутри» — первый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>проходить шаги [[DefineOwnProperty]], [[Get]] и [[Set]] и предсказывать, где запись создаст свойство,
+                вызовет сеттер или не выйдет;</li>
+            <li>называть порядок ключей и внутренний метод за каждой операцией с объектом;</li>
+            <li>различать [[Call]] и [[Construct]] обычной функции, класса и встроенной функции;</li>
+            <li>проходить FunctionDeclarationInstantiation целиком.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#chapter">Глава 10: обычные и экзотические</a></li>
+            <li><a href="#simple">Прототип, расширяемость, in и delete</a></li>
+            <li><a href="#getown">[[GetOwnProperty]] и полный дескриптор</a></li>
+            <li><a href="#validate">ValidateAndApplyPropertyDescriptor по шагам</a></li>
+            <li><a href="#get">[[Get]] и Receiver</a></li>
+            <li><a href="#set">[[Set]] по шагам</a></li>
+            <li><a href="#setter">Практика: сеттер в прототипе</a></li>
+            <li><a href="#keys">Практика: порядок ключей</a></li>
+            <li><a href="#who">Практика: кто зовёт внутренние методы</a></li>
+            <li><a href="#create">Как создаётся объект</a></li>
+            <li><a href="#slots">Функция: слоты таблицы 25</a></li>
+            <li><a href="#call">[[Call]] по шагам</a></li>
+            <li><a href="#construct">[[Construct]] по шагам</a></li>
+            <li><a href="#make">Имя, длина и prototype</a></li>
+            <li><a href="#fdi">FunctionDeclarationInstantiation целиком</a></li>
+            <li><a href="#builtin">Встроенные функции</a></li>
+            <li><a href="#cards">«Карточки 2.0»: геттер без сеттера</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="chapter">1. Глава 10: обычные и экзотические</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ordinary-and-exotic-objects-behaviours">Глава 10</a> — как ведут себя
+    объекты. День 4 показал таблицу 4: одиннадцать внутренних методов у любого объекта. <em>Обычный</em> объект — тот,
+    у кого все они взяты из <a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots">10.1</a>,
+    а у функции ещё [[Call]] и [[Construct]] из 10.2 или 10.3. Остальные — <em>экзотические</em>: массив, строка,
+    <code>arguments</code>, связанная функция — завтра, Proxy — день 16. Экзотическим объект делает хотя бы один свой
+    метод: у массива — [[DefineOwnProperty]] (из-за <code>length</code>), у связанной функции — [[Call]] и
+    [[Construct]]. Поэтому всё сегодняшнее — правила по умолчанию, от которых экзотика отступает.</p>
+
+    <p>У обычного объекта два слота: [[Prototype]] и [[Extensible]]. Вступление 10.1 сводит наследование к четырём
+    правилам — день 7 курса 2 видел их на опыте:</p>
+
+    <table>
+        <thead><tr><th>В прототипе</th><th>Чтение <code>obj.p</code></th><th>Запись <code>obj.p = v</code></th></tr></thead>
+        <tbody>
+            <tr><td>данные, записываемые</td><td>значение прототипа</td><td>своё свойство у <code>obj</code></td></tr>
+            <tr><td>данные, незаписываемые</td><td>значение прототипа</td><td>не выходит</td></tr>
+            <tr><td>аксессор</td><td>геттер с <code>this</code> = <code>obj</code></td><td>сеттер с <code>this</code> = <code>obj</code></td></tr>
+        </tbody>
+    </table>
+
+    <pre class="code js">const proto = {};
+Object.defineProperty(proto, "fixed", { value: "прототип", writable: false });
+Object.defineProperty(proto, "both", { get() { return `get ${this.tag}`; }, set(v) { this.log = v; } });
+proto.plain = "прототип";
+const obj = Object.create(proto);
+obj.tag = "obj";
+obj.plain = "своё"; obj.fixed = "своё"; obj.both = "запись";
+console.log(obj.plain, proto.plain, obj.fixed, Object.hasOwn(obj, "fixed"), obj.both, obj.log, Object.hasOwn(obj, "both"));</pre>
+
+    <div class="result-box">
+        своё прототип прототип false get obj запись false
+    </div>
+
+    <p>Запись в <code>fixed</code> не прошла молча — скрипт нестрогий. Если [[Extensible]] стал false, назад пути нет:
+    ни новых свойств, ни нового прототипа (инварианты 6.1.7.3, день 4).</p>
+
+    <h2 id="simple">2. Прототип, расширяемость, in и delete</h2>
+
+    <p>Шесть методов 10.1 — по строке: [[GetPrototypeOf]] (10.1.1) и [[IsExtensible]] (10.1.3) читают слот;
+    [[PreventExtensions]] (10.1.4) ставит false и отвечает true; [[HasProperty]] (10.1.7) — своё свойство или вопрос
+    прототипу; [[Delete]] (10.1.10) удаляет только configurable, на остальное отвечает false. Интереснее
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-setprototypeof-v">[[SetPrototypeOf]]</a>
+    (10.1.2): тот же прототип — true сразу; нерасширяемый объект — false; потом идёт по цепочке нового прототипа и
+    отвечает false, если встретит сам объект, — цикла не будет. False превращают в TypeError вызывающие:
+    <code>Object.setPrototypeOf</code> и сеттер <code>__proto__</code>.</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const a = {}, b = Object.create(a);
+console.log(run(() =&gt; Object.setPrototypeOf(a, b)), "|", run(() =&gt; { a.__proto__ = b; }));
+const closed = Object.preventExtensions({ x: 1 });
+console.log(Object.isExtensible(closed), run(() =&gt; Object.setPrototypeOf(closed, {})), run(() =&gt; Object.setPrototypeOf(closed, Object.prototype)));
+console.log("x" in Object.create(closed), delete closed.x, delete Object.seal({ y: 1 }).y, delete Object.prototype);</pre>
+
+    <div class="result-box">
+        TypeError: Cyclic __proto__ value | TypeError: Cyclic __proto__ value<br>
+        false TypeError: #&lt;Object&gt; is not extensible ok<br>
+        true true false false
+    </div>
+
+    <p>Прежний прототип нерасширяемому поставить можно: шаг «тот же — true» стоит раньше проверки. А
+    <code>preventExtensions</code> не мешает удалять: [[Delete]] смотрит только на configurable. Поиск цикла
+    останавливается и на объекте с необычным [[GetPrototypeOf]] — у Proxy (день 16) свою цепочку обычный метод не
+    проверяет.</p>
+
+    <h2 id="getown">3. [[GetOwnProperty]] и полный дескриптор</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-getownproperty-p">[[GetOwnProperty]]</a>
+    (10.1.5) зовёт OrdinaryGetOwnProperty: нет своего свойства — undefined; есть — новый дескриптор со всеми полями
+    его вида: <code>value</code> и <code>writable</code> или <code>get</code> и <code>set</code>, плюс
+    <code>enumerable</code> и <code>configurable</code>. Дескриптор — копия: правка её не трогает свойство.</p>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-defineownproperty-p-desc">[[DefineOwnProperty]]</a>
+    (10.1.6) читает текущий дескриптор, узнаёт расширяемость и отдаёт всё ValidateAndApplyPropertyDescriptor
+    (10.1.6.3). Создавая свойство, она берёт недостающие поля по умолчанию — false и undefined:</p>
+
+    <pre class="code js">const o = {};
+Object.defineProperty(o, "x", { value: 1 });
+o.y = 2;
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor(o, "x")), JSON.stringify(Object.getOwnPropertyDescriptor(o, "y")));</pre>
+
+    <div class="result-box">
+        {"value":1,"writable":false,"enumerable":false,"configurable":false} {"value":2,"writable":true,"enumerable":true,"configurable":true}
+    </div>
+
+    <p>Присваивание создаёт свойство иначе: CreateDataProperty (день 7) передаёт все три флага true — правило дня 5
+    курса 2.</p>
+
+    <p>Дескриптор, который передают в <code>defineProperty</code>, — обычный объект. ToPropertyDescriptor (6.2.6.5)
+    читает его поля через HasProperty и Get, значит, и унаследованные. Аксессор вместе с <code>value</code> —
+    TypeError ещё до [[DefineOwnProperty]]:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const o = {};
+Object.defineProperty(o, "x", Object.create({ value: 7, enumerable: true }));
+console.log(o.x, Object.keys(o).length, "|", run(() =&gt; Object.defineProperty(o, "y", { get() {}, value: 1 })));</pre>
+
+    <div class="result-box">
+        7 1 | TypeError: Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #&lt;Object&gt;
+    </div>
+
+    <h2 id="validate">4. ValidateAndApplyPropertyDescriptor по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-validateandapplypropertydescriptor">10.1.6.3</a>:</p>
+
+    <ol>
+        <li>своего свойства нет: объект нерасширяемый — false; иначе создать свойство из полей Desc и умолчаний;</li>
+        <li>в Desc нет полей — true, ничего не меняется;</li>
+        <li>свойство не configurable: нельзя сделать его configurable, сменить enumerable, сменить вид (данные ↔
+            аксессор), заменить <code>get</code> или <code>set</code>; у незаписываемого — нельзя
+            <code>writable: true</code> и значение, которое не SameValue прежнему;</li>
+        <li>иначе применить: смена вида сохраняет enumerable и configurable, остальное берётся из Desc.</li>
+    </ol>
+
+    <p>Каждое «нельзя» — false, <code>Object.defineProperty</code> делает из него TypeError (DefinePropertyOrThrow).
+    Правила дня 5 курса 2 — это шаг 3:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const p = {};
+Object.defineProperty(p, "y", { value: 1, writable: true });
+console.log(run(() =&gt; Object.defineProperty(p, "y", { value: 2 })), run(() =&gt; Object.defineProperty(p, "y", { writable: false })), run(() =&gt; Object.defineProperty(p, "y", { writable: true })), run(() =&gt; Object.defineProperty(p, "y", { value: 2 })));
+const q = {};
+Object.defineProperty(q, "n", { value: NaN });
+Object.defineProperty(q, "z", { value: 0 });
+console.log(run(() =&gt; Object.defineProperty(q, "n", { value: NaN })), run(() =&gt; Object.defineProperty(q, "z", { value: -0 })), run(() =&gt; Object.defineProperty(q, "z", { enumerable: true })), run(() =&gt; Object.defineProperty(q, "z", {})));</pre>
+
+    <div class="result-box">
+        ok ok TypeError: Cannot redefine property: y ok<br>
+        ok TypeError: Cannot redefine property: z TypeError: Cannot redefine property: z ok
+    </div>
+
+    <p>Неудаляемое записываемое свойство можно закрыть на запись, открыть обратно — нет. Тот же NaN проходит,
+    −0 вместо +0 — нет: сравнение по SameValue. Примечание к шагу: разные NaN SameValue считает равными, хотя их можно
+    различить по битам (DataView, день 21), — поэтому шаг отвечает сразу и ничего не записывает.</p>
+
+    <p>Шаг 4 у configurable свойства: смена вида сохраняет enumerable и configurable, а <code>value</code> и
+    <code>writable</code> пропадают. <code>Object.freeze</code> — SetIntegrityLevel (7.3.15): [[PreventExtensions]],
+    потом каждому своему ключу [[DefineOwnProperty]] с <code>configurable: false</code>, у данных — ещё
+    <code>writable: false</code>; <code>seal</code> — только <code>configurable</code>:</p>
+
+    <pre class="code js">const r = {};
+Object.defineProperty(r, "k", { value: 1, enumerable: true, configurable: true });
+Object.defineProperty(r, "k", { get() { return 2; } });
+const d = Object.getOwnPropertyDescriptor(r, "k");
+console.log(typeof d.get, d.enumerable, d.configurable, "value" in d, r.k);
+const f = Object.freeze({ a: 1, get g() { return 2; } });
+const da = Object.getOwnPropertyDescriptor(f, "a"), dg = Object.getOwnPropertyDescriptor(f, "g");
+console.log(Object.isExtensible(f), da.writable, da.configurable, dg.configurable, Object.getOwnPropertyDescriptor(Object.seal({ s: 1 }), "s").writable);</pre>
+
+    <div class="result-box">
+        function true true false 2<br>
+        false false false false true
+    </div>
+
+    <h2 id="get">5. [[Get]] и Receiver</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-get-p-receiver">[[Get]]</a>
+    (10.1.8), OrdinaryGet(O, P, Receiver): своё свойство данных — его значение; аксессор — геттер, вызванный с
+    <code>this</code> = Receiver (нет геттера — undefined); своего нет — тот же [[Get]] у прототипа <em>с тем же
+    Receiver</em>, прототип null — undefined. Receiver — объект, с которого начали:</p>
+
+    <pre class="code js">const base = { get who() { return this.name; }, name: "base" };
+const child = Object.create(base);
+child.name = "child";
+console.log(child.who, base.who);</pre>
+
+    <div class="result-box">
+        child base
+    </div>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 176" role="img" aria-label="Цепочка child, base, Object.prototype, null. child.who: у child своего who нет, [[Get]] идёт к base с Receiver = child; у base геттер who, он вызван с this = child и читает child.name">
+            <defs>
+                <marker id="d14-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+                </marker>
+            </defs>
+            <rect x="10" y="30" width="170" height="74" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="22" y="52" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">child (Receiver)</text>
+            <text x="22" y="72" font-family="Consolas, monospace" font-size="11" fill="#9d174d">name: "child"</text>
+            <text x="22" y="90" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">своего who нет</text>
+
+            <rect x="235" y="30" width="170" height="74" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="247" y="52" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">base</text>
+            <text x="247" y="72" font-family="Consolas, monospace" font-size="11" fill="#334155">get who()</text>
+            <text x="247" y="90" font-family="Consolas, monospace" font-size="11" fill="#334155">name: "base"</text>
+
+            <rect x="460" y="30" width="170" height="74" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="472" y="52" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">Object.prototype</text>
+            <text x="472" y="72" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">дальше — null:</text>
+            <text x="472" y="90" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#64748b">ответ undefined</text>
+
+            <path d="M 182 67 L 231 67" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d14-arrow)"/>
+            <path d="M 407 67 L 456 67" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d14-arrow)"/>
+            <text x="186" y="22" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">[[Prototype]]</text>
+            <text x="411" y="22" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#475569">[[Prototype]]</text>
+
+            <path d="M 320 106 C 320 140, 95 140, 95 108" stroke="#ec4899" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#d14-arrow)"/>
+            <text x="336" y="132" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">геттер вызван с this = child</text>
+            <text x="10" y="168" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">child.who: [[Get]] у base с Receiver = child; геттер вызван с this = child и читает "child".</text>
+        </svg>
+        <figcaption>[[Get]] идёт по цепочке, Receiver остаётся прежним</figcaption>
+    </figure>
+
+    <p><code>super.x</code> (день 10 курса 2) — тот же [[Get]], только поиск начинается с прототипа [[HomeObject]], а
+    Receiver — <code>this</code> метода.</p>
+
+    <p>Receiver бывает и примитивом. Для <code>"abc".kind</code> GetValue (6.2.5.5) берёт обёртку только для поиска,
+    а Receiver оставляет строкой: строгий геттер видит примитив, нестрогий — обёртку (OrdinaryCallBindThis, день 9). У
+    [[Set]] примитив в Receiver — это шаг «Receiver не объект — false» из следующего раздела:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+Object.defineProperty(String.prototype, "kind", { get() { "use strict"; return typeof this; }, configurable: true });
+Object.defineProperty(String.prototype, "sloppyKind", { get() { return typeof this; }, configurable: true });
+console.log("abc".kind, "abc".sloppyKind, "|", run(() =&gt; { "use strict"; "abc".x = 1; }), run(() =&gt; { "abc".x = 1; }));</pre>
+
+    <div class="result-box">
+        string object | TypeError: Cannot create property 'x' on string 'abc' ok
+    </div>
+
+    <h2 id="set">6. [[Set]] по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-set-p-v-receiver">[[Set]]</a>
+    (10.1.9), OrdinarySet: взять свой дескриптор и отдать OrdinarySetWithOwnDescriptor (10.1.9.2):</p>
+
+    <ol>
+        <li>своего нет — спросить [[Set]] прототипа с тем же Receiver; прототипа нет — считать, что нашлось записываемое
+            свойство данных;</li>
+        <li>нашлись данные: незаписываемые — false; Receiver не объект — false; у Receiver своё свойство: аксессор или
+            незаписываемое — false, иначе [[DefineOwnProperty]] с одним полем <code>value</code>; своего нет —
+            CreateDataProperty у Receiver;</li>
+        <li>нашёлся аксессор: нет сеттера — false; иначе вызвать сеттер с <code>this</code> = Receiver, true.</li>
+    </ol>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 214" role="img" aria-label="OrdinarySetWithOwnDescriptor. Своего свойства нет: есть прототип — его [[Set]] с тем же Receiver, нет — как записываемые данные. Данные: незаписываемые — false; у Receiver аксессор или незаписываемое — false; у Receiver своё записываемое — [[DefineOwnProperty]] только value; своего нет — CreateDataProperty. Аксессор: нет сеттера — false, есть — Call сеттера с Receiver, true">
+            <rect x="10" y="10" width="196" height="160" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">своего нет</text>
+            <text x="22" y="54" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">есть прототип —</text>
+            <text x="22" y="70" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">его [[Set]], Receiver тот же</text>
+            <text x="22" y="96" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">прототипа нет — как</text>
+            <text x="22" y="112" font-family="Segoe UI, sans-serif" font-size="11" fill="#334155">записываемые данные →</text>
+
+            <rect x="222" y="10" width="196" height="160" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="234" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">данные</text>
+            <text x="234" y="54" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">writable: false — false</text>
+            <text x="234" y="76" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">у Receiver аксессор или</text>
+            <text x="234" y="92" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">незаписываемое — false</text>
+            <text x="234" y="114" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">своё записываемое —</text>
+            <text x="234" y="130" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">define только value</text>
+            <text x="234" y="152" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">своего нет — CreateDataProperty</text>
+
+            <rect x="434" y="10" width="196" height="160" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="446" y="32" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#075985">аксессор</text>
+            <text x="446" y="54" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">нет сеттера — false</text>
+            <text x="446" y="76" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">есть — Call(сеттер,</text>
+            <text x="446" y="92" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">Receiver, «V»), true</text>
+
+            <text x="10" y="200" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">false: строгий код — TypeError (PutValue, день 4), нестрогий — молча.</text>
+        </svg>
+        <figcaption>OrdinarySetWithOwnDescriptor: три ветки</figcaption>
+    </figure>
+
+    <p>Отсюда override mistake дня 7 курса 2: незаписываемое свойство прототипа не даёт завести своё. А «одно поле
+    <code>value</code>» значит: остальные флаги своего свойства остаются прежними:</p>
+
+    <pre class="code js">const h = {};
+Object.defineProperty(h, "hidden", { value: 1, writable: true });
+h.hidden = 2;
+console.log(JSON.stringify(Object.keys(h)), h.hidden, JSON.stringify(Object.getOwnPropertyDescriptor(h, "hidden")));</pre>
+
+    <div class="result-box">
+        [] 2 {"value":2,"writable":true,"enumerable":false,"configurable":false}
+    </div>
+
+    <h3 id="super-set">super.x = v: когда Receiver — не O</h3>
+
+    <p>При обычном присваивании Receiver и есть объект, у которого искали. Разойтись они могут в <code>super.x =
+    v</code>: [[Set]] зовётся у прототипа [[HomeObject]], а Receiver — <code>this</code>. Тогда работает проверка
+    своего свойства Receiver из шага 2:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class A {}
+A.prototype.x = 1;
+class B extends A { write() { super.x = 5; } }
+const viaAccessor = new B();
+Object.defineProperty(viaAccessor, "x", { get() { return "своё"; }, configurable: true });
+const viaFixed = new B();
+Object.defineProperty(viaFixed, "x", { value: "своё", writable: false, configurable: true });
+console.log(run(() =&gt; viaAccessor.write()), "|", run(() =&gt; viaFixed.write()));</pre>
+
+    <div class="result-box">
+        TypeError: Cannot redefine property: x | TypeError: Cannot assign to read only property 'x' of object '#&lt;B&gt;'
+    </div>
+
+    <p>У <code>A.prototype</code> <code>x</code> записываемый, поэтому решает своё свойство <code>this</code>:
+    аксессор и незаписываемое — false, а код класса строгий. Текст V8 в первом случае — «Cannot redefine», хотя по
+    шагам до [[DefineOwnProperty]] дело не дошло.</p>
+
+    <h2 id="setter">7. Практика: сеттер в прототипе</h2>
+
+    <p>Практика плана: запись в свойство, у которого сеттер в прототипе. Присваивание идёт по [[Set]] и находит
+    сеттер. Поле класса — нет: поля определяются, а не присваиваются (DefineField → CreateDataPropertyOrThrow, день 7),
+    и сеттер прототипа не видят:</p>
+
+    <pre class="code js">const log = [];
+class Model { set title(v) { log.push(`сеттер: ${v}`); } get title() { return "из геттера"; } }
+class Plain extends Model { constructor() { super(); this.title = "присваивание"; } }
+class Field extends Model { title = "поле"; }
+const plain = new Plain(), field = new Field();
+console.log(log.join(", "), Object.hasOwn(plain, "title"), plain.title, Object.hasOwn(field, "title"), field.title);</pre>
+
+    <div class="result-box">
+        сеттер: присваивание false из геттера true поле
+    </div>
+
+    <p>У <code>field</code> своё свойство данных закрыло аксессор модели: следующее <code>field.title = …</code> найдёт
+    его на шаге 2 и сеттер не позовёт. Модели, которая проверяет запись сеттером, поле наследника с тем же именем
+    отключает проверку.</p>
+
+    <p>Так же расходятся <code>Object.assign</code> (20.1.2.1: Set для каждого ключа) и spread в литерале
+    (CopyDataProperties: CreateDataPropertyOrThrow):</p>
+
+    <pre class="code js">const log = [];
+class Model { set title(v) { log.push(`сеттер: ${v}`); } }
+const viaAssign = Object.assign(new Model(), { title: "assign" });
+const viaSpread = { __proto__: Model.prototype, ...{ title: "spread" } };
+console.log(log.join(), Object.hasOwn(viaAssign, "title"), Object.hasOwn(viaSpread, "title"));</pre>
+
+    <div class="result-box">
+        сеттер: assign false true
+    </div>
+
+    <h2 id="keys">8. Практика: порядок ключей</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-ownpropertykeys">[[OwnPropertyKeys]]</a>
+    (10.1.11), OrdinaryOwnPropertyKeys: сначала индексы массива по возрастанию, потом остальные строки в порядке
+    создания, потом символы в порядке создания. Индекс массива — каноническая запись целого от 0 до 2³² − 2 (6.1.7).
+    Практика плана:</p>
+
+    <pre class="code js">const sym = Symbol("s");
+const keys = { b: 1, 2: 1, [sym]: 1, a: 1, 1: 1, "-1": 1, "01": 1, 4294967295: 1, 4294967294: 1, 1.5: 1 };
+console.log(Object.getOwnPropertyNames(keys).join(" "), "|", Object.getOwnPropertySymbols(keys).length);
+const seen = [];
+for (const k in keys) seen.push(k);
+console.log(Object.keys(keys).join(" ") === seen.join(" "), JSON.stringify(keys));
+const arr = ["a"];
+arr.x = 1;
+arr[5] = "f";
+console.log(Object.keys(arr).join(" "));</pre>
+
+    <div class="result-box">
+        1 2 4294967294 b a -1 01 4294967295 1.5 | 1<br>
+        true {"1":1,"2":1,"4294967294":1,"b":1,"a":1,"-1":1,"01":1,"4294967295":1,"1.5":1}<br>
+        0 5 x
+    </div>
+
+    <p><code>"-1"</code>, <code>"01"</code> и <code>"1.5"</code> — не канонические целые, а 4294967295 = 2³² − 1 уже не
+    индекс: все четыре встали по времени создания. Индексы сортируются как числа: 2 раньше 10, хотя строка
+    <code>"10"</code> меньше строки <code>"2"</code>. У массива то же правило. <code>Object.keys</code>, <code>for-in</code> (порядок с
+    прототипами — день 11) и <code>JSON.stringify</code> берут ключи у одного [[OwnPropertyKeys]].</p>
+
+    <h2 id="who">9. Практика: кто зовёт внутренние методы</h2>
+
+    <p>Практика плана — таблица. Код обычно зовёт метод через операцию 7.3 (день 7), иногда — прямо. Увидеть каждый
+    вызов вживую поможет Proxy на дне 16.</p>
+
+    <table>
+        <thead><tr><th>Код</th><th>Операция</th><th>Метод</th></tr></thead>
+        <tbody>
+            <tr><td><code>o.x</code>, <code>o[k]</code></td><td>GetValue</td><td>[[Get]] с Receiver = <code>o</code></td></tr>
+            <tr><td><code>o.x = v</code></td><td>PutValue</td><td>[[Set]]</td></tr>
+            <tr><td><code>"x" in o</code></td><td>HasProperty</td><td>[[HasProperty]]</td></tr>
+            <tr><td><code>delete o.x</code></td><td>Evaluation <code>delete</code></td><td>[[Delete]]</td></tr>
+            <tr><td><code>Object.defineProperty</code></td><td>DefinePropertyOrThrow</td><td>[[DefineOwnProperty]]</td></tr>
+            <tr><td><code>Object.getOwnPropertyDescriptor</code></td><td>—</td><td>[[GetOwnProperty]]</td></tr>
+            <tr><td><code>Object.keys</code>, <code>{ ...o }</code></td><td>EnumerableOwnProperties, CopyDataProperties</td><td>[[OwnPropertyKeys]], [[GetOwnProperty]], [[Get]]</td></tr>
+            <tr><td><code>for (k in o)</code></td><td>EnumerateObjectProperties</td><td>[[OwnPropertyKeys]], [[GetOwnProperty]] — у <code>o</code> и дальше по цепочке</td></tr>
+            <tr><td><code>JSON.stringify(o)</code></td><td>SerializeJSONObject, SerializeJSONProperty</td><td>[[OwnPropertyKeys]], [[GetOwnProperty]], [[Get]]</td></tr>
+            <tr><td><code>Object.getPrototypeOf</code>, <code>instanceof</code></td><td>OrdinaryHasInstance</td><td>[[GetPrototypeOf]]</td></tr>
+            <tr><td><code>Object.setPrototypeOf</code>, <code>o.__proto__ = p</code></td><td>—</td><td>[[SetPrototypeOf]]</td></tr>
+            <tr><td><code>Object.preventExtensions</code>, <code>freeze</code></td><td>SetIntegrityLevel у <code>freeze</code></td><td>[[PreventExtensions]], у <code>freeze</code> и [[DefineOwnProperty]]</td></tr>
+            <tr><td><code>f()</code>, <code>new F()</code></td><td>Call, Construct</td><td>[[Call]], [[Construct]]</td></tr>
+        </tbody>
+    </table>
+
+    <p>Геттер — способ проверить таблицу без Proxy: его вызывает только [[Get]].</p>
+
+    <pre class="code js">const log = [];
+const o = { get x() { log.push("get"); return 1; } };
+"x" in o; Object.keys(o); Object.getOwnPropertyDescriptor(o, "x"); ({ ...o }); o.x;
+console.log(log.length, JSON.stringify(o), log.length);</pre>
+
+    <div class="result-box">
+        2 {"x":1} 3
+    </div>
+
+    <p>До геттера дошли spread и <code>o.x</code>, третьим — <code>JSON.stringify</code>; <code>in</code>,
+    <code>Object.keys</code> и дескриптор обошлись без [[Get]].</p>
+
+    <h2 id="create">10. Как создаётся объект</h2>
+
+    <p>Четыре операции 10.1.12–10.1.15.
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinaryobjectcreate">OrdinaryObjectCreate</a>(proto) — пустой обычный
+    объект с этим прототипом; примечание: слово «обычный» — обещание, что методы ему потом не заменят, экзотические
+    объекты создаёт напрямую MakeBasicObject.
+    <a href="https://tc39.es/ecma262/2026/#sec-ordinarycreatefromconstructor">OrdinaryCreateFromConstructor</a> — то же
+    для <code>new</code>, а прототип выбирает
+    <a href="https://tc39.es/ecma262/2026/#sec-getprototypefromconstructor">GetPrototypeFromConstructor</a>: свойство
+    <code>prototype</code> конструктора, а если там не объект — встроенный прототип <em>реалма конструктора</em>.
+    <a href="https://tc39.es/ecma262/2026/#sec-requireinternalslot">RequireInternalSlot</a> — TypeError, если у
+    объекта нет нужного слота: так встроенный метод проверяет свой <code>this</code>.</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+function F() {}
+F.prototype = 1;
+console.log(Object.getPrototypeOf(new F()) === Object.prototype);
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const Other = frame.contentWindow.Function("this.made = true;");
+Other.prototype = null;
+const made = new Other();
+console.log(Object.getPrototypeOf(made) === frame.contentWindow.Object.prototype, run(() =&gt; Map.prototype.get.call({}, "x")));
+console.log(run(() =&gt; Date.prototype.getTime.call(Object.create(Date.prototype))));</pre>
+
+    <div class="result-box">
+        true<br>
+        true TypeError: Method Map.prototype.get called on incompatible receiver #&lt;Object&gt;<br>
+        TypeError: this is not a Date object.
+    </div>
+
+    <p>Объект создан вызовом из нашего окна, а прототип у него — <code>Object.prototype</code> рамки: примечание
+    10.1.14 берёт его у реалма конструктора (день 9). Последняя строка — RequireInternalSlot: прототип
+    <code>Date</code> у объекта есть, слота [[DateValue]] нет.</p>
+
+    <h2 id="slots">11. Функция: слоты таблицы 25</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects">10.2</a>: функция — обычный объект с
+    [[Call]] и слотами таблицы 25: [[Environment]] (окружение, где создана), [[PrivateEnvironment]],
+    [[FormalParameters]], [[ECMAScriptCode]], [[ConstructorKind]] (base или derived), [[Realm]], [[ScriptOrModule]],
+    [[ThisMode]] (lexical, strict, global — день 9), [[Strict]], [[HomeObject]], [[SourceText]] (<code>toString</code> —
+    день 4 курса 2), [[Fields]] и [[PrivateMethods]] класса, [[ClassFieldInitializerName]], [[IsClassConstructor]].
+    Слоты ставятся при создании и потом не меняются:</p>
+
+    <pre class="code js">const base = { hi() { return "base"; } };
+const obj = { __proto__: base, hi() { return "obj+" + super.hi(); } };
+const other = { __proto__: { hi() { return "other"; } }, hi: obj.hi };
+console.log(other.hi());
+function makeCounter() { let n = 0; return () =&gt; ++n; }
+const one = makeCounter(), two = makeCounter();
+console.log(one(), one(), two());</pre>
+
+    <div class="result-box">
+        obj+base<br>
+        1 2 1
+    </div>
+
+    <p>Метод переехал в <code>other</code>, но <code>super</code> ищет от своего [[HomeObject]] — <code>obj</code>. У
+    двух стрелок одно тело и разные [[Environment]] — тот слот, который обещал день 1 курса 2. [[SourceText]] — ровно
+    текст из кода, его и отдаёт <code>toString</code>:</p>
+
+    <pre class="code js">function spaced(a,b){return a+b}
+class K { m() {} }
+console.log(String(spaced), "|", String(K), "|", String(new K().m), "|", String(() =&gt; 1));</pre>
+
+    <div class="result-box">
+        function spaced(a,b){return a+b} | class K { m() {} } | m() {} | () =&gt; 1
+    </div>
+
+    <h2 id="call">12. [[Call]] по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects-call-thisargument-argumentslist">[[Call]]</a>
+    (10.2.1):</p>
+
+    <ol>
+        <li>PrepareForOrdinaryCall: новый контекст (день 9) с реалмом функции и новым окружением функции;</li>
+        <li>класс ([[IsClassConstructor]]) — TypeError, созданная уже в контексте вызываемого, то есть в его реалме;</li>
+        <li>OrdinaryCallBindThis (день 9): lexical — ничего, strict — как есть, global — undefined и null дают
+            <code>globalThis</code>, примитив — обёртку;</li>
+        <li>OrdinaryCallEvaluateBody: EvaluateBody, внутри — FunctionDeclarationInstantiation (раздел 15) и тело;</li>
+        <li>контекст снять; return — его значение, иначе — undefined (а throw — дальше).</li>
+    </ol>
+
+    <pre class="code js">const frame = document.createElement("iframe");
+document.body.append(frame);
+const C = frame.contentWindow.eval("(class C {})");
+try { C(); } catch (e) { console.log(e.message, e instanceof TypeError, e instanceof frame.contentWindow.TypeError); }
+const sloppy = frame.contentWindow.Function("return this;");
+console.log(typeof sloppy.call(5), sloppy.call(5) instanceof frame.contentWindow.Number);</pre>
+
+    <div class="result-box">
+        Class constructor C cannot be invoked without 'new' false true<br>
+        object true
+    </div>
+
+    <p>Ошибка — из реалма класса: примечание к шагу с классом говорит прямо, что её создают в calleeContext. И обёртку для
+    <code>this</code> на шаге 3 ToObject делает в реалме функции — это примечание к OrdinaryCallBindThis. А
+    NewFunctionEnvironment из шага 1 получает newTarget: у [[Call]] это undefined, у [[Construct]] — тот, кого вызвали
+    с <code>new</code>. Отсюда <code>new.target</code> (день 9):</p>
+
+    <pre class="code js">function seen() { console.log(new.target === seen); }
+seen();
+new seen();</pre>
+
+    <div class="result-box">
+        false<br>
+        true
+    </div>
+
+    <h2 id="construct">13. [[Construct]] по шагам</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects-construct-argumentslist-newtarget">[[Construct]]</a>
+    (10.2.2) зависит от [[ConstructorKind]]:</p>
+
+    <ol>
+        <li>base: <code>this</code> = OrdinaryCreateFromConstructor(newTarget) — прототип берётся у того, кого вызвали
+            через <code>new</code>;</li>
+        <li>PrepareForOrdinaryCall(F, newTarget); у base — привязать <code>this</code> и поставить поля
+            (InitializeInstanceElements, день 7);</li>
+        <li>тело;</li>
+        <li>вернули объект — он и результат; иначе base отдаёт <code>this</code>; derived: вернули не undefined —
+            TypeError, иначе <code>this</code> из окружения — без <code>super()</code> там пусто, ReferenceError.</li>
+    </ol>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 172" role="img" aria-label="[[Construct]]. base: this создаётся сразу из prototype newTarget, потом поля, тело, return объекта заменяет this, иначе this. derived: this нет, тело, this создаёт super() у родителя вместе с полями, return объекта заменяет, undefined — this или ReferenceError без super, иначе TypeError">
+            <text x="10" y="40" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">base</text>
+            <rect x="62" y="16" width="170" height="44" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="72" y="35" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">this — из prototype</text>
+            <text x="72" y="51" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">newTarget</text>
+            <rect x="252" y="16" width="120" height="44" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="262" y="35" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">поля, потом</text>
+            <text x="262" y="51" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">тело</text>
+            <rect x="392" y="16" width="238" height="44" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="402" y="35" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">return объекта — он;</text>
+            <text x="402" y="51" font-family="Segoe UI, sans-serif" font-size="11" fill="#9d174d">иначе this (примитив не важен)</text>
+            <path d="M 234 38 L 248 38" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d14-arrow)"/>
+            <path d="M 374 38 L 388 38" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d14-arrow)"/>
+
+            <text x="10" y="112" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">derived</text>
+            <rect x="62" y="88" width="170" height="44" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="72" y="107" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">this нет: его даст</text>
+            <text x="72" y="123" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">super() вместе с полями</text>
+            <rect x="252" y="88" width="120" height="44" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="262" y="107" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">тело</text>
+            <rect x="392" y="88" width="238" height="44" rx="8" fill="#f0f9ff" stroke="#0ea5e9" stroke-width="2"/>
+            <text x="402" y="107" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">объект — он; undefined — this</text>
+            <text x="402" y="123" font-family="Segoe UI, sans-serif" font-size="11" fill="#075985">(нет — ReferenceError); иначе TypeError</text>
+            <path d="M 234 110 L 248 110" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d14-arrow)"/>
+            <path d="M 374 110 L 388 110" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d14-arrow)"/>
+
+            <text x="10" y="162" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Прототип нового объекта в обоих случаях — от newTarget, а не от того класса, чьё тело выполняется.</text>
+        </svg>
+        <figcaption>[[Construct]] базового и производного конструктора</figcaption>
+    </figure>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+function Base() { this.a = 1; return 42; }
+function Swap() { this.a = 1; return { swapped: true }; }
+class Derived extends Object { constructor() { super(); return 1; } }
+class NoSuper extends Object { constructor() {} }
+console.log(new Base().a, new Swap().swapped, run(() =&gt; new Derived()), "|", run(() =&gt; new NoSuper()));
+class P { constructor() { this.kind = new.target.name; } }
+class Q extends P {}
+const q = new Q();
+console.log(q.kind, Object.getPrototypeOf(q) === Q.prototype);</pre>
+
+    <div class="result-box">
+        1 true TypeError: Derived constructors may only return object or undefined | ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor<br>
+        Q true
+    </div>
+
+    <p>Объект для <code>Q</code> создал [[Construct]] базового <code>P</code>, но прототип взял у newTarget —
+    <code>Q</code>. Поля производного класса ставит сам <code>super()</code> (13.3.7.1): Construct родителя,
+    BindThisValue, потом InitializeInstanceElements — поэтому они появляются после тела родителя и до строки, что идёт
+    за <code>super()</code> (день 12, задание 3).</p>
+
+    <h2 id="make">14. Имя, длина и prototype</h2>
+
+    <p>Разделы 10.2.3–10.2.10 — как функция собирается (день 12): OrdinaryFunctionCreate — объект со слотами таблицы
+    25, [[Call]] и <code>length</code>; MakeConstructor — [[Construct]] и <code>prototype</code>; MakeClassConstructor —
+    [[IsClassConstructor]]; MakeMethod — [[HomeObject]]; DefineMethodProperty — свойство-метод;
+    <a href="https://tc39.es/ecma262/2026/#sec-setfunctionname">SetFunctionName</a> — <code>name</code>: символ даёт
+    «[описание]» или пустую строку, приставка пишется через пробел. У <code>name</code> и <code>length</code> флаги
+    одни: незаписываемые, неперечисляемые, удаляемые.</p>
+
+    <pre class="code js">const s = Symbol("знак");
+const o = { [s]() {}, [Symbol()]() {}, get word() { return 1; } };
+const syms = Object.getOwnPropertySymbols(o);
+console.log(o[s].name, JSON.stringify(o[syms[1]].name), Object.getOwnPropertyDescriptor(o, "word").get.name, function f() {}.bind().name);
+const d = Object.getOwnPropertyDescriptor(function g(a, b) {}, "name");
+console.log(d.writable, d.enumerable, d.configurable);
+class N { static name() { return "метод"; } }
+console.log(typeof N.name, N.name());</pre>
+
+    <div class="result-box">
+        [знак] "" get word bound f<br>
+        false false true<br>
+        function метод
+    </div>
+
+    <p>Имя класс получает до своих элементов, а <code>name</code> удаляемое — и статический метод с этим именем его
+    заменяет (DefineMethodProperty).</p>
+
+    <h3 id="chrome">Chrome против текста: caller и arguments</h3>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-addrestrictedfunctionproperties">AddRestrictedFunctionProperties</a>
+    (10.2.4) CreateIntrinsics зовёт для <code>Function.prototype</code>: <code>caller</code> и <code>arguments</code> —
+    аксессоры, у которых и геттер, и сеттер — %ThrowTypeError% (10.2.4.1): одна безымянная функция длины 0, которая
+    бросает всегда. Её же получает <code>callee</code> у <code>arguments</code> строгой функции.</p>
+
+    <pre class="code js">const c = Object.getOwnPropertyDescriptor(Function.prototype, "caller");
+const thrower = Object.getOwnPropertyDescriptor((function () { "use strict"; return arguments; })(), "callee").get;
+function sloppy() { return sloppy.caller === outer; }
+function outer() { return sloppy(); }
+console.log(c.get === thrower, c.get === c.set, JSON.stringify([c.get.name, thrower.name]), outer());</pre>
+
+    <div class="result-box">
+        false false ["get caller",""] true
+    </div>
+
+    <p>По тексту первые три значения были бы <code>true true ["",""]</code>, а <code>outer()</code> бросил бы
+    TypeError — и строки не было бы вовсе. Chrome 156 ставит
+    свои аксессоры: у строгой функции они бросают, у нестрогой во время вызова отдают того, кто её вызвал. MDN называет
+    это нестандартным и устаревшим (страницы <code>Function.prototype.caller</code> и <code>arguments</code> — день
+    31).</p>
+
+    <h2 id="fdi">15. FunctionDeclarationInstantiation целиком</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-functiondeclarationinstantiation">10.2.11</a> обещали дни 12 и 13:
+    окружения параметров и тела — раздел 3 дня 12, окружение для eval в умолчаниях — день 13. Все шаги:</p>
+
+    <ol>
+        <li>собрать имена: параметры, есть ли повторы, простой ли список, есть ли код; имена var, лексические, функции
+            тела — с конца, из одноимённых побеждает последняя;</li>
+        <li>нужен ли <code>arguments</code>: нет у стрелки, при параметре с этим именем и — если в параметрах нет кода —
+            при функции или <code>let</code> с этим именем в теле;</li>
+        <li>привязки параметров и <code>arguments</code>: связанный у нестрогого простого списка, иначе нет;</li>
+        <li>значения параметров слева направо; при повторах — без окружения, как присваивание, последний побеждает;</li>
+        <li>var тела: без кода в параметрах — в то же окружение, и var с именем параметра сохраняет его значение;</li>
+        <li>приложение B — функции в блоках (день 31); лексические имена — без значения; функции тела — сразу объектами,
+            поверх параметров.</li>
+    </ol>
+
+    <pre class="code js">function dup(a, a) { return a; }
+function shadowParam(x) { function x() {} return typeof x; }
+function copyVar(x) { var x; return x; }
+function argsFn() { function arguments() {} return typeof arguments; }
+function argsParam(arguments) { return arguments; }
+function argsLet() { let arguments = "let"; return arguments; }
+console.log(dup(1, 2), shadowParam(1), copyVar(5), argsFn(), argsParam("параметр"), argsLet());</pre>
+
+    <div class="result-box">
+        2 function 5 function параметр let
+    </div>
+
+    <p>Функция тела записана последней и закрыла параметр <code>x</code>. В трёх последних объект
+    <code>arguments</code> не создавался вовсе — шаг 2. Повтор имён шаг 4 допускает только у нестрогого простого
+    списка: в строгом коде или с умолчанием это ранняя ошибка «Duplicate parameter name not allowed in this context»
+    (день 8).</p>
+
+    <h2 id="builtin">16. Встроенные функции</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-built-in-function-objects">10.3</a>: встроенная функция — тоже
+    обычный объект, но со слотами [[Realm]], [[InitialName]] (его печатает <code>toString</code>, 20.2.3.5) и [[Async]].
+    Её [[Call]] и [[Construct]] (10.3.1–10.3.2) идут в BuiltinCallOrConstruct (10.3.3): контекст без ScriptOrModule и
+    выполнение «по описанию функции». [[Construct]] есть только у описанных как конструктор. CreateBuiltinFunction
+    (10.3.4) ставит <code>length</code> и <code>name</code>, но не <code>prototype</code>:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log("prototype" in Math.max, run(() =&gt; new Math.max()), Math.max.name, Math.max.length, String(Math.max));
+console.log("prototype" in Array, Array.prototype.map.length, run(() =&gt; new Array.prototype.map()), Object.getOwnPropertyNames(Math.max).join());</pre>
+
+    <div class="result-box">
+        false TypeError: Math.max is not a constructor max 2 function max() { [native code] }<br>
+        true 1 TypeError: Array.prototype.map is not a constructor length,name
+    </div>
+
+    <p>Свойство <code>name</code> можно переопределить, а <code>toString</code> встроенной функции берёт имя из
+    [[InitialName]] (20.2.3.5):</p>
+
+    <pre class="code js">Object.defineProperty(Math.max, "name", { value: "maximum" });
+console.log(String(Math.max), Math.max.name);</pre>
+
+    <div class="result-box">
+        function max() { [native code] } maximum
+    </div>
+
+    <h2 id="cards">17. «Карточки 2.0»: геттер без сеттера</h2>
+
+    <p>Карточка «Карточек 2.0» отдаёт поля только геттерами:</p>
+
+    <pre class="code js">// card.js, день 33 курса 2 — геттеры Card
+  get id() {
+    return this.#id;
+  }
+  get word() {
+    return this.#word;
+  }</pre>
+
+    <p>Модель — что будет с записью в <code>word</code> (модули строгие, поэтому и модель строгая):</p>
+
+    <pre class="code js">"use strict";
+const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class Card { #word; constructor(word) { this.#word = word; } get word() { return this.#word; } }
+const card = new Card("kitap");
+console.log(run(() =&gt; { card.word = "galam"; }), card.word);
+Object.defineProperty(card, "word", { value: "galam" });
+console.log(card.word, JSON.stringify(card), JSON.stringify({ ...new Card("suw") }));</pre>
+
+    <div class="result-box">
+        TypeError: Cannot set property word of #&lt;Card&gt; which has only a getter kitap<br>
+        galam {} {}
+    </div>
+
+    <p>Присваивание дошло по цепочке до аксессора без сеттера — false, в строгом коде TypeError. А
+    <code>defineProperty</code> по [[Set]] не ходит: карточка расширяемая, и ValidateAndApplyPropertyDescriptor создаёт
+    своё свойство, закрывающее геттер. <code>JSON.stringify</code> и <code>{ ...card }</code> пусты: своих
+    перечисляемых ключей нет — геттеры в прототипе, поля приватные. Закрыть дыру можно <code>Object.freeze(this)</code>
+    в конце конструктора — но у этого есть цена:</p>
+
+    <pre class="code js">"use strict";
+const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class Card { #word; constructor(word) { this.#word = word; Object.freeze(this); } get word() { return this.#word; } }
+class BigCard extends Card { level = 2; }
+const card = new Card("kitap");
+console.log(run(() =&gt; Object.defineProperty(card, "word", { value: "galam" })), card.word, "|", run(() =&gt; new BigCard("suw")));</pre>
+
+    <div class="result-box">
+        TypeError: Cannot define property word, object is not extensible kitap | TypeError: Cannot define property level, object is not extensible
+    </div>
+
+    <p>Шаг 1 ValidateAndApplyPropertyDescriptor: своего нет, объект нерасширяемый — false. Но та же проверка ловит и
+    поле наследника: поля <code>BigCard</code> ставятся после <code>super()</code>, когда карточка уже заморожена.
+    Приватному полю заморозка не мешает: <code>#word</code> — не свойство, [[DefineOwnProperty]] его не касается.</p>
+
+    <h2 id="next">18. Что будет завтра</h2>
+
+    <p>Сегодня — обычные объекты и функции изнутри: одиннадцать методов 10.1, [[Call]] и [[Construct]],
+    FunctionDeclarationInstantiation и встроенные функции. Завтра, на дне 15, — экзотические объекты: массив с его
+    <code>length</code>, строка, <code>arguments</code> и связанная функция — у них часть методов своя.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Раздел</th><th>Что делает и где мы это видели</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-and-exotic-objects-behaviours">10 Ordinary and Exotic Objects Behaviours</a></td><td>обычные и экзотические объекты</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots">10.1 Ordinary Object Internal Methods and Internal Slots</a></td><td>[[Prototype]], [[Extensible]], правила наследования</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-getprototypeof">10.1.1 [[GetPrototypeOf]]</a></td><td>прочитать [[Prototype]]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-setprototypeof-v">10.1.2 [[SetPrototypeOf]]</a></td><td>нерасширяемый и цикл — false</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-isextensible">10.1.3 [[IsExtensible]]</a></td><td>прочитать [[Extensible]]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-preventextensions">10.1.4 [[PreventExtensions]]</a></td><td>[[Extensible]] = false навсегда</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-getownproperty-p">10.1.5 [[GetOwnProperty]]</a></td><td>полный дескриптор или undefined</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-defineownproperty-p-desc">10.1.6 [[DefineOwnProperty]]</a></td><td>ValidateAndApplyPropertyDescriptor (день 5 курса 2)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-hasproperty-p">10.1.7 [[HasProperty]]</a></td><td>своё или вопрос прототипу</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-get-p-receiver">10.1.8 [[Get]]</a></td><td>вверх по цепочке с Receiver</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-set-p-v-receiver">10.1.9 [[Set]]</a></td><td>три ветки, override mistake (день 7 курса 2)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-delete-p">10.1.10 [[Delete]]</a></td><td>только configurable</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinary-object-internal-methods-and-internal-slots-ownpropertykeys">10.1.11 [[OwnPropertyKeys]]</a></td><td>индексы, строки, символы</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinaryobjectcreate">10.1.12 OrdinaryObjectCreate</a></td><td>пустой объект с прототипом</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinarycreatefromconstructor">10.1.13 OrdinaryCreateFromConstructor</a></td><td>объект для <code>new</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-getprototypefromconstructor">10.1.14 GetPrototypeFromConstructor</a></td><td><code>prototype</code> или прототип реалма конструктора</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-requireinternalslot">10.1.15 RequireInternalSlot</a></td><td>нет слота — TypeError</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects">10.2 ECMAScript Function Objects</a></td><td>слоты таблицы 25 (день 1 курса 2)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects-call-thisargument-argumentslist">10.2.1 [[Call]]</a></td><td>контекст, класс — TypeError, <code>this</code>, тело</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects-construct-argumentslist-newtarget">10.2.2 [[Construct]]</a></td><td>base и derived, правила return</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-ordinaryfunctioncreate">10.2.3 OrdinaryFunctionCreate</a></td><td>объект функции (день 12)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-addrestrictedfunctionproperties">10.2.4 AddRestrictedFunctionProperties</a></td><td><code>caller</code> и <code>arguments</code> — %ThrowTypeError%</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-makeconstructor">10.2.5 MakeConstructor</a></td><td>[[Construct]] и <code>prototype</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-makeclassconstructor">10.2.6 MakeClassConstructor</a></td><td>[[IsClassConstructor]]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-makemethod">10.2.7 MakeMethod</a></td><td>[[HomeObject]]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-definemethodproperty">10.2.8 DefineMethodProperty</a></td><td>свойство-метод</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-setfunctionname">10.2.9 SetFunctionName</a></td><td><code>name</code>: символ, приставка</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-setfunctionlength">10.2.10 SetFunctionLength</a></td><td><code>length</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-functiondeclarationinstantiation">10.2.11 FunctionDeclarationInstantiation</a></td><td>параметры, <code>arguments</code>, var, функции (дни 12, 13)</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-built-in-function-objects">10.3 Built-in Function Objects</a></td><td>[[Realm]], [[InitialName]], [[Async]]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-built-in-function-objects-call-thisargument-argumentslist">10.3.1 [[Call]]</a></td><td>BuiltinCallOrConstruct</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-built-in-function-objects-construct-argumentslist-newtarget">10.3.2 [[Construct]]</a></td><td>только у конструкторов</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-builtincallorconstruct">10.3.3 BuiltinCallOrConstruct</a></td><td>контекст без ScriptOrModule</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-createbuiltinfunction">10.3.4 CreateBuiltinFunction</a></td><td><code>length</code> и <code>name</code>, без <code>prototype</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// обычный объект: 11 методов из 10.1 и слоты [[Prototype]], [[Extensible]]; не так — экзотический
+// [[SetPrototypeOf]]: тот же — true; нерасширяемый — false; цикл — false
+// [[DefineOwnProperty]]: нет свойства — создать (флаги по умолчанию false); не configurable — почти ничего нельзя
+// [[Get]]: вверх по цепочке, Receiver прежний; геттер вызван с this = Receiver
+// [[Set]]: данные в прототипе — своё у Receiver (незаписываемые — false); аксессор — сеттер с this = Receiver
+// false от [[Set]]: строгий код — TypeError, нестрогий — молча; поле класса — define, сеттер не зовётся
+// ключи: индексы по возрастанию, строки и символы — по времени создания
+// [[Call]]: класс — TypeError; [[Construct]]: прототип от newTarget, derived без super() — ReferenceError
+// FunctionDeclarationInstantiation: функции тела поверх параметров, arguments не всегда</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>obj.fixed = "своё"</code> не создаёт своего свойства, если <code>fixed</code> в прототипе
+                незаписываемый?
+                <details class="answer"><summary>Ответ</summary>
+                    OrdinarySetWithOwnDescriptor находит дескриптор данных в прототипе с writable: false и сразу
+                    отвечает false — до создания свойства у Receiver.
+                </details>
+            </li>
+            <li>Можно ли неудаляемому записываемому свойству сменить значение? А сделать его незаписываемым и обратно?
+                <details class="answer"><summary>Ответ</summary>
+                    Значение и writable: false — да; writable: true после этого — нет: шаг 3
+                    ValidateAndApplyPropertyDescriptor.
+                </details>
+            </li>
+            <li>В каком порядке <code>Object.keys</code> выдаст ключи <code>{ b: 1, 10: 1, a: 1, 2: 1 }</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>2, 10, b, a</code>: сначала индексы по возрастанию, потом строки по времени создания.
+                </details>
+            </li>
+            <li>Почему поле <code>title = "поле"</code> наследника не вызывает сеттер <code>title</code> из класса
+                родителя?
+                <details class="answer"><summary>Ответ</summary>
+                    Поле определяется через CreateDataPropertyOrThrow, то есть [[DefineOwnProperty]], а сеттер ищет
+                    только [[Set]].
+                </details>
+            </li>
+            <li>Что вернёт <code>new F()</code>, если <code>F</code> — обычная функция и делает
+                <code>return 42</code>? А производный класс с <code>return 42</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Обычная (base) отдаст <code>this</code>, примитив не важен. Производный — TypeError: вернуть можно
+                    только объект или undefined.
+                </details>
+            </li>
+            <li>Почему геттер, найденный в прототипе, видит в <code>this</code> объект-наследник, а не прототип?
+                <details class="answer"><summary>Ответ</summary>
+                    [[Get]] прототипа вызван с тем же Receiver, с которого начали, и OrdinaryGet зовёт геттер с
+                    <code>this</code> = Receiver.
+                </details>
+            </li>
+            <li>Зачем [[Call]] создаёт TypeError для класса уже после PrepareForOrdinaryCall?
+                <details class="answer"><summary>Ответ</summary>
+                    Чтобы ошибка была из реалма класса: в calleeContext текущий реалм — реалм функции.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain">MDN Web Docs</a>
+        (Inheritance and the prototype chain, Object.defineProperty(), Enumerability and ownership of properties, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

@@ -26,7 +26,88 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-15');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
+// a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['false x-y bound bound Tag 0', 'x-y true true true'],
+  'tasks #1': ['8 0,1,2,3,4,7', '2 0,1', '4 0,1 false', 'ok TypeError TypeError TypeError a,b,C,'],
+  'tasks #2': ['0 1 2 5 length title 01 i 3', 'TypeError ok ok ok 0 1 2 3 title 01'],
+  'tasks #8': ['ok TypeError TypeError TypeError TypeError TypeError | false true true false true'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+const SOLUTIONS = {
+  myBind: `function myBind(target, boundThis, ...boundArgs) {
+  const bound = function (...args) {
+    if (new.target !== undefined) return new target(...boundArgs, ...args);
+    return Function.prototype.apply.call(target, boundThis, [...boundArgs, ...args]);
+  };
+  Object.setPrototypeOf(bound, Object.getPrototypeOf(target));
+  const len = Object.hasOwn(target, "length") && typeof target.length === "number" ? target.length : 0;
+  Object.defineProperty(bound, "length", { value: Math.max(0, Math.trunc(len) - boundArgs.length) });
+  Object.defineProperty(bound, "name", { value: "bound " + (typeof target.name === "string" ? target.name : "") });
+  bound.prototype = target.prototype;
+  return bound;
+}`,
+  setLength: `function setLength(o, desc) {
+  const define = (k, d) => { try { Object.defineProperty(o, k, d); return true; } catch { return false; } };
+  if (!("value" in desc)) return define("length", desc);
+  const newLen = desc.value >>> 0;
+  if (newLen !== Number(desc.value)) throw new RangeError("Invalid array length");
+  const old = Object.getOwnPropertyDescriptor(o, "length");
+  if (newLen >= old.value) return define("length", { ...desc, value: newLen });
+  if (!old.writable) return false;
+  const newWritable = desc.writable !== false;
+  if (!define("length", { value: newLen, writable: true })) return false;
+  const isIndex = (k) => String(Number(k)) === k && Number.isInteger(Number(k)) && Number(k) >= 0 && Number(k) <= 2 ** 32 - 2;
+  const doomed = Object.getOwnPropertyNames(o).filter(isIndex).map(Number).filter((i) => i >= newLen).sort((x, y) => y - x);
+  for (const i of doomed) {
+    if (!delete o[i]) {
+      define("length", newWritable ? { value: i + 1 } : { value: i + 1, writable: false });
+      return false;
+    }
+  }
+  if (!newWritable) define("length", { writable: false });
+  return true;
+}`,
+  mappedIndices: `function mappedIndices(params, argCount) {
+  const seen = new Set(), result = [];
+  for (let i = params.length - 1; i >= 0; i--) {
+    if (seen.has(params[i])) continue;
+    seen.add(params[i]);
+    if (i < argCount) result.unshift([i, params[i]]);
+  }
+  return result;
+}`,
+  Deck: `class Deck {
+  #words;
+  #history = [];
+  constructor(words) { this.#words = [...words]; }
+  answer(word) { this.#history.push(word); }
+  get history() { return Object.freeze([...this.#history]); }
+}`,
+  stringOwn: `function stringOwn(str, key) {
+  if (typeof key !== "string") return undefined;
+  const index = key === "-0" ? -0 : String(Number(key)) === key ? Number(key) : undefined;
+  if (index === undefined || !Number.isInteger(index)) return undefined;
+  if (Object.is(index, -0) || index < 0) return undefined;
+  if (index >= str.length) return undefined;
+  return { value: str[index], writable: false, enumerable: true, configurable: false };
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -116,6 +197,7 @@ const callersOf = (spec, op) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -131,13 +213,20 @@ const callersOf = (spec, op) => {
         check(missing.length === 0, `${name} #${i}: quoted lines are in ${QUOTES[first]}${missing.length ? ` — missing: ${missing.join(' | ')}` : ''}`);
         continue;
       }
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && lines.length === out.length, `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (EXPECT[`${name} #${i}`]) check(same(out, EXPECT[`${name} #${i}`]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
@@ -227,6 +316,52 @@ console.log(run(() => Object.defineProperty(a, "length", { value: 1, writable: f
 function d(x, x) { arguments[1] = "новое"; return x; }
 console.log(d(1, 2), d(1));`, ['1,x,y, 1', '3 a,b,c', 'TypeError: Cannot delete property \'2\' of [object Array] 3 a,b,c false', 'новое undefined'],
   'student homework 1–3: this of the first bind, arguments of both, length 3 − 2 = 1; deletion stops at index 2 — length 3, writable: false is set even so; d(1, 2) maps index 1 to x, d(1) maps nothing', 'homework.html');
+  // the tasks: what the criteria ask to find, with the reference solutions
+  await told(`${SOLUTIONS.myBind}
+function show(a, b) { return this.name + " " + a + " " + b; }
+class Point { constructor(x, y) { this.x = x; this.y = y; } }
+const OnAxis = myBind(Point, null, 0);
+class Sub extends OnAxis {}
+const RealAxis = Point.bind(null, 0);
+RealAxis.prototype = Point.prototype;
+class RealSub extends RealAxis {}
+const mine = myBind(show, null);
+delete mine.prototype;
+console.log(myBind(myBind(show, { name: "1" }), { name: "2" })(3, 4) === show.bind({ name: "1" }).bind({ name: "2" })(3, 4), new Sub(1) instanceof Sub, new RealSub(1) instanceof RealSub, Object.hasOwn(mine, "prototype"), Object.getOwnPropertyDescriptor(mine, "prototype").configurable);`,
+  ['true false true true false'], 'task 4: myBind of myBind agrees with bind of bind; Sub of the model is not a Sub, of a real bound function it is; prototype of the wrapper is not configurable and stays', 'task4.html');
+  await told(`${SOLUTIONS.setLength}
+const like = (...items) => { const o = { ...items }; Object.defineProperty(o, "length", { value: items.length, writable: true, enumerable: false, configurable: false }); return o; };
+const cases = [[{ value: 0 }], [{ value: 6 }], [{ value: 2, writable: false }], [{ writable: false }], [{ value: 0 }, { value: 3 }], [{ value: 2, writable: false }, { value: 1 }]];
+const state = (o, res) => JSON.stringify([res, o.length, Object.keys(o), Object.getOwnPropertyDescriptor(o, "length").writable]);
+const realRun = (descs) => { const r = ["a", "b", "c", "d"]; Object.defineProperty(r, 1, { configurable: false }); return state(r, descs.map((d) => { try { Object.defineProperty(r, "length", d); return true; } catch { return false; } })); };
+const modelRun = (descs) => { const m = like("a", "b", "c", "d"); Object.defineProperty(m, 1, { configurable: false }); return state(m, descs.map((d) => setLength(m, d))); };
+let calls = 0, realCalls = 0;
+setLength(like("a"), { value: { valueOf() { calls++; return 0; } } });
+Object.defineProperty(["a"], "length", { value: { valueOf() { realCalls++; return 0; } } });
+console.log(cases.every((c) => realRun(c) === modelRun(c)), calls, realCalls);`,
+  ['true 2 2'], 'task 5: setLength agrees with Object.defineProperty on a real array (answer, length, keys, writable) on six sequences; valueOf is called twice by both', 'task5.html');
+  await told(`${SOLUTIONS.mappedIndices}
+const real = (params, n) => {
+  const names = [...new Set(params)];
+  const fn = new Function(...params, "for (let i = 0; i < " + params.length + "; i++) arguments[i] = 'w' + i; return [" + names.join(",") + "];");
+  const after = fn(...Array.from({ length: n }, (_, i) => "v" + i));
+  return names.map((p, j) => [after[j], p]).filter(([v]) => typeof v === "string" && v.startsWith("w")).map(([v, p]) => [Number(v.slice(1)), p]).sort((x, y) => x[0] - y[0]);
+};
+const cases = [[["a", "b"], 1], [["a", "b", "c"], 5], [["x", "x"], 2], [["x", "x"], 1], [["a", "b", "a", "c"], 4], [["x", "y", "x"], 3]];
+console.log(cases.every(([p, n]) => JSON.stringify(real(p, n)) === JSON.stringify(mappedIndices(p, n))), JSON.stringify(real(["x", "x"], 1)));`,
+  ['true []'], 'task 6: on real sloppy functions writing arguments[i] the mapped indices agree with the model; x, x with one argument maps nothing', 'task6.html');
+  await told(`${RUN}class LeakyDeck { #history = []; answer(word) { this.#history.push(word); } get history() { return Object.freeze(this.#history); } }
+const leaky = new LeakyDeck();
+leaky.answer("kitap");
+const first = leaky.history;
+console.log(run(() => leaky.answer("galam")), leaky.history.join(), first === leaky.history);`,
+  ['TypeError: Cannot add property 1, object is not extensible kitap true'], 'task 7: freezing #history itself breaks the deck — the next answer throws', 'task7.html');
+  await told(`${SOLUTIONS.stringOwn}
+const keys = ["0", "3", "-0", "1.0", "01", "1e0", "-1", "Infinity", "NaN", "length"];
+const diff = [];
+for (const str of ["kit", "", "😀"]) for (const k of keys) if (JSON.stringify(stringOwn(str, k)) !== JSON.stringify(Object.getOwnPropertyDescriptor(new String(str), k))) diff.push(JSON.stringify(str) + ":" + k);
+console.log(diff.join(" "), String(Number("Infinity")) === "Infinity", String(Number("NaN")) === "NaN");`,
+  ['"kit":length "":length "😀":length true true'], 'task 8: stringOwn agrees with a real String object on every key but length; "Infinity" and "NaN" are canonical numbers', 'task8.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -367,6 +502,14 @@ console.log(d(1, 2), d(1));`, ['1,x,y, 1', '3 a,b,c', 'TypeError: Cannot delete 
     && inOrder(f('sec-set-immutable-prototype'), ['Let current be ? O. [[GetPrototypeOf]] ()', 'If SameValue (V, current) is true, return true', 'Return false'])
     && f('sec-properties-of-the-object-prototype-object').includes('is an immutable prototype exotic object'),
   'lecture 16: no creating operation, only %Object.prototype% and host objects; SetImmutablePrototype — the same true, else false; Object.prototype is one');
+  check(f('sec-makeconstructor').includes('"prototype", PropertyDescriptor { [[Value]] : prototype, [[Writable]] : writablePrototype, [[Enumerable]] : false, [[Configurable]] : false }')
+    && inOrder(f('sec-module-namespace-exotic-objects-defineownproperty-p-desc'), ['If P is a Symbol, return ! OrdinaryDefineOwnProperty (O, P, Desc)', 'If current is undefined, return false',
+      'If Desc has a [[Configurable]] field and Desc. [[Configurable]] is true, return false', 'If Desc has an [[Enumerable]] field and Desc. [[Enumerable]] is false, return false',
+      'If IsAccessorDescriptor (Desc) is true, return false', 'If Desc has a [[Writable]] field and Desc. [[Writable]] is false, return false',
+      'If Desc has a [[Value]] field, return SameValue (Desc. [[Value]], current. [[Value]])', 'Return true'])
+    && inOrder(f('sec-module-namespace-exotic-objects-hasproperty-p'), ['If P is a Symbol, return ! OrdinaryHasProperty (O, P)', 'If exports contains P, return true', 'Return false'])
+    && inOrder(f('sec-module-namespace-exotic-objects-delete-p'), ['If P is a Symbol, then Return ! OrdinaryDelete (O, P)', 'If exports contains P, return false', 'Return true']),
+  'tasks 4, 9: MakeConstructor (10.2.5) — prototype is not configurable; 10.4.6.6 step by step, 10.4.6.7 and 10.4.6.10 — a symbol goes to the ordinary method, an unknown name is deleted «true»');
 
   // the MDN pages of the footer and of the text
   const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/${p}/index.md`], { encoding: 'utf8' });

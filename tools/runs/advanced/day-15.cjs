@@ -5,8 +5,9 @@
 // it; an uncaught error is printed as "Uncaught TypeError: …". The context is Ashgabat time and Russian.
 //   node tools/runs/advanced/day-15.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-15.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the quoted due of deck.js (day 33 of course 2) is the
-// real one; the cheatsheet runs without an error; the experiments the lecture only tells about (what an assignment to
+// Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
+// console.log lines say, and the homework (1–3 in Chrome, 4 in the text of MDN); the quoted due of deck.js (day 33 of
+// course 2) is the real one; the cheatsheet runs without an error; the experiments the lecture only tells about (what an assignment to
 // an index and to length of an array calls and what map asks, seen through the traps of a Proxy — the run may use what
 // the lecture may not; the holes in Chrome's preview; the edge cases of length and name of a bound function, bind of an
 // arrow, bind of bind with new; the species getter; the flags of length; silent writes to a string in sloppy code; the
@@ -25,7 +26,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-15');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -133,7 +137,8 @@ const callersOf = (spec, op) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
   }
@@ -210,6 +215,18 @@ const kid = Object.create(root);
 console.log(run(() => Object.setPrototypeOf(root, kid)), "|", run(() => Object.setPrototypeOf(root, Object.create(null))), "|", run(() => Object.setPrototypeOf(EventTarget.prototype, {})), "|", run(() => Object.setPrototypeOf(window, Object.getPrototypeOf(window))), Object.getPrototypeOf(Object.prototype));`,
   ['TypeError: Cyclic __proto__ value | ok | TypeError: Immutable prototype object \'#<EventTarget>\' cannot have their prototype set | ok null'],
   'lecture 16: an ordinary [[SetPrototypeOf]] stops only a cycle, a fresh null-prototype object passes; EventTarget.prototype is immutable too; the same prototype of window is fine', 'immutable.html');
+  // the notes: the homework, in Chrome
+  await told(`${RUN}function f(a, b, c) { return [this.n, a, b, c].join(); }
+const fn = f.bind({ n: 1 }, "x").bind({ n: 2 }, "y");
+console.log(fn(), fn.length);
+const a = ["a", "b", "c", "d"];
+Object.defineProperty(a, 2, { configurable: false });
+a.length = 1;
+console.log(a.length, a.join());
+console.log(run(() => Object.defineProperty(a, "length", { value: 1, writable: false })), a.length, a.join(), Object.getOwnPropertyDescriptor(a, "length").writable);
+function d(x, x) { arguments[1] = "новое"; return x; }
+console.log(d(1, 2), d(1));`, ['1,x,y, 1', '3 a,b,c', 'TypeError: Cannot delete property \'2\' of [object Array] 3 a,b,c false', 'новое undefined'],
+  'student homework 1–3: this of the first bind, arguments of both, length 3 − 2 = 1; deletion stops at index 2 — length 3, writable: false is set even so; d(1, 2) maps index 1 to x, d(1) maps nothing', 'homework.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -356,6 +373,13 @@ console.log(run(() => Object.setPrototypeOf(root, kid)), "|", run(() => Object.s
   check(['reference/global_objects/function/bind', 'reference/global_objects/array/length', 'reference/functions/arguments', 'reference/statements/import', 'reference/global_objects/string/length']
     .every((p) => mdn(p).startsWith('---\ntitle:')),
   'footer and text: the MDN pages Function.prototype.bind(), Array: length, The arguments object, import, String: length are in the cache');
+  {
+    const args = mdn('reference/functions/arguments');
+    const assigning = args.slice(args.indexOf('### Assigning to indices'), args.indexOf('### arguments is an array-like object'));
+    check(assigning.includes('Non-strict functions that only have simple parameters (that is, no rest, default, or destructured parameters) will sync the new value of parameters with the `arguments` object, and vice versa')
+      && !/delete|accessor|writable|not passed/i.test(assigning),
+    'student homework 4: MDN «Assigning to indices» — simple non-strict functions sync «and vice versa»; it names no exception (delete, an accessor, writable: false, an argument not passed)');
+  }
 
   // the days the lecture points to
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');

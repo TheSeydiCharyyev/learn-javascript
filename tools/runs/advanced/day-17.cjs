@@ -4,7 +4,9 @@
 // printed as "Uncaught TypeError: …". The context is Ashgabat time and Russian.
 //   node tools/runs/advanced/day-17.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-17.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the cheatsheet runs without an error; the experiments
+// Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
+// console.log lines say, the table of Symbol.keyFor holds, and the homework (1–4 in Chrome, 4 also in the text of
+// MDN); the cheatsheet runs without an error; the experiments
 // the lecture only tells about (the flags and length of all 13 functions of Reflect and its tag; apply without an
 // array; Array.of creates through this; with and Symbol.unscopables, and a non-null prototype that hides toString —
 // the run may use what the lecture may not; includes, startsWith, endsWith and matchAll refuse a RegExp; the flags of
@@ -23,7 +25,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-17');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -122,7 +127,8 @@ const stepPath = (html, needle) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
   }
@@ -167,6 +173,32 @@ console.log(fd.writable, fd.enumerable, fd.configurable, Object.getPrototypeOf(S
 const st = Object.getOwnPropertyDescriptor(Symbol.prototype, Symbol.toStringTag);
 console.log(d.writable, d.configurable, d.value.name, st.value, st.writable, st.configurable);`, ['false true [Symbol.toPrimitive] Symbol false true'],
   'lecture 9, 15: Date.prototype[Symbol.toPrimitive] is read-only but configurable; the tag of Symbol.prototype is "Symbol"', 'toprim-flags.html');
+  // the notes: the table of Symbol.keyFor and the homework, in Chrome (probe d17_student.txt before writing)
+  await told(`${RUN}console.log(Symbol.keyFor(Symbol("x")), Symbol.keyFor(Symbol.for("x")), Symbol.keyFor(Symbol.iterator), run(() => Symbol.keyFor(Object(Symbol.for("x")))));`,
+    ['undefined x undefined TypeError: [object Symbol] is not a symbol'], 'student table 3: keyFor — undefined for Symbol("x") and a well-known symbol, "x" from the registry, a wrapper is not a symbol', 'student-keyfor.html');
+  await told(`${RUN}const base = { n: 1, get v() { return this.n; } };
+const p = new Proxy(base, { get(t, k, r) { return Reflect.get(t, k, r); } });
+const kid = Object.create(p);
+kid.n = 2;
+const q = new Proxy(base, { get(t, k) { return Reflect.get(t, k); } });
+const kid2 = Object.create(q);
+kid2.n = 2;
+console.log(kid.v, p.v, kid2.v);
+class A { static [Symbol.toStringTag] = "Класс"; get [Symbol.toStringTag]() { return "Экземпляр"; } }
+console.log(String(new A()), Object.prototype.toString.call(A), Object.prototype.toString.call(A.prototype));
+class D extends Array { static get [Symbol.species]() { return undefined; } }
+class E extends Array { static get [Symbol.species]() { return 1; } }
+console.log(D.from([1, 2]).map((x) => x) instanceof D, D.from([1, 2]).map((x) => x) instanceof Array, D.of(1) instanceof D, run(() => E.from([1]).map((x) => x)));`,
+  ['2 1 1', '[object Экземпляр] [object Класс] [object Экземпляр]', 'false true true TypeError: object.constructor[Symbol.species] is not a constructor'],
+  'student homework 1–3: Reflect.get with receiver gives the getter the child, without it the target; the static tag names the class, the getter — instances and the prototype; species undefined — Array, of — D, species 1 — TypeError', 'student-homework.html');
+  await told(`${RUN}class Card { constructor(w) { this.w = w; } }
+class Other {}
+console.log(run(() => Card.apply(Object.create(Other.prototype), ["kitap"])), Reflect.construct(Card, ["kitap"], Other).w);
+function OneClass() { this.nt = new.target; }
+const o2 = Object.create(Object.prototype); OneClass.apply(o2, []);
+console.log(o2.nt, Reflect.construct(OneClass, [], Other).nt === Other);`,
+  ['TypeError: Class constructor Card cannot be invoked without \'new\' kitap', 'undefined true'],
+  'student homework 4: Object.create and apply — new.target undefined for a function, a class cannot be called at all; Reflect.construct works for both', 'student-homework4.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -282,6 +314,16 @@ console.log(d.writable, d.configurable, d.value.name, st.value, st.writable, st.
       && hasAll(mdn('function/symbol.hasinstance'), ['non-configurable and non-writable', 'security feature'])
       && mdn('array/symbol.unscopables').includes('ignored for `with` statement-binding purposes'),
     'lecture 1, 4, 7, 9–14: MDN — Reflect like Math, «default forwarding behavior», «the only way to construct…»; receiver of Reflect.get; the examples of toPrimitive and toStringTag; species «a protocol…»; unscopables «Avoid using a non-null-prototype object»; hasInstance of Function.prototype fixed for security');
+    // the notes: homework 4 quotes «Reflect.construct() vs. Object.create()»; MDN shows only functions, not a class
+    const construct = mdn('reflect/construct');
+    const section = construct.slice(construct.indexOf('### Reflect.construct() vs. Object.create()'), construct.indexOf('## Specifications'));
+    check(section.includes('while the end result is the same') && section.includes('the `new.target` operator will point to `undefined`') && !/\bclass\s+\w/.test(section),
+      'student homework 4: MDN «Reflect.construct() vs. Object.create()» — the end result is the same, new.target undefined; its examples are functions, no class');
+    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');
+    const footer = notes.slice(notes.indexOf('<div class="sources">'));
+    check(['(Reflect,', 'Reflect.construct()', 'Reflect.get()', 'Symbol.toPrimitive', 'Symbol.toStringTag', 'Symbol.species', 'Symbol.hasInstance'].every((s) => footer.includes(s))
+      && ['reflect', 'reflect/construct', 'reflect/get', 'symbol/toprimitive', 'symbol/tostringtag', 'symbol/species', 'symbol/hasinstance'].every((p) => pages.includes(p)),
+    'student: the MDN pages of the footer are pages of the plan, in the cache');
   }
 
   // the days the lecture points to, read as text without tags (a phrase may hold <code>)

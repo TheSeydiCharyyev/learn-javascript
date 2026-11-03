@@ -1,0 +1,344 @@
+// Course 3, day 18, in Chrome: the global object and the standard built-in objects. Every <pre class="code js"> block
+// of the lecture runs as the only <script> in the <body> of a clean page (one block appends an iframe, one fails as a
+// whole with a SyntaxError), the way a student would paste it into a file. Console output is rebuilt from Chrome's
+// preview objects, as DevTools prints it; an uncaught error is printed as "Uncaught TypeError: …". The context is
+// Ashgabat time and Russian.
+//   node tools/runs/advanced/day-18.cjs            every block: code head, output; checks below
+//   node tools/runs/advanced/day-18.cjs --quiet    only the checks
+// Checks: a result-box right after a block equals its output; the cheatsheet runs without an error; the experiments
+// the lecture only tells about (caller on Function.prototype is not %ThrowTypeError% in Chrome — the finding of the
+// day; Array.isArray of an array from an iframe; for-in and a method assigned to Array.prototype; decodeURIComponent
+// leaves +; the table of URI characters); what the lecture says about the text of ECMA-262 2026 (chapters 17–19, 20.3,
+// the terms of 4.4 and the operations around them) is checked against tools/.cache/ecma262-2026.html; the two MDN
+// pages it quotes are in tools/.cache/mdn-content.git and say what it quotes; the days it points to say what it says;
+// the reference table holds all 69 rows of the day's plan (all of ECMA-262) as links with their marks and every
+// tc39.es anchor exists, and every link whose text starts with a number names the section of that number.
+// Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
+const { chromium } = require('playwright');
+const path = require('node:path');
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+
+const ROOT = path.join(__dirname, '../../..');
+const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
+const DAY = path.join(ROOT, 'advanced/day-18');
+const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
+const PAGES = ['lecture'];
+const quiet = process.argv.includes('--quiet');
+
+const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
+const inner = (p) => (p.type === 'string' ? q(p.value) : p.value);
+const show = (a) => {
+  if (a.type === 'string') return a.value;
+  if (a.type === 'undefined') return 'undefined';
+  if (a.subtype === 'null') return 'null';
+  if (a.subtype === 'array') return `(${a.description.match(/\d+/)[0]}) [${a.preview.properties.map(inner).join(', ')}]`;
+  if (a.type === 'object' && a.subtype !== 'error' && a.preview) return `{${a.preview.properties.map((p) => `${p.name}: ${inner(p)}`).join(', ')}}`;
+  return String(a.value ?? a.unserializableValue ?? a.description);
+};
+
+const RUN = 'const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };\n';
+// an iframe and a module from a data: URL need a moment more before the page closes
+const wait = (code) => (code.includes('iframe') || code.includes('import(') ? 400 : 150);
+
+// run code as the only <script> in the <body> of a page; returns console lines and uncaught errors in order
+async function runScript(ctx, code, file = 'run.html') {
+  const html = `<!doctype html><meta charset="utf-8"><title>run</title><body><script>${code}\n</script></body>`;
+  await ctx.route(`http://day.test/${file}`, (route) => route.fulfill({ contentType: 'text/html', body: html }));
+  const p = await ctx.newPage();
+  const cdp = await ctx.newCDPSession(p);
+  const out = [];
+  cdp.on('Runtime.consoleAPICalled', (e) => out.push(e.args.map(show).join(' ')));
+  cdp.on('Runtime.exceptionThrown', (e) => {
+    const d = e.exceptionDetails;
+    out.push(`Uncaught ${(d.exception?.description ?? d.text).split('\n')[0]}`);
+  });
+  await cdp.send('Runtime.enable');
+  await p.goto(`http://day.test/${file}`);
+  await p.waitForTimeout(wait(code));
+  await p.close();
+  await ctx.unroute(`http://day.test/${file}`);
+  return out;
+}
+
+// one line of docs/coverage/*.csv: a title with a comma is in double quotes
+const csvLine = (line) => [...line.matchAll(/("(?:[^"]|"")*"|[^,]*)(?:,|$)/g)].map((m) => m[1].replace(/^"|"$/g, '').replace(/""/g, '"'));
+const textOf = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+// the same text in one line, without the spaces that removed tags leave before punctuation
+const flat = (html) => textOf(html).replace(/\s+/g, ' ').replace(/ ([,.)»])/g, '$1').replace(/([(«]) /g, '$1');
+// the own part of a clause: from its id to the first nested clause
+const clause = (spec, id) => {
+  const at = spec.indexOf(`id="${id}"`);
+  const rest = spec.slice(at);
+  const next = rest.slice(10).search(/<emu-(clause|annex)\b/);
+  return next === -1 ? rest : rest.slice(0, next + 10);
+};
+const inOrder = (text, words) => words.every((w, i) => text.includes(w) && (i === 0 || text.indexOf(words[i - 1]) < text.indexOf(w)));
+const hasAll = (text, words) => words.every((w) => text.includes(w));
+// the number of the step whose own text holds the words, as the spec writes it: 1, a, i, 1, a, i, …
+const stepPath = (html, needle) => {
+  const roman = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'];
+  const fmt = (p) => p.map((n, i) => (i % 3 === 0 ? n : i % 3 === 1 ? String.fromCharCode(96 + n) : roman[n - 1])).join('.');
+  const re = /<(\/?)(ol|li)\b[^>]*>/g;
+  let depth = -1;
+  const counts = [], cur = [];
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    if (m[2] === 'ol') { if (m[1]) depth--; else { depth++; counts[depth] = 0; } continue; }
+    if (m[1]) continue;
+    counts[depth]++; cur[depth] = counts[depth]; cur.length = depth + 1;
+    const rest = html.slice(re.lastIndex);
+    if (flat(rest.slice(0, rest.search(/<ol\b|<\/li>/))).includes(needle)) return fmt(cur);
+  }
+  return null;
+};
+
+(async () => {
+  const b = await chromium.launch({ headless: true, channel: 'chrome' });
+  const ctx = await b.newContext({ timezoneId: 'Asia/Ashgabat', locale: 'ru-RU' });
+  let bad = 0, checked = 0;
+  const check = (ok, text) => { checked++; if (!ok) bad++; if (!ok || !quiet) console.log(`${ok ? 'OK  ' : 'BAD '} ${text}`); };
+  const same = (a, x) => JSON.stringify(a) === JSON.stringify(x);
+
+  for (const name of PAGES) {
+    const src = await ctx.newPage();
+    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
+      const next = pre.nextElementSibling;
+      return {
+        code: pre.textContent,
+        box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
+        cheat: !!pre.closest('.cheatsheet'),
+      };
+    }));
+    await src.close();
+    if (!quiet) console.log(`\n===== ${name}: ${blocks.length} blocks`);
+
+    for (const [i, blk] of blocks.entries()) {
+      const first = blk.code.split('\n')[0];
+      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      if (!quiet) {
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        for (const l of out) console.log(`    > ${l}`);
+      }
+      if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      else check(false, `${name} #${i} ${first}: no result-box`);
+    }
+  }
+
+  // what the lecture only tells about (probes d18_a–e.txt before writing)
+  const told = async (code, want, text, file) => { const out = await runScript(ctx, code, file); check(same(out, want), `${text} ${JSON.stringify(out)}`); };
+  await told(`${RUN}const dc = Object.getOwnPropertyDescriptor(Function.prototype, "caller");
+const da = Object.getOwnPropertyDescriptor(Function.prototype, "arguments");
+const thrower = Object.getOwnPropertyDescriptor((function () { "use strict"; return arguments; })(), "callee").get;
+console.log(typeof dc.get, dc.get === dc.set, dc.get === thrower, da.get === thrower, dc.enumerable, dc.configurable);
+function sloppy() {}
+console.log(sloppy.caller, Object.hasOwn(sloppy, "caller"), Object.hasOwn(sloppy, "arguments"), run(() => Math.max.caller));`,
+  ['function false false false false true', 'null false false TypeError: \'caller\', \'callee\', and \'arguments\' properties may not be accessed on strict mode functions or the arguments objects for calls to them'],
+  'lecture 7 (finding): caller on Function.prototype — getter and setter differ and are not %ThrowTypeError% (10.2.4 wants both to be it); a sloppy function has no own caller or arguments and gets null; a built-in throws', 'caller.html');
+  await told(`const frame = document.body.appendChild(document.createElement("iframe"));
+const arr = new frame.contentWindow.Array(1, 2);
+console.log(arr instanceof Array, Array.isArray(arr));`, ['false true'], 'lecture 1: an array of another realm is not instanceof Array, Array.isArray knows it', 'realm-array.html');
+  await told(`Array.prototype.last = function () { return this[this.length - 1]; };
+const seen = [];
+for (const k in [7, 8]) seen.push(k);
+Object.defineProperty(Array.prototype, "first", { value() { return this[0]; }, writable: true, configurable: true });
+const seen2 = [];
+for (const k in [7, 8]) seen2.push(k);
+console.log(seen.join(), seen2.join(), [7, 8].last(), [7, 8].first());`, ['0,1,last 0,1,last 8 7'],
+  'lecture 6: a method assigned to Array.prototype is enumerable and for-in shows it, one defined non-enumerable is not seen', 'forin.html');
+  await told(`const sample = ";/?:@&=+$,#-_.!~*'() []";
+console.log([...sample].filter((c) => c !== " ").map((c) => c + (encodeURI(c) === c ? "U" : "-") + (encodeURIComponent(c) === c ? "C" : "-")).join(" "));
+console.log(decodeURIComponent("a+b"), decodeURIComponent("a%2Bb"), encodeURIComponent("a b+c"), encodeURI(" "));`,
+  [';U- /U- ?U- :U- @U- &U- =U- +U- $U- ,U- #U- -UC _UC .UC !UC ~UC *UC \'UC (UC )UC [-- ]--', 'a+b a+b a%20b%2Bc %20'],
+  'lecture 14, 16: the table of URI characters — _ - . ! ~ * \' ( ) kept by both, ; / ? : @ & = + $ , # only by encodeURI, space and [ ] by none; decodeURIComponent leaves +', 'uri-table.html');
+  await b.close();
+
+  // what the lecture says about the text of ECMA-262 2026
+  const spec = fs.readFileSync(SPEC, 'utf8');
+  const f = (id) => flat(clause(spec, id));
+  const num = (id) => (clause(spec, id).match(/<span class="secnum">([^<]+)<\/span>/) || [])[1];
+  const ATTR = (w, e, c) => `This property has the attributes { [[Writable]] : ${w}, [[Enumerable]] : ${e}, [[Configurable]] : ${c} }`;
+  const B18 = f('sec-ecmascript-standard-built-in-objects');
+
+  check(hasAll(f('sec-standard-object'), ['object whose semantics are defined by this specification'])
+    && hasAll(f('sec-built-in-object'), ['object specified and supplied by an ECMAScript implementation', 'An ECMAScript implementation may specify and supply additional kinds of built-in objects'])
+    && hasAll(f('sec-built-in-function'), ['Examples of built-in functions include parseInt and Math.exp', 'A host or implementation may provide additional built-in functions'])
+    && hasAll(f('sec-built-in-constructor'), ['Examples of built-in constructors include Object and Function', 'A host or implementation may provide additional built-in constructors'])
+    && f('sec-boolean-object').includes('instance of the standard built-in Boolean constructor')
+    && f('sec-terms-and-definitions-infinity').includes('positive infinite Number value') && f('sec-terms-and-definitions-nan').includes('NaN')
+    && ['sec-standard-object', 'sec-built-in-object', 'sec-boolean-object', 'sec-terms-and-definitions-infinity', 'sec-terms-and-definitions-nan', 'sec-built-in-function', 'sec-built-in-constructor'].map(num).join() === '4.4.11,4.4.12,4.4.19,4.4.26,4.4.27,4.4.35,4.4.36',
+  'lecture 1, 9, 15: the terms 4.4.11, 4.4.12, 4.4.19, 4.4.26, 4.4.27, 4.4.35, 4.4.36 and their notes (parseInt and Math.exp, Object and Function, hosts may add)');
+  check(hasAll(B18, ['Unless specified otherwise, the [[Extensible]] internal slot of a built-in object initially has the value true', 'Every built-in function object has a [[Realm]] internal slot',
+    'Such missing arguments are considered to be “not present” and may be identified in that manner by specification algorithms',
+    'the extra arguments are evaluated by the call and then ignored by the function', 'as long as the behaviour is not the throwing of a TypeError exception that is predicated simply on the presence of an extra argument',
+    'encouraged to do so by adding new functions rather than adding new parameters to existing functions',
+    'has the Function prototype object, which is the initial value of the expression Function.prototype (20.2.3), as the value of its [[Prototype]] internal slot', 'every built-in prototype object has the Object prototype object',
+    'If such an algorithm needs to distinguish the two cases, it checks whether NewTarget is undefined, which indicates a [[Call]] invocation',
+    'Built-in function objects that are not identified as constructors do not implement the [[Construct]] internal method unless otherwise specified', 'Built-in function objects that are not constructors do not have a "prototype" property unless otherwise specified']),
+  'lecture 1, 4, 5: chapter 18 — [[Extensible]] true, [[Realm]], missing arguments «not present», extra ones evaluated and ignored, no TypeError for them, note 1, %Function.prototype% and %Object.prototype%, NewTarget, no [[Construct]] and prototype');
+  check(hasAll(B18, ['Unless otherwise specified, this value is the number of required parameters shown in the subclause heading for the function description. Optional parameters and rest parameters are not included in the parameter count',
+    '«Array.prototype.map (callback [, thisArg])»', 'therefore the value of the "length" property of that function object is 1', 'Unless otherwise specified, the "length" property of a built-in function object has the attributes { [[Writable]] : false, [[Enumerable]] : false, [[Configurable]] : true }',
+    'Functions that are identified as anonymous functions use the empty String as the value of the "name" property', 'have "get" or "set" (respectively) passed to the prefix parameter when calling CreateBuiltinFunction',
+    'The value of the "name" property is explicitly specified for each built-in functions whose property key is a Symbol value',
+    'Every other data property described in clauses 19 through 28 and in Annex B.2 has the attributes { [[Writable]] : true, [[Enumerable]] : false, [[Configurable]] : true } unless otherwise specified',
+    'Every accessor property described in clauses 19 through 28 and in Annex B.2 has the attributes { [[Enumerable]] : false, [[Configurable]] : true } unless otherwise specified', 'If only a get accessor function is described, the set accessor function is the default value, undefined'])
+    && num('sec-createbuiltinfunction') === '10.3.4' && f('sec-createbuiltinfunction').includes('prefix'),
+  'lecture 2, 3, 6: chapter 18 — length: required parameters, note 2 about map, the attributes; name: anonymous "", get/set prefix (10.3.4), symbol keys explicit; data and accessor properties of clauses 19–28');
+  {
+    // a heading as the lecture writes it: «(...args)», «[, options]» (the spec puts spaces around them)
+    const heading = (id) => flat(clause(spec, id).match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \]/g, ']').replace(/\.\.\. /g, '...');
+    check(f('sec-math.max').includes('The "length" property of this function is 2') && f('sec-array.prototype.push').includes('The "length" property of this method is 1')
+      && f('sec-properties-of-the-date-constructor').includes('has a "length" property whose value is 7')
+      && heading('sec-math.max').includes('Math.max (...args)') && heading('sec-array.prototype.push').includes('(...items)') && heading('sec-date').includes('Date (...values)')
+      && heading('sec-promise-executor').includes('Promise (executor)') && heading('sec-regexp-pattern-flags').includes('RegExp (pattern, flags)') && heading('sec-proxy-target-handler').includes('Proxy (target, handler)')
+      && heading('sec-error-message').includes('Error (message [, options])') && heading('sec-array.prototype.concat').includes('Array.prototype.concat (...items)')
+      && f('sec-properties-of-the-function-prototype-object').includes('has a "name" property whose value is the empty String') && num('sec-properties-of-the-function-prototype-object') === '20.2.3',
+    `lecture 2, 3: the headings — Math.max (...args), push (...items), Date (...values), Promise (executor), RegExp (pattern, flags), Proxy (target, handler), Error (message [, options]), concat (...items); lengths 2, 1, 7 written apart; Function.prototype name "" (20.2.3) [${heading('sec-error-message')}]`);
+  }
+  check(f('sec-array.prototype.reduce').includes('If initialValue is present') && f('sec-date').includes('Let numberOfArgs be the number of elements in values')
+    && stepPath(clause(spec, 'sec-map-iterable'), 'If NewTarget is undefined, throw a TypeError exception') === '1' && stepPath(clause(spec, 'sec-promise-executor'), 'If NewTarget is undefined, throw a TypeError exception') === '1'
+    && f('sec-date').includes('If NewTarget is undefined, then') && f('sec-array').includes('If NewTarget is undefined, let newTarget be the active function object'),
+  'lecture 4, 5: reduce asks «If initialValue is present», Date counts its arguments; Map and Promise throw in step 1 without new; Date and Array check NewTarget');
+  check(hasAll(f('sec-error-handling-and-language-extensions'), ['An early error is an error that can be detected and reported prior to the evaluation of any construct in the Script containing the error',
+    'Early errors in eval code are reported at the time eval is called', 'Static Semantics: Early Errors', 'even if the compiler can prove that a construct cannot execute without error',
+    'Except as restricted in 17.1, a host or implementation may extend Script syntax', 'Except as restricted in 17.1, a host or implementation may provide additional types, values, objects, properties, and functions',
+    'host-defined behaviour instead of throwing an error (such as ReferenceError)'])
+    && hasAll(f('sec-forbidden-extensions'), ['ECMAScript function objects defined using syntactic constructors in strict mode code must not be created with own properties named "caller" or "arguments"',
+      'ArrowFunction, MethodDefinition, GeneratorDeclaration', 'ClassDeclaration, ClassExpression', 'Built-in functions, strict functions created using the Function constructor', 'and functions created using the bind method also must not be created with such own properties',
+      'must not be a strict function object', 'The behaviour of built-in methods which are specified in ECMA-402, such as those named toLocaleString, must not be extended except as specified in ECMA-402',
+      'When parsing for the Module goal symbol, the lexical grammar extensions defined in B.1.1 must not be supported'])
+    && num('sec-html-like-comments') === 'B.1.1' && f('sec-html-like-comments').includes('this extension is not allowed when parsing source text using the goal symbol Module'),
+  'lecture 7, 10: chapter 17 — early errors, eval checked when called, «Static Semantics: Early Errors», «even if the compiler can prove…», «Except as restricted in 17.1», ReferenceError of a host; 17.1 — caller and arguments, ECMA-402, B.1.1 HTML-like comments not in modules');
+  check(inOrder(f('sec-addrestrictedfunctionproperties'), ['Let thrower be realm. [[Intrinsics]].[[ %ThrowTypeError% ]]', 'PropertyDescriptor { [[Get]] : thrower, [[Set]] : thrower, [[Enumerable]] : false, [[Configurable]] : true }', '"arguments"'])
+    && num('sec-addrestrictedfunctionproperties') === '10.2.4',
+  'lecture 7 (finding): 10.2.4 — caller and arguments of Function.prototype get and set %ThrowTypeError%, the same function');
+  check(hasAll(f('sec-global-object'), ['is created before control enters any execution context', 'does not have a [[Construct]] internal method', 'does not have a [[Call]] internal method',
+    'has a [[Prototype]] internal slot whose value is host-defined', 'may have host-defined properties in addition to the properties defined in this specification', 'This may include a property whose value is the global object itself'])
+    && f('sec-globalthis').includes('realm. [[GlobalEnv]]. [[GlobalThisValue]]') && f('sec-globalthis').includes(ATTR('true', 'false', 'true'))
+    && ['sec-value-properties-of-the-global-object-infinity', 'sec-value-properties-of-the-global-object-nan', 'sec-undefined'].every((id) => f(id).includes(ATTR('false', 'false', 'false')))
+    && ['sec-globalthis', 'sec-value-properties-of-the-global-object-infinity', 'sec-value-properties-of-the-global-object-nan', 'sec-undefined'].map(num).join() === '19.1.1,19.1.2,19.1.3,19.1.4',
+  'lecture 8, 9: 19 — before any context, no [[Construct]] and [[Call]], host-defined prototype and properties, «This may include…»; 19.1.1 GlobalThisValue, writable and configurable; 19.1.2–19.1.4 fixed');
+  check(inOrder(f('sec-hasrestrictedglobalproperty'), ['If existingProp is undefined, return false', 'If existingProp. [[Configurable]] is true, return false. Return true'])
+    && f('sec-candeclareglobalvar').includes('If hasProperty is true, return true') && f('sec-createglobalvarbinding').includes('If a binding already exists, it is reused')
+    && num('sec-well-known-intrinsic-objects') === '6.1.7.4'
+    && f('sec-runtime-semantics-evaluateasyncfunctionbody').includes('Let promiseCapability be ! NewPromiseCapability (%Promise%)'),
+  'lecture 9, 10, 15: HasRestrictedGlobalProperty — a non-configurable property forbids let; CanDeclareGlobalVar allows var over an existing property; CreateGlobalVarBinding reuses it; 6.1.7.4; an async function takes %Promise%');
+  {
+    const subs = (id, n) => [...clause(spec, id).matchAll(/<emu-clause id="([^"]+)"/g)].length === 0 && [...spec.slice(spec.indexOf(`id="${id}"`)).matchAll(/<span class="secnum">([^<]+)<\/span>/g)].slice(1).map((m) => m[1]).filter((s) => new RegExp(`^${n.replace(/\./g, '\\.')}\\.\\d+$`).test(s));
+    // the titles of the direct subclauses of n, once each (every number is printed twice: in the menu and in the text)
+    const firstWords = (n) => { const seen = new Map(); const re = new RegExp(`<span class="secnum">(${n.replace(/\./g, '\\.')}\\.\\d+)</span>\\s*([^<(]+)`, 'g'); for (const m of spec.matchAll(re)) if (!seen.has(m[1])) seen.set(m[1], m[2].trim()); return [...seen.values()]; };
+    const globals19_2 = firstWords('19.2');
+    const ctors = firstWords('19.3');
+    const others = firstWords('19.4');
+    const values = firstWords('19.1');
+    const uri = firstWords('19.2.6').filter((s) => /^(de|en)codeURI/.test(s));
+    void subs;
+    check(values.length === 4 && ctors.length === 42 && others.length === 4 && JSON.stringify(others) === JSON.stringify(['Atomics', 'JSON', 'Math', 'Reflect'])
+      && globals19_2.filter((s) => s !== 'URI Handling Functions').length + uri.length === 9 && ['sec-escape-string', 'sec-unescape-string'].every((id) => spec.includes(`id="${id}"`))
+      && [...clause(spec, 'sec-constructor-properties-of-the-global-object').matchAll(/See /g)].length === 0,
+    `lecture 10, 15: 59 properties — ${values.length} values, ${globals19_2.length - 1} + ${uri.length} functions, ${ctors.length} constructors, ${others.length} objects (${others.join(', ')}); Annex B escape and unescape exist`);
+    const tally = { errors: ['AggregateError', 'Error', 'EvalError', 'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError', 'URIError'], wrappers: ['Boolean', 'Number', 'BigInt', 'String', 'Symbol'],
+      collections: ['Map', 'Set', 'WeakMap', 'WeakSet', 'WeakRef', 'FinalizationRegistry'], binary: ['ArrayBuffer', 'SharedArrayBuffer', 'DataView', 'BigInt64Array', 'BigUint64Array', 'Float16Array', 'Float32Array', 'Float64Array', 'Int8Array', 'Int16Array', 'Int32Array', 'Uint8Array', 'Uint8ClampedArray', 'Uint16Array', 'Uint32Array'],
+      rest: ['Object', 'Function', 'Array', 'Date', 'RegExp', 'Promise', 'Proxy', 'Iterator'] };
+    const grouped = Object.values(tally).flat();
+    check(grouped.length === 42 && new Set(grouped).size === 42 && grouped.every((n) => ctors.includes(n)) && [8, 5, 6, 15, 8].join() === Object.values(tally).map((g) => g.length).join(),
+      'lecture 15: the table of 42 constructors — 8 errors, 5 wrappers, 6 collections and references, 15 for binary data, 8 others, each of 19.3 once');
+  }
+  check(hasAll(f('sec-isnan-number'), ['Let num be ? ToNumber (number)', 'A reliable way for ECMAScript code to test if a value X is NaN is an expression of the form X !== X'])
+    && f('sec-isfinite-number').includes('Let num be ? ToNumber (number)')
+    && hasAll(f('sec-parsefloat-string'), ['Let trimmedString be ! TrimString (inputString, start)', 'the longest prefix of trimmed that satisfies the syntax of a StrDecimalLiteral'])
+    && f('sec-number.parseint').includes('The initial value of the "parseInt" property is %parseInt%') && f('sec-number.parsefloat').includes('The initial value of the "parseFloat" property is %parseFloat%')
+    && num('sec-number.parseint').startsWith('21.1.2'),
+  'lecture 11: isFinite and isNaN begin with ToNumber, the note X !== X; parseFloat — TrimString and the longest StrDecimalLiteral prefix; Number.parseInt and Number.parseFloat are %parseInt% and %parseFloat% (21.1.2)');
+  {
+    const pi = clause(spec, 'sec-parseint-string-radix');
+    check(inOrder(f('sec-parseint-string-radix'), ['Let inputString be ? ToString (string)', 'Let S be ! TrimString (inputString, start)', 'set sign to -1', 'set S to the substring of S from index 1', 'Let R be ℝ (? ToInt32 (radix))',
+      'If R < 2 or R > 36, return NaN', 'If R ≠ 16, set stripPrefix to false', 'Set R to 10', 'the first two code units of S are either "0x" or "0X"', 'If Z is empty, return NaN',
+      'if R = 10 and Z contains more than 20 significant digits, every significant digit after the 20th may be replaced by a 0 digit', 'If sign = -1, return -0'])
+      && stepPath(pi, 'Let inputString be ? ToString (string)') === '1' && stepPath(pi, 'If R < 2 or R > 36, return NaN') === '8.a' && stepPath(pi, 'Set R to 10') === '9.a'
+      && stepPath(pi, 'Let mathInt be the integer value') === '14',
+    `lecture 12, 13: 19.2.5 in order — ToString, TrimString, sign, ToInt32, 2–36, stripPrefix, 10, 0x, empty Z, 20 digits, −0; steps 1, 8, 9 and 14 as the lecture names them [${stepPath(pi, 'If R < 2 or R > 36, return NaN')}, ${stepPath(pi, 'Set R to 10')}, ${stepPath(pi, 'Let mathInt be the integer value')}]`);
+  }
+  check(hasAll(f('sec-uri-handling-functions'), ['encodeURI and decodeURI are intended to work with complete URIs', 'encodeURIComponent and decodeURIComponent are intended to work with the individual components of a URI',
+    'The set of reserved characters is based upon RFC 2396 and does not reflect changes introduced by the more recent RFC 3986'])
+    && f('sec-encodeuri-uri').includes('Let extraUnescaped be ";/?:@&=+$,#"') && f('sec-encodeuricomponent-uricomponent').includes('Let extraUnescaped be the empty String')
+    && f('sec-decodeuri-encodeduri').includes('Let preserveEscapeSet be ";/?:@&=+$,#"')
+    && inOrder(f('sec-encode'), ['Let alwaysUnescaped be the string-concatenation of the ASCII word characters and "-.!~*\'()"', 'If cp. [[IsUnpairedSurrogate]] is true, throw a URIError exception', 'applying the UTF-8 transformation to cp. [[CodePoint]]', 'formatted as an uppercase hexadecimal number'])
+    && flat(spec).includes('which consists solely of every letter and number in the Unicode Basic Latin block along with U+005F (LOW LINE)')
+    && hasAll(f('sec-decode'), ['If k + 3 > len, throw a URIError exception', 'If B is not an integer, throw a URIError exception', 'If preserveEscapeSet contains asciiChar, set S to escape', 'If Octets does not contain a valid UTF-8 encoding of a Unicode code point, throw a URIError exception',
+      'RFC 3629 prohibits the decoding of invalid UTF-8 octet sequences', 'the invalid sequence 0xC0 0x80 must not decode'])
+    && f('sec-parsehexoctet').includes('HexDigits') && num('sec-encode') === '19.2.6.5',
+  'lecture 14: 19.2.6 — whole URIs and components, note 1 RFC 2396; extraUnescaped and preserveEscapeSet ;/?:@&=+$,#; Encode (19.2.6.5) — ASCII word characters (with _) and -.!~*\'(), unpaired surrogate, UTF-8, uppercase; Decode — three URIErrors, RFC 3629 and C0 80; ParseHexOctet');
+  check(hasAll(f('sec-boolean-constructor'), ['creates and initializes a new Boolean object when called as a constructor', 'performs a type conversion when called as a function rather than as a constructor', 'must include a super call to the Boolean constructor'])
+    && inOrder(f('sec-boolean-constructor-boolean-value'), ['Let b be ToBoolean (value). If NewTarget is undefined, return b', 'OrdinaryCreateFromConstructor (NewTarget, "%Boolean.prototype%", «[[BooleanData]]»)'])
+    && f('sec-properties-of-the-boolean-constructor').includes('has a [[Prototype]] internal slot whose value is %Function.prototype%')
+    && f('sec-properties-of-the-boolean-prototype-object').includes('is itself a Boolean object; it has a [[BooleanData]] internal slot with the value false')
+    && inOrder(f('sec-thisbooleanvalue'), ['If value is a Boolean, return value', 'If value is an Object and value has a [[BooleanData]] internal slot', 'Throw a TypeError exception'])
+    && f('sec-properties-of-boolean-instances').includes('Boolean instances have a [[BooleanData]] internal slot') && num('sec-boolean-objects') === '20.3',
+  'lecture 15: 20.3 — a conversion without new, a wrapper with new, super for subclasses; Boolean.prototype is a Boolean with false; ThisBooleanValue; instances have [[BooleanData]]');
+
+  // the MDN pages the lecture quotes
+  const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/global_objects/${p}/index.md`], { encoding: 'utf8' });
+  // MDN markdown as text: {{jsxref("X")}} and {{domxref("A/x", "x")}} macros, links and backticks dropped
+  const plain = (md) => md.replace(/\{\{\w+\("[^"]*",\s*"([^"]+)"\)\}\}/g, '$1').replace(/\{\{\w+\("([^"]+)"\)\}\}/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/`/g, '');
+  {
+    const g = plain(mdn('globalthis'));
+    const e = plain(mdn('encodeuricomponent'));
+    check(g.includes('Historically, accessing the global object has required different syntax in different JavaScript environments') && g.includes('### HTML and the WindowProxy')
+      && g.includes('in Web Workers only self will work') && g.includes('In Node.js none of these work, and you must instead use global') && g.includes('it references a Proxy around the actual global object')
+      && e.includes('For application/x-www-form-urlencoded, spaces are to be replaced by +'),
+    'lecture 9, 16: MDN globalThis — «Historically…», window/self/frames, Workers self, Node global, «HTML and the WindowProxy» (a proxy around the global object); encodeURIComponent — + for x-www-form-urlencoded');
+  }
+
+  // the days the lecture points to, read as text without tags
+  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const page = (p) => flat(read(p));
+  check(hasAll(page('advanced/day-01/lecture.html'), ['4.4.11 standard object', '4.4.12 built-in object', '4.4.19 Boolean object', '4.4.26 Infinity', '4.4.27 NaN', '4.4.35 built-in function', '4.4.36 built-in constructor'])
+    && hasAll(page('advanced/day-02/lecture.html'), ['FEFF', '00A0']) && page('advanced/day-05/lecture.html').includes('ToNumber') && page('advanced/day-06/lecture.html').includes('ToInt32')
+    && hasAll(page('advanced/day-09/lecture.html'), ['[[Realm]]', 'IsArray', 'iframe'])
+    && hasAll(page('advanced/day-13/lecture.html'), ['HasRestrictedGlobalProperty', 'var total дал неудаляемое свойство окна', 'SyntaxError', 'eval'])
+    && page('advanced/day-14/lecture.html').includes('OrdinarySetWithOwnDescriptor') && hasAll(page('advanced/day-15/lecture.html'), ['window', 'bound ', 'Object.prototype.toString'])
+    && hasAll(read('advanced/day-16/lecture.html'), ['JSON.stringify(revoke.name)', 'kitap function 0 "" proxy,revoke'])
+    && hasAll(page('advanced/day-17/lecture.html'), ['RegExp(re)', 'Symbol is not a constructor', 'На дне 18']),
+  'lecture: course 3 — the terms of day 1; FEFF and 00A0 (2); ToNumber (5); ToInt32 (6); [[Realm]], IsArray, iframe (9); HasRestrictedGlobalProperty, var — a non-configurable property, eval (13); OrdinarySetWithOwnDescriptor (14); window, bound (15); revoke "" (16); RegExp(re), new Symbol, the promise of day 18 (17)');
+  check(page('essentials/day-20/lecture.html').includes('Ловушка map(parseInt)') && page('essentials/day-31/lecture.html').includes('encodeURIComponent')
+    && hasAll(page('intermediate/day-20/lecture.html'), ['URIError', 'одиноким суррогатом']),
+  'lecture 13, 14: Essentials — map(parseInt) (day 20), encodeURIComponent (day 31); course 2 — URIError on a lone surrogate (day 20)');
+  {
+    const plan = read('docs/plan-3-advanced.md').replace(/\s+/g, ' ');
+    check(hasAll(plan, ['**19. Мини-проект: наблюдаемое хранилище на Proxy и Reflect.**', 'доходят до подписчиков, и страница перерисовывается сама', 'Операции пересылаются через `Reflect` с верным `receiver`',
+      'вложенные объекты и массивы оборачиваются при чтении', 'У каждого необычного места — комментарий со ссылкой на раздел', '**31. Наследие и совместимость: приложение B, with, устаревшие методы.**']),
+    'lecture 17: day 19 as the plan says; day 31 for the legacy');
+    const ahead = read('tools/check-ahead.mjs');
+    check(hasAll(ahead, ["day3: 20, re: /\\b(?:ArrayBuffer|", "day3: 21, re: /\\b(?:DataView|Float16Array)\\b", "day3: 22, re: /\\b(?:SharedArrayBuffer|Atomics)\\b", "day3: 24, re: /\\b(?:WeakRef|FinalizationRegistry)\\b", "id: 'proxy'", 'day3: 16', "id: 'reflect'", 'day3: 17']),
+      'lecture 15 and the reference table: the days of course 3 for the binary data (20, 21, 22), WeakRef and FinalizationRegistry (24), Proxy (16), Reflect (17) are those of check-ahead');
+
+    // the reference table holds every row of the plan as a link with its mark, every anchor of the lecture exists
+    const lecture = read('advanced/day-18/lecture.html');
+    const spRows = fs.readFileSync(path.join(ROOT, 'docs/coverage/ecma262.csv'), 'utf8').split('\n').map(csvLine);
+    const mdRows = fs.readFileSync(path.join(ROOT, 'docs/coverage/mdn-javascript.csv'), 'utf8').split('\n').map(csvLine);
+    const refTable = lecture.slice(lecture.indexOf('<div class="ref">'), lecture.indexOf('<div class="cheatsheet">'));
+    const refSpec = [...refTable.matchAll(/<tr><td><a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">/g)].map((m) => m[1]);
+    const specRows = spRows.filter((c) => c[6] === '3' && c[7] === '18').map((c) => c[0]);
+    const mdnRows = mdRows.filter((c) => c[5] === '3' && c[6] === '18').map((c) => c[0]);
+    const missing = specRows.filter((id) => !refSpec.includes(id));
+    check(specRows.length === 69 && mdnRows.length === 0 && refSpec.length === 69 && missing.length === 0,
+      `plan: ${specRows.length} rows of ECMA-262 and ${mdnRows.length} of MDN for day 18, ${refSpec.length} rows in the reference table, missing: ${missing.join(', ') || 'none'}`);
+    const fullSpec = spRows.filter((c) => c[6] === '3' && c[7] === '18' && c[9] === 'подробно').map((c) => c[0]);
+    const markedSpec = [...refTable.matchAll(/2026\/#([\w.%-]+)">[^<]*<\/a><\/td><td>.*?<\/td><td><span class="mark mark-full">/g)].map((m) => m[1]);
+    check(fullSpec.length === 6 && JSON.stringify(fullSpec) === JSON.stringify(markedSpec), `plan: the 6 rows "подробно" are marked so in the table ${JSON.stringify(markedSpec)}`);
+    const anchors = new Set([...lecture.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]));
+    const gone = [...anchors].filter((a) => !spec.includes(`id="${a}"`));
+    check(gone.length === 0, `links: ${anchors.size} anchors of tc39.es, not in the 2026 text: ${gone.join(', ') || 'none'}`);
+    const named = [...lecture.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
+    const wrongNum = named.filter(([id, n]) => num(id) !== n).map(([id, n]) => `${n}≠${num(id)} (${id})`);
+    check(named.length > 0 && wrongNum.length === 0, `links: ${named.length} links whose text starts with a number, wrong: ${wrongNum.join(', ') || 'none'}`);
+    const footer = lecture.slice(lecture.indexOf('<div class="sources">'));
+    check(['globalThis', 'encodeURIComponent()', 'ECMA-262 2026'].every((s) => footer.includes(s)) && (lecture.match(/developer\.mozilla\.org/g) || []).length === 3,
+      'links: the footer names the two MDN pages the text quotes and ECMA-262 2026; MDN is linked only there and at the two quotes');
+  }
+
+  console.log(`\nchecks: ${checked}, ${bad ? `PROBLEMS ${bad}` : 'all match'}`);
+  process.exit(bad ? 1 : 0);
+})();

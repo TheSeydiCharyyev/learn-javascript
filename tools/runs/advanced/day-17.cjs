@@ -6,7 +6,9 @@
 //   node tools/runs/advanced/day-17.cjs --quiet    only the checks
 // Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
 // console.log lines say, the table of Symbol.keyFor holds, and the homework (1–4 in Chrome, 4 also in the text of
-// MDN); the cheatsheet runs without an error; the experiments
+// MDN); a block of the tasks prints what EXPECT says, an example runs with the reference solution of SOLUTIONS and every
+// "expression;   // value" line equals its comment, and what the criteria ask to find holds in Chrome and in the text of
+// ECMA-262; the cheatsheet runs without an error; the experiments
 // the lecture only tells about (the flags and length of all 13 functions of Reflect and its tag; apply without an
 // array; Array.of creates through this; with and Symbol.unscopables, and a non-null prototype that hides toString —
 // the run may use what the lecture may not; includes, startsWith, endsWith and matchAll refuse a RegExp; the flags of
@@ -25,7 +27,77 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-17');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
+// a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['true false false false suw', 'TypeError true 0,1,2,3,4,length TypeError'],
+  'tasks #1': ['3 2 6 true true 2 2 2 | default string number default number string string default', 'string number true string'],
+  'tasks #2': ['[object Deck] [object Array] [object Array] [object Array] [object Deck]', 'Plain Array Array Array'],
+  'tasks #8': ['true 1 string obj undefined TypeError undefined undefined null "undefined"'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+// No template literals inside: Node would fill ${…} of these strings itself.
+const SOLUTIONS = {
+  traced: `function traced(target) {
+  const log = [];
+  const KEYED = new Set(["get", "set", "has", "deleteProperty", "defineProperty", "getOwnPropertyDescriptor"]);
+  const handler = new Proxy({}, {
+    get(h, trap) {
+      return (...args) => {
+        log.push(KEYED.has(trap) ? trap + " " + String(args[1]) : trap);
+        return Reflect[trap](...args);
+      };
+    },
+  });
+  return { proxy: new Proxy(target, handler), log };
+}`,
+  Score: `class Score {
+  constructor(value, max) { this.value = value; this.max = max; }
+  get [Symbol.toStringTag]() { return "Score"; }
+  [Symbol.toPrimitive](hint) { return hint === "number" ? this.value / this.max : this.value + "/" + this.max; }
+}`,
+  like: `function like(shape) {
+  return {
+    [Symbol.hasInstance](value) {
+      if (value === null || typeof value !== "object") return false;
+      return Object.keys(shape).every((k) => typeof value[k] === shape[k]);
+    },
+  };
+}`,
+  withDefaults: `function withDefaults(Class, defaults) {
+  return new Proxy(Class, {
+    construct(target, args, newTarget) {
+      const obj = Reflect.construct(target, args, newTarget);
+      for (const key of Object.keys(defaults)) if (!Object.hasOwn(obj, key)) obj[key] = defaults[key];
+      return obj;
+    },
+  });
+}`,
+  myGet: `function myGet(target, key, receiver = target) {
+  if (Object(target) !== target) throw new TypeError("myGet called on non-object");
+  for (let o = target; o !== null; o = Object.getPrototypeOf(o)) {
+    const desc = Object.getOwnPropertyDescriptor(o, key);
+    if (desc === undefined) continue;
+    if ("value" in desc) return desc.value;
+    return desc.get === undefined ? undefined : desc.get.call(receiver);
+  }
+  return undefined;
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -114,6 +186,7 @@ const stepPath = (html, needle) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -121,13 +194,20 @@ const stepPath = (html, needle) => {
 
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split('\n')[0];
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && lines.length === out.length, `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (EXPECT[`${name} #${i}`]) check(same(out, EXPECT[`${name} #${i}`]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
@@ -199,6 +279,60 @@ const o2 = Object.create(Object.prototype); OneClass.apply(o2, []);
 console.log(o2.nt, Reflect.construct(OneClass, [], Other).nt === Other);`,
   ['TypeError: Class constructor Card cannot be invoked without \'new\' kitap', 'undefined true'],
   'student homework 4: Object.create and apply — new.target undefined for a function, a class cannot be called at all; Reflect.construct works for both', 'student-homework4.html');
+  // the tasks: what the criteria ask to find, with the reference solutions (probe d17_tasks.txt before writing)
+  await told(`"use strict";
+${RUN}const sealed = Object.seal({ word: "kitap" });
+console.log(run(() => { sealed.level = 1; }));
+console.log(run(() => { delete sealed.word; }));
+console.log(run(() => Object.defineProperty(sealed, "word", { enumerable: false })));`,
+  ['TypeError: Cannot add property level, object is not extensible', 'TypeError: Cannot delete property \'word\' of #<Object>', 'TypeError: Cannot redefine property: word'],
+  'task 1: the same three writes through an assignment, delete and Object.defineProperty in strict code — TypeError each', 'task1.html');
+  await told(`const target = { word: "kitap", get title() { return this.word.toUpperCase(); } };
+const lost = new Proxy(target, { get(t, key) { return t[key]; } });
+const kid = Object.create(lost);
+kid.word = "galam";
+console.log(kid.title);
+${SOLUTIONS.traced}
+const { proxy, log } = traced(target);
+const kid2 = Object.create(proxy);
+kid2.word = "galam";
+const before = log.length;
+kid2.word;
+console.log(log.length === before, "title" in kid2, log.at(-1));`, ['KITAP', 'true true has title'],
+  'task 4: t[key] loses the Receiver — KITAP; an own property of the child never reaches the proxy, in for an inherited key does', 'task4.html');
+  await told(`${SOLUTIONS.Score}
+const a = new Score(4, 5);
+class JsonScore extends Score { toJSON() { return String(this); } }
+console.log(new Score(4, 5) == new Score(8, 10), new Score(4, 5) == "4/5", JSON.stringify(a), JSON.stringify(new JsonScore(4, 5)));`,
+  ['false true {"value":4,"max":5} "4/5"'], 'task 5: two objects compare by identity, an object and a string through ToPrimitive "default"; JSON asks toJSON, not toPrimitive', 'task5.html');
+  await told(`function likeFn(shape) {
+  const F = function () {};
+  F[Symbol.hasInstance] = (v) => v !== null && typeof v === "object" && Object.keys(shape).every((k) => typeof v[k] === shape[k]);
+  return F;
+}
+function likeFixed(shape) {
+  const F = function () {};
+  Object.defineProperty(F, Symbol.hasInstance, { value: (v) => v !== null && typeof v === "object" && Object.keys(shape).every((k) => typeof v[k] === shape[k]) });
+  return F;
+}
+console.log(({ word: "kitap" }) instanceof likeFn({ word: "string" }), ({ word: "kitap" }) instanceof likeFixed({ word: "string" }));`, ['false true'],
+  'task 6: a function with the method assigned — the assignment fails silently, OrdinaryHasInstance answers false; defineProperty fixes it', 'task6.html');
+  await told(`function lossy(Class, defaults) {
+  return new Proxy(Class, { construct(target, args) { const obj = new target(...args); for (const key of Object.keys(defaults)) if (!Object.hasOwn(obj, key)) obj[key] = defaults[key]; return obj; } });
+}
+class Card { constructor(word) { this.word = word; } }
+class BigCard extends lossy(Card, { level: 1 }) { constructor(word) { super(word); this.level = 5; } }
+const big = new BigCard("suw");
+console.log(big instanceof BigCard, big.level, Object.getPrototypeOf(big) === Card.prototype);
+${SOLUTIONS.withDefaults}
+class Rated { constructor(word) { this.word = word; this.level = 3; } }
+console.log(new (withDefaults(Rated, { level: 1, due: 0 }))("kitap").level);`, ['false 5 true', '3'],
+  'task 7: new target(...) takes the prototype of Card, the field is set on what super() returned; a default does not cover what the constructor sets', 'task7.html');
+  await told(`${SOLUTIONS.myGet}
+const p = new Proxy({ x: 1 }, { get() { return 2; } });
+const setOnly = { set v(x) {} };
+console.log(Reflect.get(p, "x"), myGet(p, "x"), Reflect.get(setOnly, "v"), myGet(setOnly, "v"));`, ['2 1 undefined undefined'],
+  'task 8: Reflect.get calls the [[Get]] of the proxy (its trap), myGet walks descriptors; a setter-only accessor — undefined in both', 'task8.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -298,6 +432,32 @@ console.log(o2.nt, Reflect.construct(OneClass, [], Other).nt === Other);`,
     && f('sec-symbol-object').includes('4.4.33'),
   'lecture 15: 20.4.1 — a function call, no new, extends but super throws; 20.4.2–20.4.5 by their numbers; [[SymbolData]] only in instances; SymbolDescriptiveString; == and a property key go through ToPrimitive; 4.4.33 Symbol object');
 
+  // what the tasks say about the text of ECMA-262 2026
+  check(f('sec-ordinarydelete').includes('If desc. [[Configurable]] is true, then Remove the own property with name P from O. Return true. Return false')
+    && f('sec-validateandapplypropertydescriptor').includes('If current. [[Configurable]] is false, then If Desc has a [[Configurable]] field and Desc. [[Configurable]] is true, return false. If Desc has an [[Enumerable]] field and Desc. [[Enumerable]] is not current. [[Enumerable]], return false')
+    && f('sec-validateandapplypropertydescriptor').includes('If extensible is false, return false'),
+  'task 1: OrdinaryDelete — false for a non-configurable key; ValidateAndApplyPropertyDescriptor — no new key on a non-extensible object, no other enumerable on a non-configurable one');
+  check(f('sec-applystringornumericbinaryoperator').includes('If opText is +, then Let lPrim be ? ToPrimitive (lVal)') && f('sec-tonumeric').includes('Let primValue be ? ToPrimitive (value, number)')
+    && f('sec-islessthan').includes('ToPrimitive (x, number)') && f('sec-tostring').includes('Let primValue be ? ToPrimitive (argument, string)')
+    && f('sec-array.prototype.join').includes('Let S be ? ToString (element)') && f('sec-islooselyequal').includes('If SameType (x, y) is true, then Return IsStrictlyEqual (x, y)'),
+  'tasks 2, 5: + — ToPrimitive without a hint; ToNumeric — number; IsLessThan — number; ToString — string, join calls ToString of each element; == of two objects — IsStrictlyEqual');
+  check(f('sec-array.prototype.tosorted').includes('Let A be ? ArrayCreate (len)') && ['concat', 'filter', 'map'].every((m) => f(`sec-array.prototype.${m}`).includes('ArraySpeciesCreate (O,'))
+    && f('sec-arrayspeciescreate').includes('If C is undefined, return ? ArrayCreate (length)'),
+  'task 3: toSorted — ArrayCreate; concat, filter, map — ArraySpeciesCreate; C undefined — ArrayCreate');
+  check(inOrder(f('sec-ordinaryget'), ['Let desc be ? O. [[GetOwnProperty]] (P)', 'If parent is null, return undefined. Return ? parent. [[Get]] (P, Receiver)', 'If IsDataDescriptor (desc) is true, return desc. [[Value]]',
+    'Let getter be desc. [[Get]]. If getter is undefined, return undefined. Return ? Call (getter, Receiver)']) && num('sec-ordinaryget') === '10.1.8.1',
+  'task 8: OrdinaryGet (10.1.8.1) — own descriptor, else the parent with the same Receiver; data — the value; no getter — undefined; the getter with this = Receiver');
+  check(inOrder(f('sec-symbol-description'), ['If NewTarget is not undefined, throw a TypeError exception', 'If description is undefined, let descString be undefined. Else, let descString be ? ToString (description)'])
+    && inOrder(f('sec-symbol.for'), ['Let stringKey be ? ToString (key)', 'If e. [[Key]] is stringKey, return e. [[Symbol]]', 'Let newSymbol be a new Symbol whose [[Description]] is stringKey'])
+    && num('sec-symbol-description') === '20.4.1.1' && num('sec-symbol.for') === '20.4.2.2' && num('sec-keyforsymbol') === '20.4.5.1'
+    && ['sec-instanceofoperator', 'sec-function.prototype-%symbol.hasinstance%'].map(num).join() === '13.10.2,20.2.3.6',
+  'task 9: Symbol(description) — undefined stays undefined, else ToString; Symbol.for — ToString of the key, the registry; the numbers 20.4.1.1, 20.4.2.2, 20.4.5.1, 13.10.2, 20.2.3.6');
+  {
+    const tasks = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const gone = [...tasks.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]).filter((a) => !spec.includes(`id="${a}"`));
+    check(gone.length === 0 && !/(?<![.\w$])with\s*\(/.test(tasks.replace(/<[^>]+>/g, '')), `tasks: every tc39.es anchor exists, no with in the code ${gone.join(', ')}`);
+  }
+
   // the MDN pages of the plan and what the lecture says about them
   const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/global_objects/${p}/index.md`], { encoding: 'utf8' });
   const R = ['apply', 'construct', 'defineproperty', 'deleteproperty', 'get', 'getownpropertydescriptor', 'getprototypeof', 'has', 'isextensible', 'ownkeys', 'preventextensions', 'set', 'setprototypeof'];
@@ -324,6 +484,10 @@ console.log(o2.nt, Reflect.construct(OneClass, [], Other).nt === Other);`,
     check(['(Reflect,', 'Reflect.construct()', 'Reflect.get()', 'Symbol.toPrimitive', 'Symbol.toStringTag', 'Symbol.species', 'Symbol.hasInstance'].every((s) => footer.includes(s))
       && ['reflect', 'reflect/construct', 'reflect/get', 'symbol/toprimitive', 'symbol/tostringtag', 'symbol/species', 'symbol/hasinstance'].every((p) => pages.includes(p)),
     'student: the MDN pages of the footer are pages of the plan, in the cache');
+    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasksFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(['(Reflect,', 'Reflect.get()', 'Reflect.construct()', 'Symbol.toPrimitive', 'Symbol.toStringTag', 'Symbol.species', 'Symbol.hasInstance'].every((s) => tasksFooter.includes(s)),
+      'tasks: the MDN pages of the footer are pages of the plan, in the cache');
   }
 
   // the days the lecture points to, read as text without tags (a phrase may hold <code>)

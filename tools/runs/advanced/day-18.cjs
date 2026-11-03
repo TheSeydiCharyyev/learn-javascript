@@ -5,7 +5,12 @@
 // Ashgabat time and Russian.
 //   node tools/runs/advanced/day-18.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-18.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the cheatsheet runs without an error; the experiments
+// Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
+// console.log lines say, and the homework holds in Chrome and in the text of ECMA-262 and MDN; a block of the tasks
+// prints what EXPECT says, an example runs with the reference solution of SOLUTIONS and every "expression;   // value"
+// line equals its comment, and what the criteria ask to find holds in Chrome and in the text of ECMA-262 (the models of
+// parseInt, encodeURIComponent and decodeURIComponent agree with the real functions on whole ranges); the cheatsheet
+// runs without an error; the experiments
 // the lecture only tells about (caller on Function.prototype is not %ThrowTypeError% in Chrome — the finding of the
 // day; Array.isArray of an array from an iframe; for-in and a method assigned to Array.prototype; decodeURIComponent
 // leaves +; the table of URI characters); what the lecture says about the text of ECMA-262 2026 (chapters 17–19, 20.3,
@@ -23,7 +28,124 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-18');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
+// a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['slice:2 fill:1 defineProperty:3 split:2 then:2 of:0 Set:0', 'TypeError ok TypeError false get size true'],
+  'tasks #1': ['we- нет we- нет wec --- w-c', 'false true undefined 1'],
+  'tasks #2': ['NaN 1 NaN NaN 1 NaN NaN 12', '255 255 0 255 255 255'],
+  'tasks #8': ['0.0005 NaN Infinity NaN 1.2 0 1 1 NaN 1'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+// No template literals inside, and every backslash doubled: Node reads these strings as templates first.
+const SOLUTIONS = {
+  myParseInt: `function myParseInt(string, radix) {
+  let s = "".concat(string).trimStart();
+  let sign = 1;
+  if (s[0] === "-") sign = -1;
+  if (s[0] === "+" || s[0] === "-") s = s.slice(1);
+  let r = radix | 0;
+  let stripPrefix = true;
+  if (r !== 0) {
+    if (r < 2 || r > 36) return NaN;
+    if (r !== 16) stripPrefix = false;
+  } else r = 10;
+  if (stripPrefix && (s.startsWith("0x") || s.startsWith("0X"))) { s = s.slice(2); r = 16; }
+  const DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz";
+  let value = 0, count = 0;
+  for (const ch of s) {
+    const lower = ch >= "A" && ch <= "Z" ? String.fromCharCode(ch.charCodeAt(0) + 32) : ch;
+    const d = DIGITS.indexOf(lower);
+    if (d === -1 || d >= r) break;
+    value = value * r + d;
+    count++;
+  }
+  if (count === 0) return NaN;
+  return sign * value;
+}`,
+  myEncodeURIComponent: `function myEncodeURIComponent(s, extra = "") {
+  const str = "".concat(s);
+  const KEEP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.!~*'()" + extra;
+  let out = "";
+  for (let k = 0; k < str.length; k++) {
+    const ch = str[k];
+    if (KEEP.includes(ch)) { out += ch; continue; }
+    const cp = str.codePointAt(k);
+    if (cp >= 0xd800 && cp <= 0xdfff) throw new URIError("URI malformed");
+    if (cp > 0xffff) k++;
+    const bytes = cp < 0x80 ? [cp] : cp < 0x800 ? [0xc0 | (cp >> 6), 0x80 | (cp & 63)] : cp < 0x10000 ? [0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63)] : [0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63)];
+    for (const byte of bytes) out += "%" + byte.toString(16).toUpperCase().padStart(2, "0");
+  }
+  return out;
+}`,
+  builtinLike: `function builtinLike(name, length, fn) {
+  const f = { [name](...args) { return fn(...args); } }[name];
+  Object.defineProperty(f, "length", { value: length });
+  return f;
+}`,
+  parseShareLink: `function parseShareLink(query) {
+  const settings = { deck: "", perDay: 20, sound: true };
+  const errors = [];
+  for (const pair of query.replace(/^\\?/, "").split("&")) {
+    if (pair === "") continue;
+    const at = pair.indexOf("=");
+    const rawKey = at === -1 ? pair : pair.slice(0, at);
+    const rawValue = at === -1 ? "" : pair.slice(at + 1);
+    let key, value;
+    try { key = decodeURIComponent(rawKey); value = decodeURIComponent(rawValue.replaceAll("+", " ")); } catch { errors.push(rawKey); continue; }
+    if (key === "deck") settings.deck = value;
+    else if (key === "perDay") { if (/^[0-9]{1,3}$/.test(value) && +value >= 1 && +value <= 100) settings.perDay = parseInt(value, 10); else errors.push(key); }
+    else if (key === "sound") { if (value === "1" || value === "0") settings.sound = value === "1"; else errors.push(key); }
+  }
+  return { settings, errors };
+}`,
+  makeShareLink: `function makeShareLink(settings) {
+  return "?deck=" + encodeURIComponent(settings.deck) + "&perDay=" + settings.perDay + "&sound=" + (settings.sound ? 1 : 0);
+}`,
+  myDecodeURIComponent: `function myDecodeURIComponent(s) {
+  const str = "".concat(s);
+  const byteAt = (i) => {
+    if (i + 3 > str.length || str[i] !== "%") throw new URIError("URI malformed");
+    const h = str.slice(i + 1, i + 3);
+    if (!/^[0-9a-fA-F]{2}$/.test(h)) throw new URIError("URI malformed");
+    return parseInt(h, 16);
+  };
+  let out = "";
+  for (let k = 0; k < str.length; k++) {
+    if (str[k] !== "%") { out += str[k]; continue; }
+    const b = byteAt(k);
+    k += 2;
+    const n = b < 0x80 ? 0 : b < 0xc0 ? 1 : b < 0xe0 ? 2 : b < 0xf0 ? 3 : b < 0xf8 ? 4 : 5;
+    if (n === 0) { out += String.fromCharCode(b); continue; }
+    if (n === 1 || n > 4) throw new URIError("URI malformed");
+    let cp = b & (0xff >> (n + 1));
+    for (let j = 1; j < n; j++) {
+      const c = byteAt(k + 1);
+      if ((c & 0xc0) !== 0x80) throw new URIError("URI malformed");
+      cp = (cp << 6) | (c & 63);
+      k += 3;
+    }
+    const min = [0, 0, 0x80, 0x800, 0x10000][n];
+    if (cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) throw new URIError("URI malformed");
+    out += String.fromCodePoint(cp);
+  }
+  return out;
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -111,6 +233,7 @@ const stepPath = (html, needle) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -118,13 +241,20 @@ const stepPath = (html, needle) => {
 
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split('\n')[0];
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && lines.length === out.length, `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (EXPECT[`${name} #${i}`]) check(same(out, EXPECT[`${name} #${i}`]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
@@ -166,6 +296,44 @@ console.log(parseInt("0.00000008"), parseInt(0.00000008), parseInt("  +0x10"), p
 console.log([..."!'()*"].map((c) => encodeURIComponent(c)).join(""), encodeURIComponent("!'()*") === "!'()*");`,
   ['2 2 1 2 1 get description', 'false true false undefined 1', '0 8 16 10 483', '!\'()* true'],
   'student homework 1–4: replace 2, splice 2, call 1, JSON.parse 2 (written apart), indexOf 1, "get description"; var is not deleted, an assigned property is; let is not on the object; parseInt — "0" before ".", "8e-8", + and 0x, no octal, 1e3 in 16; ! \' ( ) * kept', 'student-homework.html');
+  // the tasks: what the criteria ask to find, with the reference solutions (probe d18_tasks.txt before writing)
+  await told(`${RUN}console.log(typeof Date(), run(() => Set()));`, ['string TypeError: Constructor Set requires \'new\''], 'task 1: Date() answers without new, Set() throws in step 1', 'task1.html');
+  await told(`${SOLUTIONS.myParseInt}
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const inputs = ["", " 12", "-0", "+0x1f", "0X10", "0x", "-0x", "z", "Z", "zz", "Infinity", "12e3", "0.9", "\\u00A07", "\\uFEFF-8", "٣", "K", "\\u212A", "10", "7f", "0b11"];
+const radixes = [undefined, 0, 2, 8, 10, 16, 36, 37, 1, -1, NaN, "16", 16.9, 2 ** 32 + 2, Infinity];
+const diff = [];
+for (const s of inputs) for (const r of radixes) if (!Object.is(myParseInt(s, r), parseInt(s, r))) diff.push(JSON.stringify(s) + "/" + r);
+for (const x of [null, undefined, 0.0000005, 1e21, -0, true, {}]) if (!Object.is(myParseInt(x, 36), parseInt(x, 36))) diff.push(String(x));
+console.log(inputs.length, radixes.length, diff.length, run(() => parseInt(Symbol())), run(() => myParseInt(Symbol())), run(() => "".concat(Symbol())), String(Symbol("x")));`,
+  ['21 15 0 TypeError TypeError TypeError Symbol(x)'],
+  'task 4: myParseInt agrees with parseInt on 21 inputs × 15 radixes and 7 other values (Object.is); ToString of a symbol throws in parseInt and in concat, String(symbol) does not', 'task4.html');
+  await told(`${SOLUTIONS.myEncodeURIComponent}
+let diff = 0;
+for (let cp = 0; cp < 0x800; cp++) { const ch = String.fromCodePoint(cp); if (myEncodeURIComponent(ch) !== encodeURIComponent(ch) || myEncodeURIComponent(ch, ";/?:@&=+$,#") !== encodeURI(ch)) diff++; }
+for (const ch of ["€", "😀", "\\uFFFF", "\\u{10FFFF}", "китап", "a&b=c+d #e", "ü\\u{1F44D}\\u{1F3FD}"]) if (myEncodeURIComponent(ch) !== encodeURIComponent(ch) || myEncodeURIComponent(ch, ";/?:@&=+$,#") !== encodeURI(ch)) diff++;
+console.log(diff, ["\\u007F", "\\u07FF", "\\uFFFF", "\\u{10FFFF}"].map((c) => encodeURIComponent(c).length / 3).join());`,
+  ['0 1,2,3,4'], 'task 5: the model agrees with encodeURIComponent on 0–U+07FF and the samples, with extra — with encodeURI; 1, 2, 3 and 4 bytes at the edges of the ranges', 'task5.html');
+  await told(`${SOLUTIONS.builtinLike}
+const clamp = builtinLike("clamp", 3, (x, lo, hi) => Math.min(Math.max(x, lo), hi));
+const flags = (f, k) => { const d = Object.getOwnPropertyDescriptor(f, k); return [d.writable, d.enumerable, d.configurable].join(); };
+console.log(flags(Math.max, "length") === flags(clamp, "length"), flags(Math.max, "name") === flags(clamp, "name"), Math.max.toString(), "|", clamp.toString());`,
+  ['true true function max() { [native code] } | [name](...args) { return fn(...args); }'],
+  'task 6: the attributes of length and name equal those of Math.max; toString — [native code] for a built-in, the source text for the method', 'task6.html');
+  await told(`${SOLUTIONS.parseShareLink}
+${SOLUTIONS.makeShareLink}
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const names = ["a & b", "x=y", "1+1", "100%", "ü", "😀 deck", ""];
+console.log(names.every((n) => parseShareLink(makeShareLink({ deck: n, perDay: 5, sound: true })).settings.deck === n), run(() => makeShareLink({ deck: "x\\uD800", perDay: 5, sound: true })), JSON.stringify(parseShareLink(makeShareLink({ deck: "x\\uD800".toWellFormed(), perDay: 5, sound: true })).settings.deck));`,
+  ['true URIError "x�"'], 'task 7: seven deck names go there and back; a lone surrogate breaks makeShareLink, toWellFormed turns it into U+FFFD', 'task7.html');
+  await told(`${SOLUTIONS.myDecodeURIComponent}
+const run = (f) => { try { return f(); } catch (e) { return e.name; } };
+const samples = ["%41", "%", "%4", "%zz", "%C2", "%C2%A9", "%C2A9", "%E2%82%AC", "%E2%82", "%F0%9F%98%80", "%F4%8F%BF%BF", "%F4%90%80%80", "%F0%80%80%80", "%E0%80%80", "%ED%A0%80", "%ED%9F%BF", "%F8%80%80%80%80", "%80", "%FF", "a%2", "%%41", "%C3%A4%C3", "%EF%BB%BF"];
+const diff = [];
+for (let b = 0; b < 256; b++) { const s = "%" + b.toString(16).padStart(2, "0"); if (run(() => myDecodeURIComponent(s)) !== run(() => decodeURIComponent(s))) diff.push(s); }
+for (const s of samples) if (run(() => myDecodeURIComponent(s)) !== run(() => decodeURIComponent(s))) diff.push(s);
+console.log(samples.length, diff.length, run(() => decodeURIComponent("%F4%90%80%80")), run(() => decodeURIComponent("%ED%9F%BF")).codePointAt(0).toString(16));`,
+  ['23 0 URIError d7ff'], 'task 8: the model agrees with decodeURIComponent on all 256 «%XX» and 23 samples (strings and URIError); above U+10FFFF — URIError, U+D7FF is fine', 'task8.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -201,7 +369,7 @@ console.log([..."!'()*"].map((c) => encodeURIComponent(c)).join(""), encodeURICo
   'lecture 2, 3, 6: chapter 18 — length: required parameters, note 2 about map, the attributes; name: anonymous "", get/set prefix (10.3.4), symbol keys explicit; data and accessor properties of clauses 19–28');
   {
     // a heading as the lecture writes it: «(...args)», «[, options]» (the spec puts spaces around them)
-    const heading = (id) => flat(clause(spec, id).match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \]/g, ']').replace(/\.\.\. /g, '...');
+    const heading = (id) => flat(clause(spec, id).match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \]/g, ']').replace(/\[ /g, '[').replace(/\.\.\. /g, '...');
     check(f('sec-math.max').includes('The "length" property of this function is 2') && f('sec-array.prototype.push').includes('The "length" property of this method is 1')
       && f('sec-properties-of-the-date-constructor').includes('has a "length" property whose value is 7')
       && heading('sec-math.max').includes('Math.max (...args)') && heading('sec-array.prototype.push').includes('(...items)') && heading('sec-date').includes('Date (...values)')
@@ -296,7 +464,7 @@ console.log([..."!'()*"].map((c) => encodeURIComponent(c)).join(""), encodeURICo
   {
     const pi = clause(spec, 'sec-parseint-string-radix');
     const sp = (w) => stepPath(pi, w);
-    const heading = (id) => flat(clause(spec, id).match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \]/g, ']').replace(/\.\.\. /g, '...');
+    const heading = (id) => flat(clause(spec, id).match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \]/g, ']').replace(/\[ /g, '[').replace(/\.\.\. /g, '...');
     check(sp('Let inputString be ? ToString (string)') === '1' && sp('Let S be ! TrimString (inputString, start)') === '2' && sp('Let sign be 1') === '3' && sp('set S to the substring of S from index 1') === '5'
       && sp('Let R be ℝ (? ToInt32 (radix))') === '6' && sp('Set R to 10') === '9.a' && sp('the first two code units of S are either "0x" or "0X"') === '10.a' && sp('If Z is empty, return NaN') === '13'
       && sp('If sign = -1, return -0') === '15.a' && sp('Return 𝔽 (sign × mathInt)') === '16',
@@ -305,6 +473,33 @@ console.log([..."!'()*"].map((c) => encodeURIComponent(c)).join(""), encodeURICo
       && heading('sec-string.prototype.replace').includes('(searchValue, replaceValue)') && heading('sec-array.prototype.splice').includes('(start, deleteCount,...items)')
       && heading('sec-function.prototype.call').includes('(thisArg,...args)') && heading('sec-array.prototype.indexof').includes('(searchElement [, fromIndex])'),
     `student homework 1: the headings give replace 2, splice 2, call 1, indexOf 1; JSON.parse (text [, reviver]) has 2 written apart [${heading('sec-array.prototype.splice')}]`);
+  }
+
+  // what the tasks say about the text of ECMA-262 2026
+  {
+    const heading = (id) => flat(clause(spec, id).match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \]/g, ']').replace(/\[ /g, '[').replace(/\.\.\. /g, '...');
+    check(heading('sec-array.prototype.slice').includes('(start, end)') && heading('sec-array.prototype.fill').includes('(value [, start [, end]])')
+      && heading('sec-object.defineproperty').includes('(O, P, Attributes)') && heading('sec-string.prototype.split').includes('(separator, limit)')
+      && heading('sec-promise.prototype.then').includes('(onFulfilled, onRejected)') && heading('sec-array.of').includes('Array.of (...items)') && heading('sec-set-iterable').includes('Set ([iterable])')
+      && stepPath(clause(spec, 'sec-set-iterable'), 'If NewTarget is undefined, throw a TypeError exception') === '1',
+    `task 1: the headings — slice (start, end), fill (value [, start [, end]]), defineProperty (O, P, Attributes), split (separator, limit), then (onFulfilled, onRejected), Array.of (...items), Set ([iterable]); Set throws in step 1 [${heading('sec-array.prototype.fill')}]`);
+    check(f('sec-createglobalfunctionbinding').includes('Let desc be the PropertyDescriptor { [[Value]] : V, [[Writable]] : true, [[Enumerable]] : true, [[Configurable]] : D }')
+      && hasAll(f('sec-globaldeclarationinstantiation'), ['CreateGlobalFunctionBinding (env, fn, fo, false)', 'CreateGlobalVarBinding (env, vn, false)']),
+    'task 2: a function declaration — writable, enumerable, configurable D; GlobalDeclarationInstantiation passes false for both var and function');
+    check(f('sec-parseint-string-radix').includes('using the letters A through Z and a through z for digits with values 10 through 35'),
+      'task 3: the digits of parseInt — 0–9 and the Latin letters, nothing else');
+    check(f('sec-string.prototype.concat').includes('Let nextString be ? ToString (next)') && f('sec-string-constructor-string-value').includes('If NewTarget is undefined and value is a Symbol, return SymbolDescriptiveString (value)'),
+      'task 4: concat calls ToString (a symbol throws), String(symbol) returns SymbolDescriptiveString');
+    check(hasAll(f('sec-function.prototype.tostring'), ['has a [[SourceText]] internal slot', 'Return CodePointsToString (func. [[SourceText]])', 'If func is a built-in function object, return an implementation-defined String source code representation of func. The representation must have the syntax of a NativeFunction'])
+      && num('sec-function.prototype.tostring') === '20.2.3.5' && f('sec-runtime-semantics-definemethod').includes('OrdinaryFunctionCreate (prototype, sourceText') && !f('sec-runtime-semantics-definemethod').includes('MakeConstructor'),
+    'task 6: 20.2.3.5 — the source text of an ECMAScript function, NativeFunction of a built-in; DefineMethod creates the closure without MakeConstructor');
+    check(hasAll(f('sec-tonumber-applied-to-the-string-type'), ['StrWhiteSpaceChar ::: WhiteSpace LineTerminator', 'StrUnsignedDecimalLiteral ::: Infinity']) && num('sec-tonumber-applied-to-the-string-type') === '7.1.4.1'
+      && f('sec-trimstring').includes('The definition of white space is the union of WhiteSpace and LineTerminator'),
+    'task 9: 7.1.4.1 — StrDecimalLiteral, Infinity among its forms; white space of TrimString is WhiteSpace and LineTerminator (U+2028 too)');
+    const tasks = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const gone = [...tasks.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]).filter((a) => !spec.includes(`id="${a}"`));
+    const tfooter = tasks.slice(tasks.indexOf('<div class="sources">'));
+    check(gone.length === 0 && ['encodeURIComponent()', 'globalThis', 'ECMA-262 2026'].every((s) => tfooter.includes(s)), `tasks: every tc39.es anchor exists, the footer names the MDN pages and ECMA-262 ${gone.join(', ')}`);
   }
 
   // the MDN pages the lecture quotes

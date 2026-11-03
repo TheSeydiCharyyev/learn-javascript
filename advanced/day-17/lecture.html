@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 17 — Reflect и встроенные символы</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/lecture.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #ec4899; }
+        h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+        h3 { color: #9d174d; }
+        .step-number { background: #ec4899; }
+        .toc a { color: #be185d; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 17</span>
+    <span class="nav-sep">|</span>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F3EB; Лекция</span>
+    <a href="student.html" class="nav-link">&#x1F468;&#x200D;&#x1F393; Конспект</a>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <div class="day-head">
+        <span class="day-no">День 17 &bull; урок 1</span>
+        <h1>Reflect и встроенные символы</h1>
+        <p>Курс 3, Advanced. Модуль «Объекты изнутри» — четвёртый день. 45 минут.</p>
+    </div>
+
+    <div class="goals">
+        <ul>
+            <li>называть внутренний метод за каждой функцией Reflect и её отличие от двойника из Object;</li>
+            <li>пересылать операции прокси через Reflect с верным Receiver и newTarget;</li>
+            <li>проходить алгоритмы, которые спрашивают встроенные символы, и менять их ответ своим методом;</li>
+            <li>различать символ и объект Symbol, глобальный реестр и встроенные символы.</li>
+        </ul>
+    </div>
+
+    <div class="toc">
+        <div class="toc-title">Содержание главы</div>
+        <ol>
+            <li><a href="#reflect">Глава 28 и объект Reflect</a></li>
+            <li><a href="#bool">Булево вместо исключения</a></li>
+            <li><a href="#ownkeys">ownKeys и порядок ключей</a></li>
+            <li><a href="#receiver">get и set: Receiver</a></li>
+            <li><a href="#forward">Практика: прокси с верной пересылкой</a></li>
+            <li><a href="#apply">apply: аргументы списком</a></li>
+            <li><a href="#construct">construct и newTarget</a></li>
+            <li><a href="#symbols">Встроенные символы</a></li>
+            <li><a href="#toprimitive">Symbol.toPrimitive</a></li>
+            <li><a href="#tostringtag">Symbol.toStringTag</a></li>
+            <li><a href="#species">Symbol.species</a></li>
+            <li><a href="#hasinstance">Практика: своя проверка instanceof</a></li>
+            <li><a href="#regexp">Символы методов строк и IsRegExp</a></li>
+            <li><a href="#concat">isConcatSpreadable и unscopables</a></li>
+            <li><a href="#objects">Объекты Symbol</a></li>
+            <li><a href="#cards">«Карточки 2.0»: колода со своими символами</a></li>
+            <li><a href="#next">Что будет завтра</a></li>
+        </ol>
+    </div>
+
+    <h2 id="reflect">1. Глава 28 и объект Reflect</h2>
+
+    <p>Глава <a href="https://tc39.es/ecma262/2026/#sec-reflection">28 Reflection</a> собирает то, чем код
+    смотрит на объекты и меняет их поведение: 28.1 — объект Reflect, 28.2 — Proxy (день 16), 28.3 — объекты
+    пространства имён модуля (день 15). Раздел <a href="https://tc39.es/ecma262/2026/#sec-reflect-object">28.1</a>
+    описывает Reflect семью пунктами: это %Reflect%, обычный объект с прототипом %Object.prototype%, и он не функция —
+    нет ни [[Call]], ни [[Construct]]. Страница MDN
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect">Reflect</a>
+    сравнивает его с Math: все свойства статические.</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(typeof Reflect, String(Reflect), Object.getPrototypeOf(Reflect) === Object.prototype, Object.getOwnPropertyNames(Reflect).length);
+console.log(run(() =&gt; Reflect()), "|", run(() =&gt; new Reflect()));
+const d = Object.getOwnPropertyDescriptor(Reflect, "get");
+console.log(d.writable, d.enumerable, d.configurable, Reflect.get.length, Reflect.construct.length, Reflect.set.length);</pre>
+
+    <div class="result-box">
+        object [object Reflect] true 13<br>
+        TypeError: Reflect is not a function | TypeError: Reflect is not a constructor<br>
+        true false true 2 2 3
+    </div>
+
+    <p>Тринадцать функций — записываемые и удаляемые, но не перечисляемые, как все встроенные методы, — и строка
+    «Reflect» под %Symbol.toStringTag% (28.1.14). У <code>get</code>, <code>construct</code> и <code>set</code>
+    последний аргумент необязательный, поэтому <code>length</code> на единицу меньше. Каждая функция делает одно:
+    проверяет аргументы и зовёт внутренний метод цели. Вот она, таблица 29 дня 16, с третьим столбцом:</p>
+
+    <table>
+        <thead><tr><th>Внутренний метод</th><th>Функция Reflect</th><th>Без Reflect</th></tr></thead>
+        <tbody>
+            <tr><td>[[GetPrototypeOf]]</td><td><code>getPrototypeOf(t)</code></td><td><code>Object.getPrototypeOf(t)</code></td></tr>
+            <tr><td>[[SetPrototypeOf]]</td><td><code>setPrototypeOf(t, proto)</code></td><td><code>Object.setPrototypeOf(t, proto)</code></td></tr>
+            <tr><td>[[IsExtensible]]</td><td><code>isExtensible(t)</code></td><td><code>Object.isExtensible(t)</code></td></tr>
+            <tr><td>[[PreventExtensions]]</td><td><code>preventExtensions(t)</code></td><td><code>Object.preventExtensions(t)</code></td></tr>
+            <tr><td>[[GetOwnProperty]]</td><td><code>getOwnPropertyDescriptor(t, k)</code></td><td><code>Object.getOwnPropertyDescriptor(t, k)</code></td></tr>
+            <tr><td>[[DefineOwnProperty]]</td><td><code>defineProperty(t, k, desc)</code></td><td><code>Object.defineProperty(t, k, desc)</code></td></tr>
+            <tr><td>[[HasProperty]]</td><td><code>has(t, k)</code></td><td><code>k in t</code></td></tr>
+            <tr><td>[[Get]]</td><td><code>get(t, k, receiver)</code></td><td><code>t[k]</code></td></tr>
+            <tr><td>[[Set]]</td><td><code>set(t, k, v, receiver)</code></td><td><code>t[k] = v</code></td></tr>
+            <tr><td>[[Delete]]</td><td><code>deleteProperty(t, k)</code></td><td><code>delete t[k]</code></td></tr>
+            <tr><td>[[OwnPropertyKeys]]</td><td><code>ownKeys(t)</code></td><td><code>getOwnPropertyNames</code> и <code>getOwnPropertySymbols</code></td></tr>
+            <tr><td>[[Call]]</td><td><code>apply(f, thisArg, args)</code></td><td><code>f.apply(thisArg, args)</code></td></tr>
+            <tr><td>[[Construct]]</td><td><code>construct(C, args, newTarget)</code></td><td><code>new C(...args)</code></td></tr>
+        </tbody>
+    </table>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 200" role="img" aria-label="Внутренний метод цели зовут три стороны: код неявно (t.x, in, delete, Object.keys, new), Reflect явно по имени метода, а ловушка прокси пересылает операцию через Reflect">
+            <defs>
+                <marker id="d17-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+                </marker>
+            </defs>
+            <rect x="10" y="20" width="180" height="70" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">код</text>
+            <text x="22" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">t.x, x in t, delete t.x</text>
+            <text x="22" y="80" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">Object.keys(t), new C()</text>
+
+            <rect x="230" y="20" width="180" height="70" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="242" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">внутренний метод цели</text>
+            <text x="242" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">[[Get]], [[HasProperty]],</text>
+            <text x="242" y="80" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">[[Delete]] … всего 13</text>
+
+            <rect x="450" y="20" width="180" height="70" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="462" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">Reflect</text>
+            <text x="462" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">Reflect.get(t, "x", r)</text>
+            <text x="462" y="80" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">те же 13 — по имени</text>
+
+            <rect x="450" y="118" width="180" height="56" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="462" y="140" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">ловушка прокси</text>
+            <text x="462" y="160" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">get(t, key, receiver)</text>
+
+            <path d="M 192 55 L 226 55" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <path d="M 448 55 L 414 55" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <path d="M 540 116 L 540 94" stroke="#ec4899" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <text x="10" y="192" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Код зовёт метод неявно, Reflect — явно, а ловушка прокси пересылает через Reflect.</text>
+        </svg>
+        <figcaption>Три входа в один внутренний метод</figcaption>
+    </figure>
+
+    <p>Имена и аргументы функций Reflect совпадают с ловушками. MDN называет это главным применением Reflect:
+    «default forwarding behavior in Proxy handler traps».</p>
+
+    <h2 id="bool">2. Булево вместо исключения</h2>
+
+    <p>Внутренние методы отвечают булевым (день 4): получилось или нет. Object.defineProperty превращает false в
+    TypeError (DefinePropertyOrThrow, день 7), присваивание в строгом коде — тоже (PutValue). Reflect отдаёт ответ
+    метода как есть, и в строгом коде тоже:</p>
+
+    <pre class="code js">"use strict";
+const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const frozen = Object.freeze({ word: "kitap" });
+console.log(Reflect.defineProperty(frozen, "x", { value: 1 }), run(() =&gt; Object.defineProperty(frozen, "x", { value: 1 })));
+console.log(Reflect.set(frozen, "word", "suw"), run(() =&gt; { frozen.word = "suw"; }));
+console.log(Reflect.deleteProperty(frozen, "word"), run(() =&gt; delete frozen.word));
+console.log(Reflect.setPrototypeOf(frozen, null), run(() =&gt; Object.setPrototypeOf(frozen, null)));
+console.log(Object.getPrototypeOf(1) === Number.prototype, run(() =&gt; Reflect.getPrototypeOf(1)), Object.isExtensible(1), run(() =&gt; Reflect.isExtensible(1)));</pre>
+
+    <div class="result-box">
+        false TypeError: Cannot define property x, object is not extensible<br>
+        false TypeError: Cannot assign to read only property 'word' of object '#&lt;Object&gt;'<br>
+        false TypeError: Cannot delete property 'word' of #&lt;Object&gt;<br>
+        false TypeError: #&lt;Object&gt; is not extensible<br>
+        true TypeError: Reflect.getPrototypeOf called on non-object false TypeError: Reflect.isExtensible called on non-object
+    </div>
+
+    <p>Вторая разница — в первом шаге. Каждая функция 28.1.3–28.1.13 начинает с «If target is not an Object, throw a
+    TypeError exception». Object.getPrototypeOf сначала зовёт ToObject, и у единицы находится Number.prototype, а
+    Object.isExtensible для примитива просто отвечает false. Выходит, Reflect строг к аргументам и честен в ответе:
+    ошибку даёт неверная цель, а не отказ метода.</p>
+
+    <h2 id="ownkeys">3. ownKeys и порядок ключей</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/ownKeys">Reflect.ownKeys</a>
+    (<a href="https://tc39.es/ecma262/2026/#sec-reflect.ownkeys">28.1.10</a>) — это [[OwnPropertyKeys]] и
+    CreateArrayFromList: все свои ключи одним массивом, строки и символы, перечисляемые и нет. Порядок задаёт
+    OrdinaryOwnPropertyKeys (день 14): индексы по возрастанию, потом строки в порядке создания, потом символы.</p>
+
+    <pre class="code js">const tag = Symbol("tag");
+const card = { word: "kitap", 2: "b", [tag]: 1, 1: "a" };
+Object.defineProperty(card, "hidden", { value: true, enumerable: false });
+console.log(Reflect.ownKeys(card).map(String).join(" "));
+console.log(Object.keys(card).join(" "), "|", Object.getOwnPropertyNames(card).join(" "), "|", Object.getOwnPropertySymbols(card).map(String).join(" "));
+class Lesson { static day = 17; }
+console.log(Reflect.ownKeys([7, 8]).join(" "), "|", Reflect.ownKeys(Lesson).join(" "), "|", Reflect.ownKeys(() =&gt; {}).join(" "));</pre>
+
+    <div class="result-box">
+        1 2 word hidden Symbol(tag)<br>
+        1 2 word | 1 2 word hidden | Symbol(tag)<br>
+        0 1 length | length name prototype day | length name
+    </div>
+
+    <p>Object.keys берёт только перечисляемые строки, getOwnPropertyNames — все строки, getOwnPropertySymbols — только
+    символы; ownKeys — объединение двух последних в порядке [[OwnPropertyKeys]]. Символ <code>tag</code> создан раньше
+    <code>hidden</code>, но стоит после: символы всегда в конце. У массива свой <code>length</code>, у класса —
+    <code>length</code>, <code>name</code>, <code>prototype</code> и статическое поле, у стрелки <code>prototype</code>
+    нет.</p>
+
+    <h2 id="receiver">4. get и set: Receiver</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/get">Reflect.get</a>
+    (<a href="https://tc39.es/ecma262/2026/#sec-reflect.get">28.1.5</a>) и
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/set">Reflect.set</a>
+    (<a href="https://tc39.es/ecma262/2026/#sec-reflect.set">28.1.12</a>) принимают необязательный receiver; нет его —
+    «Set receiver to target». Это Receiver дня 14: на нём вызывают геттер и сеттер, на нём OrdinarySetWithOwnDescriptor
+    создаёт свойство. MDN пишет о нём так: «The value of <code>this</code> provided for the call to
+    <code>target</code> if a getter is encountered».</p>
+
+    <pre class="code js">const card = { word: "kitap", get title() { return this.word.toUpperCase(); }, set title(v) { this.word = v.toLowerCase(); } };
+const other = { word: "galam" };
+console.log(Reflect.get(card, "title"), Reflect.get(card, "title", other), card.title);
+console.log(Reflect.set(card, "title", "SUW", other), other.word, card.word);
+const plain = {};
+console.log(Reflect.set({ x: 1 }, "x", 2, plain), plain.x, Reflect.set({ x: 1 }, "x", 2, 5), Reflect.set(Object.freeze({ x: 1 }), "x", 2, plain));</pre>
+
+    <div class="result-box">
+        KITAP GALAM KITAP<br>
+        true suw kitap<br>
+        true 2 false false
+    </div>
+
+    <p>Геттер и сеттер <code>title</code> взяли <code>this</code> = <code>other</code>: прочитали и переписали чужое
+    слово, а <code>card</code> не изменился. В третьей строке свойство <code>x</code> нашлось у цели, а записалось в
+    <code>plain</code>. Receiver-примитив — false (шаг «If Receiver is not an Object, return false»), незаписываемое
+    свойство цели — тоже false, даже если пишут в другой объект.</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 206" role="img" aria-label="Reflect.get(t, k, r) зовёт t.[[Get]](k, r): дескриптор берётся у цели, геттер вызывается с this = r. Reflect.set(t, k, v, r) зовёт t.[[Set]](k, v, r): у цели записываемые данные — CreateDataProperty(r, k, v), запись идёт в r">
+            <rect x="10" y="20" width="190" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">Reflect.get(t, k, r)</text>
+            <text x="22" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">r — Receiver</text>
+
+            <rect x="235" y="20" width="180" height="56" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="247" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">t.[[Get]](k, r)</text>
+            <text x="247" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">дескриптор k — у цели</text>
+
+            <rect x="450" y="20" width="180" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="462" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">геттер</text>
+            <text x="462" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">вызван с this = r</text>
+
+            <rect x="10" y="108" width="190" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="130" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">Reflect.set(t, k, v, r)</text>
+            <text x="22" y="150" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">r — Receiver</text>
+
+            <rect x="235" y="108" width="180" height="56" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="247" y="130" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">t.[[Set]](k, v, r)</text>
+            <text x="247" y="150" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">у цели — writable: true</text>
+
+            <rect x="450" y="108" width="180" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="462" y="130" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">CreateDataProperty</text>
+            <text x="462" y="150" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">(r, k, v) — пишут в r</text>
+
+            <path d="M 202 48 L 231 48" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <path d="M 417 48 L 446 48" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <path d="M 202 136 L 231 136" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <path d="M 417 136 L 446 136" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <text x="10" y="196" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">Что можно — решает дескриптор цели; чей this и куда пишут — решает Receiver.</text>
+        </svg>
+        <figcaption>Receiver в Reflect.get и Reflect.set</figcaption>
+    </figure>
+
+    <h2 id="forward">5. Практика: прокси с верной пересылкой</h2>
+
+    <p>На дне 16 ловушки пересылали через <code>t[key]</code> и теряли Receiver: наследник прокси получал геттер с
+    <code>this</code> = цель, а запись через прокси в прототипе попадала в цель. Те же два примера с Reflect:</p>
+
+    <pre class="code js">const target = { name: "цель", get who() { return this.name; } };
+const lost = new Proxy(target, { get(t, key) { return t[key]; } });
+const right = new Proxy(target, { get(t, key, receiver) { return Reflect.get(t, key, receiver); } });
+const a = Object.create(lost);
+const b = Object.create(right);
+a.name = "наследник";
+b.name = "наследник";
+console.log(a.who, b.who);
+const proto = new Proxy({}, { set(t, key, value, receiver) { return Reflect.set(t, key, value, receiver); } });
+const child = Object.create(proto);
+child.x = 1;
+console.log(Object.hasOwn(child, "x"), Object.keys(Object.getPrototypeOf(child)).length);</pre>
+
+    <div class="result-box">
+        цель наследник<br>
+        true 0
+    </div>
+
+    <p>Ловушка получила receiver последним аргументом и отдала его дальше — больше ничего не нужно. А раз имена и
+    аргументы совпадают, ловушки можно не писать по одной. Обработчик-прокси дня 16 отвечает на каждое имя ловушки
+    функцией, которая записывает имя и зовёт функцию Reflect с тем же именем:</p>
+
+    <pre class="code js">const log = [];
+const handler = new Proxy({}, { get(h, trap) { return (...args) =&gt; { log.push(trap); return Reflect[trap](...args); }; } });
+const p = new Proxy({ x: 1 }, handler);
+p.y = 2;
+console.log(Object.keys(p).join(), "y" in p, delete p.x, JSON.stringify(p));
+console.log(log.join(", "));</pre>
+
+    <div class="result-box">
+        x,y true true {"y":2}<br>
+        set, getOwnPropertyDescriptor, defineProperty, ownKeys, getOwnPropertyDescriptor, getOwnPropertyDescriptor, has, deleteProperty, get, ownKeys, getOwnPropertyDescriptor, get
+    </div>
+
+    <p>Журнал дня 16 подменял ответ «ловушки нет», этот — пересылает каждую операцию и видит всю цепочку.
+    <code>p.y = 2</code> — это <code>set</code>, а за ним <code>getOwnPropertyDescriptor</code> и
+    <code>defineProperty</code>: Reflect.set передал Receiver = прокси, и OrdinarySetWithOwnDescriptor спросил и
+    определил свойство на нём, то есть снова через ловушки. JSON.stringify начинает с <code>get</code>
+    (<code>toJSON</code>) и заканчивает <code>get</code> значения <code>y</code>.</p>
+
+    <h2 id="apply">6. apply: аргументы списком</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply">Reflect.apply</a>
+    (<a href="https://tc39.es/ecma262/2026/#sec-reflect.apply">28.1.1</a>): цель не вызываемая — TypeError; аргументы —
+    CreateListFromArrayLike, то есть любой объект с <code>length</code>; потом Call. Зачем он, если есть
+    <code>Function.prototype.apply</code>? Метод <code>apply</code> ищут у самой функции, и его можно подменить —
+    поэтому на днях 15 и 16 мы писали <code>Function.prototype.apply.call(f, …)</code>. Reflect.apply короче:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+function show(a, b) { return `${this.name}: ${a}, ${b}`; }
+show.apply = () =&gt; "подменённый apply";
+console.log(show.apply({ name: "x" }, [1, 2]), "|", Reflect.apply(show, { name: "kitap" }, [1, 2]), "|", Reflect.apply(Math.max, null, { length: 2, 0: 3, 1: 7 }));
+console.log(Math.max.apply(null), run(() =&gt; Reflect.apply(Math.max, null)), "|", run(() =&gt; Reflect.apply({}, null, [])));</pre>
+
+    <div class="result-box">
+        подменённый apply | kitap: 1, 2 | 7<br>
+        -Infinity TypeError: CreateListFromArrayLike called on non-object | TypeError: Function.prototype.apply was called on #&lt;Object&gt;, which is an object and not a function
+    </div>
+
+    <p>Разница в мелочи: <code>Function.prototype.apply</code> без массива зовёт функцию без аргументов
+    (<code>Math.max()</code> — −∞), а Reflect.apply требует объект. Текст V8 о невызываемой цели упоминает
+    <code>Function.prototype.apply</code>, хотя звали Reflect.apply: у V8 общее сообщение.</p>
+
+    <h2 id="construct">7. construct и newTarget</h2>
+
+    <p><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/construct">Reflect.construct</a>
+    (<a href="https://tc39.es/ecma262/2026/#sec-reflect.construct">28.1.2</a>) — [[Construct]] с newTarget по выбору:
+    нет третьего аргумента — сама цель; оба обязаны быть конструкторами. MDN: это «the only way to construct a target
+    function with a specific <code>new.target</code> value». На дне 16 ловушка <code>construct</code> звала
+    <code>new target(...)</code> и теряла newTarget наследника. С Reflect.construct:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class Card { constructor(word) { this.word = word; this.made = new.target.name; } }
+const Watched = new Proxy(Card, { construct(target, args, newTarget) { return Reflect.construct(target, args, newTarget); } });
+class BigCard extends Watched { level = 2; }
+const big = new BigCard("suw");
+console.log(big instanceof BigCard, big.made, JSON.stringify(big));
+class Other {}
+const mixed = Reflect.construct(Card, ["kitap"], Other);
+console.log(mixed.word, mixed.made, mixed instanceof Other, mixed instanceof Card);
+console.log(run(() =&gt; Reflect.construct(() =&gt; {}, [])), "|", run(() =&gt; Reflect.construct(Card, [], () =&gt; {})), "|", run(() =&gt; Reflect.construct(Card)));</pre>
+
+    <div class="result-box">
+        true BigCard {"word":"suw","made":"BigCard","level":2}<br>
+        kitap Other true false<br>
+        TypeError: () =&gt; {} is not a constructor | TypeError: () =&gt; {} is not a constructor | TypeError: CreateListFromArrayLike called on non-object
+    </div>
+
+    <p>Внутри Card <code>new.target</code> — BigCard, и объект — BigCard. Вторая строка — то, что без Reflect не
+    сделать: код конструктора Card, а прототип — Other, потому что OrdinaryCreateFromConstructor берёт
+    <code>prototype</code> у newTarget (день 14). Так закрывается и задание 4 дня 15: модель <code>bind</code> теряла
+    newTarget наследника, а с Reflect — нет.</p>
+
+    <pre class="code js">function myBind(target, boundThis, ...boundArgs) {
+  return function bound(...args) {
+    if (new.target === undefined) return Reflect.apply(target, boundThis, [...boundArgs, ...args]);
+    return Reflect.construct(target, [...boundArgs, ...args], new.target === bound ? target : new.target);
+  };
+}
+class Point { constructor(x, y) { this.x = x; this.y = y; } }
+const OnAxis = myBind(Point, null, 0);
+class Sub extends OnAxis {}
+console.log(new Sub(5) instanceof Sub, new Sub(5).y, new OnAxis(5) instanceof Point);</pre>
+
+    <div class="result-box">
+        true 5 true
+    </div>
+
+    <h2 id="symbols">8. Встроенные символы</h2>
+
+    <p>Курс 2 (день 11) познакомил со встроенными символами: язык создаёт их заранее и сам ищет у объекта метод под
+    таким ключом. Таблица 1 раздела <a href="https://tc39.es/ecma262/2026/#sec-well-known-symbols">6.1.5.1</a>
+    перечисляет 13, в тексте спецификации их пишут %Symbol.iterator% (раньше — @@iterator). Итераторы мы прошли,
+    сегодня — остальные. Общий ход у всех один:</p>
+
+    <figure class="scheme">
+        <svg viewBox="0 0 640 220" role="img" aria-label="Операция языка (instanceof, ToPrimitive, concat, toString, map) делает Get или GetMethod по встроенному символу у объекта или его прототипа. Есть ответ — язык вызывает метод или берёт значение; undefined — алгоритм по умолчанию">
+            <rect x="10" y="20" width="190" height="70" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="22" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">операция языка</text>
+            <text x="22" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">instanceof, ToPrimitive,</text>
+            <text x="22" y="80" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">concat, toString, map</text>
+
+            <rect x="240" y="20" width="170" height="70" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="252" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">Get или GetMethod</text>
+            <text x="252" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">(obj, %Symbol.x%)</text>
+            <text x="252" y="80" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">у объекта или прототипа</text>
+
+            <rect x="450" y="20" width="180" height="56" rx="8" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+            <text x="462" y="42" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#9d174d">есть ответ</text>
+            <text x="462" y="62" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#9d174d">вызвать или взять его</text>
+
+            <rect x="450" y="104" width="180" height="56" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/>
+            <text x="462" y="126" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#334155">undefined</text>
+            <text x="462" y="146" font-family="Segoe UI, sans-serif" font-size="10.5" fill="#334155">алгоритм по умолчанию</text>
+
+            <path d="M 202 55 L 236 55" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <path d="M 412 48 L 446 48" stroke="#ec4899" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <path d="M 325 92 C 325 132, 380 132, 446 132" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#d17-arrow)"/>
+            <text x="10" y="184" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">По умолчанию: OrdinaryToPrimitive, OrdinaryHasInstance, builtinTag у toString,</text>
+            <text x="10" y="206" font-family="Segoe UI, sans-serif" font-size="11.5" fill="#334155">IsArray у concat, конструктор по умолчанию у species.</text>
+        </svg>
+        <figcaption>Как язык спрашивает встроенный символ</figcaption>
+    </figure>
+
+    <table>
+        <thead><tr><th>Символ</th><th>Кто спрашивает</th><th>Без ответа</th></tr></thead>
+        <tbody>
+            <tr><td><code>toPrimitive</code></td><td>ToPrimitive (7.1.1)</td><td>OrdinaryToPrimitive</td></tr>
+            <tr><td><code>toStringTag</code></td><td><code>Object.prototype.toString</code></td><td>тег по слотам</td></tr>
+            <tr><td><code>species</code></td><td>ArraySpeciesCreate, SpeciesConstructor</td><td>конструктор по умолчанию</td></tr>
+            <tr><td><code>hasInstance</code></td><td><code>instanceof</code> (13.10.2)</td><td>OrdinaryHasInstance</td></tr>
+            <tr><td><code>isConcatSpreadable</code></td><td><code>concat</code></td><td>IsArray</td></tr>
+            <tr><td><code>match</code>, <code>matchAll</code>, <code>replace</code>, <code>search</code>, <code>split</code></td><td>методы строк, IsRegExp</td><td>аргумент — строка</td></tr>
+            <tr><td><code>unscopables</code></td><td><code>with</code> (день 31)</td><td>все имена видны</td></tr>
+            <tr><td><code>iterator</code>, <code>asyncIterator</code></td><td><code>for...of</code>, <code>for await</code> (курс 2)</td><td>TypeError</td></tr>
+        </tbody>
+    </table>
+
+    <p>Свойства-символы конструктора Symbol (20.4.2) неизменяемые, а сами символы, по 6.1.5.1, «shared by all realms»:
+    у iframe свой Symbol (день 9), но символы у него те же.</p>
+
+    <pre class="code js">const frame = document.body.appendChild(document.createElement("iframe"));
+const other = frame.contentWindow;
+console.log(other.Symbol.iterator === Symbol.iterator, other.Symbol === Symbol, other.Symbol.for("kitap") === Symbol.for("kitap"), Symbol.keyFor(Symbol.iterator));
+const desc = Object.getOwnPropertyDescriptor(Symbol, "iterator");
+console.log(desc.writable, desc.enumerable, desc.configurable, Symbol.iterator.description);
+console.log(Object.getOwnPropertyNames(Symbol).filter((k) =&gt; typeof Symbol[k] === "symbol").join(" "));</pre>
+
+    <div class="result-box">
+        true false true undefined<br>
+        false false false Symbol.iterator<br>
+        asyncIterator hasInstance isConcatSpreadable iterator match matchAll replace search species split toPrimitive toStringTag unscopables dispose asyncDispose
+    </div>
+
+    <p>Глобальный реестр Symbol.for тоже общий (20.4.2.2), но встроенных символов в нём нет: keyFor — undefined. Chrome
+    знает 15 таких свойств: 13 из таблицы 1 и два для объявления <code>using</code> — это день 25.</p>
+
+    <h2 id="toprimitive">9. Symbol.toPrimitive</h2>
+
+    <p>ToPrimitive (<a href="https://tc39.es/ecma262/2026/#sec-toprimitive">7.1.1</a>, день 5) первым шагом делает
+    GetMethod(input, %Symbol.toPrimitive%). Метод есть — его зовут с подсказкой «default», «number» или «string», и
+    ответ обязан быть примитивом. Страница MDN
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/toPrimitive">Symbol.toPrimitive</a>
+    показывает объект, который на каждую подсказку отвечает своим. Цена:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const price = { amount: 12, [Symbol.toPrimitive](hint) { return hint === "number" ? this.amount : hint === "string" ? `${this.amount} манат` : "цена"; } };
+console.log(+price, `${price}`, price + "", price * 2, [price] + "", price == "цена");
+console.log(run(() =&gt; +{ [Symbol.toPrimitive]() { return {}; } }), "|", run(() =&gt; `${{ [Symbol.toPrimitive]: 1 }}`));</pre>
+
+    <div class="result-box">
+        12 12 манат цена 24 12 манат true<br>
+        TypeError: Cannot convert object to primitive value | TypeError: number 1 is not a function
+    </div>
+
+    <p>Унарный плюс и умножение просят число, шаблон и <code>[price] + ""</code> (через <code>join</code> и
+    ToString) — строку, а бинарный плюс и <code>==</code> подсказки не дают — это «default». Метод вернул объект —
+    TypeError шага 1.b.vi; не функция — TypeError из GetMethod.</p>
+
+    <p>Примечание к 7.1.1: из встроенных объектов свой метод есть только у Date и Symbol. Дата — единственная, кто
+    считает «default» строкой (<a href="https://tc39.es/ecma262/2026/#sec-date.prototype-%symbol.toprimitive%">21.4.4.45</a>),
+    поэтому <code>d + 1</code> — строка, а <code>d - 1</code> — число:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const d = new Date(2026, 10, 3);
+console.log(typeof (d + 1), typeof (d - 1), d[Symbol.toPrimitive]("number") === d.getTime(), d[Symbol.toPrimitive]("default") === String(d), run(() =&gt; d[Symbol.toPrimitive]("число")));
+const s = Symbol("kitap");
+const dd = Object.getOwnPropertyDescriptor(Symbol.prototype, Symbol.toPrimitive);
+console.log(Object(s)[Symbol.toPrimitive]() === s, Symbol.prototype[Symbol.toPrimitive].name, dd.writable, dd.configurable, run(() =&gt; Object(s) + ""));</pre>
+
+    <div class="result-box">
+        string number true true TypeError: Invalid hint: число<br>
+        true [Symbol.toPrimitive] false true TypeError: Cannot convert a Symbol value to a string
+    </div>
+
+    <p>Метод даты — OrdinaryToPrimitive с порядком по подсказке; чужая подсказка — TypeError.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/Symbol.toPrimitive">Symbol.prototype[Symbol.toPrimitive]</a>
+    (20.4.3.5) подсказку не смотрит и отдаёт символ из обёртки, поэтому обёртка + строка падает так же, как сам
+    символ. У обоих методов <code>writable: false</code>, но <code>configurable: true</code>: заменить можно только
+    через defineProperty.</p>
+
+    <h2 id="tostringtag">10. Symbol.toStringTag</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-object.prototype.tostring">Object.prototype.toString</a> (20.1.3.6,
+    день 15) сначала выбирает тег по слотам: Array, Arguments, Function, Error, Boolean, Number, String, Date, RegExp,
+    иначе Object. Потом читает Get(O, %Symbol.toStringTag%), и если там строка — она идёт в ответ. У Map, Promise,
+    Math, JSON, Reflect, символов, генераторов и BigInt такая строка лежит в прототипе или в самом объекте
+    (<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/toStringTag">Symbol.toStringTag</a>,
+    раздел «Built-in toStringTag symbols»):</p>
+
+    <pre class="code js">const tag = (x) =&gt; Object.prototype.toString.call(x);
+console.log(tag(new Map()), tag(Promise.resolve()), tag(Math), tag(JSON), tag(Reflect), tag(Symbol()), tag(function* () {}()), tag(1n));
+class Deck { get [Symbol.toStringTag]() { return "Deck"; } }
+const arr = [];
+arr[Symbol.toStringTag] = "Колода";
+console.log(tag(new Deck()), String(new Deck()), tag(arr), Array.isArray(arr), tag({ [Symbol.toStringTag]: 42 }), tag(new Proxy([], {})));</pre>
+
+    <div class="result-box">
+        [object Map] [object Promise] [object Math] [object JSON] [object Reflect] [object Symbol] [object Generator] [object BigInt]<br>
+        [object Deck] [object Deck] [object Колода] true [object Object] [object Array]
+    </div>
+
+    <p>Своему классу хватает одного геттера. Строка побеждает даже тег по слотам: массив с тегом «Колода» остаётся
+    массивом, но toString его уже не узнаёт. Поэтому примечание к 20.1.3.6 и предупреждает, что toString «does not
+    provide a reliable type testing mechanism». Тег не строка — молча берётся тег по слотам. Прокси массива — Array:
+    IsArray смотрит сквозь прокси (день 16).</p>
+
+    <h2 id="species">11. Symbol.species</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-get-array-%symbol.species%">Array[Symbol.species]</a> (23.1.2.6) —
+    геттер, который отдаёт <code>this</code>, поэтому у наследника Deck он отдаёт Deck. ArraySpeciesCreate (день 15)
+    берёт <code>constructor</code> объекта, а у него — Symbol.species, и <code>map</code> наследника создаёт наследника.
+    Свой статический геттер меняет ответ:</p>
+
+    <pre class="code js">class Deck extends Array { static get [Symbol.species]() { return Array; } }
+const d = Deck.from(["kitap", "galam"]);
+console.log(d instanceof Deck, d.map((w) =&gt; w).constructor.name, d.filter(Boolean) instanceof Deck, d.slice() instanceof Deck, Deck.of(1) instanceof Deck);
+const desc = Object.getOwnPropertyDescriptor(Array, Symbol.species);
+console.log(typeof desc.get, desc.set, desc.get.name, desc.get.call(Deck) === Deck);</pre>
+
+    <div class="result-box">
+        true Array false false true<br>
+        function undefined get [Symbol.species] true
+    </div>
+
+    <p><code>map</code>, <code>filter</code> и <code>slice</code> отдали Array, а <code>Deck.of</code> — Deck:
+    <code>of</code> и <code>from</code> создают через <code>this</code>, без species. Страница MDN
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/species">Symbol.species</a>
+    объясняет зачем: species — «a protocol about how instances should be copied», и производному объекту не всегда
+    нужны методы наследника. Промисы делают то же через SpeciesConstructor
+    (<a href="https://tc39.es/ecma262/2026/#sec-speciesconstructor">7.3.22</a>, день 7): <code>then</code> и
+    <code>finally</code> берут <code>constructor</code>, у него — species; undefined или null — конструктор по
+    умолчанию.</p>
+
+    <pre class="code js">class Lesson extends Promise { static get [Symbol.species]() { return Promise; } }
+const l = Lesson.resolve(1);
+console.log(l instanceof Lesson, l.then((x) =&gt; x) instanceof Lesson, l.then((x) =&gt; x).constructor.name, l.finally(() =&gt; {}) instanceof Lesson);
+class Lazy extends Promise { static get [Symbol.species]() { return null; } }
+console.log(Lazy.resolve(1).then((x) =&gt; x).constructor.name);</pre>
+
+    <div class="result-box">
+        true false Promise false<br>
+        Promise
+    </div>
+
+    <h2 id="hasinstance">12. Практика: своя проверка instanceof</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-instanceofoperator">InstanceofOperator</a> (13.10.2): правый операнд
+    не объект — TypeError; есть метод %Symbol.hasInstance% — ToBoolean от его ответа; иначе правый операнд обязан быть
+    вызываемым, и работает OrdinaryHasInstance (день 7). Курс 2 показал метод для знакомства, а теперь — проверка,
+    которой нужен не прототип, а свойство значения:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class Even { static [Symbol.hasInstance](n) { return Number.isInteger(n) &amp;&amp; n % 2 === 0; } }
+console.log(2 instanceof Even, 3 instanceof Even, "2" instanceof Even);
+function Plain() {}
+Plain[Symbol.hasInstance] = () =&gt; true;
+console.log({} instanceof Plain, Object.hasOwn(Plain, Symbol.hasInstance), run(() =&gt; { "use strict"; Plain[Symbol.hasInstance] = () =&gt; true; }));
+Object.defineProperty(Plain, Symbol.hasInstance, { value: () =&gt; true });
+console.log({} instanceof Plain, Function.prototype[Symbol.hasInstance].call(Plain, {}));
+console.log(run(() =&gt; 1 instanceof {}), "|", 1 instanceof { [Symbol.hasInstance]: () =&gt; true });</pre>
+
+    <div class="result-box">
+        true false false<br>
+        false false TypeError: Cannot assign to read only property 'Symbol(Symbol.hasInstance)' of function 'function Plain() {}'<br>
+        true false<br>
+        TypeError: Right-hand side of 'instanceof' is not callable | true
+    </div>
+
+    <p>Обычной функции метод не присвоить: все функции наследуют
+    <a href="https://tc39.es/ecma262/2026/#sec-function.prototype-%symbol.hasinstance%">Function.prototype[%Symbol.hasInstance%]</a>
+    (20.2.3.6), а он незаписываемый и неудаляемый. Нестрогий код молчит, строгий бросает — OrdinarySetWithOwnDescriptor
+    (день 14) отказывает при незаписываемом свойстве в прототипе. Примечание объясняет зачем: иначе подменённый метод
+    раскрыл бы цель связанной функции. Своё свойство — через defineProperty или <code>static</code> в классе, а прежний
+    ответ даёт вызов метода Function.prototype. Объекту с методом [[Call]] не нужен: шаг с символом стоит раньше
+    проверки IsCallable.</p>
+
+    <h2 id="regexp">13. Символы методов строк и IsRegExp</h2>
+
+    <p>Пять символов — <code>match</code>, <code>matchAll</code>, <code>replace</code>, <code>search</code>,
+    <code>split</code> — разобраны на дне 19 курса 2: метод строки спрашивает аргумент о символе и отдаёт работу ему.
+    Сегодня — обратная сторона, <a href="https://tc39.es/ecma262/2026/#sec-isregexp">IsRegExp</a> (7.2.6). Регулярка
+    ли аргумент, решает не слот, а Get(argument, %Symbol.match%): есть ответ — ToBoolean от него, нет — слот
+    [[RegExpMatcher]].</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const re = /a/g;
+console.log(RegExp(re) === re, new RegExp(re) === re, run(() =&gt; "kitap".replaceAll(/a/, "_")), "|", "kitap".replaceAll(re, "_"));
+const fake = { [Symbol.match]: true, source: "a", flags: "g", constructor: RegExp };
+console.log(RegExp(fake) === fake, run(() =&gt; "kitap".includes(fake)));
+console.log(Object.getOwnPropertySymbols(RegExp.prototype).map((s) =&gt; s.description).join(" "));</pre>
+
+    <div class="result-box">
+        true false TypeError: String.prototype.replaceAll called with a non-global RegExp argument | kit_p<br>
+        true TypeError: First argument to String.prototype.includes must not be a regular expression<br>
+        Symbol.match Symbol.matchAll Symbol.replace Symbol.search Symbol.split
+    </div>
+
+    <p><code>RegExp(re)</code> без <code>new</code> отдаёт тот же объект, если IsRegExp — true и его
+    <code>constructor</code> — RegExp; подделка с <code>Symbol.match: true</code> проходит тот же шаг.
+    <code>includes</code>, <code>startsWith</code> и <code>endsWith</code> отказываются от регулярок,
+    <code>replaceAll</code> и <code>matchAll</code> требуют флаг g. Сами методы лежат в RegExp.prototype под пятью
+    символами (страницы MDN <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/match">Symbol.match</a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/replace">Symbol.replace</a>
+    и соседние).</p>
+
+    <h2 id="concat">14. isConcatSpreadable и unscopables</h2>
+
+    <p><a href="https://tc39.es/ecma262/2026/#sec-isconcatspreadable">IsConcatSpreadable</a> (23.1.3.2.1):
+    <code>concat</code> раскрывает аргумент, если Get по %Symbol.isConcatSpreadable% даёт true, а без ответа — если это
+    массив. Так подобие массива раскрывается, а массив можно оставить целым:</p>
+
+    <pre class="code js">const pair = { length: 2, 0: "kitap", 1: "galam", [Symbol.isConcatSpreadable]: true };
+const solid = ["suw"];
+solid[Symbol.isConcatSpreadable] = false;
+const r = [1].concat(pair, solid, [2]);
+console.log(r.length, r[1], Array.isArray(r[3]), r[3][0]);
+const u = Array.prototype[Symbol.unscopables];
+console.log(Object.getPrototypeOf(u), Object.keys(u).join(" "));</pre>
+
+    <div class="result-box">
+        5 kitap true suw<br>
+        null at copyWithin entries fill find findIndex findLast findLastIndex flat flatMap includes keys toReversed toSorted toSpliced values
+    </div>
+
+    <p>Symbol.unscopables спрашивает только инструкция <code>with</code>.
+    <a href="https://tc39.es/ecma262/2026/#sec-array.prototype-%symbol.unscopables%">Array.prototype[Symbol.unscopables]</a>
+    (23.1.3.41) — объект без прототипа с именами методов, появившихся с ES2015: старый код внутри
+    <code>with (array)</code> не увидит их вместо своих переменных. Прототип null — совет MDN «Avoid using a
+    non-null-prototype object»: иначе невидимыми стали бы и имена из Object.prototype. Сам <code>with</code> — день 31,
+    там и проверим.</p>
+
+    <h2 id="objects">15. Объекты Symbol</h2>
+
+    <p>Раздел <a href="https://tc39.es/ecma262/2026/#sec-symbol-objects">20.4</a>: конструктор (20.4.1) создаёт символ
+    при вызове функцией, с <code>new</code> — TypeError, наследовать можно, но <code>super()</code> бросает. У
+    конструктора (20.4.2) — 13 встроенных символов, <code>for</code> и <code>keyFor</code>; у прототипа (20.4.3) —
+    <code>description</code>, <code>toString</code>, <code>valueOf</code>, [Symbol.toPrimitive] и тег «Symbol»;
+    экземпляры (20.4.4) — объекты со слотом [[SymbolData]]; 20.4.5 — KeyForSymbol. Объект Symbol (термин 4.4.33,
+    день 1) — обёртка, как <code>new Number(1)</code>:</p>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const s = Symbol("kitap");
+const box = Object(s);
+console.log(typeof box, box == s, box === s, box.valueOf() === s, box.description, String(s), run(() =&gt; `${s}`));
+console.log(run(() =&gt; new Symbol()), "|", run(() =&gt; { class S extends Symbol {} return new S(); }), "|", Symbol().description, Symbol.for("kitap") === Symbol.for("kitap"), Symbol.keyFor(Symbol.for("kitap")), Symbol.keyFor(s));
+const obj = { [s]: 1 };
+console.log(obj[box], Object.prototype.toString.call(box), run(() =&gt; Symbol.prototype.valueOf.call({})), run(() =&gt; Symbol.keyFor("kitap")));</pre>
+
+    <div class="result-box">
+        object true false true kitap Symbol(kitap) TypeError: Cannot convert a Symbol value to a string<br>
+        TypeError: Symbol is not a constructor | TypeError: Symbol is not a constructor | undefined true kitap undefined<br>
+        1 [object Symbol] TypeError: Symbol.prototype.valueOf requires that 'this' be a Symbol TypeError: kitap is not a symbol
+    </div>
+
+    <p>Обёртка — объект: <code>===</code> с символом ложно, а <code>==</code> истинно — IsLooselyEqual зовёт
+    ToPrimitive (день 5), и [Symbol.toPrimitive] отдаёт символ. Ключ-обёртка работает так же: ToPropertyKey тоже идёт
+    через ToPrimitive. Неявно символ строкой не становится, только через <code>String(s)</code> или
+    <code>toString</code> — SymbolDescriptiveString склеивает «Symbol(», описание и «)».</p>
+
+    <h2 id="cards">16. «Карточки 2.0»: колода со своими символами</h2>
+
+    <p>Соберём всё в колоде: тег Deck для отладки, число карточек для сравнений, подпись для строк и species, чтобы
+    <code>map</code> отдавал простые слова без методов колоды:</p>
+
+    <pre class="code js">class Deck extends Array {
+  static get [Symbol.species]() { return Array; }
+  get [Symbol.toStringTag]() { return "Deck"; }
+  [Symbol.toPrimitive](hint) { return hint === "number" ? this.length : `колода из ${this.length}`; }
+}
+const deck = Deck.from(["kitap", "galam", "suw"]);
+console.log(String(deck), `${deck}`, +deck, deck &gt; 2, Object.prototype.toString.call(deck), deck + "!");
+const words = deck.map((w) =&gt; w.toUpperCase());
+console.log(words instanceof Deck, Array.isArray(words), JSON.stringify(words), JSON.stringify(deck));</pre>
+
+    <div class="result-box">
+        колода из 3 колода из 3 3 true [object Deck] колода из 3!<br>
+        false true ["KITAP","GALAM","SUW"] ["kitap","galam","suw"]
+    </div>
+
+    <p><code>String</code> и шаблон дают подсказку «string», унарный плюс и <code>&gt;</code> — «number», а
+    <code>deck + "!"</code> — «default», и метод отдал подпись. <code>map</code> вернул Array. JSON.stringify видит
+    обычный массив: ни тег, ни toPrimitive в JSON не участвуют.</p>
+
+    <h2 id="next">17. Что будет завтра</h2>
+
+    <p>На дне 18 — глобальный объект и общие правила встроенных объектов (главы 18–19): откуда у встроенных функций
+    <code>length</code> и <code>name</code>, что они делают с лишними аргументами и какие свойства
+    <code>globalThis</code> даёт стандарт, а какие — хозяин.</p>
+
+    <div class="ref">
+        <div class="ref-title">Справочник дня</div>
+        <table>
+            <thead><tr><th>Раздел</th><th>Что делает и где мы это видели</th><th>Как разбираем</th></tr></thead>
+            <tbody>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-symbol-objects">20.4 Symbol Objects</a></td><td>конструктор, прототип, экземпляры</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-symbol-constructor">20.4.1 The Symbol Constructor</a></td><td>без <code>new</code>; <code>super()</code> бросает</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-symbol-constructor">20.4.2 Properties of the Symbol Constructor</a></td><td>13 символов, <code>for</code>, <code>keyFor</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-symbol-prototype-object">20.4.3 Properties of the Symbol Prototype Object</a></td><td><code>description</code>, [Symbol.toPrimitive]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-properties-of-symbol-instances">20.4.4 Properties of Symbol Instances</a></td><td>слот [[SymbolData]]</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-abstract-operations-for-symbols">20.4.5 Abstract Operations for Symbols</a></td><td>KeyForSymbol</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflection">28 Reflection</a></td><td>Reflect, Proxy (день 16), пространство имён (день 15)</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect-object">28.1 The Reflect Object</a></td><td>обычный объект, не функция</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.apply">28.1.1 Reflect.apply</a></td><td>CreateListFromArrayLike, Call</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.construct">28.1.2 Reflect.construct</a></td><td>newTarget — тоже конструктор</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.defineproperty">28.1.3 Reflect.defineProperty</a></td><td>false вместо TypeError</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.deleteproperty">28.1.4 Reflect.deleteProperty</a></td><td>булево и в строгом коде</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.get">28.1.5 Reflect.get</a></td><td>receiver по умолчанию — цель</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.getownpropertydescriptor">28.1.6 Reflect.getOwnPropertyDescriptor</a></td><td>без ToObject</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.getprototypeof">28.1.7 Reflect.getPrototypeOf</a></td><td>примитив — TypeError</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.has">28.1.8 Reflect.has</a></td><td>оператор <code>in</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.isextensible">28.1.9 Reflect.isExtensible</a></td><td>примитив — TypeError</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.ownkeys">28.1.10 Reflect.ownKeys</a></td><td>строки и символы одним списком</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.preventextensions">28.1.11 Reflect.preventExtensions</a></td><td>булево</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.set">28.1.12 Reflect.set</a></td><td>receiver; запись — в него</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect.setprototypeof">28.1.13 Reflect.setPrototypeOf</a></td><td>булево</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://tc39.es/ecma262/2026/#sec-reflect-%symbol.tostringtag%">28.1.14 Reflect [ %Symbol.toStringTag% ]</a></td><td>«Reflect»</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/Symbol.species">MDN: Array[Symbol.species]</a></td><td>геттер отдаёт <code>this</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/Symbol.unscopables">MDN: Array.prototype[Symbol.unscopables]</a></td><td>имена, скрытые от <code>with</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Symbol.hasInstance">MDN: Function.prototype[Symbol.hasInstance]()</a></td><td>неизменяемый метод по умолчанию</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect">MDN: Reflect</a></td><td>пересылка в ловушках</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply">MDN: Reflect.apply()</a></td><td>вместо <code>Function.prototype.apply.call</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/construct">MDN: Reflect.construct()</a></td><td>свой <code>new.target</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/defineProperty">MDN: Reflect.defineProperty()</a></td><td>булево вместо исключения</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/deleteProperty">MDN: Reflect.deleteProperty()</a></td><td>как <code>delete</code>, но функция</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/get">MDN: Reflect.get()</a></td><td>геттер с чужим <code>this</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/getOwnPropertyDescriptor">MDN: Reflect.getOwnPropertyDescriptor()</a></td><td>примитив — TypeError</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/getPrototypeOf">MDN: Reflect.getPrototypeOf()</a></td><td>без ToObject</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/has">MDN: Reflect.has()</a></td><td>как <code>in</code></td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/isExtensible">MDN: Reflect.isExtensible()</a></td><td>примитив — TypeError</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/ownKeys">MDN: Reflect.ownKeys()</a></td><td>все свои ключи</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/preventExtensions">MDN: Reflect.preventExtensions()</a></td><td>булево</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/set">MDN: Reflect.set()</a></td><td>запись с receiver</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/setPrototypeOf">MDN: Reflect.setPrototypeOf()</a></td><td>булево</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/hasInstance">MDN: Symbol.hasInstance</a></td><td>своя проверка <code>instanceof</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/isConcatSpreadable">MDN: Symbol.isConcatSpreadable</a></td><td>раскрыть подобие массива</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/match">MDN: Symbol.match</a></td><td>IsRegExp; день 19 курса 2</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/matchAll">MDN: Symbol.matchAll</a></td><td>день 19 курса 2</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/replace">MDN: Symbol.replace</a></td><td>день 19 курса 2</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/search">MDN: Symbol.search</a></td><td>день 19 курса 2</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/species">MDN: Symbol.species</a></td><td>как копировать экземпляры</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/split">MDN: Symbol.split</a></td><td>день 19 курса 2</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/Symbol.toPrimitive">MDN: Symbol.prototype[Symbol.toPrimitive]()</a></td><td>отдаёт символ, подсказку не смотрит</td><td><span class="mark mark-brief">кратко</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/toPrimitive">MDN: Symbol.toPrimitive</a></td><td>подсказки default, number, string</td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/toStringTag">MDN: Symbol.toStringTag</a></td><td>тег в <code>[object …]</code></td><td><span class="mark mark-full">подробно</span></td></tr>
+                <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/unscopables">MDN: Symbol.unscopables</a></td><td>только <code>with</code>, день 31</td><td><span class="mark mark-brief">кратко</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="cheatsheet">
+        <pre class="code js">// Reflect: обычный объект, 13 функций = 13 внутренних методов (таблица 29 дня 16) + тег "Reflect"
+// ответ метода как есть: false вместо TypeError; цель не объект — TypeError, без ToObject
+// Reflect.get(t, k, receiver), Reflect.set(t, k, v, receiver): this геттера и сеттера, запись — в receiver
+// ловушка прокси: return Reflect.имяЛовушки(...аргументы ловушки) — пересылка без потерь
+// Reflect.apply(f, thisArg, args): args — подобие массива; Reflect.construct(C, args, newTarget)
+// встроенный символ: язык делает Get или GetMethod по нему; нет ответа — алгоритм по умолчанию
+// [Symbol.toPrimitive](hint) — примитив; у даты "default" = строка; toStringTag — строка в [object …]
+// species: map, filter, slice массива, then и finally промиса; hasInstance: instanceof
+// Symbol() — без new; Symbol.for — реестр, общий для реалмов; Object(sym) — обёртка</pre>
+    </div>
+
+    <div class="selfcheck">
+        <ol>
+            <li>Почему <code>Reflect.defineProperty</code> на замороженном объекте отвечает false, а
+                <code>Object.defineProperty</code> бросает?
+                <details class="answer"><summary>Ответ</summary>
+                    Оба зовут [[DefineOwnProperty]], и тот отвечает false. Object.defineProperty идёт через
+                    DefinePropertyOrThrow, который превращает false в TypeError; Reflect отдаёт ответ как есть.
+                </details>
+            </li>
+            <li>Что даёт третий аргумент <code>Reflect.get</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Receiver: с ним как с <code>this</code> вызывают найденный геттер. Нет аргумента — Receiver = цель.
+                </details>
+            </li>
+            <li>Чем ловушка <code>get(t, key, receiver) { return Reflect.get(t, key, receiver); }</code> лучше
+                <code>return t[key]</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>t[key]</code> — новый [[Get]] с Receiver = цель: геттер получает <code>this</code> = цель, и
+                    наследник прокси теряется. Reflect.get передаёт Receiver, пришедший в ловушку.
+                </details>
+            </li>
+            <li>Как создать объект кодом конструктора Card, но с прототипом Other?
+                <details class="answer"><summary>Ответ</summary>
+                    <code>Reflect.construct(Card, args, Other)</code>: OrdinaryCreateFromConstructor берёт
+                    <code>prototype</code> у newTarget, а код выполняет Card.
+                </details>
+            </li>
+            <li>Почему у даты <code>d + 1</code> — строка, а <code>d - 1</code> — число?
+                <details class="answer"><summary>Ответ</summary>
+                    Бинарный плюс зовёт ToPrimitive без подсказки — «default», и метод
+                    Date.prototype[Symbol.toPrimitive] считает её строкой. Минус просит число.
+                </details>
+            </li>
+            <li>Почему обычной функции нельзя присвоить <code>F[Symbol.hasInstance] = …</code>?
+                <details class="answer"><summary>Ответ</summary>
+                    Функция наследует Function.prototype[%Symbol.hasInstance%], а он незаписываемый: присваивание
+                    отклоняется (в строгом коде — TypeError). Своё свойство — через defineProperty или
+                    <code>static</code> в классе.
+                </details>
+            </li>
+            <li>Зачем наследнику Array свой Symbol.species?
+                <details class="answer"><summary>Ответ</summary>
+                    Чтобы <code>map</code>, <code>filter</code>, <code>slice</code> и другие копирующие методы создавали
+                    не наследника, а другой класс — обычно Array: ArraySpeciesCreate берёт species у
+                    <code>constructor</code>.
+                </details>
+            </li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect">MDN Web Docs</a>
+        (Reflect и его методы, Symbol.toPrimitive, Symbol.toStringTag, Symbol.species, Symbol.hasInstance и другие встроенные символы, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

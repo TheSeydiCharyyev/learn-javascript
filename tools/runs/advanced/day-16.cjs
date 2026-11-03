@@ -4,7 +4,9 @@
 // The context is Ashgabat time and Russian.
 //   node tools/runs/advanced/day-16.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-16.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the cheatsheet runs without an error; the experiments
+// Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
+// console.log lines say, the table «code — traps» of the notes holds, and the homework (1–3 in Chrome, 4 in the text of
+// MDN); the cheatsheet runs without an error; the experiments
 // the lecture only tells about (GetMethod with null and with a non-function; an empty handler gives getters this =
 // proxy; t[key] helps a getter of a Map, not its methods, the wrapper of MDN helps both; Promise.resolve asks then;
 // a sloppy assignment is silent on false, Object.assign throws; the table of the six traps seen through a handler that
@@ -24,7 +26,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-16');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -119,7 +124,8 @@ const callersOf = (spec, op) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
   }
@@ -176,6 +182,40 @@ Promise.resolve({ then }).then((v) => console.log("fulfilled", v), (e) => consol
 const { proxy: f, revoke: r2 } = Proxy.revocable(class {}, {});
 revoke(); r2();
 console.log(typeof proxy, typeof f);`, ['object function'], 'lecture 15 (scheme): typeof of revoked proxies still works — it looks at [[Call]]', 'typeof.html');
+  // the notes: the table «code — traps», seen through a handler that is itself a proxy (the first trap is the one of
+  // the operation, the rest come from forwarding: [[Set]] of the target asks the Receiver, [[Construct]] reads prototype)
+  await told(`const log = [];
+const handler = new Proxy({}, { get(h, trap) { log.push(trap); return undefined; } });
+const watch = (target, f) => { log.length = 0; f(new Proxy(target, handler)); return [...new Set(log)].join(); };
+const rows = {
+  get: watch({ x: 1 }, (p) => p.x),
+  set: watch({}, (p) => { p.x = 1; }),
+  in: watch({ x: 1 }, (p) => "x" in p),
+  del: watch({ x: 1 }, (p) => delete p.x),
+  keys: watch({ x: 1 }, (p) => Object.keys(p)),
+  json: watch({ x: 1 }, (p) => JSON.stringify(p)),
+  inst: watch({}, (p) => p instanceof Object),
+  proto: watch({}, (p) => Object.getPrototypeOf(p)),
+  call: watch(function () {}, (p) => p()),
+  construct: watch(function () {}, (p) => new p()),
+};
+console.log(JSON.stringify(rows));`,
+  ['{"get":"get","set":"set,getOwnPropertyDescriptor,defineProperty","in":"has","del":"deleteProperty","keys":"ownKeys,getOwnPropertyDescriptor","json":"get,ownKeys,getOwnPropertyDescriptor","inst":"getPrototypeOf","proto":"getPrototypeOf","call":"apply","construct":"construct,get"}'],
+  'student table 1: p.x — get, p.x = v — set, in — has, delete — deleteProperty, Object.keys — ownKeys and descriptors, JSON — get (toJSON) first, instanceof and getPrototypeOf, p() — apply, new p() — construct', 'student-table.html');
+  // the notes: the homework, in Chrome
+  await told(`${RUN}const t = {};
+Object.defineProperty(t, "id", { value: 7, configurable: false, writable: true });
+const p = new Proxy(t, { get() { return 0; }, has() { return false; } });
+console.log(p.id, run(() => "id" in p));
+const k = new Proxy({ x: 1 }, { ownKeys() { return ["x", "y"]; } });
+console.log(JSON.stringify(Object.keys(k)), JSON.stringify(Object.getOwnPropertyNames(k)), Object.preventExtensions(k) === k, Object.isExtensible(k), run(() => Object.keys(k)));
+const twice = new Proxy(function (x) { return x; }, { apply(t, self, args) { return t(...args) * 2; } });
+const made = new twice(1);
+console.log(twice(2), twice.call(null, 3), JSON.stringify([1, 2].map(twice)), typeof made, JSON.stringify(made), Object.getPrototypeOf(made) === twice.prototype);`,
+  ['0 TypeError: \'has\' on proxy: trap returned falsish for property \'id\' which exists in the proxy target as non-configurable',
+    '["x"] ["x","y"] true false TypeError: \'ownKeys\' on proxy: trap returned extra keys but proxy target is non-extensible',
+    '4 6 [2,4] object {} true'],
+  'student homework 1–3: id is writable — get may answer anything, has may not hide a non-configurable key; Object.keys drops y without a descriptor, after preventExtensions (no trap — the target) the extra key throws; new does not go to apply — the target constructs an object', 'student-homework.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -277,6 +317,18 @@ console.log(typeof proxy, typeof f);`, ['object function'], 'lecture 15 (scheme)
       && mdn(`${G}/proxy`).includes('### Handler functions') && mdn(`${G}/revocable`).includes('calling `revoke()` again has no effect')
       && mdn(`${G}/proxy/get`).includes('Property access: `proxy[foo]` and `proxy.bar`') && hasAll(mdn(`${G}/proxy/ownkeys`), ['{{jsxref("Object.keys()")}}', '{{jsxref("Object.getOwnPropertyNames()")}}']),
     'lecture 1, 5, 15: MDN — the terms of the guide, the example «No private field forwarding» and its wrapper, handler functions, a second revoke() does nothing, what get and ownKeys intercept');
+    // the notes: homework 4 quotes «Return value» of handler.set(); the answer — Object.assign throws on false even in
+    // sloppy code (Set with Throw = true, checked above: assign.html and 7.3.4)
+    const plain = (md) => md.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\{\{jsxref\("([^"]+)"\)\}\}/g, '$1');
+    const setMd = plain(mdn(`${G}/proxy/set`));
+    check(setMd.includes('### Return value') && setMd.includes('Many operations, including using property accessors in strict mode, throw a TypeError if the `[[Set]]` internal method returns `false`.')
+      && !setMd.includes('Object.assign'),
+    'student homework 4: MDN handler.set() «Return value» — many operations, strict assignment among them, throw on false; Object.assign is not named there');
+    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');
+    const footer = notes.slice(notes.indexOf('<div class="sources">'));
+    check(['(Proxy,', 'handler.get()', 'handler.set()', 'handler.ownKeys()', 'handler.construct()', 'Proxy.revocable()'].every((s) => footer.includes(s))
+      && [G, `${G}/proxy/get`, `${G}/proxy/set`, `${G}/proxy/ownkeys`, `${G}/proxy/construct`, `${G}/revocable`].every((p) => pages.includes(p)),
+    'student: the MDN pages of the footer are pages of the plan, in the cache');
   }
 
   // the days the lecture points to

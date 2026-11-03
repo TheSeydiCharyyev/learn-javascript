@@ -6,7 +6,9 @@
 //   node tools/runs/advanced/day-16.cjs --quiet    only the checks
 // Checks: a result-box right after a block equals its output; a block of the notes prints what the comments of its
 // console.log lines say, the table «code — traps» of the notes holds, and the homework (1–3 in Chrome, 4 in the text of
-// MDN); the cheatsheet runs without an error; the experiments
+// MDN); a block of the tasks prints what EXPECT says, an example runs with the reference solution of SOLUTIONS and every
+// "expression;   // value" line equals its comment, and what the criteria ask to find holds in Chrome and in the text of
+// ECMA-262; the cheatsheet runs without an error; the experiments
 // the lecture only tells about (GetMethod with null and with a non-function; an empty handler gives getters this =
 // proxy; t[key] helps a getter of a Map, not its methods, the wrapper of MDN helps both; Promise.resolve asks then;
 // a sloppy assignment is silent on false, Object.assign throws; the table of the six traps seen through a handler that
@@ -26,7 +28,94 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-16');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
+// a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['kitap 2 нет: nope 2 false', '2 undefined word,level'],
+  'tasks #1': ['TypeError 100 100 TypeError false', 'ok true TypeError ok 0'],
+  'tasks #2': ['getOwnPropertyDescriptor', 'ownKeys, getOwnPropertyDescriptor, get', 'get, set, getOwnPropertyDescriptor, defineProperty', 'has', 'isExtensible'],
+  'tasks #8': ['ok TypeError TypeError TypeError ok TypeError 1 false', 'TypeError ok 1'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+// No Reflect: the day forwards with t[key], key in t, Object.defineProperty and Function.prototype.apply.call.
+const SOLUTIONS = {
+  checked: `function checked(target, test) {
+  const guard = (key, value) => { if (!test(key, value)) throw new RangeError(String(key) + ": " + String(value) + " не прошло проверку"); };
+  return new Proxy(target, {
+    set(t, key, value) { guard(key, value); t[key] = value; return true; },
+    defineProperty(t, key, desc) {
+      if ("get" in desc || "set" in desc) throw new TypeError(String(key) + ": аксессор не проверить");
+      if ("value" in desc) guard(key, desc.value);
+      Object.defineProperty(t, key, desc);
+      return true;
+    },
+  });
+}`,
+  range: `function range(from, to) {
+  const inRange = (key) => typeof key === "string" && String(Number(key)) === key && Number.isInteger(Number(key)) && Number(key) >= from && Number(key) <= to;
+  return new Proxy({}, {
+    get(t, key) { return inRange(key) ? Number(key) : t[key]; },
+    has(t, key) { return inRange(key) || key in t; },
+    ownKeys() { const keys = []; for (let i = from; i <= to; i++) keys.push(String(i)); return keys; },
+    getOwnPropertyDescriptor(t, key) { return inRange(key) ? { value: Number(key), writable: false, enumerable: true, configurable: true } : Object.getOwnPropertyDescriptor(t, key); },
+  });
+}`,
+  memo: `function memo(fn) {
+  const cache = new Map();
+  return new Proxy(fn, {
+    apply(target, thisArg, args) {
+      const key = JSON.stringify(args);
+      if (!cache.has(key)) cache.set(key, Function.prototype.apply.call(target, thisArg, args));
+      return cache.get(key);
+    },
+  });
+}`,
+  strictSettings: `function strictSettings(defaults) {
+  const LANGUAGE = new Set(["toJSON", "then"]);
+  return new Proxy({ ...defaults }, {
+    get(t, key) {
+      if (typeof key === "string" && !LANGUAGE.has(key) && !(key in t)) throw new ReferenceError("нет настройки «" + key + "»");
+      return t[key];
+    },
+    set(t, key, value) {
+      if (!Object.hasOwn(t, key)) throw new ReferenceError("нет настройки «" + String(key) + "»");
+      if (typeof value !== typeof t[key]) throw new TypeError(String(key) + ": нужен " + typeof t[key]);
+      t[key] = value;
+      return true;
+    },
+    defineProperty(t, key) { throw new TypeError(String(key) + ": только присваиванием"); },
+    deleteProperty() { return false; },
+  });
+}`,
+  lend: `function lend(target) {
+  const wrappers = new WeakMap();
+  const revokes = [];
+  const wrap = (obj) => {
+    if (wrappers.has(obj)) return wrappers.get(obj);
+    const { proxy, revoke } = Proxy.revocable(obj, {
+      get(t, key) { const value = t[key]; return typeof value === "object" && value !== null ? wrap(value) : value; },
+    });
+    wrappers.set(obj, proxy);
+    revokes.push(revoke);
+    return proxy;
+  };
+  return { proxy: wrap(target), revoke() { for (const r of revokes) r(); } };
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -111,6 +200,7 @@ const callersOf = (spec, op) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
@@ -118,13 +208,20 @@ const callersOf = (spec, op) => {
 
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split('\n')[0];
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && lines.length === out.length, `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (EXPECT[`${name} #${i}`]) check(same(out, EXPECT[`${name} #${i}`]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
@@ -216,6 +313,69 @@ console.log(twice(2), twice.call(null, 3), JSON.stringify([1, 2].map(twice)), ty
     '["x"] ["x","y"] true false TypeError: \'ownKeys\' on proxy: trap returned extra keys but proxy target is non-extensible',
     '4 6 [2,4] object {} true'],
   'student homework 1–3: id is writable — get may answer anything, has may not hide a non-configurable key; Object.keys drops y without a descriptor, after preventExtensions (no trap — the target) the extra key throws; new does not go to apply — the target constructs an object', 'student-homework.html');
+  // the tasks: what the criteria ask to find, with the reference solutions (probe d16_tasks.txt before writing)
+  await told(`${RUN}const p = new Proxy({ level: 2 }, { set: () => false });
+p.level = 3;
+console.log(p.level, run(() => Object.assign(p, { level: 4 })));`, ['2 TypeError: \'set\' on proxy: trap returned falsish for property \'level\''],
+  'task 1: false from set — the sloppy assignment is silent and writes nothing, Object.assign throws', 'task1.html');
+  await told(`const log = [];
+const handler = new Proxy({}, { get(h, trap) { log.push(trap); return undefined; } });
+const watch = (target, f) => { log.length = 0; f(new Proxy(target, handler)); return [...new Set(log)].join(", "); };
+console.log(watch(Object.freeze({ x: 1 }), (p) => Object.isFrozen(p)));`, ['isExtensible, ownKeys, getOwnPropertyDescriptor'],
+  'task 3: isFrozen of a frozen target goes on — ownKeys and the descriptor of every key', 'task3.html');
+  await told(`${RUN}const log = [];
+const ok = (v) => Number.isInteger(v) && v >= 1 && v <= 5;
+const only = new Proxy({}, { defineProperty(t, key, desc) { log.push(String(key) + " " + JSON.stringify(desc)); if (!ok(desc.value)) throw new RangeError("нет"); Object.defineProperty(t, key, desc); return true; } });
+only.a = 5;
+only.a = 4;
+console.log(run(() => { only.b = 7; }), JSON.stringify(only), log.join(" | "));`,
+  ['RangeError: нет {"a":4} a {"value":5,"writable":true,"enumerable":true,"configurable":true} | a {"value":4} | b {"value":7,"writable":true,"enumerable":true,"configurable":true}'],
+  'task 4: a defineProperty trap alone checks assignment too — a new key comes with the full descriptor (CreateDataProperty), an existing one with { value } only', 'task4.html');
+  await told(`${RUN}const keysOnly = new Proxy({}, { get(t, key) { return Number(key); }, ownKeys() { return ["3", "4"]; } });
+console.log(JSON.stringify(Object.keys(keysOnly)), JSON.stringify(keysOnly), JSON.stringify(Object.getOwnPropertyNames(keysOnly)));
+const fixed = new Proxy({}, { ownKeys() { return ["3"]; }, getOwnPropertyDescriptor() { return { value: 3, writable: false, enumerable: true, configurable: false }; } });
+console.log(run(() => Object.keys(fixed)));
+${SOLUTIONS.range}
+const r = range(3, 5);
+console.log(Object.preventExtensions(r) === r, run(() => Object.keys(r)));`,
+  ['[] {} ["3","4"]', 'TypeError: \'getOwnPropertyDescriptor\' on proxy: trap reported non-configurability for property \'3\' which is either non-existent or configurable in the proxy target',
+    'true TypeError: \'ownKeys\' on proxy: trap returned extra keys but proxy target is non-extensible'],
+  'task 5: without getOwnPropertyDescriptor Object.keys and JSON see nothing, getOwnPropertyNames sees the keys; configurable: false — TypeError; preventExtensions, then Object.keys — TypeError', 'task5.html');
+  await told(`${RUN}${SOLUTIONS.memo}
+function memoThis(fn) {
+  const byThis = new WeakMap(), noThis = new Map();
+  return new Proxy(fn, { apply(target, thisArg, args) {
+    const cache = thisArg !== null && (typeof thisArg === "object" || typeof thisArg === "function") ? (byThis.get(thisArg) ?? byThis.set(thisArg, new Map()).get(thisArg)) : noThis;
+    const key = JSON.stringify(args); if (!cache.has(key)) cache.set(key, Function.prototype.apply.call(target, thisArg, args)); return cache.get(key); } });
+}
+function plus(x) { return this.n + x; }
+const shared = memo(plus);
+const a = { n: 1, plus: shared }, b = { n: 10, plus: shared };
+const fixedPlus = memoThis(plus);
+const c = { n: 1, plus: fixedPlus }, d = { n: 10, plus: fixedPlus };
+class Card { constructor(word) { this.word = word; } }
+const MemoCard = memo(Card);
+console.log(a.plus(1), b.plus(1), c.plus(1), d.plus(1), new MemoCard("kitap") === new MemoCard("kitap"), run(() => MemoCard("kitap")));`,
+  ['2 2 2 11 false TypeError: Class constructor Card cannot be invoked without \'new\''],
+  'task 6: one memo for two objects gives the second the first answer (the key has no thisArg), a cache per thisArg — 2 and 11; new is not cached (no construct trap), a call without new — the class throws inside apply', 'task6.html');
+  await told(`${RUN}${SOLUTIONS.strictSettings}
+const settings = strictSettings({ perDay: 10, sound: true });
+const lecture = new Proxy({ perDay: 10 }, { get(t, key) { if (typeof key === "string" && !(key in t)) throw new ReferenceError("нет настройки «" + key + "»"); return t[key]; } });
+const withIn = new Proxy({ perDay: 10 }, { set(t, key, value) { if (!(key in t)) throw new ReferenceError("нет настройки «" + String(key) + "»"); if (typeof value !== typeof t[key]) throw new TypeError(String(key) + ": нужен " + typeof t[key]); t[key] = value; return true; } });
+console.log(run(() => { settings.toString = 1; }), "|", run(() => { withIn.toString = 1; }), "|", String(lecture));
+Promise.resolve(settings).then((v) => console.log("fulfilled", v === settings), (e) => console.log("rejected", e.name, e.message));
+Promise.resolve(lecture).then((v) => console.log("fulfilled", v === lecture), (e) => console.log("rejected", e.name, e.message));`,
+  ['ReferenceError: нет настройки «toString» | TypeError: toString: нужен function | [object Object]', 'fulfilled true', 'rejected ReferenceError нет настройки «then»'],
+  'task 7: Object.hasOwn stops toString as a typo, in would let it to the type check; String works in the lecture too; Promise.resolve fulfills with the settings, the lecture version is rejected on then', 'task7.html');
+  await told(`${RUN}${SOLUTIONS.lend}
+const frozen = lend(Object.freeze({ deck: {} }));
+console.log(run(() => frozen.proxy.deck));`,
+  ['TypeError: \'get\' on proxy: property \'deck\' is a read-only and non-configurable data property on the proxy target but the proxy did not return its actual value (expected \'#<Object>\' but got \'#<Object>\')'],
+  'task 8: lend over a frozen object — a wrapper for a fixed property breaks 10.5.8, and V8 prints both objects as #<Object>', 'task8.html');
+  await told(`const plain = {};
+Object.defineProperty(plain, "c", { value: 1 });
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor(plain, "c")));`, ['{"value":1,"writable":false,"enumerable":false,"configurable":false}'],
+  'task 9: on an ordinary object { value: 1 } makes a non-configurable property — the proxy checks only the fields that Desc has', 'task9.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -304,6 +464,32 @@ console.log(twice(2), twice.call(null, 3), JSON.stringify([1, 2].map(twice)), ty
     && f('sec-ordinaryhasinstance').includes('Set O to ? O. [[GetPrototypeOf]] ()') && f('sec-object.prototype.isprototypeof').includes('Repeat, Set V to ? V. [[GetPrototypeOf]] ()'),
   'lecture 5, 6, 9, 13: ToPrimitive — GetMethod (0 throws); JSON — GetV toJSON, called only if callable; includes, Set and WeakMap compare by SameValueZero and SameValue; [[HasProperty]] — own first; instanceof and isPrototypeOf go by [[GetPrototypeOf]]');
 
+  // what the tasks say about the text of ECMA-262 2026
+  {
+    const num = (id) => (clause(spec, id).match(/<span class="secnum">([^<]+)<\/span>/) || [])[1];
+    check(f('sec-object.hasown').includes('Return ? HasOwnProperty (obj, key)') && f('sec-hasownproperty').includes('Let desc be ? O. [[GetOwnProperty]] (P)')
+      && f('sec-object.entries').includes('EnumerableOwnProperties (obj, key+value)') && inOrder(f('sec-enumerableownproperties'), ['Let ownKeys be ? O. [[OwnPropertyKeys]] ()', 'Let desc be ? O. [[GetOwnProperty]] (key)', 'Let value be ? Get (O, key)'])
+      && inOrder(f('sec-ordinaryhasproperty'), ['Let hasOwn be ? O. [[GetOwnProperty]] (P). If hasOwn is not undefined, return true', 'Return ? parent. [[HasProperty]] (P)'])
+      && f('sec-object.isfrozen').includes('Return ? TestIntegrityLevel (O, frozen)')
+      && inOrder(f('sec-testintegritylevel'), ['Let extensible be ? IsExtensible (O). If extensible is true, return false', 'Let keys be ? O. [[OwnPropertyKeys]] ()', 'Let currentDesc be ? O. [[GetOwnProperty]] (k)']),
+    'task 3: hasOwn — HasOwnProperty, [[GetOwnProperty]]; entries — EnumerableOwnProperties: keys, descriptors, Get; in — OrdinaryHasProperty asks the parent; isFrozen — TestIntegrityLevel stops at an extensible object');
+    check(inOrder(f('sec-ordinarysetwithowndescriptor'), ['Return ? CreateDataProperty (Receiver, P, V)', 'Let valueDesc be the PropertyDescriptor { [[Value]] : V }. Return ? Receiver. [[DefineOwnProperty]] (P, valueDesc)']),
+      'task 4: OrdinarySetWithOwnDescriptor — a new key: CreateDataProperty on the Receiver, an existing one: [[DefineOwnProperty]] with { [[Value]] } only');
+    check(inOrder(f(`${PX}-defineownproperty-p-desc`), ['If Desc has a [[Configurable]] field and Desc. [[Configurable]] is false, then Let settingConfigFalse be true',
+      'If targetDesc is undefined, then If extensibleTarget is false, throw a TypeError exception. If settingConfigFalse is true, throw a TypeError exception',
+      'If IsCompatiblePropertyDescriptor (extensibleTarget, Desc, targetDesc) is false, throw a TypeError exception',
+      'If settingConfigFalse is true and targetDesc. [[Configurable]] is true, throw a TypeError exception',
+      'If IsDataDescriptor (targetDesc) is true, targetDesc. [[Configurable]] is false, and targetDesc. [[Writable]] is true, then If Desc has a [[Writable]] field and Desc. [[Writable]] is false, throw a TypeError exception']),
+    'task 9: 10.5.6 — settingConfigFalse only if Desc has the field; a new key on a non-extensible target; incompatible; non-configurable over configurable; non-writable over a fixed writable');
+    check(num('sec-promise-resolve-functions') === '27.2.1.3' && f('sec-promise-resolve-functions').includes('CreateResolvingFunctions')
+      && f('sec-promise-resolve-functions').includes('Let then be Completion (Get (resolution, "then")). If then is an abrupt completion, then Perform RejectPromise (promise, then. [[Value]])'),
+    'task 7: CreateResolvingFunctions (27.2.1.3) — resolve asks then and rejects the promise if the question throws');
+    const tasks = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    check([['getownproperty-p', '10.5.5'], ['defineownproperty-p-desc', '10.5.6'], ['get-p-receiver', '10.5.8'], ['ownpropertykeys', '10.5.11']].every(([id, n]) => num(`${PX}-${id}`) === n)
+      && [...tasks.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].every((m) => spec.includes(`id="${m[1]}"`)),
+    'tasks: the numbers 10.5.5, 10.5.6, 10.5.8, 10.5.11 are those of the 2026 text, every tc39.es anchor exists');
+  }
+
   // the MDN pages of the plan and what the lecture says about them
   const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/${p}/index.md`], { encoding: 'utf8' });
   const G = 'reference/global_objects/proxy';
@@ -329,6 +515,11 @@ console.log(twice(2), twice.call(null, 3), JSON.stringify([1, 2].map(twice)), ty
     check(['(Proxy,', 'handler.get()', 'handler.set()', 'handler.ownKeys()', 'handler.construct()', 'Proxy.revocable()'].every((s) => footer.includes(s))
       && [G, `${G}/proxy/get`, `${G}/proxy/set`, `${G}/proxy/ownkeys`, `${G}/proxy/construct`, `${G}/revocable`].every((p) => pages.includes(p)),
     'student: the MDN pages of the footer are pages of the plan, in the cache');
+    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasksFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(['(Proxy,', 'handler.set()', 'handler.defineProperty()', 'handler.ownKeys()', 'handler.getOwnPropertyDescriptor()', 'handler.apply()', 'Proxy.revocable()'].every((s) => tasksFooter.includes(s))
+      && [`${G}/proxy/defineproperty`, `${G}/proxy/getownpropertydescriptor`, `${G}/proxy/apply`].every((p) => pages.includes(p)),
+    'tasks: the MDN pages of the footer are pages of the plan, in the cache');
   }
 
   // the days the lecture points to

@@ -23,7 +23,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-18');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -121,7 +124,8 @@ const stepPath = (html, needle) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
   }
@@ -152,6 +156,16 @@ console.log([...sample].filter((c) => c !== " ").map((c) => c + (encodeURI(c) ==
 console.log(decodeURIComponent("a+b"), decodeURIComponent("a%2Bb"), encodeURIComponent("a b+c"), encodeURI(" "));`,
   [';U- /U- ?U- :U- @U- &U- =U- +U- $U- ,U- #U- -UC _UC .UC !UC ~UC *UC \'UC (UC )UC [-- ]--', 'a+b a+b a%20b%2Bc %20'],
   'lecture 14, 16: the table of URI characters — _ - . ! ~ * \' ( ) kept by both, ; / ? : @ & = + $ , # only by encodeURI, space and [ ] by none; decodeURIComponent leaves +', 'uri-table.html');
+  // the notes: the homework, in Chrome (probe d18_student.txt before writing)
+  await told(`console.log(String.prototype.replace.length, Array.prototype.splice.length, Function.prototype.call.length, JSON.parse.length, Array.prototype.indexOf.length, Object.getOwnPropertyDescriptor(Symbol.prototype, "description").get.name);
+var x = 1;
+let y = 2;
+globalThis.z = 3;
+console.log(delete globalThis.x, delete globalThis.z, "y" in globalThis, typeof z, x);
+console.log(parseInt("0.00000008"), parseInt(0.00000008), parseInt("  +0x10"), parseInt("010"), parseInt("1e3", 16));
+console.log([..."!'()*"].map((c) => encodeURIComponent(c)).join(""), encodeURIComponent("!'()*") === "!'()*");`,
+  ['2 2 1 2 1 get description', 'false true false undefined 1', '0 8 16 10 483', '!\'()* true'],
+  'student homework 1–4: replace 2, splice 2, call 1, JSON.parse 2 (written apart), indexOf 1, "get description"; var is not deleted, an assigned property is; let is not on the object; parseInt — "0" before ".", "8e-8", + and 0x, no octal, 1e3 in 16; ! \' ( ) * kept', 'student-homework.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -278,6 +292,21 @@ console.log(decodeURIComponent("a+b"), decodeURIComponent("a%2Bb"), encodeURICom
     && f('sec-properties-of-boolean-instances').includes('Boolean instances have a [[BooleanData]] internal slot') && num('sec-boolean-objects') === '20.3',
   'lecture 15: 20.3 — a conversion without new, a wrapper with new, super for subclasses; Boolean.prototype is a Boolean with false; ThisBooleanValue; instances have [[BooleanData]]');
 
+  // the notes: the step numbers of the parseInt table, the lengths of homework 1
+  {
+    const pi = clause(spec, 'sec-parseint-string-radix');
+    const sp = (w) => stepPath(pi, w);
+    const heading = (id) => flat(clause(spec, id).match(/<h1>([\s\S]*?)<\/h1>/)[1]).replace(/ \]/g, ']').replace(/\.\.\. /g, '...');
+    check(sp('Let inputString be ? ToString (string)') === '1' && sp('Let S be ! TrimString (inputString, start)') === '2' && sp('Let sign be 1') === '3' && sp('set S to the substring of S from index 1') === '5'
+      && sp('Let R be ℝ (? ToInt32 (radix))') === '6' && sp('Set R to 10') === '9.a' && sp('the first two code units of S are either "0x" or "0X"') === '10.a' && sp('If Z is empty, return NaN') === '13'
+      && sp('If sign = -1, return -0') === '15.a' && sp('Return 𝔽 (sign × mathInt)') === '16',
+    'student table 3: the steps of 19.2.5 — 1–2 ToString and trim, 3–5 sign, 6–9 radix, 10 0x, 11–13 digits and empty, 14–16 the number and −0');
+    check(f('sec-json.parse').includes('The "length" property of this function is 2') && heading('sec-json.parse').includes('JSON.parse (text [, reviver])')
+      && heading('sec-string.prototype.replace').includes('(searchValue, replaceValue)') && heading('sec-array.prototype.splice').includes('(start, deleteCount,...items)')
+      && heading('sec-function.prototype.call').includes('(thisArg,...args)') && heading('sec-array.prototype.indexof').includes('(searchElement [, fromIndex])'),
+    `student homework 1: the headings give replace 2, splice 2, call 1, indexOf 1; JSON.parse (text [, reviver]) has 2 written apart [${heading('sec-array.prototype.splice')}]`);
+  }
+
   // the MDN pages the lecture quotes
   const mdn = (p) => execFileSync('git', ['-C', MDN_GIT, 'show', `HEAD:files/en-us/web/javascript/reference/global_objects/${p}/index.md`], { encoding: 'utf8' });
   // MDN markdown as text: {{jsxref("X")}} and {{domxref("A/x", "x")}} macros, links and backticks dropped
@@ -289,6 +318,12 @@ console.log(decodeURIComponent("a+b"), decodeURIComponent("a%2Bb"), encodeURICom
       && g.includes('in Web Workers only self will work') && g.includes('In Node.js none of these work, and you must instead use global') && g.includes('it references a Proxy around the actual global object')
       && e.includes('For application/x-www-form-urlencoded, spaces are to be replaced by +'),
     'lecture 9, 16: MDN globalThis — «Historically…», window/self/frames, Workers self, Node global, «HTML and the WindowProxy» (a proxy around the global object); encodeURIComponent — + for x-www-form-urlencoded');
+    check(e.includes('### Encoding for RFC3986') && e.includes("The more recent RFC3986 reserves !, ', (, ), and *"),
+      'student homework 4: MDN encodeURIComponent «Encoding for RFC3986» — RFC3986 reserves ! \' ( ) *');
+    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');
+    const nfooter = notes.slice(notes.indexOf('<div class="sources">'));
+    check(['globalThis', 'encodeURIComponent()', 'ECMA-262 2026'].every((s) => nfooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 2,
+      'student: the footer names the MDN pages the notes use (globalThis in «запомни», encodeURIComponent in homework 4) and ECMA-262 2026');
   }
 
   // the days the lecture points to, read as text without tags

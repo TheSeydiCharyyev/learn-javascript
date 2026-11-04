@@ -17,6 +17,9 @@
 // The notes: the map of the program is comments only and names what the files have; the table «Куда приходит запись»
 // gives the number of notifications Chrome gives; console.count of the checklist grows by one a click; homework 2 —
 // «✕» at the second of five; the MDN quote, the anchors and the footer.
+// The tasks: a reference solution of every task as a patch of the project, and what its criteria say holds in Chrome
+// (counts of notify and render, sorting without notifications and the loop of sort in render, the deep check, the pause,
+// keys of the notifications, undo with and without the comparison, the three complaints of task 9 on their copies).
 //   node tools/runs/advanced/day-19.cjs            every run: code head, output; checks below
 //   node tools/runs/advanced/day-19.cjs --quiet    only the checks
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
@@ -111,7 +114,8 @@ const stepPaths = (html, needle) => {
     const cdp = await ctx.newCDPSession(p);
     await cdp.send('Runtime.enable');
     cdp.on('Runtime.consoleAPICalled', (e) => out.push(e.args.map(show).join(' ')));
-    cdp.on('Runtime.exceptionThrown', (e) => { const d = e.exceptionDetails; out.push(`Uncaught ${(d.exception?.description ?? d.text).split(LF)[0]}`); });
+    // "Uncaught" or "Uncaught (in promise)", as DevTools writes it
+    cdp.on('Runtime.exceptionThrown', (e) => { const d = e.exceptionDetails; out.push(`${d.text} ${(d.exception?.description ?? '').split(LF)[0]}`.trim()); });
     await p.goto(`${ORIGIN}/index.html`);
     await p.waitForTimeout(400);
     // every redraw writes #summary once
@@ -173,6 +177,12 @@ const stepPaths = (html, needle) => {
     all.notes = await src.evaluate(() => ({
       blocks: [...document.querySelectorAll('pre.code')].map((pre) => pre.textContent),
       writes: [...[...document.querySelectorAll('table')][0].querySelectorAll('tbody tr')].map((tr) => [...tr.cells].map((c) => c.innerText.trim())),
+      text: document.querySelector('.container').innerText,
+    }));
+    await src.goto('file:///' + path.join(DAY, 'tasks.html').replace(/\\/g, '/'));
+    all.tasks = await src.evaluate(() => ({
+      blocks: [...document.querySelectorAll('pre.code')].map((pre) => pre.textContent),
+      tasks: [...document.querySelectorAll('.task')].map((t) => t.innerText.replace(/\s+/g, ' ')),
       text: document.querySelector('.container').innerText,
     }));
     await ctx.close();
@@ -489,6 +499,227 @@ console.log(n(() => ["a", "b", "c", "d", "e"], (o) => { o.splice(1, 1); }).join(
     check(dpText.includes('The defineProperty() method must return a Boolean') && N.text.includes('«must return a Boolean»'), 'notes: MDN handler.defineProperty() — «must return a Boolean»');
     check(hasAll(N.text, ['Заданий: 4 · готово: 1', 'Напишите задание и кто его делает']) && hasAll(all.text, ['Заданий: 4 · готово: 1', 'Напишите задание и кто его делает']),
       'notes, checklist: the texts of the first show and the form are those of the lecture and the project');
+  }
+
+  // the tasks: reference solutions on copies of the project (probe d19_tasks.txt before writing the page)
+  {
+    const T = all.tasks;
+    const task = (n) => T.tasks[n - 1];
+    check(T.tasks.length === 9 && T.blocks.length === 2, `tasks: 9 tasks, 2 blocks (${T.tasks.length}, ${T.blocks.length})`);
+    const value = (page, code) => page.p.evaluate((c) => JSON.stringify((0, eval)(c)), code);
+    const last = (out, w) => out.filter((l) => l.startsWith(`${w}: `)).at(-1) ?? `${w}: 0`;
+    const counted = (files) => patch(patch(files, 'store.js', `  function notify() {${LF}`, `  function notify() {${LF}    console.count("notify");${LF}`), 'main.js', `function render() {${LF}`, `function render() {${LF}  console.count("render");${LF}`);
+    // task 1
+    {
+      const page = await open(APP);
+      const keys = await value(page, 'Object.keys(board)');
+      const trues = await value(page, '[board.tasks === board.tasks, Array.isArray(board.tasks)]');
+      const id = await tryConsole(page, 'board.tasks[0].id = "1"');
+      const st = await tryConsole(page, 'board.tasks[0].status = "готово"');
+      await console_(page, 'delete board.filter');
+      await page.p.waitForTimeout(100);
+      const v = await view(page.p);
+      const first = page.out[0];
+      const back = await tryConsole(page, 'board.filter = ""');
+      await page.p.waitForTimeout(100);
+      const v2 = await view(page.p);
+      // a number right after delete passes too: the property is gone, there is nothing to compare its type with
+      const other = await open(APP);
+      await console_(other, 'delete board.filter');
+      const asNumber = await tryConsole(other, 'board.filter = 5');
+      await other.close();
+      check(keys === '["title","filter","nextId","tasks"]' && trues === '[true,true]' && id === 'TypeError: id: нужен number, а пришёл string' && st === 'RangeError: status: можно только todo, doing, done'
+        && first === "Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'toLowerCase')" && same(v.todo, []) && same(v.doing, FIRST.doing) && same(v.done, FIRST.done)
+        && asNumber === 'ok' && back === 'ok' && same(v2.todo, FIRST.todo)
+        && hasAll(task(1), ["['title', 'filter', 'nextId', 'tasks']", "Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'toLowerCase')", 'колонка «Надо» опустела']),
+      `task 1: keys, two true, the two errors, delete filter — «in promise», «Надо» empty; after it even a number passes; "" brings the board back ${JSON.stringify([id, st, first, asNumber])}`);
+      await page.close();
+    }
+    // task 2
+    {
+      const page = await open(counted(APP));
+      const p = page.p;
+      const at = () => `${last(page.out, 'notify')} ${last(page.out, 'render')}`;
+      const r = [at()];
+      await press(p, 'Проверки tests.js', '→'); r.push(at());
+      await press(p, 'Разметка страницы', '✕'); r.push(at());
+      await addTask(p, 'Тесты', 'Сапар'); r.push(at());
+      await p.click('#filter'); await p.keyboard.type('аман', { delay: 30 }); await settle(p); r.push(at());
+      check(same(r, ['notify: 0 render: 1', 'notify: 1 render: 2', 'notify: 6 render: 3', 'notify: 9 render: 4', 'notify: 13 render: 8']),
+        `task 2: load 0/1; → +1/+1; ✕ at the first of four +5/+1; the form +3/+1; «аман» by letters +4/+4 ${JSON.stringify(r)}`);
+      await page.close();
+    }
+    // task 3
+    {
+      const page = await open(APP);
+      const p = page.p;
+      await p.click('#new-task button'); await settle(p);
+      await addTask(p, '  Тесты в Chrome ', 'Сапар');
+      await press(p, 'Проверки tests.js', '→');
+      await press(p, 'Разметка страницы', '✕');
+      await filterBy(p, 'аман');
+      await p.reload(); await settle(p);
+      await console_(page, 'board.tasks[0].status = "done"');
+      const ids = await value(page, 'board.tasks.map((t) => t.id).join()');
+      const next = await value(page, 'board.nextId');
+      await p.evaluate(() => localStorage.clear()); await p.reload(); await settle(p);
+      const again = [await value(page, 'board.tasks.length'), await value(page, 'board.nextId')];
+      check(ids === '"2,3,4,5"' && next === '6' && same(again, ['4', '5']) && hasAll(task(3), ['"2,3,4,5"', 'board.nextId — 6', 'nextId 5']), `task 3: after the scenario ${ids}, ${next}; after clear() ${again}`);
+      await page.close();
+    }
+    // task 4
+    const SORT = patch(patch(APP, 'main.js', '.filter((task) => task.status === status && isVisible(task)).map(makeCard)', '.filter((task) => task.status === status && isVisible(task)).toSorted(byWho).map(makeCard)'),
+      'main.js', 'function isVisible(task) {', `function byWho(a, b) {${LF}  return a.who.localeCompare(b.who, "ru") || a.title.localeCompare(b.title, "ru");${LF}}${LF}${LF}function isVisible(task) {`);
+    {
+      const page = await open(counted(SORT));
+      const v = await view(page.p);
+      const n0 = last(page.out, 'notify');
+      const ids = await value(page, 'board.tasks.map((t) => t.id).join()');
+      await press(page.p, 'Сохранение storage.js', '→');
+      const doing = (await view(page.p)).doing;
+      check(same(v.todo, ['Сохранение storage.js — Аман', 'Проверки tests.js — Мерет']) && n0 === 'notify: 0' && ids === '"1,2,3,4"' && same(doing, ['Модуль card.js — Аман', 'Сохранение storage.js — Аман'])
+        && task(4).includes('a.who.localeCompare(b.who, "ru") || a.title.localeCompare(b.title, "ru")'), `task 4: «Надо» and «Делаю» by who, then title; the data untouched, no notification ${JSON.stringify([v.todo, doing])}`);
+      await page.close();
+      const loop = await open(patch(counted(SORT), 'main.js', `function render() {${LF}`, `let n = 0;${LF}function render() {${LF}  if (++n > 50) throw new Error("стоп");${LF}  state.tasks.sort(byWho);${LF}`));
+      check(last(loop.out, 'render') === 'render: 50' && loop.out.includes('Uncaught (in promise) Error: стоп') && hasAll(task(4), ['if (++n > 50) throw new Error("стоп");', 'Uncaught (in promise) Error: стоп']),
+        `task 4: state.tasks.sort in render — every redraw orders the next one, the guard stops it after 50 ${last(loop.out, 'render')}`);
+      await loop.close();
+    }
+    // task 5
+    {
+      const DEEP = patch(APP, 'store.js', `  function check(target, key, value) {${LF}`, `  function check(target, key, value) {${LF}    if (typeof value === "object" && value !== null) {${LF}      for (const [k, v] of Object.entries(value)) check(value, k, v);${LF}    }${LF}`);
+      const page = await open(DEEP);
+      const p = page.p;
+      const bad = await tryConsole(page, 'board.tasks.push({ id: 9, title: "x", who: "y", status: "готово" })');
+      const len = await value(page, 'board.tasks.length');
+      const cards = await p.evaluate(() => document.querySelectorAll('#columns li').length);
+      await addTask(p, 'Тесты', 'Сапар'); await press(p, 'Проверки tests.js', '→'); await press(p, 'Разметка страницы', '✕');
+      const works = await view(p);
+      const silent = page.out.length === 0;
+      await console_(page, T.blocks[0]);
+      await p.reload(); await settle(p);
+      const spoiled = await view(p);
+      const cards2 = await p.evaluate(() => document.querySelectorAll('#columns li').length);
+      check(bad === 'RangeError: status: можно только todo, doing, done' && len === '4' && cards === 4 && silent && works.summary === 'Заданий: 4 · готово: 0' && works.doing.includes('Проверки tests.js — Мерет')
+        && spoiled.summary === 'Заданий: 4 · готово: 0' && cards2 === 3 && page.out.length === 0 && task(5).includes('«Заданий: 4 · готово: 0», карточек 3'),
+      `task 5: push with «готово» stopped, the form, arrows and ✕ work; spoiled storage opens without an error, 3 cards ${JSON.stringify([bad, spoiled.summary, cards2])}`);
+      await page.close();
+    }
+    // task 6
+    {
+      const PAUSE = patch(patch(APP, 'index.html', '<p><input id="filter" placeholder="Фильтр по имени"></p>', '<p><input id="filter" placeholder="Фильтр по имени"> <label><input type="checkbox" id="pause"> Не сохранять</label></p>'),
+        'main.js', 'subscribe(() => localStorage.setItem(SAVED, JSON.stringify(state)));', `const save = () => localStorage.setItem(SAVED, JSON.stringify(state));${LF}let stopSaving = subscribe(save);${LF}document.querySelector("#pause").addEventListener("change", (event) => {${LF}  if (event.target.checked) {${LF}    stopSaving();${LF}  } else {${LF}    stopSaving = subscribe(save);${LF}    save();${LF}  }${LF}});`);
+      const page = await open(PAUSE);
+      const p = page.p;
+      await p.check('#pause'); await press(p, 'Разметка страницы', '✕');
+      const during = (await view(p)).done;
+      await p.reload(); await settle(p);
+      const kept = (await view(p)).done;
+      await p.check('#pause'); await press(p, 'Разметка страницы', '✕'); await p.uncheck('#pause'); await settle(p);
+      await p.reload(); await settle(p);
+      const gone = (await view(p)).done;
+      check(same(during, []) && same(kept, ['Разметка страницы — Айна']) && same(gone, []) && page.out.length === 0, `task 6: paused — the board redraws, nothing saved; unpaused — saved at once ${JSON.stringify([during, kept, gone])}`);
+      await page.close();
+      const twice = await run({ 'store.js': STORE, 'main.js': `import { createStore } from "./store.js";${LF}const { state, subscribe } = createStore({ n: 0 });${LF}const save = () => console.count("save");${LF}const stop = subscribe(save);${LF}subscribe(save);${LF}state.n += 1;${LF}await null;${LF}stop();${LF}state.n += 1;${LF}await null;${LF}await null;${LF}console.log("после одной отписки");` });
+      check(same(twice, ['save: 1', 'после одной отписки']), `task 6: subscribe(save) twice — one call a change, the first unsubscribe removes it ${JSON.stringify(twice)}`);
+    }
+    // task 7
+    {
+      let KEYS = patch(APP, 'store.js', `  const listeners = new Set();${LF}`, `  const listeners = new Map();${LF}  const changed = new Set();${LF}`);
+      KEYS = patch(KEYS, 'store.js', `  function notify() {${LF}    if (planned) return;${LF}    planned = true;${LF}    Promise.resolve().then(() => {   // микрозадача (27.2.5.4.1 → 9.5.5): после всего текущего кода${LF}      planned = false;${LF}      for (const listener of listeners) listener();${LF}    });${LF}  }`,
+        `  function notify(key) {${LF}    changed.add(key);${LF}    if (planned) return;${LF}    planned = true;${LF}    Promise.resolve().then(() => {${LF}      planned = false;${LF}      const keys = [...changed];${LF}      changed.clear();${LF}      for (const [listener, only] of listeners) {${LF}        if (only === null || only.some((k) => keys.includes(k))) listener(keys);${LF}      }${LF}    });${LF}  }`);
+      KEYS = patch(KEYS, 'store.js', `      if (ok) notify();${LF}      return ok;   // false`, `      if (ok) notify(key);${LF}      return ok;   // false`);
+      KEYS = patch(KEYS, 'store.js', `      if (ok) notify();${LF}      return ok;${LF}    },${LF}  };`, `      if (ok) notify(key);${LF}      return ok;${LF}    },${LF}  };`);
+      KEYS = patch(KEYS, 'store.js', `    subscribe(listener) {${LF}      listeners.add(listener);`, `    subscribe(listener, only = null) {${LF}      listeners.set(listener, only);`);
+      KEYS = patch(KEYS, 'main.js', `subscribe(render);${LF}`, `subscribe(render);${LF}subscribe(() => console.log("фильтр:", state.filter), ["filter"]);${LF}subscribe(() => console.log("title"), ["title"]);${LF}subscribe((keys) => console.log("ключи:", JSON.stringify(keys)));${LF}`);
+      const page = await open(KEYS);
+      const p = page.p;
+      await press(p, 'Проверки tests.js', '→');
+      await press(p, 'Разметка страницы', '✕');
+      await addTask(p, 'Тесты', 'Сапар');
+      const beforeFilter = page.out.slice();
+      await p.click('#filter'); await p.keyboard.type('аман', { delay: 30 }); await settle(p);
+      const filterLines = page.out.slice(beforeFilter.length).filter((l) => l.startsWith('фильтр:'));
+      await console_(page, 'board.title = "JS-2"');
+      await console_(page, 'board.tasks[0].title = "x"');
+      check(same(beforeFilter, ['ключи: ["status"]', 'ключи: ["0","1","2","3","length"]', 'ключи: ["3","length","nextId"]']) && same(filterLines, ['фильтр: а', 'фильтр: ам', 'фильтр: ама', 'фильтр: аман'])
+        && page.out.filter((l) => l === 'title').length === 2 && hasAll(task(7), ['["0", "1", "2", "3", "length"]', '["3", "length", "nextId"]']),
+      `task 7: keys for →, ✕ and the form; the filter subscriber only on typing (4); "title" from the board and from a task ${JSON.stringify(beforeFilter)}`);
+      await page.close();
+    }
+    // task 8
+    {
+      const UNDO = patch(patch(APP, 'index.html', '<p id="error" class="error"></p>', `<p><button id="undo" disabled>Отменить</button></p>${LF}  <p id="error" class="error"></p>`),
+        'main.js', `subscribe(render);${LF}`, `subscribe(render);${LF}${LF}const undo = document.querySelector("#undo");${LF}const snapshot = () => JSON.stringify({ tasks: state.tasks, nextId: state.nextId });${LF}const snapshots = [snapshot()];${LF}subscribe(() => {${LF}  const now = snapshot();${LF}  if (now !== snapshots.at(-1)) snapshots.push(now);${LF}  undo.disabled = snapshots.length === 1;${LF}});${LF}undo.addEventListener("click", () => {${LF}  snapshots.pop();${LF}  const before = JSON.parse(snapshots.at(-1));${LF}  state.tasks = before.tasks;${LF}  state.nextId = before.nextId;${LF}});${LF}`);
+      const act = async (p) => { await addTask(p, 'Тесты', 'Сапар'); await press(p, 'Тесты', '→'); await press(p, 'Разметка страницы', '✕'); };
+      const page = await open(UNDO);
+      const p = page.p;
+      const disabled = () => p.evaluate(() => document.querySelector('#undo').disabled);
+      const r = [await disabled()];
+      await act(p);
+      await filterBy(p, 'аман'); await filterBy(p, '');
+      r.push(await disabled());
+      for (let i = 0; i < 3; i++) { await p.click('#undo'); await settle(p); r.push((await view(p)).summary); }
+      r.push(await disabled());
+      const v = await view(p);
+      await addTask(p, 'Ещё', 'Сапар');
+      const id = await value(page, 'board.tasks.at(-1).id');
+      check(same(r, [true, false, 'Заданий: 5 · готово: 1', 'Заданий: 5 · готово: 1', 'Заданий: 4 · готово: 1', true]) && same(v.todo, FIRST.todo) && same(v.done, FIRST.done) && id === '5' && page.out.length === 0,
+        `task 8: disabled at the start; three undos bring the first board back (the filter is not in the history); the next task gets 5 ${JSON.stringify(r)}`);
+      await page.close();
+      const page2 = await open(patch(UNDO, 'main.js', '  if (now !== snapshots.at(-1)) snapshots.push(now);', '  snapshots.push(now);'));
+      await act(page2.p);
+      const r2 = [];
+      for (let i = 0; i < 3; i++) { await page2.p.click('#undo'); await settle(page2.p); const w = await view(page2.p); r2.push(`${w.summary} / ${w.done.join()}`); }
+      check(same(r2, Array(3).fill('Заданий: 5 · готово: 1 / Разметка страницы — Айна')), `task 8: without the comparison only one action is undone, then «Отменить» changes nothing ${JSON.stringify(r2)}`);
+      await page2.close();
+    }
+    // task 9: the three fragments, each on its own copy
+    {
+      const frag = T.blocks[1];
+      check(frag.includes('for (const listener of listeners) listener();') && !frag.includes('planned') && frag.includes('localStorage.setItem(SAVED, state)') && frag.includes('без строки filter.value = state.filter;'),
+        'task 9: the fragments — notify without planned, setItem of the object, no filter.value');
+      const noFlag = patch(counted(APP), 'store.js', `    if (planned) return;${LF}    planned = true;${LF}    Promise.resolve().then(() => {   // микрозадача (27.2.5.4.1 → 9.5.5): после всего текущего кода${LF}      planned = false;${LF}`, `    Promise.resolve().then(() => {${LF}`);
+      const page = await open(noFlag);
+      await press(page.p, 'Разметка страницы', '✕');
+      const v = await view(page.p);
+      check(last(page.out, 'render') === 'render: 6' && v.summary === 'Заданий: 3 · готово: 0' && same(v.done, []), `task 9, complaint 1: without planned ✕ redraws five times, the board is right (${last(page.out, 'render')})`);
+      await page.close();
+      const F = patch(APP, 'main.js', 'localStorage.setItem(SAVED, JSON.stringify(state))', 'localStorage.setItem(SAVED, state)');
+      const page2 = await open(F);
+      const p2 = page2.p;
+      await press(p2, 'Разметка страницы', '✕');
+      const saved = await p2.evaluate(() => localStorage.getItem('board-js-1'));
+      await p2.reload(); await settle(p2);
+      const blank = await p2.evaluate(() => [document.querySelector('#heading').textContent, document.querySelectorAll('#columns li').length]);
+      const err = page2.out.slice();
+      F['main.js'] = APP['main.js'];
+      await p2.reload(); await settle(p2);
+      const stillBlank = await p2.evaluate(() => document.querySelectorAll('#columns li').length);
+      await p2.evaluate(() => localStorage.clear()); await p2.reload(); await settle(p2);
+      const fine = (await view(p2)).summary;
+      check(saved === '[object Object]' && same(err, ['Uncaught SyntaxError: "[object Object]" is not valid JSON']) && same(blank, ['', 0]) && stillBlank === 0 && fine === FIRST.summary
+        && task(9).includes('SyntaxError: "[object Object]" is not valid JSON'),
+      `task 9, complaint 2: «[object Object]» in localStorage, a blank page; the fix alone does not help until clear() ${JSON.stringify([saved, err, stillBlank, fine])}`);
+      await page2.close();
+      const page3 = await open(patch(APP, 'main.js', `filter.value = state.filter;${LF}`, ''));
+      await filterBy(page3.p, 'аман');
+      await page3.p.reload(); await settle(page3.p);
+      const input = await page3.p.inputValue('#filter');
+      const v3 = await view(page3.p);
+      check(input === '' && same(v3.todo, ['Сохранение storage.js — Аман']) && same(v3.doing, ['Модуль card.js — Аман']), `task 9, complaint 3: an empty field over a filtered board ${JSON.stringify([input, v3.todo, v3.doing])}`);
+      await page3.close();
+    }
+    // the text of the tasks: ECMA-262, MDN, the footer
+    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const ts = fs.readFileSync(SPEC, 'utf8');
+    const tAnchors = [...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]);
+    const toSorted = plainMd(execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/global_objects/array/tosorted/index.md'], { encoding: 'utf8' }));
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(same(tAnchors, ['sec-tostring']) && same(stepPaths(clause(ts, 'sec-tostring'), 'Let primValue be ? ToPrimitive (argument, string)'), ['10']) && task(9).includes('7.1.17, шаг 10')
+      && toSorted.includes('is the copying version of the sort() method') && task(4).includes('«the copying version of the sort() method»')
+      && ['Array.prototype.toSorted()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => tFooter.includes(s)) && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 2,
+    'tasks: 7.1.17 step 10 (ToPrimitive of an object); MDN toSorted — «the copying version of the sort() method»; the footer names it and ECMA-262 2026');
   }
   await b.close();
 

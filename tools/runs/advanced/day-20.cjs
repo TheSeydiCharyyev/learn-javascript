@@ -21,7 +21,84 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-20');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
+// a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['-1,-128,1,31,0 | 255,128,1,31,0 | 0,128,255,31,0 | -1,128,1,31,0 | 4294967295,128,65537,31,0 | -1.5,128,65537,31,NaN', 'true 127,-128,-1,0 0,0,254,255'],
+  'tasks #1': ['1,6,3 0,1,2,1e0 true TypeError 3', 'ok TypeError TypeError ok false'],
+  'tasks #2': ['0 0 255 255 0 0 128 63 0 65535', '3.0039215087890625 -1,16448 255,255'],
+  'tasks #8': ['7,7,7,7,7 2', 'TypeError 0', 'ok 3,3'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
+// No template literals inside: Node reads these strings as templates first.
+const SOLUTIONS = {
+  concatTyped: `function concatTyped(...views) {
+  const Kind = views.length ? views[0].constructor : Uint8Array;
+  const total = views.reduce((n, v) => n + v.length, 0);
+  const out = new Kind(total);
+  let offset = 0;
+  for (const v of views) { out.set(v, offset); offset += v.length; }
+  return out;
+}`,
+  canonicalIndex: `function canonicalIndex(key) {
+  if (key === "-0") return -0;
+  const n = Number(key);
+  return String(n) === key ? n : undefined;
+}`,
+  typedHas: `function typedHas(ta, key) {
+  if (typeof key !== "string") return key in ta;
+  const n = canonicalIndex(key);
+  if (n === undefined) return key in ta;
+  return Number.isInteger(n) && !Object.is(n, -0) && n >= 0 && n < ta.length;
+}`,
+  makeProgress: `function makeProgress(maxCards) {
+  const buf = new ArrayBuffer(0, { maxByteLength: maxCards });
+  const counts = new Uint8ClampedArray(buf);
+  return {
+    counts,
+    add() { buf.resize(buf.byteLength + 1); },
+    know(i) { counts[i]++; },
+    forget() { buf.resize(buf.byteLength - 1); },
+  };
+}`,
+  take: `function take(view) {
+  const { byteOffset, length } = view;
+  return new view.constructor(view.buffer.transfer(), byteOffset, length);
+}`,
+  toUint8Clamp: `function toUint8Clamp(x) {
+  const n = Number(x);
+  if (Number.isNaN(n)) return 0;
+  const c = Math.min(Math.max(n, 0), 255);
+  const f = Math.floor(c);
+  if (c < f + 0.5) return f;
+  if (c > f + 0.5) return f + 1;
+  return f % 2 === 0 ? f : f + 1;
+}`,
+  clamped: `function clamped(view) {
+  return new Proxy(view, {
+    set(target, key, value) {
+      target[key] = typeof key === "string" && String(Number(key)) === key ? toUint8Clamp(value) : value;
+      return true;
+    },
+  });
+}`,
+};
+const NEEDS = { typedHas: ['canonicalIndex'], clamped: ['toUint8Clamp'] };
+const checkable = (code) => {
+  const direct = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const names = [...new Set(direct.flatMap((n) => [...(NEEDS[n] ?? []), n]))];
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `__check(${JSON.stringify(m[1])}, () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `function __check(text, fn, want) {
+  const got = JSON.stringify(fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 // the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
 const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
   .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
@@ -103,19 +180,27 @@ const stepPaths = (html, needle) => {
         code: pre.textContent,
         box: next && next.matches('.result-box') ? next.innerText.split('\n').map((s) => s.trim()).filter(Boolean) : null,
         cheat: !!pre.closest('.cheatsheet'),
+        example: !!pre.closest('.example'),
       };
     }));
     await src.close();
     if (!quiet) console.log(`\n===== ${name}: ${blocks.length} blocks`);
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split('\n')[0];
-      const out = await runScript(ctx, blk.code, `${name}-${i}.html`);
+      const out = await runScript(ctx, blk.example ? checkable(blk.code) : blk.code, `${name}-${i}.html`);
       if (!quiet) {
-        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : ''}: ${first}`);
+        console.log(`\n--- ${name} #${i}${blk.cheat ? ' (cheatsheet)' : blk.example ? ' (example)' : ''}: ${first}`);
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
+      if (blk.example) {
+        const lines = out.filter((l) => l.startsWith('EX-'));
+        for (const l of lines) check(l.startsWith('EX-OK'), `${name} #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(lines.length > 0 && lines.length === out.length, `${name} #${i} example runs with the reference solution: ${lines.length} lines`);
+        continue;
+      }
       if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (EXPECT[`${name} #${i}`]) check(same(out, EXPECT[`${name} #${i}`]), `${name} #${i} ${first}: ${JSON.stringify(out)}`);
       else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
@@ -159,6 +244,53 @@ buffer.resize(12); r.push(float32.length);
 console.log(r.join(" "));`,
   ['Int8Array -56 56 112 127', 'Uint16Array 200 65336 4464 127', 'Uint8ClampedArray 200 0 255 128', '0 undefined undefined 0 false', '0,1,2,3,2.0', '0 0 0 0 2 1 0 0 258', '0 1 2'],
   'student homework 1–4: ToInt8/ToUint16/ToUint8Clamp of 200, −200, 70000, 127.5; "2.0" is not a numeric key, -1 is one; u16[1] lands in bytes 4–5, u32[0] = 258; a length-tracking view from byte 4 — 0, 1, 2', 'student-homework.html');
+  // the tasks: what the criteria ask to find, with the reference solutions (probe d20_tasks.txt before writing)
+  await told(`${SOLUTIONS.concatTyped}
+class Bytes extends Uint8Array {}
+const a = Uint8Array.of(1, 2, 3);
+console.log(concatTyped(Bytes.of(1), Uint8Array.of(2)) instanceof Bytes, Array.from(concatTyped(a.subarray(1), a.subarray(0, 1))).join());`,
+  ['true 2,3,1'], 'task 4: a subclass first gives the subclass; subarrays of one array concat to 2,3,1', 'task4.html');
+  await told(`${SOLUTIONS.canonicalIndex}
+${SOLUTIONS.typedHas}
+const keys = ["0", "1", "2", "3", "-0", "-1", "1.5", "01", "1e0", "NaN", "Infinity", "-Infinity", "length", "buffer", "foo", "", " 1", "0x1", "4294967295", "9007199254740992", "1e21", Symbol.iterator, "constructor", "toString", "BYTES_PER_ELEMENT"];
+const base = new Uint8Array(3);
+const rab = new ArrayBuffer(4, { maxByteLength: 8 });
+const out = new Uint8Array(rab, 1, 2);
+rab.resize(1);
+const det = new Uint8Array(4);
+det.buffer.transfer();
+let diff = 0;
+for (const v of [base, out, det]) for (const k of keys) if (typedHas(v, k) !== (k in v)) diff++;
+console.log(keys.length, diff, canonicalIndex("1e-7"), canonicalIndex("1e21"), canonicalIndex("0.0000001"));`,
+  ['25 0 1e-7 undefined undefined'], 'task 5: on 25 keys and three views (plain, out of bounds, detached) typedHas = in; "1e-7" is numeric, "1e21" and "0.0000001" are not', 'task5.html');
+  await told(`${SOLUTIONS.makeProgress}
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const p = makeProgress(3);
+p.add(); p.add(); p.add();
+for (let i = 0; i < 300; i++) p.know(0);
+console.log(p.counts[0], run(() => p.add()), p.counts.length);`,
+  ['255 RangeError 3'], 'task 6: 300 times know — 255; the fourth add with maxCards 3 — RangeError, three cards stay', 'task6.html');
+  await told(`${SOLUTIONS.take}
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const naive = (view) => new view.constructor(view.buffer.transfer(), view.byteOffset, view.length);
+const c = Uint16Array.of(1, 2, 3).subarray(1);
+const sub = Uint16Array.of(1, 2, 3).subarray(1);
+take(sub);
+console.log(naive(c).length, run(() => take(sub)), take(new Uint8Array(new ArrayBuffer(2, { maxByteLength: 4 }))).buffer.resizable);`,
+  ['0 TypeError true'], 'task 7: the one-liner gives an empty view (transfer runs before byteOffset and length are read); take of a moved view — TypeError; resizability kept', 'task7.html');
+  await told(`${SOLUTIONS.toUint8Clamp}
+${SOLUTIONS.clamped}
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const values = [];
+for (let i = -60; i <= 320; i += 0.25) values.push(i);
+values.push(NaN, Infinity, -Infinity, "12", "", null, true, 1e300);
+const ref = Uint8ClampedArray.from(values);
+let diff = 0;
+values.forEach((v, i) => { if (toUint8Clamp(v) !== ref[i]) diff++; });
+const c = clamped(new Uint8Array(4));
+c[0] = 5;
+console.log(values.length, diff, run(() => c.fill(1)), run(() => c.length), run(() => c.set([1])), c[0]);`,
+  ['1529 0 TypeError TypeError TypeError 5'], 'task 8: the model equals Uint8ClampedArray.from on 1529 values; fill, length and set through the proxy throw, c[0] reads', 'task8.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -289,6 +421,35 @@ console.log(r.join(" "));`,
     const nFooter = notes.slice(notes.indexOf('<div class="sources">'));
     check(nAnchors.every((a) => spec.includes(`id="${a}"`)) && ['TypedArray', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 3,
       'student: the footer names MDN TypedArray (quoted in «запомни» and homework 4) and ECMA-262 2026; MDN is linked there and twice in the text');
+  }
+
+  // what the tasks say about the text of ECMA-262 2026 and MDN
+  {
+    const tsteps = [
+      ['sec-typedarray-hasproperty', 'If numericIndex is not undefined, return IsValidIntegerIndex (O, numericIndex)', '1.b'],
+      ['sec-typedarray-hasproperty', 'Return ? OrdinaryHasProperty (O, P)', '2'],
+      ['sec-typedarray-defineownproperty', 'If IsAccessorDescriptor (Desc) is true, return false', '1.b.iv'],
+      ['sec-arraybuffer.prototype.resize', 'Let newByteLength be ? ToIndex (newLength)', '4'],
+      ['sec-%typedarray%.prototype.fill', 'Else, set value to ? ToNumber (value)', '5'],
+      ['sec-%typedarray%.prototype.fill', 'Set taRecord to MakeTypedArrayWithBufferWitnessRecord (O, seq-cst)', '14'],
+      ['sec-%typedarray%.prototype.fill', 'If IsTypedArrayOutOfBounds (taRecord) is true, throw a TypeError exception', '15'],
+      ['sec-%typedarray%.prototype.fill', 'Set endIndex to min (endIndex, len)', '17'],
+      ['sec-validatetypedarray', 'Perform ? RequireInternalSlot (O, [[TypedArrayName]])', '1'],
+      ['sec-settypedarrayfromtypedarray', 'Perform SetValueInBuffer (targetBuffer, targetByteIndex, targetType, value, true, unordered)', '24.a.ii'],
+    ];
+    const twrong = tsteps.filter(([id, needle, n]) => !same(at(id, needle), [n])).map(([id, needle, n]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${n}`);
+    check(twrong.length === 0, `tasks: ECMA-262 — 10.4.5.3 1.b and 2, 10.4.5.4 1.b.iv (an accessor), resize 4 (ToIndex), fill 5 (ToNumber once, before the range), 14–15 (bounds again), 17 (shorter end), 23.2.4.4 1 (the slot), SetTypedArrayFromTypedArray 24.a.ii (the target type): ${twrong.join('; ') || 'all right'}`);
+    check(f('sec-stringtonumber') !== '' && /NonDecimalIntegerLiteral/.test(f('sec-tonumber-applied-to-the-string-type')) && num('sec-%typedarray%.prototype.fill') === '23.2.3.9',
+      'tasks: ToNumber of a string takes "0x1F" (StrNumericLiteral has NonDecimalIntegerLiteral); fill is 23.2.3.9');
+    const setPage = plain(mdn('reference/global_objects/typedarray/set'));
+    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tAnchors = [...new Set([...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(setPage.includes('The offset into the target array at which to begin writing values') && tasksHtml.includes('«The offset into the target array at which to begin writing values»')
+      && tAnchors.every((a) => spec.includes(`id="${a}"`)) && tNamed.length === 2 && tNamed.every(([id, n]) => num(id) === n)
+      && ['TypedArray.prototype.set()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => tFooter.includes(s)) && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 2,
+    'tasks: MDN set — «The offset into the target array at which to begin writing values»; tc39.es anchors exist with right numbers (7.1.21, 23.2.3.9); the footer names set() and ECMA-262 2026');
   }
 
   // the days the lecture points to, read as text without tags

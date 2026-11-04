@@ -21,7 +21,10 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-20');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
+// the notes write the output in the comment of the line that prints it: "console.log(x);   // 3 — why"
+const commented = (code) => code.split('\n').filter((l) => l.includes('console.log(') && l.includes('//'))
+  .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
 const quiet = process.argv.includes('--quiet');
 
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -112,7 +115,8 @@ const stepPaths = (html, needle) => {
         for (const l of out) console.log(`    > ${l}`);
       }
       if (blk.cheat) { check(out.length === 0, `${name} #${i} (cheatsheet) runs without an error`); continue; }
-      if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
+      if (name === 'student') check(same(out, commented(blk.code)), `${name} #${i}: output = comments ${JSON.stringify(out)}`);
+      else if (blk.box) check(same(out, blk.box), `${name} #${i}: result-box = output ${JSON.stringify(out)}`);
       else check(false, `${name} #${i} ${first}: no result-box`);
     }
   }
@@ -134,6 +138,27 @@ const ta = new Uint8Array(2);
 let thrown = 0;
 for (const k of [5, "-0", "1.5"]) { try { ta[k] = 7; } catch { thrown++; } }
 console.log(thrown, Object.keys(ta).join());`, ['0 0,1'], 'lecture 6: the writes to 5, "-0" and "1.5" vanish without an error even in strict code', 'strict.html');
+  // the notes: the homework, in Chrome (probe d20_student.txt before writing)
+  await told(`const vals = [200, -200, 70000, 127.5];
+for (const K of [Int8Array, Uint16Array, Uint8ClampedArray]) console.log(K.name, K.from(vals).join(" "));
+const ta = new Uint8Array(4);
+console.log(ta["2"], ta["2.0"], ta[-1], ta.at(-1), "-1" in ta);
+ta["2.0"] = 5;
+console.log(Object.keys(ta).join());
+const buf = new ArrayBuffer(8);
+const u32 = new Uint32Array(buf, 4);
+const u16 = new Uint16Array(buf, 2, 2);
+u16[1] = 0x0102;
+console.log(new Uint8Array(buf).join(" "), u32[0]);
+const buffer = new ArrayBuffer(8, { maxByteLength: 16 });
+const float32 = new Float32Array(buffer, 4);
+const r = [];
+buffer.resize(3); r.push(float32.length);
+buffer.resize(8); r.push(float32.length);
+buffer.resize(12); r.push(float32.length);
+console.log(r.join(" "));`,
+  ['Int8Array -56 56 112 127', 'Uint16Array 200 65336 4464 127', 'Uint8ClampedArray 200 0 255 128', '0 undefined undefined 0 false', '0,1,2,3,2.0', '0 0 0 0 2 1 0 0 258', '0 1 2'],
+  'student homework 1–4: ToInt8/ToUint16/ToUint8Clamp of 200, −200, 70000, 127.5; "2.0" is not a numeric key, -1 is one; u16[1] lands in bytes 4–5, u32[0] = 258; a length-tracking view from byte 4 — 0, 1, 2', 'student-homework.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -247,6 +272,23 @@ console.log(thrown, Object.keys(ta).join());`, ['0 0,1'], 'lecture 6: the writes
       && guide.includes('ImageData.data') && guide.includes('Is a Uint8ClampedArray representing a one-dimensional array containing the data in the RGBA order'),
     'lecture 1, 5: MDN «JavaScript typed arrays» — buffers and views, a buffer offers no access to its contents; ImageData.data is a Uint8ClampedArray');
     check(ab.includes('can be transferred between different execution contexts, like Web Workers'), 'lecture 14: MDN ArrayBuffer — transferred to Web Workers');
+    const ta = plain(mdn('reference/global_objects/typedarray'));
+    const resizable = ta.slice(ta.indexOf('### Behavior when viewing a resizable buffer'), ta.indexOf('## Constructor'));
+    check(ta.includes("Typed arrays always use the platform's native byte order") && ta.includes('you should use a DataView instead')
+      && resizable.includes("This is the only case where a non-length-tracking typed array's length may change") && resizable.includes('const float32 = new Float32Array(buffer, 4);')
+      && resizable.includes('buffer.resize(3);') && resizable.includes('const buffer = new ArrayBuffer(8, { maxByteLength: 16 });'),
+    'student: MDN TypedArray — «Typed arrays always use the platform\'s native byte order», DataView for an order of your own; «Behavior when viewing a resizable buffer», its quote and its last example');
+  }
+  // what the notes say about the text of ECMA-262: the steps behind homework 2 and 4
+  check(same(at('sec-typedarraylength', 'Return floor ((byteLength - byteOffset) / elementSize)'), ['9']) && same(at('sec-istypedarrayoutofbounds', 'If byteOffsetStart > bufferByteLength or byteOffsetEnd > bufferByteLength, return true'), ['9'])
+    && same(at('sec-istypedarrayoutofbounds', 'Let byteOffsetEnd be bufferByteLength'), ['6.a']) && ['sec-toint8', 'sec-touint16', 'sec-touint8clamp'].map(num).join() === '7.1.10,7.1.9,7.1.12',
+  `student homework 1, 4: ToInt8 7.1.10, ToUint16 7.1.9, ToUint8Clamp 7.1.12; IsTypedArrayOutOfBounds step 9 (a length-tracking view ends at the buffer, 6.a), TypedArrayLength step 9 — floor((byteLength − byteOffset) / elementSize) [${['sec-toint8', 'sec-touint16'].map(num).join()}]`);
+  {
+    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');   // read is declared below (TDZ)
+    const nAnchors = [...new Set([...notes.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
+    const nFooter = notes.slice(notes.indexOf('<div class="sources">'));
+    check(nAnchors.every((a) => spec.includes(`id="${a}"`)) && ['TypedArray', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 3,
+      'student: the footer names MDN TypedArray (quoted in «запомни» and homework 4) and ECMA-262 2026; MDN is linked there and twice in the text');
   }
 
   // the days the lecture points to, read as text without tags

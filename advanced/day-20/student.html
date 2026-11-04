@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>День 20 — конспект</title>
+    <link rel="stylesheet" href="../../css/common.css">
+    <link rel="stylesheet" href="../../css/student.css">
+    <link rel="stylesheet" href="../../css/book.css">
+    <script src="../../js/highlight.js" defer></script>
+    <style>
+        h1 { border-bottom-color: #10b981; }
+        h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+    </style>
+</head>
+<body>
+
+<div class="lesson-nav">
+    <a href="../../index.html" class="nav-home">&#8592; Курс</a>
+    <span class="nav-sep">|</span>
+    <span class="nav-title">Advanced, день 20</span>
+    <span class="nav-sep">|</span>
+    <a href="lecture.html" class="nav-link">&#x1F468;&#x200D;&#x1F3EB; Лекция</a>
+    <span class="nav-active">&#x1F468;&#x200D;&#x1F393; Конспект</span>
+    <a href="tasks.html" class="nav-link">&#x1F4CB; Задания</a>
+</div>
+
+<div class="container">
+
+    <h1>День 20. ArrayBuffer и типизированные массивы</h1>
+    <p class="subtitle">Выжимка лекции: буфер и виды, что делает запись с числом, индексы по 10.4.5, изменяемый и
+    отсоединённый буфер.</p>
+
+    <h2>Главное</h2>
+
+    <div class="definition">
+        <code>ArrayBuffer</code> — байты без доступа к ним (глава 25); вид — типизированный массив, который читает байты
+        как числа одного размера (глава 23). Видов двенадцать (таблица 70), у всех общий родитель %TypedArray%, и каждый
+        режет записанное число своей операцией главы 7. Типизированный массив — экзотический объект (10.4.5): его
+        индексы живут в буфере, а не в свойствах.
+    </div>
+
+    <h2>Буфер, виды и запись</h2>
+
+    <pre class="code js">const buf = new ArrayBuffer(4);
+const bytes = new Uint8Array(buf), words = new Uint16Array(buf);
+bytes[0] = 1; bytes[1] = 1;
+console.log(buf.byteLength, buf[0], words[0], words.length);   // 4 undefined 257 2 — у буфера нет индексов; младший байт первым
+console.log(Uint8Array.of(300, -5, 2.5).join(), Uint8ClampedArray.of(300, -5, 2.5).join(), Int8Array.of(200).join());   // 44,251,2 255,0,2 -56 — остаток от 256; насыщение и половина к чётному; знаковый байт
+console.log(Float32Array.of(0.1)[0], Uint8Array.BYTES_PER_ELEMENT, Float64Array.BYTES_PER_ELEMENT, new Uint8Array([1, 2, 3]).subarray(1).byteOffset);   // 0.10000000149011612 1 8 1 — 32 бита не держат 0.1; размеры; subarray смотрит со сдвигом</pre>
+
+    <table>
+        <thead><tr><th>Вид</th><th>Байт</th><th>300 и −5 становятся</th></tr></thead>
+        <tbody>
+            <tr><td><code>Int8Array</code> / <code>Uint8Array</code></td><td>1</td><td>44 и −5 / 44 и 251</td></tr>
+            <tr><td><code>Uint8ClampedArray</code></td><td>1</td><td>255 и 0</td></tr>
+            <tr><td><code>Int16Array</code> / <code>Uint16Array</code></td><td>2</td><td>300 и −5 / 300 и 65531</td></tr>
+            <tr><td><code>Int32Array</code> / <code>Uint32Array</code></td><td>4</td><td>300 и −5 / 300 и 4294967291</td></tr>
+            <tr><td><code>Float32Array</code> / <code>Float64Array</code></td><td>4 / 8</td><td>300 и −5; дробь 32 бит — с хвостом</td></tr>
+            <tr><td><code>BigInt64Array</code> / <code>BigUint64Array</code></td><td>8</td><td>только BigInt: <code>300n</code>, число — <code>TypeError</code></td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Конструктор вида: пусто, длина, другой вид (копия значений), итерируемое или «похожее на массив», буфер со
+        смещением и длиной; смещение кратно размеру элемента. Порядок байтов — машинный: «Typed arrays always use the
+        platform's native byte order», а свой порядок даёт <code>DataView</code> (MDN
+        <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray">TypedArray</a>;
+        день 21). <code>subarray</code> — тот же буфер, <code>slice</code> — копия.
+    </div>
+
+    <h2>Индексы по 10.4.5</h2>
+
+    <pre class="code js">"use strict";
+const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return e.name; } };
+const ta = new Uint8Array(2);
+ta[2] = 9; ta["-0"] = 9; ta["01"] = 9;
+console.log(ta[2], ta["-0"], ta["01"], Object.keys(ta).join());   // undefined undefined 9 0,1,01 — числовой ключ вне длины не существует; "01" — обычное свойство
+console.log(run(() =&gt; { delete ta[0]; }), run(() =&gt; Object.freeze(ta)), run(() =&gt; Object.defineProperty(ta, 0, { value: 1, writable: false })));   // TypeError TypeError TypeError — [[Delete]] и [[DefineOwnProperty]] отвечают false
+console.log(Object.getPrototypeOf(Uint8Array).name, Array.isArray(ta), typeof ta.push, Uint8Array.of(10, 9, 1).sort().join());   // TypedArray false undefined 1,9,10 — общий родитель; длина неизменна; сортировка числами</pre>
+
+    <table>
+        <thead><tr><th>Внутренний метод</th><th>Что делает с числовым ключом</th></tr></thead>
+        <tbody>
+            <tr><td>[[Get]], [[GetOwnProperty]]</td><td>элемент из буфера или <code>undefined</code></td></tr>
+            <tr><td>[[Set]]</td><td>сначала ToNumber значения (<code>valueOf</code>), потом запись или тишина</td></tr>
+            <tr><td>[[HasProperty]]</td><td>IsValidIntegerIndex: целое, не −0, меньше длины</td></tr>
+            <tr><td>[[Delete]]</td><td>существующий индекс — <code>false</code>, остальные — <code>true</code></td></tr>
+            <tr><td>[[DefineOwnProperty]]</td><td>только записываемое, перечисляемое, настраиваемое значение</td></tr>
+            <tr><td>[[OwnPropertyKeys]]</td><td>индексы по порядку, потом обычные ключи</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Числовой ключ — тот, что CanonicalNumericIndexString (7.1.21) узнаёт как число в обычной записи: «2», «-0»,
+        «1.5» — да, «01» и «2.0» — нет. У вида нет девяти методов массива, меняющих длину; <code>map</code>,
+        <code>filter</code>, <code>slice</code> отдают тот же вид, и значения снова режутся. <code>JSON.stringify</code>
+        делает из вида объект с ключами — сохранять через <code>Array.from</code>.
+    </div>
+
+    <h2>Буфер меняется</h2>
+
+    <pre class="code js">const run = (f) =&gt; { try { f(); return "ok"; } catch (e) { return e.name; } };
+const rab = new ArrayBuffer(2, { maxByteLength: 4 });
+const all = new Uint8Array(rab), first = new Uint8Array(rab, 0, 2);
+rab.resize(4);
+console.log(all.length, first.length, rab.resizable);   // 4 2 true — вид без длины следит, с длиной — нет
+rab.resize(1);
+console.log(all.length, first.length, run(() =&gt; first.fill(1)));   // 1 0 TypeError — first за границей буфера
+const moved = rab.transfer();
+console.log(rab.detached, rab.byteLength, all.length, moved.byteLength, moved.resizable);   // true 0 0 1 true — старый отсоединён; transfer сохранил изменяемость</pre>
+
+    <table>
+        <thead><tr><th>С буфером</th><th>Вид без длины</th><th>Вид с длиной</th></tr></thead>
+        <tbody>
+            <tr><td><code>resize</code> больше</td><td>растёт</td><td>не меняется</td></tr>
+            <tr><td><code>resize</code> меньше конца вида</td><td>сжимается</td><td>за границей: длина 0, методы бросают</td></tr>
+            <tr><td><code>resize</code> обратно</td><td>растёт</td><td>снова в границах</td></tr>
+            <tr><td><code>transfer</code></td><td>длина 0</td><td>длина 0</td></tr>
+        </tbody>
+    </table>
+
+    <div class="remember">
+        Изменяемый буфер — только с <code>maxByteLength</code>; <code>resize</code> фиксированного — <code>TypeError</code>,
+        больше максимума — <code>RangeError</code>; максимум брать поменьше, не больше 1 ГиБ (25.1.8).
+        <code>transfer</code> сохраняет изменяемость, <code>transferToFixedLength</code> — нет; повторный перенос,
+        <code>slice</code> и новый вид на отсоединённом буфере бросают. «Карточки 2.0»: счётчик в
+        <code>Uint8Array</code> после 255 сбрасывается, в <code>Uint8ClampedArray</code> — останавливается.
+    </div>
+
+    <div class="homework">
+        <ol>
+            <li>Предскажите, что окажется в <code>Int8Array</code>, <code>Uint16Array</code> и
+                <code>Uint8ClampedArray</code> после записи 200, −200, 70000 и 127.5. Назовите операцию главы 7 для
+                каждого вида и шаг, который решил ответ.</li>
+            <li>Для <code>const ta = new Uint8Array(4)</code> предскажите <code>ta["2"]</code>, <code>ta["2.0"]</code>,
+                <code>ta[-1]</code>, <code>ta.at(-1)</code>, <code>"-1" in ta</code>, а после <code>ta["2.0"] = 5</code> —
+                <code>Object.keys(ta)</code>. Какие ответы решил CanonicalNumericIndexString?</li>
+            <li>В буфере из 8 байтов <code>u32 = new Uint32Array(buf, 4)</code> и
+                <code>u16 = new Uint16Array(buf, 2, 2)</code>. Какие байты видит каждый вид? Что покажет
+                <code>u32[0]</code> после <code>u16[1] = 0x0102</code> и почему именно так?</li>
+            <li>Прочитайте на MDN
+                <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray">TypedArray</a>
+                раздел «Behavior when viewing a resizable buffer»: «This is the only case where a non-length-tracking typed
+                array's length may change». В последнем примере вид <code>new Float32Array(buffer, 4)</code> следит за
+                длиной. Предскажите его <code>length</code> после <code>resize(3)</code>, <code>resize(8)</code> и
+                <code>resize(12)</code> и назовите шаги IsTypedArrayOutOfBounds и TypedArrayLength, которые это решают.</li>
+        </ol>
+    </div>
+
+    <div class="sources">
+        По материалам <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray">MDN Web Docs</a>
+        (TypedArray, авторы — Mozilla Contributors),
+        лицензия <a href="https://creativecommons.org/licenses/by-sa/2.5/">CC BY-SA 2.5</a>; главный источник дня —
+        спецификация <a href="https://tc39.es/ecma262/2026/">ECMA-262 2026</a>.
+        Эта страница — <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>,
+        условия целиком в <a href="../../LICENSE">LICENSE</a>.
+    </div>
+
+</div>
+
+</body>
+</html>

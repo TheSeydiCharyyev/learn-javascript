@@ -14,6 +14,9 @@
 // is checked against tools/.cache/ecma262-2026.html; the MDN pages it quotes are in tools/.cache/mdn-content.git and say
 // what it quotes; the days it points to say what it says; every tc39.es anchor exists and every link whose text starts
 // with a number names that section; the cheatsheet runs without an error.
+// The notes: the map of the program is comments only and names what the files have; the table «Куда приходит запись»
+// gives the number of notifications Chrome gives; console.count of the checklist grows by one a click; homework 2 —
+// «✕» at the second of five; the MDN quote, the anchors and the footer.
 //   node tools/runs/advanced/day-19.cjs            every run: code head, output; checks below
 //   node tools/runs/advanced/day-19.cjs --quiet    only the checks
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
@@ -52,6 +55,8 @@ const clause = (spec, id) => {
   return next === -1 ? rest : rest.slice(0, next + 10);
 };
 const hasAll = (text, words) => words.every((w) => text.includes(w));
+// MDN markdown as text: {{jsxref("X")}} macros, links and backticks dropped
+const plainMd = (md) => md.replace(/\{\{\w+\("[^"]*",\s*"([^"]+)"\)\}\}/g, '$1').replace(/\{\{\w+\("([^"]+)"\)\}\}/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/`/g, '');
 // the numbers of every step whose own text holds the words, as the spec writes them: 1, a, i, 1, a, i, …
 const stepPaths = (html, needle) => {
   const roman = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'];
@@ -164,6 +169,12 @@ const stepPaths = (html, needle) => {
       tryIt: document.querySelector('.try-it code').textContent,
       text: document.querySelector('.container').innerText,
     })));
+    await src.goto('file:///' + path.join(DAY, 'student.html').replace(/\\/g, '/'));
+    all.notes = await src.evaluate(() => ({
+      blocks: [...document.querySelectorAll('pre.code')].map((pre) => pre.textContent),
+      writes: [...[...document.querySelectorAll('table')][0].querySelectorAll('tbody tr')].map((tr) => [...tr.cells].map((c) => c.innerText.trim())),
+      text: document.querySelector('.container').innerText,
+    }));
     await ctx.close();
   }
   const L = all.blocks;
@@ -443,6 +454,42 @@ try { state.m.get(1); } catch (e) { console.log(e.name + ": " + e.message); }` }
     check(same(out, ['true 2 true', 'TypeError: Method Map.prototype.get called on incompatible receiver #<Map>']),
       `lecture 7, 16, try-it 2: after splice the target holds the tasks, not wrappers; a Map in the store does not work ${JSON.stringify(out)}`);
   }
+
+  // the notes
+  {
+    const N = all.notes;
+    check(N.blocks.length === 1 && N.blocks[0].split(LF).every((l) => l.startsWith('//')), 'notes: one block — the map of the program in comments');
+    check(hasAll(STORE, ['export function createStore(data, allowed = {})', 'return () => listeners.delete(listener);', 'const proxies = new WeakMap();', 'Promise.resolve().then(', 'if (planned) return;'])
+      && hasAll(HTML, ['<section data-status="todo">', '<form id="new-task">', '<input id="filter"', '<p id="error"'])
+      && hasAll(WHOLE, ['JSON.parse(localStorage.getItem(SAVED)) ?? first', 'globalThis.board = state;', 'subscribe(render);', 'state.tasks.push(', 'task.status = STATUSES[at + 1];', 'state.tasks.splice(', 'state.filter = filter.value.trim();']),
+    'notes: the map names what store.js, index.html and main.js have');
+    const out = await runScript(`"use strict";
+${OBSERVE}const n = (make, act) => { const changes = []; const o = observe(make(), (k) => changes.push(k)); act(o); return changes; };
+const rows = [
+  n(() => ({ key: 0 }), (o) => { o.key = 1; }),
+  n(() => ({}), (o) => { Object.defineProperty(o, "key", { value: 1 }); }),
+  n(() => ({ key: 0 }), (o) => { delete o.key; }),
+  n(() => ["a", "b", "c"], (o) => { o.push("d"); }),
+  n(() => ["a", "b", "c", "d"], (o) => { o.splice(0, 1); }),
+  n(() => ({ tasks: [{ a: 1 }] }), (o) => { JSON.stringify(o); }),
+];
+console.log(rows.map((r) => r.length).join(" "));
+console.log(n(() => ["a", "b", "c", "d", "e"], (o) => { o.splice(1, 1); }).join(", "));`);
+    check(N.writes.length === 6 && same(out[0], N.writes.map((r) => r[2]).join(' ')), `notes: the table «Куда приходит запись» — notifications in Chrome ${out[0]}, in the table ${N.writes.map((r) => r[2]).join(' ')}`);
+    check(out[1] === 'define 1, define 2, define 3, delete 4, define length', `notes, homework 2: «✕» at the second of five — five notifications: ${out[1]}`);
+    const page = await open(patch(APP, 'main.js', `function render() {${LF}`, `function render() {${LF}  console.count("render");${LF}`));
+    const seen = [page.out.join()];
+    await press(page.p, 'Проверки tests.js', '→'); seen.push(page.out.at(-1));
+    await press(page.p, 'Модуль card.js', '←'); seen.push(page.out.at(-1));
+    await press(page.p, 'Разметка страницы', '✕'); seen.push(page.out.at(-1));
+    await addTask(page.p, 'Тесты', 'Сапар'); seen.push(page.out.at(-1));
+    check(same(seen, ['render: 1', 'render: 2', 'render: 3', 'render: 4', 'render: 5']) && N.text.includes('console.count("render")'), `notes, checklist: console.count grows by one a click ${JSON.stringify(seen)}`);
+    await page.close();
+    const dpText = plainMd(execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/global_objects/proxy/proxy/defineproperty/index.md'], { encoding: 'utf8' }));
+    check(dpText.includes('The defineProperty() method must return a Boolean') && N.text.includes('«must return a Boolean»'), 'notes: MDN handler.defineProperty() — «must return a Boolean»');
+    check(hasAll(N.text, ['Заданий: 4 · готово: 1', 'Напишите задание и кто его делает']) && hasAll(all.text, ['Заданий: 4 · готово: 1', 'Напишите задание и кто его делает']),
+      'notes, checklist: the texts of the first show and the form are those of the lecture and the project');
+  }
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -558,6 +605,15 @@ try { state.m.get(1); } catch (e) { console.log(e.name + ": " + e.message); }` }
     const footer = lecture.slice(lecture.indexOf('<div class="sources">'));
     check(['Proxy, handler.defineProperty()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => footer.includes(s)) && (lecture.match(/developer\.mozilla\.org/g) || []).length === 3,
       'links: the footer names the two MDN pages the text uses and ECMA-262 2026; MDN is linked at the two places and in the footer');
+    const notes = read('advanced/day-19/student.html');
+    const nAnchors = [...new Set([...notes.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
+    const nNamed = [...notes.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
+    const nWrong = [...nAnchors.filter((a) => !spec.includes(`id="${a}"`)), ...nNamed.filter(([id, n]) => num(id) !== n).map(([id, n]) => `${n}≠${num(id)}`)];
+    const nFooter = notes.slice(notes.indexOf('<div class="sources">'));
+    check(nAnchors.length === 5 && nNamed.length === 5 && nWrong.length === 0 && ['handler.defineProperty()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 2,
+      `notes: ${nAnchors.length} anchors of tc39.es with the right numbers, the footer names handler.defineProperty() (quoted in «запомни») and ECMA-262 2026 ${nWrong.join(', ')}`);
+    check(stepPaths(clause(spec, 'sec-ordinarysetwithowndescriptor'), 'Return ? CreateDataProperty (Receiver, P, V)')[0] === '2.d.ii' && notes.includes('шаги 2.d.ii и 2.h') && notes.includes('шаг 6.a') && notes.includes('шаги 5.a и 6') && notes.includes('шаг 3.a'),
+      'notes: the step numbers of the table and of «запомни» are those the lecture checked');
   }
 
   console.log(`\nchecks: ${checked}, ${bad ? `PROBLEMS ${bad}` : 'all match'}`);

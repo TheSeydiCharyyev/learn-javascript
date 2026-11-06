@@ -25,7 +25,27 @@ export type Piece = { tag: string; attrs: Record<string, string>; html: string }
 // An inline handler (onclick="…") on a top-level <body> element: React never renders string handlers, so the site
 // puts it back by the element's id (see handlersScript).
 export type Handler = [id: string, name: string, code: string];
-export type SourcePage = { lang: string; head: Piece[]; body: Piece[]; handlers: Handler[]; nav: NavModel | null };
+export type PageKind = "lecture" | "student" | "tasks";
+export type SourcePage = {
+  lang: string;
+  head: Piece[];
+  body: Piece[];
+  handlers: Handler[];
+  nav: NavModel | null;
+  kind: PageKind | null; // a day page: lecture, notes (student) or tasks
+  // A day page's own CSS, in cascade order: css/<kind>.css, css/book.css, then its <style> (the colours of the day).
+  pageCss: string[];
+};
+
+// lecture.css, student.css and tasks.css set the same selectors differently (body, h1, h2, .container, pre…), so a
+// page carries the CSS of its kind itself instead of all of it being global. Scoping them to the kind with
+// :where(html:has(.page-<kind>)) was tried 06.11.2026 and dropped: computed styles stayed the same, but the mere
+// :has() on <html> made Chrome rasterize gradients and SVG edges differently (up to 218 per channel).
+const courseCss = new Map<string, string>();
+function readCourseCss(file: string): string {
+  if (!courseCss.has(file)) courseCss.set(file, fs.readFileSync(path.join(REPO, "css", file), "utf8"));
+  return courseCss.get(file)!;
+}
 
 // Every page the site builds, as paths from the repository root: the home page and each day page, Russian and en/.
 export function pagePaths(): string[] {
@@ -125,10 +145,33 @@ export function readPage(rel: string): SourcePage {
   if (html.attrs.some((a) => a.name !== "lang")) throw new Error(`${rel}: <html> has attributes besides lang`);
   if (body.attrs.length) throw new Error(`${rel}: <body> has attributes, the site does not carry them yet`);
 
-  const kept = head.childNodes.filter(isElement).map((el) => piece(source, el))
+  let kept = head.childNodes.filter(isElement).map((el) => piece(source, el))
     .filter((p) => p.tag !== "meta" && !(p.tag === "script" && HIGHLIGHT_SCRIPT.test(p.attrs.src ?? "")));
   const unknown = kept.filter((p) => !HEAD_KEPT.has(p.tag));
   if (unknown.length) throw new Error(`${rel}: unexpected in <head>: ${unknown.map((p) => p.tag).join(", ")}`);
+
+  // The file's <link>s to css/ go: common.css is imported by the layout, the rest the page carries itself (pageCss)
+  // — but only if they are exactly the set expected for this kind of page.
+  const kind = /\/(lecture|student|tasks)\.html$/.exec(rel)?.[1] as PageKind | undefined;
+  const cssOf = (p: Piece) => (p.tag === "link" && p.attrs.rel === "stylesheet" ? path.posix.normalize(path.posix.join(path.posix.dirname(rel), p.attrs.href ?? "")) : null);
+  const linked = kept.map(cssOf).filter((c): c is string => c !== null);
+  const expected = rel === "index.html" ? ["css/common.css"] : kind ? ["css/common.css", `css/${kind}.css`, "css/book.css"] : null;
+  if (!expected || linked.join(" ") !== expected.join(" ")) throw new Error(`${rel}: stylesheets ${linked.join(", ")} — the scoped CSS expects ${expected?.join(", ") ?? "a known kind of page"}`);
+  kept = kept.filter((p) => cssOf(p) === null);
+
+  // A day page carries its CSS into the page, in the order the file loaded it: its kind's CSS, book.css, then its own
+  // <style> (the colours of the day). It leaves with the page when the reader goes to another one.
+  const pageCss: string[] = [];
+  if (kind) {
+    pageCss.push(readCourseCss(`${kind}.css`), readCourseCss("book.css"));
+    const styles = kept.filter((p) => p.tag === "style");
+    if (styles.length > 1) throw new Error(`${rel}: more than one <style> in <head>`);
+    if (styles[0]) {
+      if (Object.keys(styles[0].attrs).length) throw new Error(`${rel}: <style> with attributes`);
+      pageCss.push(styles[0].html);
+      kept = kept.filter((p) => p !== styles[0]);
+    }
+  }
 
   // At the top level of <body> only elements and whitespace are carried; anything else would be lost silently.
   for (const n of body.childNodes) {
@@ -165,7 +208,15 @@ export function readPage(rel: string): SourcePage {
     }
   }
 
-  const page: SourcePage = { lang: html.attrs.find((a) => a.name === "lang")?.value ?? "", head: kept, body: pieces, handlers, nav };
+  const page: SourcePage = {
+    lang: html.attrs.find((a) => a.name === "lang")?.value ?? "",
+    head: kept,
+    body: pieces,
+    handlers,
+    nav,
+    kind: kind ?? null,
+    pageCss,
+  };
   cache.set(rel, page);
   return page;
 }

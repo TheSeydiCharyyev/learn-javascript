@@ -5,6 +5,7 @@
 //   NODE_PATH=... node tools/compare-site.cjs intermediate 3 4     days 3 and 4 of course 2 (RU and en/)
 //   NODE_PATH=... node tools/compare-site.cjs home                 only the home page, in RU, EN, TM, TR
 //   NODE_PATH=... node tools/compare-site.cjs --sizes=1280x900 essentials
+//   NODE_PATH=... node tools/compare-site.cjs --styles advanced   also boxes and computed styles of every element
 //
 // The old page is opened as file:// (as check-pages does), the new one from site/out over a local http server (Next's
 // scripts sit at /_next/…). At the five check-pages sizes, for every page:
@@ -12,7 +13,8 @@
 //   - <body> after the page's scripts ran (highlight.js, lang.js): every top-level element's outerHTML; Next's own
 //     nodes are dropped (a hidden <div> of comments, its data scripts, the route announcer); the onclick attribute
 //     of the RU/EN button is not compared (React attaches that click as a listener) — the click test checks it;
-//   - title, <html lang>, highlighted tokens, stylesheets, page height;
+//   - title, <html lang>, highlighted tokens, page height (the list of stylesheets is not compared: the site bundles
+//     the course CSS, scoped to the kind of page, into one file — 06.11.2026);
 //   - JS errors and failed requests on both pages (/favicon.ico is skipped: Chrome asks every http site for it);
 //   - hydration probe: from the first byte a MutationObserver records nodes removed from <body> — a client re-render
 //     by React would remove them all (05.11.2026: that is how the "whole <body> as one string" layout failed).
@@ -49,6 +51,8 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 
 // ---------- arguments ----------
 const args = process.argv.slice(2);
 const sizesArg = args.find((a) => a.startsWith('--sizes='));
+// --styles: compare the render inputs (boxes, computed styles, fonts) of every page state, not only when pixels differ
+const STYLES = args.includes('--styles');
 const SIZES = sizesArg ? ALL_SIZES.filter(([w, h]) => sizesArg.slice(8).split(',').includes(`${w}x${h}`)) : ALL_SIZES;
 const words = args.filter((a) => !a.startsWith('--'));
 const wrong = words.filter((a) => a !== 'home' && !COURSES.includes(a) && !/^\d+$/.test(a));
@@ -145,11 +149,16 @@ const NEXT_NODE = `(n) => n.tagName === 'NEXT-ROUTE-ANNOUNCER'
   || (n.tagName === 'SCRIPT' && (/\\/_next\\//.test(n.src) || /self\\.__next_f|globalThis\\["TURBOPACK"\\]/.test(n.textContent)))
   || (n.tagName === 'DIV' && n.hidden && [...n.childNodes].every((c) => c.nodeType === 8))`;
 
+// The page's top-level elements. A day page of the site starts with its own CSS as <style> elements in <body> (its
+// kind's CSS, book.css, the colours of the day — 06.11.2026); a top-level <style> is not compared as markup: what
+// it does shows in the pixels and, with --styles, in the computed styles.
+const TOP_ELEMENTS = `(isNext) => [...document.body.children].filter((c) => !isNext(c) && c.tagName !== 'STYLE')`;
+
 // The RU/EN button of a day page: the HTML pages write its click as onclick="…", React attaches it as an event
 // listener (06.11.2026, <LessonNav>) — so that attribute is not compared; what the click does is (the click test).
-const snapshot = (page) => page.evaluate((nextNode) => {
+const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
   const isNext = eval(nextNode);
-  const top = [...document.body.children].filter((n) => !isNext(n)).map((n) => {
+  const top = eval(topElements)(isNext).map((n) => {
     const c = n.cloneNode(true);
     c.querySelectorAll('a.lang-btn[onclick]').forEach((a) => a.removeAttribute('onclick'));
     return c.outerHTML;
@@ -161,21 +170,21 @@ const snapshot = (page) => page.evaluate((nextNode) => {
     body: top.join('\n') + (text.length ? `\n[text at top level: ${text.join(' | ')}]` : ''),
     tokens: document.querySelectorAll('pre [class^="tok-"]').length,
     height: document.documentElement.scrollHeight,
-    sheets: [...document.styleSheets].map((s) => (s.href ?? 'inline').replace(/^.*\/css\//, 'css/')),
     removed: window.__removed ?? ['(no probe)'],
   };
-}, NEXT_NODE);
+}, [NEXT_NODE, TOP_ELEMENTS]);
 
 // Everything Chrome draws the page from; page addresses inside styles become <base> (file:// against http://).
-const renderInputs = (page, base) => page.evaluate(([nextNode, base]) => {
+const renderInputs = (page, base) => page.evaluate(([nextNode, topElements, base]) => {
   const isNext = eval(nextNode);
+  const topOf = eval(topElements);
   const style = (cs) => { let s = ''; for (let i = 0; i < cs.length; i++) s += cs[i] + ':' + cs.getPropertyValue(cs[i]) + ';'; return s.split(base).join('<base>'); };
   const out = [];
   const walk = (el, at) => {
     const r = el.getBoundingClientRect();
     out.push([at + ' ' + el.tagName.toLowerCase(), r.x, r.y + scrollY, r.width, r.height,
       style(getComputedStyle(el)), style(getComputedStyle(el, '::before')), style(getComputedStyle(el, '::after'))]);
-    [...el.children].filter((c) => !isNext(c)).forEach((c, i) => walk(c, `${at}/${i}`));
+    (el === document.body ? topOf(isNext) : [...el.children].filter((c) => !isNext(c))).forEach((c, i) => walk(c, `${at}/${i}`));
   };
   out.push(['html', 0, 0, 0, 0, style(getComputedStyle(document.documentElement)), '', '']);
   walk(document.body, 'body');
@@ -183,7 +192,7 @@ const renderInputs = (page, base) => page.evaluate(([nextNode, base]) => {
   // file and Chrome marks a varying part of them loaded — a different font would show in the boxes anyway
   const fonts = [...document.fonts].map((f) => `${f.family} ${f.weight} ${f.style} ${f.unicodeRange}${/loading|error/.test(f.status) ? ' ' + f.status : ''}`).sort().join(', ');
   return { out, fonts };
-}, [NEXT_NODE, base]);
+}, [NEXT_NODE, TOP_ELEMENTS, base]);
 
 function firstInputDifference(a, b) {
   if (a.fonts !== b.fonts) return `fonts: ${a.fonts.slice(0, 200)} | ${b.fonts.slice(0, 200)}`;
@@ -303,10 +312,17 @@ const HOME_STEPS = [
           if ((await run('old')) === 'skip') return;
           checks++;
           const oldSnap = await snapshot(page); let oldShot = await shot(); const oldErrors = [...errors]; errors.length = 0;
+          const oldInputs = STYLES ? await renderInputs(page, OLD_BASE) : null;
           await run('new');
           const newSnap = await snapshot(page); let newShot = await shot(); const newErrors = [...errors];
+          const newInputs = STYLES ? await renderInputs(page, BASE) : null;
           const where = step ? `${tag} [after: ${step}]` : tag;
-          for (const k of ['title', 'lang', 'body', 'tokens', 'height', 'sheets']) {
+          if (STYLES) {
+            const why = firstInputDifference(oldInputs, newInputs);
+            if (why) say(`${where}: render inputs differ (--styles): ${why.slice(0, 300)}`);
+          }
+          // (the list of stylesheets is not compared since 06.11.2026: the site bundles the course CSS into one file)
+          for (const k of ['title', 'lang', 'body', 'tokens', 'height']) {
             if (JSON.stringify(oldSnap[k]) !== JSON.stringify(newSnap[k])) say(`${where}: ${k}: ${String(JSON.stringify(oldSnap[k])).slice(0, 100)} | ${String(JSON.stringify(newSnap[k])).slice(0, 100)}`);
           }
           if (newSnap.removed.length) say(`${where}: nodes removed from <body> on the new page: ${newSnap.removed.join(', ')}`);

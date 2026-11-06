@@ -11,6 +11,7 @@ import path from "node:path";
 import { createElement, type ReactElement } from "react";
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
 import Title from "./title";
+import { highlightCode } from "./highlight";
 
 type Element = DefaultTreeAdapterTypes.Element;
 
@@ -67,22 +68,64 @@ function piece(source: string, el: Element): Piece {
 // <meta charset> and <meta name="viewport"> come from Next.js itself.
 const HEAD_KEPT = new Set(["title", "link", "script", "style"]);
 const isHandler = (name: string) => /^on/i.test(name);
+const HIGHLIGHT_SCRIPT = /(^|\/)js\/highlight\.js$/;
 
 const cache = new Map<string, SourcePage>();
 
-export function readPage(rel: string): SourcePage {
-  const hit = cache.get(rel);
-  if (hit) return hit;
-  const source = fs.readFileSync(path.join(REPO, rel), "utf8");
+function textOf(n: DefaultTreeAdapterTypes.ChildNode): string {
+  if (n.nodeName === "#text" && "value" in n) return n.value;
+  return isElement(n) ? n.childNodes.map(textOf).join("") : "";
+}
+
+function documentParts(rel: string, source: string) {
   const doc = parse(source, { sourceCodeLocationInfo: true });
   const html = doc.childNodes.filter(isElement).find((n) => n.tagName === "html");
   if (!html) throw new Error(`${rel}: no <html>`);
   const [head, body] = ["head", "body"].map((t) => html.childNodes.filter(isElement).find((n) => n.tagName === t));
   if (!head || !body) throw new Error(`${rel}: no <head> or <body>`);
+  return { html, head, body };
+}
+
+// Highlighting at build time: the same change js/highlight.js makes in the browser on DOMContentLoaded — every
+// <pre class="code …"> gets its text as highlighted spans (html when the class has "html", js otherwise) and
+// data-highlighted="1" as its last attribute (as dataset adds it). The parser drops a newline right after <pre>,
+// innerHTML in the browser keeps it — hence the extra "\n" in front.
+function highlightBlocks(rel: string, source: string, body: Element): string {
+  const edits: [from: number, to: number, text: string][] = [];
+  const walk = (el: Element) => {
+    for (const c of el.childNodes) {
+      if (!isElement(c)) continue;
+      const classes = c.attrs.find((a) => a.name === "class")?.value.split(/\s+/) ?? [];
+      if (c.tagName !== "pre" || !classes.includes("code")) { walk(c); continue; }
+      const loc = c.sourceCodeLocation;
+      if (!loc?.startTag || !loc.endTag || source[loc.startTag.endOffset - 1] !== ">") throw new Error(`${rel}: a <pre class="code"> not written as <pre …>…</pre>`);
+      if (c.attrs.some((a) => a.name === "data-highlighted")) throw new Error(`${rel}: <pre data-highlighted> in the file`);
+      const at = loc.startTag.endOffset - 1;
+      edits.push([at, at, ' data-highlighted="1"']);
+      edits.push([loc.startTag.endOffset, loc.endTag.startOffset, "\n" + highlightCode(textOf(c), classes.includes("html") ? "html" : "js")]);
+    }
+  };
+  walk(body);
+  let out = source;
+  for (const [from, to, text] of edits.sort((a, b) => b[0] - a[0] || b[1] - a[1])) out = out.slice(0, from) + text + out.slice(to);
+  return out;
+}
+
+export function readPage(rel: string): SourcePage {
+  const hit = cache.get(rel);
+  if (hit) return hit;
+  let source = fs.readFileSync(path.join(REPO, rel), "utf8");
+  let { html, head, body } = documentParts(rel, source);
+  const highlighted = head.childNodes.some((n) => isElement(n) && n.tagName === "script" && HIGHLIGHT_SCRIPT.test(n.attrs.find((a) => a.name === "src")?.value ?? ""));
+  if (highlighted) {
+    source = highlightBlocks(rel, source, body);
+    ({ html, head, body } = documentParts(rel, source));
+  }
   if (html.attrs.some((a) => a.name !== "lang")) throw new Error(`${rel}: <html> has attributes besides lang`);
   if (body.attrs.length) throw new Error(`${rel}: <body> has attributes, the site does not carry them yet`);
 
-  const kept = head.childNodes.filter(isElement).map((el) => piece(source, el)).filter((p) => p.tag !== "meta");
+  const kept = head.childNodes.filter(isElement).map((el) => piece(source, el))
+    .filter((p) => p.tag !== "meta" && !(p.tag === "script" && HIGHLIGHT_SCRIPT.test(p.attrs.src ?? "")));
   const unknown = kept.filter((p) => !HEAD_KEPT.has(p.tag));
   if (unknown.length) throw new Error(`${rel}: unexpected in <head>: ${unknown.map((p) => p.tag).join(", ")}`);
 

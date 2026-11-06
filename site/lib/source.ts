@@ -12,6 +12,7 @@ import { createElement, type ReactElement } from "react";
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
 import Title from "./title";
 import { highlightCode } from "./highlight";
+import { navInnerHtml, navModel, type NavModel } from "./nav";
 
 type Element = DefaultTreeAdapterTypes.Element;
 
@@ -24,7 +25,7 @@ export type Piece = { tag: string; attrs: Record<string, string>; html: string }
 // An inline handler (onclick="…") on a top-level <body> element: React never renders string handlers, so the site
 // puts it back by the element's id (see handlersScript).
 export type Handler = [id: string, name: string, code: string];
-export type SourcePage = { lang: string; head: Piece[]; body: Piece[]; handlers: Handler[] };
+export type SourcePage = { lang: string; head: Piece[]; body: Piece[]; handlers: Handler[]; nav: NavModel | null };
 
 // Every page the site builds, as paths from the repository root: the home page and each day page, Russian and en/.
 export function pagePaths(): string[] {
@@ -136,6 +137,25 @@ export function readPage(rel: string): SourcePage {
     throw new Error(`${rel}: a ${n.nodeName} at the top level of <body>, the site does not carry it yet`);
   }
   const pieces = body.childNodes.filter(isElement).map((el) => piece(source, el));
+
+  // The navigation bar of a day page is drawn by <LessonNav> from where the page lies; the file's own bar must be
+  // exactly what that model gives, so nothing written in a bar is lost.
+  let nav: NavModel | null = null;
+  const isNav = (p: Piece) => p.tag === "div" && p.attrs.class === "lesson-nav";
+  if (pieces.slice(1).some(isNav)) throw new Error(`${rel}: <div class="lesson-nav"> is not the first element of <body>`);
+  if (pieces[0] && isNav(pieces[0])) {
+    nav = navModel(rel, REPO);
+    if (!nav) throw new Error(`${rel}: a navigation bar on a page that is not a day page`);
+    const want = navInnerHtml(nav), have = pieces[0].html;
+    if (want !== have) {
+      let i = 0;
+      while (i < want.length && want[i] === have[i]) i++;
+      throw new Error(`${rel}: the navigation bar differs from the one <LessonNav> draws, at ${i}:\n  file:  ${JSON.stringify(have.slice(Math.max(0, i - 40), i + 60))}\n  model: ${JSON.stringify(want.slice(Math.max(0, i - 40), i + 60))}`);
+    }
+    if (Object.keys(pieces[0].attrs).length !== 1) throw new Error(`${rel}: the navigation bar has attributes besides class`);
+    pieces.shift();
+  }
+
   const handlers: Handler[] = [];
   for (const p of pieces) {
     for (const [name, code] of Object.entries(p.attrs)) {
@@ -145,7 +165,7 @@ export function readPage(rel: string): SourcePage {
     }
   }
 
-  const page: SourcePage = { lang: html.attrs.find((a) => a.name === "lang")?.value ?? "", head: kept, body: pieces, handlers };
+  const page: SourcePage = { lang: html.attrs.find((a) => a.name === "lang")?.value ?? "", head: kept, body: pieces, handlers, nav };
   cache.set(rel, page);
   return page;
 }

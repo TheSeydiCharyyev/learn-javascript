@@ -10,7 +10,8 @@
 // scripts sit at /_next/…). At the five check-pages sizes, for every page:
 //   - full-page screenshots, byte for byte; on a mismatch the pair is shot again (at most twice);
 //   - <body> after the page's scripts ran (highlight.js, lang.js): every top-level element's outerHTML; Next's own
-//     nodes are dropped (a hidden <div> of comments, its data scripts, the route announcer);
+//     nodes are dropped (a hidden <div> of comments, its data scripts, the route announcer); the onclick attribute
+//     of the RU/EN button is not compared (React attaches that click as a listener) — the click test checks it;
 //   - title, <html lang>, highlighted tokens, stylesheets, page height;
 //   - JS errors and failed requests on both pages (/favicon.ico is skipped: Chrome asks every http site for it);
 //   - hydration probe: from the first byte a MutationObserver records nodes removed from <body> — a client re-render
@@ -144,9 +145,15 @@ const NEXT_NODE = `(n) => n.tagName === 'NEXT-ROUTE-ANNOUNCER'
   || (n.tagName === 'SCRIPT' && (/\\/_next\\//.test(n.src) || /self\\.__next_f|globalThis\\["TURBOPACK"\\]/.test(n.textContent)))
   || (n.tagName === 'DIV' && n.hidden && [...n.childNodes].every((c) => c.nodeType === 8))`;
 
+// The RU/EN button of a day page: the HTML pages write its click as onclick="…", React attaches it as an event
+// listener (06.11.2026, <LessonNav>) — so that attribute is not compared; what the click does is (the click test).
 const snapshot = (page) => page.evaluate((nextNode) => {
   const isNext = eval(nextNode);
-  const top = [...document.body.children].filter((n) => !isNext(n)).map((n) => n.outerHTML);
+  const top = [...document.body.children].filter((n) => !isNext(n)).map((n) => {
+    const c = n.cloneNode(true);
+    c.querySelectorAll('a.lang-btn[onclick]').forEach((a) => a.removeAttribute('onclick'));
+    return c.outerHTML;
+  });
   const text = [...document.body.childNodes].filter((n) => n.nodeType === 3 && n.data.trim()).map((n) => n.data);
   return {
     title: document.title,

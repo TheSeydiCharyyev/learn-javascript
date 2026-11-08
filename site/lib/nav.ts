@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { LANG_KEY } from "./lang-key";
 
-// exists: whether the page is written (day 21 of Advanced has only its lecture yet) — the bar links it either way.
+// exists: whether the page is written, in HTML or MDX (day 21 of Advanced has only its lecture yet) — the bar links
+// it either way.
 export type NavItem = { file: "lecture.html" | "student.html" | "tasks.html"; label: string; active: boolean; exists: boolean };
 export type NavModel = {
   home: { href: string; label: string };
@@ -33,6 +34,10 @@ const LECTURE_NAME: Record<string, { ru: string; en: string }> = {
   "essentials/day-15": { ru: "Теория", en: "Theory" },
 };
 
+// A page exists when its HTML or its MDX file does (rel is the .html path).
+const pageExists = (repo: string, rel: string) =>
+  fs.existsSync(path.join(repo, rel)) || fs.existsSync(path.join(repo, rel.replace(/\.html$/, ".mdx")));
+
 export function navModel(rel: string, repo: string): NavModel | null {
   const m = /^([a-z-]+)\/(day-(\d+))\/(en\/)?(lecture|student|tasks)\.html$/.exec(rel);
   if (!m || !COURSE_NAMES[m[1]]) return null;
@@ -44,10 +49,10 @@ export function navModel(rel: string, repo: string): NavModel | null {
     file: `${k}.html`,
     label: `${EMOJI[k]} ${k === "lecture" ? lectureWord : w[k]}`,
     active: k === kind,
-    exists: fs.existsSync(path.join(repo, course, dayDir, en ?? "", `${k}.html`)),
+    exists: pageExists(repo, `${course}/${dayDir}/${en ?? ""}${k}.html`),
   }));
   const other = en ? `${course}/${dayDir}/${kind}.html` : `${course}/${dayDir}/en/${kind}.html`;
-  const switchTo = fs.existsSync(path.join(repo, other))
+  const switchTo = pageExists(repo, other)
     ? en
       ? { href: `../${kind}.html`, lang: "ru" as const, label: "RU" }
       : { href: `en/${kind}.html`, lang: "en" as const, label: "EN" }

@@ -1,4 +1,5 @@
-// The Next.js site (site/out) against the HTML files it is built from — page for page, as the reader sees them.
+// The Next.js site (site/out) against the HTML files of the course — page for page, as the reader sees them. A page
+// the site builds from MDX (lecture.mdx next to lecture.html, stage 2 of the move) is held against its HTML file.
 //
 //   cd site && pnpm build && cd ..
 //   NODE_PATH=C:/Users/seydi/goose/ui/node_modules node tools/compare-site.cjs                  every page + home
@@ -10,12 +11,16 @@
 // The old page is opened as file:// (as check-pages does), the new one from site/out over a local http server (Next's
 // scripts sit at /_next/…). At the five check-pages sizes, for every page:
 //   - full-page screenshots, byte for byte; on a mismatch the pair is shot again (at most twice);
-//   - <body> after the page's scripts ran (highlight.js, lang.js): every top-level element's outerHTML; Next's own
+//   - <body> after the page's scripts ran (highlight.js, lang.js): every top-level element as markup; Next's own
 //     nodes are dropped (a hidden <div> of comments, its data scripts, the route announcer); the onclick attribute
 //     of the RU/EN button is not compared (React attaches that click as a listener) — the click tests check it; in
 //     the navigation bar the new site links to routes ("student", not "student.html" — 07.11.2026), so there its
-//     page links are compared with ".html" added, and the attributes of the bar's links in any order (<Link> writes
-//     class before href);
+//     page links are compared with ".html" added. The markup is compared as the browser lays it out (08.11.2026 —
+//     MDX does not keep the HTML files' line breaks and indentation): runs of spaces and line breaks in text are one
+//     space, and none next to a block-level element (SVG too: its schemes are files now, without the HTML page's
+//     indentation); inside <pre> (white-space kept) everything as is;
+//     comments are skipped (React writes <!-- --> between some texts); attributes in name order, style as the
+//     browser normalizes it;
 //   - title, <html lang>, highlighted tokens, page height (the list of stylesheets is not compared: the site bundles
 //     the course CSS, scoped to the kind of page, into one file — 06.11.2026);
 //   - JS errors and failed requests on both pages (/favicon.ico is skipped: Chrome asks every http site for it);
@@ -93,7 +98,17 @@ if (!specs.length) { console.log('no pages selected'); process.exit(1); }
 // ---------- the build must be there and newer than its sources ----------
 if (!fs.existsSync(path.join(OUT, 'index.html'))) { console.log('site/out/index.html is missing: run `pnpm build` in site/ first'); process.exit(1); }
 const files = [...new Set(specs.map((s) => s.split('@')[0]))];
-const stale = files.filter((f) => !fs.existsSync(path.join(OUT, f)) || fs.statSync(path.join(ROOT, f)).mtimeMs > fs.statSync(path.join(OUT, f)).mtimeMs);
+// a page's sources: its HTML file, and its MDX file with the schemes next to it when the page is written in MDX
+const sourcesOf = (f) => {
+  const out = [path.join(ROOT, f)];
+  const mdx = path.join(ROOT, f.replace(/\.html$/, '.mdx'));
+  if (fs.existsSync(mdx)) {
+    out.push(mdx);
+    for (const n of fs.readdirSync(path.dirname(mdx))) if (n.endsWith('.svg')) out.push(path.join(path.dirname(mdx), n));
+  }
+  return out.filter((x) => fs.existsSync(x));
+};
+const stale = files.filter((f) => !fs.existsSync(path.join(OUT, f)) || sourcesOf(f).some((x) => fs.statSync(x).mtimeMs > fs.statSync(path.join(OUT, f)).mtimeMs));
 if (stale.length) { console.log(`site/out is older than ${stale.length} page(s), e.g. ${stale[0]}: run \`pnpm build\` in site/ first`); process.exit(1); }
 
 // ---------- helpers ----------
@@ -174,21 +189,45 @@ const TOP_ELEMENTS = `(isNext) => [...document.body.children].filter((c) => !isN
 // The RU/EN button of a day page: the HTML pages write its click as onclick="…", React attaches it as an event
 // listener (06.11.2026, <LessonNav>) — so that attribute is not compared; what the click does is (the click tests).
 // The bar's page links: the new site's go to routes — ".html" is added to them (only there: a link still ending in
-// ".html" becomes "….html.html" and differs); <Link> writes class before href — the links' attributes are sorted.
+// ".html" becomes "….html.html" and differs).
+// The markup as laid out (see the top of the file): read from the live page, since whether a neighbour is
+// block-level is its computed display.
 const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
   const isNext = eval(nextNode);
   const isNew = location.protocol === 'http:';
-  const top = eval(topElements)(isNext).map((n) => {
-    const c = n.cloneNode(true);
-    c.querySelectorAll('a.lang-btn[onclick]').forEach((a) => a.removeAttribute('onclick'));
-    if (c.matches('div.lesson-nav')) c.querySelectorAll('a').forEach((a) => {
-      if (isNew && a.matches('.nav-link, .lang-btn')) a.setAttribute('href', a.getAttribute('href') + '.html');
-      const at = [...a.attributes].map((x) => [x.name, x.value]).sort((x, y) => (x[0] < y[0] ? -1 : 1));
-      at.forEach(([k]) => a.removeAttribute(k));
-      at.forEach(([k, v]) => a.setAttribute(k, v));
+  const isBlock = (n) => !!n && n.nodeType === 1 && !/^inline/.test(getComputedStyle(n).display);
+  const keepsSpaces = (el) => /^pre/.test(getComputedStyle(el).whiteSpace);
+  const quote = (v) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const attrs = (el) => {
+    let at = [...el.attributes].map((a) => [a.name, a.value]);
+    if (el.matches('a.lang-btn')) at = at.filter(([k]) => k !== 'onclick');
+    if (isNew && el.matches('div.lesson-nav a.nav-link, div.lesson-nav a.lang-btn')) at = at.map(([k, v]) => [k, k === 'href' ? v + '.html' : v]);
+    at = at.map(([k, v]) => [k, k === 'style' ? el.style.cssText : v]).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+    return at.map(([k, v]) => ` ${k}="${quote(v)}"`).join('');
+  };
+  const markup = (el) => {
+    const tag = el.tagName.toLowerCase();
+    const open = `<${tag}${attrs(el)}>`, close = `</${tag}>`;
+    if (keepsSpaces(el)) return open + el.innerHTML + close;
+    const parts = []; // elements, and texts merged across comments
+    for (const k of el.childNodes) {
+      if (k.nodeType === 1) { if (!isNext(k)) parts.push({ el: k }); }
+      else if (k.nodeType === 3) {
+        const last = parts[parts.length - 1];
+        if (last && 'text' in last) last.text += k.data; else parts.push({ text: k.data });
+      }
+    }
+    let inner = '';
+    parts.forEach((p, i) => {
+      if (p.el) { inner += markup(p.el); return; }
+      let t = p.text.replace(/[ \t\n\r\f]+/g, ' ');
+      if (i === 0 ? isBlock(el) : isBlock(parts[i - 1].el)) t = t.replace(/^ /, '');
+      if (i === parts.length - 1 ? isBlock(el) : isBlock(parts[i + 1].el)) t = t.replace(/ $/, '');
+      inner += t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\u00a0/g, '&nbsp;');
     });
-    return c.outerHTML;
-  });
+    return open + inner + close;
+  };
+  const top = eval(topElements)(isNext).map(markup);
   const text = [...document.body.childNodes].filter((n) => n.nodeType === 3 && n.data.trim()).map((n) => n.data);
   return {
     title: document.title,
@@ -414,7 +453,15 @@ function navSteps(file) {
           }
           // (the list of stylesheets is not compared since 06.11.2026: the site bundles the course CSS into one file)
           for (const k of ['title', 'lang', 'body', 'tokens', 'height']) {
-            if (JSON.stringify(oldSnap[k]) !== JSON.stringify(newSnap[k])) say(`${where}: ${k}: ${String(JSON.stringify(oldSnap[k])).slice(0, 100)} | ${String(JSON.stringify(newSnap[k])).slice(0, 100)}`);
+            if (JSON.stringify(oldSnap[k]) === JSON.stringify(newSnap[k])) continue;
+            if (k !== 'body') { say(`${where}: ${k}: ${String(JSON.stringify(oldSnap[k])).slice(0, 100)} | ${String(JSON.stringify(newSnap[k])).slice(0, 100)}`); continue; }
+            // the markup differs: say where, and keep both (an element per line) for a line diff
+            let i = 0;
+            while (i < oldSnap.body.length && oldSnap.body[i] === newSnap.body[i]) i++;
+            const stem = path.join(SHOTS, `${w}x${h}-${spec.replace(/[\\/@]/g, '_')}${step ? '-' + step.replace(/\W+/g, '_') : ''}`);
+            const lines = (b) => b.replace(/(?=<(?!\/)(?:p|div|li|ul|ol|h\d|pre|table|thead|tbody|tr|figure|figcaption|details|summary|svg)\b)/g, '\n');
+            fs.writeFileSync(`${stem}-body-old.txt`, lines(oldSnap.body)); fs.writeFileSync(`${stem}-body-new.txt`, lines(newSnap.body));
+            say(`${where}: body differs at ${i}: …${JSON.stringify(oldSnap.body.slice(Math.max(0, i - 60), i + 80))} | …${JSON.stringify(newSnap.body.slice(Math.max(0, i - 60), i + 80))} (both in ${path.basename(stem)}-body-*.txt)`);
           }
           if (newSnap.removed.length) say(`${where}: nodes removed from <body> on the new page: ${newSnap.removed.join(', ')}`);
           if (oldErrors.length) say(`${where}: errors on the old page: ${oldErrors.join('; ')}`);

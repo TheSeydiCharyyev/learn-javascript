@@ -1,6 +1,7 @@
-// Reads the course pages from the repository at build time. The HTML files (index.html and the days in
-// essentials/, intermediate/, advanced/) stay the only source of the text: the site takes the <head> resources and
-// the top-level elements of <body> as written — the inner HTML of each is cut from the file by parser offsets, not
+// Reads the course pages from the repository at build time. A day page is written in MDX (lecture.mdx next to
+// lecture.html — stage 2 of the move, 08.11.2026; see lib/mdx.ts) or still in HTML; the MDX file wins when both
+// are there. For an HTML page (index.html and the days not moved yet) the site takes the <head> resources and the
+// top-level elements of <body> as written — the inner HTML of each is cut from the file by parser offsets, not
 // re-serialized, so inline handlers, inline scripts and entities inside them reach the browser byte for byte.
 //
 // <body> itself must hold React's children: Next.js puts its own nodes there (a hidden metadata <div> first), and
@@ -13,6 +14,7 @@ import { parse, type DefaultTreeAdapterTypes } from "parse5";
 import Title from "./title";
 import { highlightCode } from "./highlight";
 import { navInnerHtml, navModel, type NavModel } from "./nav";
+import { splitFrontmatter, type Frontmatter } from "./mdx";
 
 type Element = DefaultTreeAdapterTypes.Element;
 
@@ -37,6 +39,8 @@ export type SourcePage = {
   pageCss: string[];
   // A day page's <title> as text: given to Next.js as metadata (see page.tsx); null on the home page.
   title: string | null;
+  // A page written in MDX: its frontmatter and the MDX after it (head, body and handlers are empty then).
+  mdx: { front: Frontmatter; body: string; dir: string; up: string } | null;
 };
 
 // lecture.css, student.css and tasks.css set the same selectors differently (body, h1, h2, .container, pre…), so a
@@ -50,6 +54,7 @@ function readCourseCss(file: string): string {
 }
 
 // Every page the site builds, as paths from the repository root: the home page and each day page, Russian and en/.
+// A page is named by its .html path whether it is written in HTML or MDX (its address stays the same).
 export function pagePaths(): string[] {
   const out = ["index.html"];
   for (const course of COURSES) {
@@ -59,11 +64,35 @@ export function pagePaths(): string[] {
       for (const sub of ["", "en/"]) {
         const at = path.join(dir, day, sub);
         if (!fs.existsSync(at)) continue;
-        for (const f of fs.readdirSync(at).filter((f) => f.endsWith(".html")).sort()) out.push(`${course}/${day}/${sub}${f}`);
+        const names = new Set(fs.readdirSync(at).filter((f) => /\.(html|mdx)$/.test(f)).map((f) => f.replace(/\.mdx$/, ".html")));
+        for (const f of [...names].sort()) out.push(`${course}/${day}/${sub}${f}`);
       }
     }
   }
   return out;
+}
+
+// A day page written in MDX: everything but its text comes from where it lies (kind, language, navigation bar) and
+// from its frontmatter (title, the lecture's head, the colours of the day).
+function readMdxPage(rel: string, mdxRel: string): SourcePage {
+  const kind = /\/(lecture|student|tasks)\.html$/.exec(rel)?.[1] as PageKind | undefined;
+  const nav = navModel(rel, REPO);
+  if (!kind || !nav) throw new Error(`${mdxRel}: an MDX page must be a day page (…/day-NN/[en/]lecture|student|tasks.mdx)`);
+  const { data: front, body } = splitFrontmatter(mdxRel, fs.readFileSync(path.join(REPO, mdxRel), "utf8"));
+  const lecture = front.day !== undefined || front.heading !== undefined || front.lead !== undefined;
+  if (lecture && !(front.day && front.heading && front.lead)) throw new Error(`${mdxRel}: the day head needs day, heading and lead together`);
+  const en = /\/en\//.test(rel);
+  return {
+    lang: en ? "en" : "ru",
+    head: [],
+    body: [],
+    handlers: [],
+    nav,
+    kind,
+    pageCss: [readCourseCss(`${kind}.css`), readCourseCss("book.css"), ...(front.css ? [front.css] : [])],
+    title: front.title,
+    mdx: { front, body, dir: path.join(REPO, path.dirname(rel)), up: en ? "../../../" : "../../" },
+  };
 }
 
 // "essentials/day-01/lecture.html" <-> ["essentials", "day-01", "lecture"], "index.html" <-> []; the export writes
@@ -137,6 +166,12 @@ function highlightBlocks(rel: string, source: string, body: Element): string {
 export function readPage(rel: string): SourcePage {
   const hit = cache.get(rel);
   if (hit) return hit;
+  const mdxRel = rel.replace(/\.html$/, ".mdx");
+  if (mdxRel !== rel && fs.existsSync(path.join(REPO, mdxRel))) {
+    const page = readMdxPage(rel, mdxRel);
+    cache.set(rel, page);
+    return page;
+  }
   let source = fs.readFileSync(path.join(REPO, rel), "utf8");
   let { html, head, body } = documentParts(rel, source);
   const highlighted = head.childNodes.some((n) => isElement(n) && n.tagName === "script" && HIGHLIGHT_SCRIPT.test(n.attrs.find((a) => a.name === "src")?.value ?? ""));
@@ -229,6 +264,7 @@ export function readPage(rel: string): SourcePage {
     kind: kind ?? null,
     pageCss,
     title,
+    mdx: null,
   };
   cache.set(rel, page);
   return page;

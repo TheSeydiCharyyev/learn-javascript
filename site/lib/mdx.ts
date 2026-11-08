@@ -10,6 +10,9 @@
 //     h1 { border-bottom-color: #f59e0b; }
 //   ---
 //
+// Notes and tasks pages have no day head: they start with "# День 1. Задания" and <Subtitle>…</Subtitle> in the text.
+// The pages are made from the HTML ones by tools/html-to-mdx.mjs.
+//
 // Syntax the course adds to MDX, each turned into what the HTML pages had:
 //   ## 1. Что такое JavaScript {#what}     a heading with its id (MDX itself would read {#what} as an expression)
 //   ```js file="config.json"               a code block: <pre class="code js" data-file="config.json">, highlighted

@@ -2,9 +2,12 @@
 // block, so the CSS of the course applies unchanged and compare-site can hold the MDX page against the HTML one.
 //
 // Two kinds of boxes, as the HTML pages have them (counted over all 385 pages, 08.11.2026):
-//   - text boxes (Analogy, Mistake, ProTip, …): the text lies right in the <div>, sometimes followed by a code block
-//     or a list. MDX wraps text written on its own lines in <p>; these boxes take that <p> off again.
-//   - block boxes (Goals, Ref, Step, …): their content is blocks (<p>, lists, tables) and stays as MDX gives it.
+//   - text boxes (Analogy, Mistake, ProTip, Hint, Definition, Remember, …): the text lies right in the <div>,
+//     sometimes followed by a code block or a list. MDX wraps text written on its own lines in <p>; these boxes take
+//     that <p> off again (so do Goal, Subtitle, Answer, Event and a scheme's caption).
+//   - block boxes (Goals, Ref, Step, Criteria, Example, Homework, …): their content is blocks (<p>, lists, tables)
+//     and stays as MDX gives it.
+// Fixed labels (Contents, Answer, levels of tasks, minutes…) come from the page's language.
 import fs from "node:fs";
 import path from "node:path";
 import { Children, Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
@@ -17,8 +20,8 @@ export type PageContext = {
 };
 
 const LABELS = {
-  ru: { toc: "Содержание главы", answer: "Ответ", ref: "Справочник дня", full: "подробно", brief: "кратко", review: "повторение" },
-  en: { toc: "Contents", answer: "Answer", ref: "Reference of the day", full: "in depth", brief: "briefly", review: "review" },
+  ru: { toc: "Содержание главы", answer: "Ответ", ref: "Справочник дня", full: "подробно", brief: "кратко", review: "повторение", easy: "Легко", medium: "Средне", hard: "Сложно", min: "мин" },
+  en: { toc: "Contents", answer: "Answer", ref: "Reference of the day", full: "in depth", brief: "briefly", review: "review", easy: "Easy", medium: "Medium", hard: "Hard", min: "min" },
 };
 
 type Kids = { children?: ReactNode };
@@ -150,9 +153,37 @@ export function courseComponents(ctx: PageContext) {
         {unwrap(children)}
       </div>
     ),
+    // a task of a tasks page: the header (number and name, level, minutes), then the goal (<Goal>), the task itself,
+    // hints, criteria
+    Task: ({ title, level, time, children }: { title: string; level: "easy" | "medium" | "hard"; time: string } & Kids) => {
+      if (!L[level]) throw new Error(`<Task level="${level}">: easy, medium or hard`);
+      return (
+        <div className="task">
+          <div className="task-header">
+            <span className="task-title">{title}</span>
+            <div className="task-meta">
+              <span className={`badge badge-${level}`}>{L[level]}</span>
+              <span className="badge badge-time">{`${time} ${L.min}`}</span>
+            </div>
+          </div>
+          {children}
+        </div>
+      );
+    },
+    Goal: ({ children }: Kids) => <p className="task-goal">{unwrap(children)}</p>,
+    Subtitle: ({ children }: Kids) => <p className="subtitle">{unwrap(children)}</p>,
     Goals: blockBox("goals"),
     Cheatsheet: blockBox("cheatsheet"),
     Selfcheck: blockBox("selfcheck"),
+    Criteria: blockBox("criteria"),
+    Example: blockBox("example"),
+    Homework: blockBox("homework"),
+    Hint: textBox("hint"),
+    WriteBox: textBox("write-box"),
+    Definition: textBox("definition"),
+    KeyPoint: textBox("key-point"),
+    Remember: textBox("remember"),
+    NoteBox: textBox("note-box"),
     Analogy: textBox("analogy"),
     TryIt: textBox("try-it"),
     Why: textBox("why"),

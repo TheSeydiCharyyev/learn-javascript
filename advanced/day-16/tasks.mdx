@@ -1,0 +1,285 @@
+---
+title: День 16 — задания
+---
+
+# День 16. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-16` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага. Reflect пока не берём — он на дне 17: цели пересылаем через `t[key]`, `key in t`, `Object.defineProperty` и `Function.prototype.apply.call`.</Subtitle>
+
+## Разминка
+
+<Task title="1. Ловушка или цель" level="easy" time="7">
+<Goal>проходить общую схему внутреннего метода прокси.</Goal>
+
+```js
+const target = { word: "kitap" };
+const handler = { get(t, key) { return key in t ? t[key] : `нет: ${String(key)}`; } };
+const p = new Proxy(target, handler);
+p.level = 2;
+console.log(p.word, p.level, p.nope, target.level, "nope" in p);
+handler.set = () => false;
+p.level = 3;
+delete handler.get;
+console.log(p.level, p.nope, Object.keys(p).join());
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждой операции названы ловушка или метод цели; объяснено, почему после
+  `delete handler.get` ловушки уже нет;
+- объяснено, почему `p.level = 3` не бросило и уровень остался прежним, и что сделает
+  `Object.assign(p, { level: 4 })`.
+</Criteria>
+</Task>
+
+<Task title="2. Что пропустит сверка" level="easy" time="7">
+<Goal>применять инварианты 10.5 к свойствам цели.</Goal>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const target = { open: 1 };
+Object.defineProperty(target, "id", { value: 7, writable: false, configurable: false });
+Object.defineProperty(target, "count", { value: 0, writable: true, configurable: false });
+const p = new Proxy(target, {
+  get() { return 100; },
+  has() { return false; },
+  deleteProperty() { return true; },
+  ownKeys() { return ["id", "count", "extra"]; },
+});
+console.log(run(() => p.id), p.count, p.open, run(() => "count" in p), "open" in p);
+console.log(run(() => delete p.open), "open" in target, run(() => delete p.count), run(() => Object.keys(p)), Object.keys(p).length);
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого TypeError назван метод 10.5 и нарушенное правило; объяснено, почему `p.count`
+  вправе соврать, а `p.id` — нет;
+- объяснено, почему `Object.keys(p)` прошёл, хотя ловушка не назвала `open` и
+  добавила `extra`, и почему он пуст.
+</Criteria>
+</Task>
+
+<Task title="3. Журнал: новые операции" level="easy" time="6">
+<Goal>предсказывать ловушки по алгоритму операции.</Goal>
+
+```js
+const log = [];
+const handler = new Proxy({}, { get(h, trap) { log.push(trap); return undefined; } });
+const watch = (target, f) => { log.length = 0; f(new Proxy(target, handler)); return [...new Set(log)].join(", "); };
+console.log(watch({ x: 1 }, (p) => Object.hasOwn(p, "x")));
+console.log(watch({ x: 1 }, (p) => Object.entries(p)));
+console.log(watch({ x: 1 }, (p) => { p.x++; }));
+console.log(watch({ x: 1 }, (p) => "y" in Object.create(p)));
+console.log(watch({ x: 1 }, (p) => Object.isFrozen(p)));
+```
+
+<Criteria>
+- предсказаны пять строк;
+- для каждой строки назван алгоритм, который зовёт эти ловушки: HasOwnProperty, EnumerableOwnProperties,
+  OrdinarySetWithOwnDescriptor, OrdinaryHasProperty, TestIntegrityLevel;
+- объяснено, почему `isFrozen` остановился на одной ловушке и какие добавятся у цели
+  `Object.freeze({ x: 1 })`.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Проверка записи" level="medium" time="12">
+<Goal>закрыть оба пути записи: \[\[Set\]\] и \[\[DefineOwnProperty\]\].</Goal>
+
+Напишите `checked(target, test)` — прокси, который пропускает запись, только если
+`test(key, value)` вернул true, иначе бросает RangeError. Проверяйте и присваивание, и
+`Object.defineProperty`; аксессор проверить нельзя — TypeError. Пересылка — `t[key] = value`
+и `Object.defineProperty(t, key, desc)`.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const scores = checked({}, (key, value) => Number.isInteger(value) && value >= 1 && value <= 5);
+scores.Aýna = 5;
+run(() => { scores.Merdan = 7; });                                         // "RangeError"
+run(() => Object.defineProperty(scores, "Merdan", { value: 7 }));          // "RangeError"
+run(() => Object.assign(scores, { Merdan: 4, Leýla: 0 }));                 // "RangeError"
+JSON.stringify(scores);                                                    // '{"Aýna":5,"Merdan":4}'
+run(() => Object.defineProperty(scores, "x", { get() { return 1; } }));    // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- вариант только с ловушкой `defineProperty`, без `set`, тоже ловит
+  `scores.Merdan = 7` — объяснено, каким шагом OrdinarySetWithOwnDescriptor присваивание дошло
+  до неё и какой дескриптор она получает для уже существующего ключа;
+- объяснено, почему после отказа `Object.assign` у объекта остался `Merdan: 4`.
+</Criteria>
+</Task>
+
+<Task title="5. Виртуальный диапазон" level="medium" time="12">
+<Goal>отдавать ключи, которых у цели нет, так, чтобы их видели все операции.</Goal>
+
+Напишите `range(from, to)` — объект без своих свойств, у которого «есть» ключи от
+`from` до `to`, а значение ключа — само число. Нужны ловушки `get`,
+`has`, `ownKeys` и `getOwnPropertyDescriptor`; ключ — каноническая строка целого
+(`"03"` — не ключ).
+
+<Example>
+```js
+const r = range(3, 5);
+[r[3], r[5], r[6], r.foo];                                                 // [3, 5, undefined, undefined]
+["4" in r, "6" in r, "03" in r, "toString" in r];                          // [true, false, false, true]
+Object.keys(r);                                                            // ["3", "4", "5"]
+JSON.stringify(r);                                                         // '{"3":3,"4":4,"5":5}'
+Object.values({ ...r });                                                   // [3, 4, 5]
+String(r);                                                                 // "[object Object]"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- без `getOwnPropertyDescriptor` `Object.keys(r)` пуст и
+  `JSON.stringify(r)` — `"{}"`, а `Object.getOwnPropertyNames(r)` видит
+  ключи — объяснено почему;
+- дескриптор с `configurable: false` даёт TypeError, а после
+  `Object.preventExtensions(r)` бросает `Object.keys(r)` — названы правила 10.5.5
+  и 10.5.11.
+</Criteria>
+</Task>
+
+<Task title="6. Кэш вызовов" level="medium" time="12">
+<Goal>перехватывать вызов ловушкой `apply`.</Goal>
+
+Напишите `memo(fn)` — прокси функции, который запоминает ответ по аргументам (ключ —
+`JSON.stringify(args)`) и зовёт цель только при первом вызове с такими аргументами. Вызов цели —
+`Function.prototype.apply.call(target, thisArg, args)`.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+let real = 0;
+function add(a, b) { real++; return a + b; }
+const fast = memo(add);
+[fast(1, 2), fast(1, 2), fast.call(null, 1, 2), fast(2, 1), real];         // [3, 3, 3, 3, 2]
+[typeof fast, fast.name, fast.length, fast === add];                       // ["function", "add", 2, false]
+class Card { constructor(word) { this.word = word; } }
+const MemoCard = memo(Card);
+new MemoCard("kitap").word;                                                // "kitap"
+run(() => MemoCard("kitap"));                                              // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- один `memo(plus)` для `function plus(x) { return this.n + x; }` — метод объектов
+  `{ n: 1 }` и `{ n: 10 }`: второй получает чужой ответ; объяснено почему, и кэш
+  заведён на каждый `thisArg` (WeakMap) — теперь 2 и 11;
+- объяснено, почему `new MemoCard("kitap")` не кэшируется и откуда TypeError у
+  `MemoCard("kitap")`.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: настройки" level="medium" time="14">
+<Goal>ловить опечатки, не мешая вопросам, которые задаёт сам язык.</Goal>
+
+Страж опечаток из раздела 16 лекции сломал `JSON.stringify`. Напишите
+`strictSettings(defaults)`: чтение неизвестного имени — ReferenceError, но служебные имена языка
+(`toJSON`, `then`) и символы уходят к цели; запись — только в свои ключи
+(`Object.hasOwn`) и того же типа; `Object.defineProperty` — TypeError «только
+присваиванием»; удалить настройку нельзя.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const settings = strictSettings({ perDay: 10, sound: true });
+settings.perDay = 20;
+[JSON.stringify(settings), String(settings)];                              // ['{"perDay":20,"sound":true}', "[object Object]"]
+run(() => settings.perday);                                                // "ReferenceError: нет настройки «perday»"
+run(() => { settings.sound = "да"; });                                     // "TypeError: sound: нужен boolean"
+run(() => { settings.theme = "dark"; });                                   // "ReferenceError: нет настройки «theme»"
+run(() => Object.defineProperty(settings, "perDay", { value: "5" }));      // "TypeError: perDay: только присваиванием"
+run(() => { "use strict"; delete settings.sound; });                       // "TypeError: 'deleteProperty' on proxy: trap returned falsish for property 'sound'"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- `Promise.resolve(settings)` выполняется самими настройками, а с вариантом лекции —
+  отклоняется ReferenceError «нет настройки «then»»; назван шаг CreateResolvingFunctions (27.2.1.3),
+  который спрашивает `then`;
+- объяснено, почему `String(settings)` работал и в лекции и почему запись проверяет
+  `Object.hasOwn`, а не `in` (что дало бы `settings.toString = 1`).
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Отзыв по всему дереву" level="hard" time="12">
+<Goal>отозвать доступ, который успел разойтись по вложенным объектам.</Goal>
+
+Дать чужому коду колоду на время — мало отозвать один прокси: через него достают вложенный объект и оставляют
+себе. Напишите `lend(target)` → `{ proxy, revoke }`: объект, прочитанный через прокси,
+отдаётся тоже прокси (для одного объекта — один и тот же, WeakMap), а `revoke()` отзывает их все.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const data = { owner: "Aýna", deck: { words: ["kitap", "galam"] } };
+const { proxy, revoke } = lend(data);
+const deck = proxy.deck;
+[proxy.owner, deck.words.length, proxy.deck === deck, deck === data.deck];   // ["Aýna", 2, true, false]
+revoke();
+[run(() => proxy.owner), run(() => deck.words), data.deck.words.length];     // ["TypeError", "TypeError", 2]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- `lend(Object.freeze({ deck: {} })).proxy.deck` бросает TypeError — назван шаг 10.5.8 и
+  объяснено, почему текст V8 «expected '#\<Object>' but got '#\<Object>'» сам себе не
+  противоречит;
+- объяснено, зачем обёртки в WeakMap, а не в Map, и что после `revoke()` может забрать
+  сборщик.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: 10.5.6" level="hard" time="8">
+<Goal>прочитать раздел, который на лекции был одной строкой.</Goal>
+
+Прочитайте [10.5.6
+\[\[DefineOwnProperty\]\]](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-defineownproperty-p-desc) целиком и предскажите две строки. Ловушка ничего не определяет — только отвечает
+true.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const target = {};
+Object.defineProperty(target, "a", { value: 1, writable: true, configurable: false });
+Object.defineProperty(target, "b", { value: 1, writable: true, configurable: true });
+const p = new Proxy(target, { defineProperty() { return true; } });
+const tries = [
+  () => Object.defineProperty(p, "a", { value: 2 }),
+  () => Object.defineProperty(p, "a", { configurable: false, writable: false }),
+  () => Object.defineProperty(p, "b", { configurable: false }),
+  () => Object.defineProperty(p, "c", { value: 1, configurable: false }),
+  () => Object.defineProperty(p, "c", { value: 1 }),
+  () => Object.defineProperty(p, "a", { get() {} }),
+];
+console.log(tries.map(run).join(" "), target.a, "c" in target);
+Object.preventExtensions(target);
+console.log(run(() => Object.defineProperty(p, "c", { value: 1 })), run(() => Object.defineProperty(p, "b", { value: 5 })), target.b);
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого `defineProperty` назван шаг 10.5.6, который дал ответ;
+- объяснено, почему `{ value: 1 }` для `c` прошёл, хотя у обычного объекта
+  `Object.defineProperty(o, "c", { value: 1 })` создаёт неудаляемое свойство.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy)
+(Proxy, handler.set(), handler.defineProperty(), handler.ownKeys(), handler.getOwnPropertyDescriptor(),
+handler.apply(), Proxy.revocable(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

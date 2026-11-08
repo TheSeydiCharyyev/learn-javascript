@@ -1,0 +1,144 @@
+---
+title: День 13 — конспект
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+---
+
+# День 13. Скрипты и модули изнутри, eval
+
+<Subtitle>Выжимка лекции: как скрипт получает имена в глобальной записи, как граф модулей связывается и выполняется, чем прямой `eval` отличается от косвенного.</Subtitle>
+
+## Главное
+
+<Definition>
+Скрипт и модуль — два вида исходного текста. Скрипт: ParseScript → ScriptEvaluation →
+**GlobalDeclarationInstantiation** (сначала все проверки, потом все имена) → текст. Модуль: весь граф
+сначала связывается — **InitializeEnvironment** создаёт привязки, — потом выполняется обходом в
+глубину. `eval` разбирает строку как скрипт: прямой — в окружении вызывающего, косвенный — в глобальном.
+</Definition>
+
+## Скрипты и глобальная запись
+
+Вывод каждого скрипта — в комментарии в конце его строки.
+
+```html
+<!-- index.html -->
+<script>let count = 1; var total = 10; globalThis.label = "свойство";</script>
+<script>let total = 20;</script>                <!-- Uncaught SyntaxError: Identifier 'total' has already been declared — шаг 1 -->
+<script>var before = 1; var count = 2;</script> <!-- Uncaught SyntaxError: Identifier 'count' has already been declared — шаг 2 -->
+<script>let label = "let"; console.log(label, globalThis.label);</script>    <!-- let свойство — свойство окна затенено -->
+<script>let broken = nothing();</script>        <!-- Uncaught ReferenceError: nothing is not defined -->
+<script>try { broken = 1; } catch (e) { console.log(e.message); }</script>   <!-- Cannot access 'broken' before initialization -->
+<script>console.log("before" in window, count, total);</script>          <!-- true 1 10 — before создал Chrome, по тексту — нет -->
+```
+
+<Remember>
+Ранняя ошибка (16.1.1) — скрипт не выполнится ни на строку. Ошибка при выполнении останавливает его на месте.
+GlobalDeclarationInstantiation проверяет имена против общей глобальной записи: `let` против
+`let` и против неудаляемого свойства окна (`var`, `undefined`, `top`),
+`var` и функция против `let` — SyntaxError. Конфликт — по тексту ни одного имени (Chrome
+создаёт стоящие раньше). `let` без значения после ошибки — мёртвая зона до перезагрузки.
+</Remember>
+
+## Модули: связывание и выполнение
+
+Файлы — в порядке выполнения: `main.js` ведёт в `first.js`, тот — в
+`second.js`, который снова просит `first.js`, а он уже на стеке.
+
+```js
+// second.js
+import { count, hello, MAX } from "./first.js";
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+console.log(count, hello(), attempt(() => MAX));   // undefined привет ReferenceError — var, функция, const
+```
+
+```js
+// first.js
+import "./second.js";
+export var count = 1;
+export function hello() { return "привет"; }
+export const MAX = 3;
+console.log(count, MAX);                           // 1 3 — теперь всё со значениями
+```
+
+```js
+// bad.js
+throw new Error("сбой");
+```
+
+```js
+// main.js
+import "./first.js";
+const one = await import("./bad.js").catch((e) => e);
+const two = await import("./bad.js").catch((e) => e);
+console.log(one === two, one.message);             // true сбой — ошибка выполнения запомнена
+```
+
+<Remember>
+Связывание — до первой строки любого модуля: `var` — `undefined`, функции готовы,
+`let`, `const`, `class` — без значения. Выполнение — обход в глубину по
+запросам в порядке текста; в цикле первым выполняется самый глубокий. `export *` не пересылает
+`default`; имя из двух звёздочек с разными привязками выпадает из объекта модуля, а импорт его по
+имени — SyntaxError. Модуль с `await` наверху выполняется асинхронно, импортёр его ждёт, сосед — нет.
+</Remember>
+
+## eval: прямой и косвенный
+
+```js
+var where = "глобальная";
+function test() {
+  var where = "локальная";
+  console.log(eval("where"), (0, eval)("where"));   // локальная глобальная — прямой видит функцию
+  eval("var x = 1");
+  console.log(typeof x);                            // number — нестрогий прямой: var в функцию
+}
+test();
+function strict() { "use strict"; eval("var y = 1"); return typeof y; }
+console.log(strict(), eval("let z = 1; typeof z"), typeof z);   // undefined number undefined — строгий и let внутри
+(0, eval)("var g = 1");
+console.log(delete globalThis.g, eval(42), eval("2; var q = 3"));   // true 42 2 — удаляемый var, не строка, значение
+const settings = { size: { font: 16 } };
+console.log("size.font".split(".").reduce((o, key) => o?.[key], settings));   // 16 — путь без eval
+```
+
+| Вызов | Вид | Что видит строка | `var` нестрогой строки |
+| --- | --- | --- | --- |
+| `eval(s)`, `(eval)(s)` | прямой | окружения вызывающего | в его VariableEnvironment |
+| `(0, eval)(s)`, `eval?.(s)`, `obj.eval(s)` | косвенный | только глобальное | свойство окна, удаляемое |
+| любой строгий | — | как выше | в новом окружении eval |
+
+<Remember>
+Прямой eval — вызов по имени `eval` без свойства, со значением %eval% (13.3.6.1). Строгость
+наследует только прямой. `let`, `const`, `class` из eval всегда остаются внутри.
+Не строка возвращается как есть. Ранние ошибки — при вызове: `new.target` не в функции,
+`super` не в методе, `arguments` в поле. Под CSP без `'unsafe-eval'` eval и
+`Function` бросают EvalError. Замены: `obj[key]`, таблица функций, `JSON.parse`,
+`Function` с параметрами.
+</Remember>
+
+<Homework>
+1. Страница: `<script>globalThis.x = 1; var y = 2;</script>`,
+   `<script>let x = 10; let y = 20;</script>`,
+   `<script>console.log(x, y);</script>`. Что напечатает третий скрипт? Найдите шаг 16.1.7,
+   на котором бросил второй, и объясните, почему `let x` не создан.
+2. Модули: `main.js` импортирует `a.js`; `a.js` — `b.js` и
+   `c.js`; `b.js` — `c.js`; `c.js` — `a.js`. Каждый
+   первой строкой печатает своё имя. Предскажите порядок по шагам InnerModuleEvaluation.
+3. Внутри `function f() { var v = "местная"; … }` при глобальном `var v = "глобальная"`
+   что вернут `eval("v")`, `(eval)("v")`, `window.eval("v")`,
+   `[eval][0]("v")`, `eval?.("v")`? Для каждого назовите условие 13.3.6.1, которое
+   выполнено или нет.
+4. Прочитайте страницу MDN
+   [import defer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/defer).
+   Почему у неё только форма `import defer * as ns` и что будет с модулем, у которого
+   `await` наверху? Свяжите ответ с HasTLA из InnerModuleEvaluation.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval)
+(eval(), import defer, import source, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

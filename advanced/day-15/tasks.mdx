@@ -1,0 +1,268 @@
+---
+title: День 15 — задания
+---
+
+# День 15. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-15` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага. Proxy и Reflect пока не берём — они на днях 16 и 17.</Subtitle>
+
+## Разминка
+
+<Task title="1. bind от bind и new" level="easy" time="7">
+<Goal>проходить \[\[Call\]\] и \[\[Construct\]\] связанной функции.</Goal>
+
+```js
+const box = { text: "старт" };
+function Tag(a, b) { this.text = `${a}-${b}`; return new.target === Tag; }
+const one = Tag.bind(box, "x");
+const two = one.bind({ text: "другой" }, "y");
+console.log(two("z"), box.text, two.name, two.length);
+const made = new two("z");
+console.log(made.text, made instanceof Tag, made instanceof two, Object.getPrototypeOf(made) === Tag.prototype);
+```
+
+<Criteria>
+- предсказаны две строки;
+- для `two("z")` назван `this` каждого \[\[Call\]\] и как склеиваются аргументы;
+- для `new two("z")` названы обе замены newTarget и объяснено, почему `return true`
+  не заменил объект (день 14).
+</Criteria>
+</Task>
+
+<Task title="2. length по шагам" level="easy" time="7">
+<Goal>применять \[\[DefineOwnProperty\]\] массива и ArraySetLength.</Goal>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const a = ["a", "b", "c", "d", "e"];
+Object.defineProperty(a, 1, { configurable: false });
+a[7] = "h";
+console.log(a.length, Object.keys(a).join());
+a.length = 0;
+console.log(a.length, Object.keys(a).join());
+a.length = 4;
+console.log(a.length, Object.keys(a).join(), 3 in a);
+Object.defineProperty(a, "length", { writable: false });
+console.log(run(() => { "use strict"; a[2] = "C"; }), run(() => { "use strict"; a[4] = "e"; }), run(() => { "use strict"; a.length = 4; }), run(() => a.push("x")), a.join());
+```
+
+<Criteria>
+- предсказаны четыре строки;
+- для каждой записи назван шаг 10.4.2.1 или ArraySetLength;
+- объяснено, почему `a[2] = "C"` прошло, а `a.length = 4` с тем же значением — нет.
+</Criteria>
+</Task>
+
+<Task title="3. Обёртка строки и её ключи" level="easy" time="6">
+<Goal>различать свойства-символы и обычные свойства объекта String.</Goal>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const s = new String("kit");
+s.title = "книга"; s[5] = "!"; s[1] = "X"; s["01"] = "ноль-один";
+console.log(Object.getOwnPropertyNames(s).join(" "), s[1], s.length);
+console.log(run(() => { "use strict"; s[1] = "X"; }), run(() => { "use strict"; s[3] = "?"; }), run(() => Object.defineProperty(s, 2, { value: "t" })), run(() => { "use strict"; delete s[5]; }), Object.keys(s).join(" "));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждой операции назван метод 10.4.3 или обычный шаг, который её решил;
+- объяснено, где стоит `length` среди ключей и почему его нет в `Object.keys`.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Своя связанная функция" level="medium" time="14">
+<Goal>перенести 10.4.1 и 20.2.3.2 в код.</Goal>
+
+Напишите `myBind(target, boundThis, ...boundArgs)` — обычную функцию-обёртку, которая ведёт себя как
+связанная: вызов — цель с `boundThis` и склеенными аргументами (`Function.prototype.apply.call`:
+у цели может не быть `apply` в цепочке); вызов с `new` (`new.target` не undefined) —
+`new target(...)`; прототип — как у цели; `length` и `name` — по 20.2.3.2;
+`prototype` обёртки — `target.prototype`, чтобы работал `instanceof`.
+
+<Example>
+```js
+function show(a, b) { return `${this.name} ${a} ${b}`; }
+const mine = myBind(show, { name: "мой" }, 1);
+mine(2);                                                                  // "мой 1 2"
+mine.call({ name: "чужой" }, 2);                                          // "мой 1 2"
+[mine.name, mine.length];                                                 // ["bound show", 1]
+class Point { constructor(x, y) { this.x = x; this.y = y; } }
+const OnAxis = myBind(Point, null, 0);
+new OnAxis(5).y;                                                          // 5
+[new OnAxis(5) instanceof Point, new OnAxis(5) instanceof OnAxis];        // [true, true]
+Object.getPrototypeOf(myBind(async function () {}, null)) === Object.getPrototypeOf(async function () {});   // true
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- `myBind(myBind(show, { name: "1" }), { name: "2" })(3, 4)` совпадает с `bind` от
+  `bind`;
+- названы два отличия, которых без Reflect (день 17) не убрать: своё `prototype` обёртки не
+  удалить (10.2.5 MakeConstructor) и `class Sub extends OnAxis {}` — у модели
+  `new Sub(1) instanceof Sub` false, у связанной функции с `prototype` из раздела 4
+  лекции — true; объяснено, какой newTarget теряется.
+</Criteria>
+</Task>
+
+<Task title="5. Своя ArraySetLength" level="medium" time="12">
+<Goal>перенести 10.4.2.4 в код.</Goal>
+
+Напишите `setLength(o, desc)` → `true` или `false` по шагам раздела 7 лекции
+для подобия массива из `like`: ToUint32 — `value >>> 0` (день 6), ToNumber —
+`Number`, не совпали — `throw new RangeError("Invalid array length")`; определять —
+`Object.defineProperty` внутри `try` (false вместо TypeError); удалять — `delete`
+в нестрогом коде (false, если не удалилось); `writable: false` — отложить до конца удаления.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const like = (...items) => { const o = { ...items }; Object.defineProperty(o, "length", { value: items.length, writable: true, enumerable: false, configurable: false }); return o; };
+const o = like("a", "b", "c", "d");
+Object.defineProperty(o, 1, { configurable: false });
+setLength(o, { value: 0 });                                               // false
+[o.length, Object.keys(o).join()];                                        // [2, "0,1"]
+setLength(o, { value: 5 });                                               // true
+setLength(o, { value: 1, writable: false });                              // false
+[o.length, Object.getOwnPropertyDescriptor(o, "length").writable];        // [2, false]
+setLength(o, { value: 9 });                                               // false
+run(() => setLength(like(), { value: 1.5 }));                             // "RangeError"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- для `["a", "b", "c", "d"]` с неудаляемым индексом 1 модель и настоящий
+  `Object.defineProperty(arr, "length", desc)` (true — без ошибки) совпадают на
+  `{ value: 0 }`, `{ value: 6 }`, `{ value: 2, writable: false }` и
+  `{ writable: false }` — и по ответу, и по длине, ключам и флагу;
+- объяснено, сколько раз модель зовёт `valueOf` у объекта в `value` и почему
+  столько же, сколько ArraySetLength.
+</Criteria>
+</Task>
+
+<Task title="6. Какие индексы связаны" level="medium" time="10">
+<Goal>повторить цикл CreateMappedArgumentsObject.</Goal>
+
+Напишите `mappedIndices(params, argCount)` — какие индексы связанный `arguments` получит в
+\[\[ParameterMap\]\]: пары `[индекс, имя]` по возрастанию индекса. Идите, как 10.4.4.7: с конца, имя — только
+при первой встрече, связь — только если индекс меньше числа переданных аргументов.
+
+<Example>
+```js
+mappedIndices(["a", "b"], 1);                                             // [[0, "a"]]
+mappedIndices(["a", "b", "c"], 5);                                        // [[0, "a"], [1, "b"], [2, "c"]]
+mappedIndices(["x", "x"], 2);                                             // [[1, "x"]]
+mappedIndices(["x", "x"], 1);                                             // []
+mappedIndices(["a", "b", "a", "c"], 4);                                   // [[1, "b"], [2, "a"], [3, "c"]]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- те же случаи на настоящих нестрогих функциях из `new Function(...params, тело)`: тело
+  пишет `arguments[i]` и возвращает параметры — связи совпадают с моделью;
+- объяснено, почему у `["x", "x"]` с одним аргументом не связан ни один индекс.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: история ответов" level="medium" time="14">
+<Goal>отдать массив наружу так, чтобы его нельзя было изменить.</Goal>
+
+Колода запоминает ответы ученика. Напишите `Deck` с приватным списком `#history`, методом
+`answer(word)` и геттером `history`: снаружи список не изменить, а колода продолжает
+дописывать ответы.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const deck = new Deck(["kitap", "galam"]);
+deck.answer("kitap");
+const seen = deck.history;
+deck.answer("galam");
+[seen.length, deck.history.length];                                       // [1, 2]
+run(() => deck.history.push("suw"));                                      // "TypeError"
+run(() => { "use strict"; deck.history.length = 0; });                    // "TypeError"
+run(() => { "use strict"; deck.history[0] = "suw"; });                    // "TypeError"
+deck.history.join();                                                      // "kitap,galam"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- для трёх отказов назван шаг, который дал false: у `push` — шаг \[\[DefineOwnProperty\]\]
+  массива, у `length` и индекса — OrdinarySetWithOwnDescriptor;
+- версия `get history() { return Object.freeze(this.#history); }` без копии ломает саму
+  колоду: второй `answer` бросает TypeError — объяснено почему.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Своя StringGetOwnProperty" level="hard" time="12">
+<Goal>перенести 10.4.3.5 в код.</Goal>
+
+Напишите `stringOwn(str, key)` → дескриптор или `undefined` по шагам
+StringGetOwnProperty. CanonicalNumericIndexString: `"-0"` — это −0; иначе число, если
+`String(Number(key)) === key`, иначе undefined.
+
+<Example>
+```js
+JSON.stringify(stringOwn("kit", "1"));          // '{"value":"i","writable":false,"enumerable":true,"configurable":false}'
+stringOwn("kit", "3");                          // undefined
+stringOwn("kit", "-0");                         // undefined
+stringOwn("kit", "1.0");                        // undefined
+stringOwn("😀", "1").value === "😀"[1];         // true
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- для строк `"kit"`, `""`, `"😀"` и ключей `"0"`,
+  `"3"`, `"-0"`, `"1.0"`, `"01"`, `"1e0"`,
+  `"-1"`, `"Infinity"`, `"NaN"`, `"length"` модель совпадает
+  с `Object.getOwnPropertyDescriptor(new String(str), key)` везде, кроме
+  `"length"`, — объяснено, какой шаг \[\[GetOwnProperty\]\] его отдаёт;
+- объяснено, почему `"Infinity"` и `"NaN"` — канонические числа, но не индексы.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: пространство имён" level="hard" time="8">
+<Goal>прочитать разделы, которые на лекции были одной строкой.</Goal>
+
+Прочитайте [10.4.6.6
+\[\[DefineOwnProperty\]\]](https://tc39.es/ecma262/2026/#sec-module-namespace-exotic-objects-defineownproperty-p-desc), 10.4.6.7 \[\[HasProperty\]\] и 10.4.6.10 \[\[Delete\]\] и предскажите строку.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+import("data:text/javascript," + encodeURIComponent("export let n = 1;")).then((ns) => {
+  const defines = [
+    () => Object.defineProperty(ns, "n", { value: 1, writable: true, enumerable: true, configurable: false }),
+    () => Object.defineProperty(ns, "n", { enumerable: false }),
+    () => Object.defineProperty(ns, "n", { writable: false }),
+    () => Object.defineProperty(ns, "n", { get() { return 1; } }),
+    () => Object.defineProperty(ns, "m", { value: 1 }),
+    () => Object.defineProperty(ns, Symbol.iterator, { value: 1 }),
+  ];
+  console.log(defines.map(run).join(" "), "|", delete ns.n, delete ns.m, "n" in ns, "m" in ns, Symbol.toStringTag in ns);
+});
+```
+
+<Criteria>
+- предсказана строка;
+- для каждого `defineProperty` назван шаг 10.4.6.6, который дал ответ;
+- объяснено, почему `delete ns.m` — true, хотя удалять нечего, и почему символ уходит в
+  обычный метод и всё равно не определяется.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/bind)
+(Function.prototype.bind(), Array: length, The arguments object, import, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

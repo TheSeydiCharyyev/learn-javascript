@@ -1,0 +1,112 @@
+---
+title: День 9 — конспект
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+---
+
+# День 9. Контексты выполнения, реалмы, задания и агенты
+
+<Subtitle>Выжимка лекции: модель выполнения, реалмы и текущий реалм, стек контекстов, поиск `this`, задания и агенты.</Subtitle>
+
+## Главное
+
+<Definition>
+**Агент** — исполнитель JavaScript: один поток, стек контекстов, очередь заданий и куча.
+**Реалм** — встроенные объекты, глобальный объект с окружением и всё загруженное в нём; в вебе — один
+на окно и рамку. **Контекст выполнения** — запись о работающем коде: функция, реалм, окружения.
+**Задание** — кусок работы, который начинается с пустого стека.
+</Definition>
+
+## Реалмы
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const list = other.Array.of(1, 2);
+console.log(list instanceof Array, Array.isArray(list));                  // false true — у рамки свой Array.prototype
+console.log(list.map((x) => x) instanceof Array);                         // false — map рамки, массив рамки
+console.log(Array.prototype.map.call(list, (x) => x) instanceof Array);   // true — map страницы отбросил чужой %Array%
+console.log(other.Function("return [];")() instanceof Array);             // false — литерал в реалме функции
+```
+
+| Что создаётся | В каком реалме |
+| --- | --- |
+| литерал, ошибка, объект встроенной функции | реалм выполняемой функции — текущий |
+| `this` нестрогой функции без объекта | глобальный `this` реалма функции |
+| `x = 1` без объявления, нестрогий код | свойство глобального объекта текущего реалма |
+| `map`, `filter`, `slice` чужого массива | реалм метода, если конструктор — чужой `%Array%` |
+
+<Remember>
+Рамка того же источника — свой реалм в том же агенте: одна очередь микрозадач, один поток. Данные, которые могли
+прийти из другого окна, проверяйте `Array.isArray` и `Error.isError`, а не
+`instanceof`. Переход рамки на новую страницу — новый реалм, а `contentWindow` тот же.
+</Remember>
+
+## Стек и this
+
+```js
+const stack = () => new Error().stack.split("\n").slice(2)
+  .map((line) => line.trim().slice(3).split(" (")[0])
+  .map((name) => (name.includes("://") ? "скрипт" : name)).join(" ← ");
+function outer() { return inner(); }
+function inner() { return stack(); }
+console.log(outer());                                  // inner ← outer ← скрипт — наверху выполняемый контекст
+const obj = { name: "obj", method() { return (() => this.name)(); } };
+console.log(obj.method());                             // obj — стрелку поиск this проходит мимо
+class Base {}
+class Child extends Base {
+  constructor() {
+    try { this; } catch (e) { console.log(e.name); }   // ReferenceError — до super() this не связан
+    super();
+  }
+}
+new Child();
+```
+
+<Remember>
+Вызов кладёт контекст на стек, `return` снимает; `yield` и `await` снимают и
+потом возвращают. Имя ищется от места, где написан код (ResolveBinding). `this` и
+`new.target` — вверх по `[[OuterEnv]]` до записи с `this`: блок и стрелка — мимо,
+у модуля `undefined`. В отладчике: Call Stack — кадры, Scope — Local, Script, Global.
+</Remember>
+
+## Задания
+
+```js
+console.log("скрипт");                                             // скрипт
+document.addEventListener("ping", () => console.log("событие"));   // событие — dispatchEvent из кода: сразу, в том же задании
+document.dispatchEvent(new Event("ping"));
+Promise.resolve().then(() => console.log("then"));                 // then — задание промиса, микрозадача
+setTimeout(() => console.log("таймер"), 0);                        // таймер — задача HTML, после всех микрозадач
+```
+
+<Remember>
+Задание начинается с пустого стека, выполняется одно за раз и до конца; ошибка в нём — его забота
+(в `then` — отказ промиса). Промисы ставит язык (HostEnqueuePromiseJob, по порядку); таймеры,
+события и `queueMicrotask` — HTML. Окно не может блокироваться, worker может. Кластер — агенты с общей
+памятью. Чужое окно — SecurityError.
+</Remember>
+
+<Homework>
+1. Поставьте `debugger` в `inner` из блока «Стек и this», откройте DevTools и
+   перезагрузите страницу. Запишите строки Call Stack и что показывает Scope у каждого кадра.
+2. Предскажите и проверьте: `Array.prototype.filter.call(other.Array.of(1, 2), Boolean) instanceof Array`,
+   `other.Array.prototype.slice.call([1]) instanceof Array`,
+   `[...other.Array.of(1)] instanceof Array`.
+3. По примечанию к HostEnqueuePromiseJob (9.5.5) найдите, в каком реалме работает задание
+   `then`. Проверьте: чей массив вернёт `Promise.resolve(1).then(other.Function("x", "return [x];"))`?
+4. Прочитайте раздел «Never blocking» страницы MDN
+   [JavaScript execution model](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model)
+   и найдите два старых исключения. Объясните через раздел 9.5, почему на время такого вызова замирает вся
+   страница.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model)
+(JavaScript execution model, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

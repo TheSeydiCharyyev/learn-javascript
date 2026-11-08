@@ -1,0 +1,271 @@
+---
+title: День 9 — задания
+---
+
+# День 9. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-09` курса 3. Помощник `stack` — из лекции. Каждое предсказание — до запуска, каждое «почему» — с номером раздела.</Subtitle>
+
+## Разминка
+
+<Task title="1. Чей массив" level="easy" time="7">
+<Goal>находить текущий реалм и шаг ArraySpeciesCreate.</Goal>
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const list = other.Array.of(3, 1, 2);
+const ours = (x) => x instanceof Array;
+console.log(ours(list.slice()), ours(Array.prototype.slice.call(list)), ours(list.toSorted()), ours(Array.from(list)));
+console.log(ours(other.JSON.parse("[1]")), ours(JSON.parse("[1]")), ours([].concat(list)), ours(other.Array.prototype.concat.call([], list)));
+```
+
+<Criteria>
+- предсказаны восемь ответов, у каждого назван текущий реалм — чей метод работает;
+- для последнего ответа найден шаг 10.4.2.3, который отбросил конструктор;
+- объяснено, почему `toSorted` не смотрит на конструктор вовсе (его шаги в 23.1.3).
+</Criteria>
+</Task>
+
+<Task title="2. Откуда this" level="easy" time="7">
+<Goal>проходить GetThisEnvironment и GetNewTarget по шагам.</Goal>
+
+```js
+const who = (v) => (v === undefined ? "undefined" : v === globalThis ? "global" : v.name);
+const obj = {
+  name: "obj",
+  arrow: () => who(this),
+  method() {
+    const inner = function () { return who(this); };
+    return [who(this), (() => who(this))(), inner(), inner.call({ name: "call" })].join(" ");
+  },
+  nested() { return { name: "inner", get: () => who(this) }.get(); },
+};
+console.log(who(this), obj.arrow(), obj.method(), obj.nested());
+function F() { console.log((() => (new.target ? new.target.name : "нет"))()); }
+F();
+new F();
+```
+
+<Criteria>
+- предсказаны девять значений, для каждой стрелки названа запись окружения, где кончился поиск;
+- объяснено, почему `nested` даёт «obj», а не «inner»;
+- для `inner()` назван шаг OrdinaryCallBindThis (10.2.1.2), который дал глобальный `this`.
+</Criteria>
+</Task>
+
+<Task title="3. Что под функцией" level="easy" time="6">
+<Goal>видеть, где начинается новое задание.</Goal>
+
+```js
+const stack = () => new Error().stack.split("\n").slice(2)
+  .map((line) => line.trim().slice(3).split(" (")[0])
+  .map((name) => (name.includes("://") ? "скрипт" : name)).join(" ← ");
+function a() { b(); }
+function b() { console.log(stack()); }
+a();
+Promise.resolve().then(a);
+setTimeout(a, 0);
+queueMicrotask(function c() { a(); });
+(async function d() { await null; a(); })();
+```
+
+<Criteria>
+- предсказаны пять строк в порядке вывода;
+- объяснено, почему под `a` в `then` и в таймере ничего нет (9.5);
+- найдено, как отличить по выводу микрозадачу от задачи, если их стеки одинаковы.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Своя GetThisEnvironment" level="medium" time="12">
+<Goal>перенести 9.4.3–9.4.5 и HasThisBinding записей в код.</Goal>
+
+Запись окружения — объект: `{ kind: "declarative", outer }`,
+`{ kind: "function", status, thisValue, newTarget, outer }` (`status` —
+`"lexical"`, `"initialized"` или `"uninitialized"`),
+`{ kind: "module", outer }`, `{ kind: "global", thisValue, outer: null }`. Напишите
+`hasThisBinding(env)` — кусками по видам, `getThisEnvironment(env)`,
+`resolveThisBinding(env)` (ReferenceError, пока `this` не связан) и
+`getNewTarget(env)`.
+
+<Example>
+```js
+const attempt = (f) => { try { return f(); } catch (e) { return e.name; } };
+const global = { kind: "global", thisValue: "window", outer: null };
+const method = { kind: "function", status: "initialized", thisValue: "obj", newTarget: undefined, outer: global };
+const arrow = { kind: "function", status: "lexical", outer: method };
+const block = { kind: "declarative", outer: arrow };
+const ctor = { kind: "function", status: "uninitialized", newTarget: "Child", outer: global };
+const inCtor = { kind: "function", status: "lexical", outer: ctor };
+resolveThisBinding(block);                                           // "obj"
+getThisEnvironment(block) === method;                                // true
+resolveThisBinding({ kind: "declarative", outer: { kind: "module", outer: global } });   // undefined
+getNewTarget(inCtor);                                                // "Child"
+attempt(() => resolveThisBinding(inCtor));                           // "ReferenceError"
+```
+</Example>
+
+<Criteria>
+- все пять строк примера дают то, что в комментариях;
+- поиск — один цикл по `outer`, как шаг 2 раздела 9.4.3, без проверки на `null`, и
+  объяснено, почему она не нужна;
+- та же цепочка в настоящем коде — блок в стрелке в методе — даёт тот же ответ.
+</Criteria>
+</Task>
+
+<Task title="5. Своя очередь заданий" level="medium" time="14">
+<Goal>собрать требования 9.5 и порядок браузера в одной модели.</Goal>
+
+Напишите `makeLoop()` с методами `script(fn)` и `task(fn)` — поставить задачу,
+`microtask(fn)`, `log(text)`, `run()` и `journal()`. `run`
+берёт задачи по одной; после каждой выполняет все микрозадачи, даже добавленные по ходу. Ошибка задания не
+останавливает очередь: в журнал пишется «ошибка: текст».
+
+<Example>
+```js
+const loop = makeLoop();
+loop.script(() => {
+  loop.log("скрипт");
+  loop.task(() => loop.log("таймер"));
+  loop.microtask(() => {
+    loop.log("микро 1");
+    loop.microtask(() => loop.log("микро 3"));
+  });
+  loop.microtask(() => loop.log("микро 2"));
+});
+loop.script(() => {
+  loop.microtask(() => loop.log("микро второго скрипта"));
+  throw new Error("сбой");
+});
+loop.run();
+loop.journal().join(" | ");   // "скрипт | микро 1 | микро 2 | микро 3 | ошибка: сбой | микро второго скрипта | таймер"
+```
+</Example>
+
+<Criteria>
+- строка примера даёт то, что в комментарии;
+- первый скрипт, переписанный на `setTimeout` и `Promise.resolve().then`, печатает в
+  Chrome тот же порядок;
+- каждое требование 9.5 (пустой стек, одно за раз, до конца, свои ошибки) показано строкой модели.
+</Criteria>
+</Task>
+
+<Task title="6. «Карточки 2.0»: одна загрузка на всех" level="medium" time="12">
+<Goal>не начинать работу второй раз, пока идёт первая.</Goal>
+
+Две буквы подряд грузят колоды дважды (раздел 16 лекции). Напишите `once(asyncFn)`: пока вызов
+не закончился, все вызовы получают тот же промис; после выполнения или отказа следующий вызов начинает заново.
+Оберните ею `openAll` в своём `main.js`.
+
+<Example>
+```js
+let loads = 0;
+const slow = async () => {
+  loads++;
+  await null;
+  return "колоды";
+};
+const openAll = once(slow);
+const first = openAll();
+first === openAll();   // true
+loads;                 // 1
+```
+</Example>
+
+<Criteria>
+- обе строки примера дают то, что в комментариях;
+- после того как `first` выполнился, новый вызов грузит снова: `loads` — 2;
+- после отказа следующий вызов тоже пробует снова, а не отдаёт старый отказ.
+</Criteria>
+</Task>
+
+<Task title="7. В каком окне переменная" level="medium" time="10">
+<Goal>отличать реалм функции от реалма того, кто её зовёт.</Goal>
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+other.Function("a = 1;")();
+(function () { b = 2; })();
+other.Function("return function () { c = 3; };")()();
+other.Function("f", "f();")(() => { d = 4; });
+console.log(["a", "b", "c", "d"].map((n) => (n in window ? "страница" : n in other ? "рамка" : "нигде")).join(" "));
+```
+
+<Criteria>
+- предсказаны четыре ответа;
+- для каждого назван реалм выполняемой функции в момент записи и операция, которая его взяла
+  (PutValue и GetGlobalObject);
+- объяснено, почему `d` — на странице, хотя стрелку вызвал код рамки.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свои ResolveBinding и PutValue" level="hard" time="10">
+<Goal>пройти путь имени: 9.4.2, 9.1.2.1, 6.2.5.5–6.2.5.6.</Goal>
+
+Запись окружения — `{ bindings: Map, outer }`. Напишите `resolveBinding(name, env, strict)` —
+ссылку `{ base, name, strict }`, где `base` — запись с именем или
+`"unresolvable"`; `getValue(ref)`; `putValue(ref, value, globalObject)` —
+`globalObject` играет роль глобального объекта текущего реалма.
+
+<Example>
+```js
+const attempt = (f) => { try { return f(); } catch (e) { return e.name; } };
+const globalObject = {};
+const global = { bindings: new Map([["label", "страница"]]), outer: null };
+const fn = { bindings: new Map([["x", 1]]), outer: global };
+getValue(resolveBinding("x", fn, false));                                     // 1
+getValue(resolveBinding("label", fn, false));                                 // "страница"
+putValue(resolveBinding("leak", fn, false), 5, globalObject);
+globalObject.leak;                                                            // 5
+attempt(() => putValue(resolveBinding("y", fn, true), 1, globalObject));     // "ReferenceError"
+attempt(() => getValue(resolveBinding("nope", fn, false)));                  // "ReferenceError"
+```
+</Example>
+
+<Criteria>
+- все пять проверяемых строк примера дают то, что в комментариях;
+- флажок `strict` хранится в ссылке, как `[[Strict]]` Reference Record (день 4), и
+  читается только при записи;
+- объяснено, почему чтение неразрешимой ссылки бросает и в нестрогом коде.
+</Criteria>
+</Task>
+
+<Task title="9. Задание для thenable по шагам" level="hard" time="10">
+<Goal>прочитать, как resolve ставит задание и какой реалм ему даёт.</Goal>
+
+Прочитайте [27.2.1.3 CreateResolvingFunctions](https://tc39.es/ecma262/2026/#sec-promise-resolve-functions)
+и [27.2.2.2 NewPromiseResolveThenableJob](https://tc39.es/ecma262/2026/#sec-newpromiseresolvethenablejob),
+найдите вызов HostEnqueuePromiseJob и предскажите строку.
+
+```js
+const log = [];
+const thenable = { then(resolve) { log.push("then"); resolve("готово"); } };
+Promise.resolve().then(() => log.push("1"));
+new Promise((resolve) => resolve(thenable)).then((v) => log.push(v));
+Promise.resolve().then(() => log.push("2")).then(() => log.push("3")).then(() => log.push("4"));
+setTimeout(() => console.log(log.join(" ")), 0);
+```
+
+<Criteria>
+- предсказана строка, у каждого слова — задание, которое его записало;
+- найдено, откуда берётся реалм задания: GetFunctionRealm функции `then`, и что будет, если
+  это отозванный прокси (день 16);
+- объяснено, почему «готово» записано после «2»: сколько лишних заданий дал thenable и сколько дал бы
+  вместо него выполненный промис (день 28 курса 2).
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model)
+(JavaScript execution model, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

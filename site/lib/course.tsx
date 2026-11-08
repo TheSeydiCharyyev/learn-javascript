@@ -63,25 +63,41 @@ function Code({ lang, code, file, page }: { lang: string; code: string; file?: s
   if (lang === "js" || lang === "html") {
     return <pre className={`code ${lang}`} {...data} data-highlighted="1" dangerouslySetInnerHTML={{ __html: highlightCode(code, lang) }} />;
   }
-  if (lang === "plain-out" || lang === "grammar") {
+  if (lang === "plain-out") {
     return <pre className={lang} {...data} dangerouslySetInnerHTML={{ __html: escapeHtml(code) }} />;
+  }
+  // a grammar rule of the specification: *WhileStatement* is a nonterminal, in italics as in the spec (days 2 and 3
+  // of Advanced); tools/html-to-mdx.mjs checks that a rule has no other "*Name*"
+  if (lang === "grammar") {
+    const html = escapeHtml(code).replace(/\*([A-Za-z][A-Za-z0-9]*)\*/g, "<em>$1</em>");
+    return <pre className={lang} {...data} dangerouslySetInnerHTML={{ __html: html }} />;
   }
   throw new Error(`a code block with lang "${lang}": the course has js, html, plain-out, grammar`);
 }
 
 // A scheme: the SVG file next to the page, put into the page as the HTML pages had it inline (the file keeps
 // xmlns so that it opens on its own; inline it is not written).
+// An attribute value of the SVG file as text: React writes it escaped again, so "&amp;" in the file (day 18 of
+// Advanced: "…;/?:@&amp;=+$,#") would show as "&amp;". The files have the XML five and numeric references.
+const NAMED_REFS: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+const decodeRefs = (src: string, value: string) =>
+  value.replace(/&(#x[\dA-Fa-f]+|#\d+|\w+);/g, (ref, body: string) => {
+    if (body[0] === "#") return String.fromCodePoint(body[1] === "x" ? parseInt(body.slice(2), 16) : Number(body.slice(1)));
+    if (!(body in NAMED_REFS)) throw new Error(`${src}: ${ref} in an attribute of <svg>`);
+    return NAMED_REFS[body];
+  });
 const SVG_ROOT_ATTRS: Record<string, string> = { viewBox: "viewBox", role: "role", "aria-label": "aria-label", width: "width", height: "height" };
 function scheme(ctx: PageContext) {
   const Scheme = ({ src, children }: { src: string } & Kids) => {
     const text = fs.readFileSync(path.join(ctx.dir, src), "utf8");
-    const m = /^\s*<svg\b([^>]*)>([\s\S]*)<\/svg>\s*$/.exec(text);
+    // the root's attributes are read quote by quote: an aria-label may hold ">" (">> 2", day 6 of Advanced)
+    const m = /^\s*<svg\b((?:\s+[\w:-]+="[^"]*")*)\s*>([\s\S]*)<\/svg>\s*$/.exec(text);
     if (!m) throw new Error(`${src}: not a single <svg> element`);
     const props: Record<string, string> = {};
     for (const [, name, value] of m[1].matchAll(/([\w:-]+)="([^"]*)"/g)) {
       if (name === "xmlns") continue;
       if (!SVG_ROOT_ATTRS[name]) throw new Error(`${src}: <svg ${name}="…"> is not carried yet`);
-      props[SVG_ROOT_ATTRS[name]] = value;
+      props[SVG_ROOT_ATTRS[name]] = decodeRefs(src, value);
     }
     return (
       <figure className="scheme">

@@ -1,0 +1,244 @@
+---
+title: День 17 — задания
+---
+
+# День 17. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-17` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага. Инструкцию `with` не берём — она на дне 31.</Subtitle>
+
+## Разминка
+
+<Task title="1. Reflect или Object" level="easy" time="7">
+<Goal>отличать ответ внутреннего метода от исключения обёртки.</Goal>
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const sealed = Object.seal({ word: "kitap" });
+console.log(Reflect.set(sealed, "word", "suw"), Reflect.set(sealed, "level", 1), Reflect.deleteProperty(sealed, "word"), Reflect.defineProperty(sealed, "word", { enumerable: false }), sealed.word);
+console.log(run(() => Reflect.has("kitap", "length")), "length" in Object("kitap"), Reflect.ownKeys("kitap".split("")).join(), run(() => Reflect.ownKeys("kitap")));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого false назван шаг, который его дал: OrdinaryDelete или ValidateAndApplyPropertyDescriptor;
+- названо, что те же три записи дадут через присваивание, `delete` и
+  `Object.defineProperty` в строгом коде, и почему.
+</Criteria>
+</Task>
+
+<Task title="2. Чья подсказка" level="easy" time="7">
+<Goal>называть, какую подсказку ToPrimitive даёт каждая операция.</Goal>
+
+```js
+const log = [];
+const t = { [Symbol.toPrimitive](hint) { log.push(hint); return 2; } };
+const r = [t + 1, `${t}`, t * 3, t == 2, t > 1, String(t), [t].join(), t + ""];
+console.log(r.join(" "), "|", log.join(" "));
+const d = new Date(0);
+console.log(typeof (d + 0), typeof +d, d == d.toString(), typeof `${d}`);
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждой подсказки назван алгоритм, который её дал: ApplyStringOrNumericBinaryOperator, ToNumeric,
+  IsLooselyEqual, IsLessThan, ToString;
+- объяснено, почему `[t].join()` дал «string», а `t + ""` — «default».
+</Criteria>
+</Task>
+
+<Task title="3. Array или Deck" level="easy" time="6">
+<Goal>предсказывать, каким конструктором метод массива создаёт результат.</Goal>
+
+```js
+class Deck extends Array {
+  static get [Symbol.species]() { return Array; }
+  get [Symbol.toStringTag]() { return "Deck"; }
+}
+class Plain extends Array {}
+const deck = Deck.from(["kitap", "galam", "suw"]);
+const tag = (x) => Object.prototype.toString.call(x);
+console.log(tag(deck), tag(deck.filter(Boolean)), tag(deck.concat()), tag(deck.toSorted()), tag(Deck.of(1)));
+const loose = [1];
+loose.constructor = undefined;
+console.log(Plain.from([1]).map((x) => x).constructor.name, deck.map(String).constructor.name, loose.map((x) => x).constructor.name, [].concat.call(deck).constructor.name);
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого значения назван путь: шаг ArraySpeciesCreate, ArrayCreate или `this`;
+- объяснено, почему `deck.toSorted()` — Array без всякого species и почему
+  `loose.map` не бросил при `constructor` = undefined.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Журнал с ключами" level="medium" time="14">
+<Goal>пересылать каждую операцию прокси через Reflect, не теряя Receiver.</Goal>
+
+Напишите `traced(target)` → `{ proxy, log }`: каждая операция над прокси дописывает в
+`log` строку «ловушка ключ» (у `get`, `set`, `has`,
+`deleteProperty`, `defineProperty`, `getOwnPropertyDescriptor`; ключ —
+`String(key)`) или только имя ловушки и уходит к цели через Reflect с теми же аргументами. Тринадцать
+ловушек по одной не пишите.
+
+<Example>
+```js
+const { proxy, log } = traced({ word: "kitap", get title() { return this.word.toUpperCase(); } });
+const kid = Object.create(proxy);
+kid.word = "galam";
+kid.title;                                                                 // "GALAM"
+log.join(" | ");                                                           // "set word | get title"
+Object.keys(proxy);                                                        // ["word", "title"]
+log.slice(2).join(" | ");                                                  // "ownKeys | getOwnPropertyDescriptor word | getOwnPropertyDescriptor title"
+[Symbol.iterator in proxy, log.at(-1)];                                    // [false, "has Symbol(Symbol.iterator)"]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- с пересылкой `t[key]` вместо Reflect.get строка `kid.title` даёт «KITAP» —
+  объяснено почему;
+- объяснено, почему чтение `kid.word` после присваивания в журнал не попадает, а
+  `"title" in kid` дописывает «has title».
+</Criteria>
+</Task>
+
+<Task title="5. Оценка как число и строка" level="medium" time="12">
+<Goal>отвечать на подсказки ToPrimitive и давать объекту тег.</Goal>
+
+Напишите класс `Score(value, max)`: на подсказку «number» — доля `value / max`, на
+остальные — строка вида «4/5»; тег `[object Score]`.
+
+<Example>
+```js
+const a = new Score(4, 5), b = new Score(9, 10);
+[a > b, a < b, `${a}`, a + "", Object.prototype.toString.call(a)];      // [false, true, "4/5", "4/5", "[object Score]"]
+[Math.max(a, b), [b, a].sort((x, y) => x - y).join()];                    // [0.9, "4/5,9/10"]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- `new Score(4, 5) == new Score(8, 10)` — false, а `new Score(4, 5) == "4/5"` —
+  true: объяснено по шагам IsLooselyEqual;
+- `JSON.stringify(a)` даёт `{"value":4,"max":5}` — объяснено, что спрашивает
+  JSON, и добавлен метод, после которого получится `"4/5"`.
+</Criteria>
+</Task>
+
+<Task title="6. instanceof по форме" level="medium" time="10">
+<Goal>определять ответ `instanceof` своим методом.</Goal>
+
+Напишите `like(shape)`, где `shape` — объект «ключ — результат typeof». Ответ —
+обычный объект (не функция), справа от `instanceof` он даёт true, только если значение — объект и у
+него каждый ключ формы нужного типа.
+
+<Example>
+```js
+const CardLike = like({ word: "string", level: "number" });
+({ word: "kitap", level: 2 }) instanceof CardLike;                         // true
+({ word: "kitap" }) instanceof CardLike;                                   // false
+({ word: "kitap", level: "2" }) instanceof CardLike;                       // false
+null instanceof CardLike;                                                  // false
+typeof CardLike;                                                           // "object"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- объяснено по 13.10.2, почему справа может стоять объект, у которого нет \[\[Call\]\];
+- вариант, где ответ — функция, а метод ей присвоен (`F[Symbol.hasInstance] = …`), всегда
+  даёт false — объяснено по 20.2.3.6 и исправлено.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: умолчания" level="medium" time="14">
+<Goal>достраивать объекты в ловушке `construct`, не ломая наследование.</Goal>
+
+Напишите `withDefaults(Class, defaults)` — прокси класса, который создаёт объект через
+Reflect.construct с тем же newTarget и дописывает ключи `defaults`, которых у объекта нет
+(`Object.hasOwn`). От такого класса можно наследовать.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+class Card { constructor(word) { this.word = word; } }
+const SafeCard = withDefaults(Card, { level: 1, due: 0 });
+const c = new SafeCard("kitap");
+[c.word, c.level, c instanceof Card, c instanceof SafeCard];               // ["kitap", 1, true, true]
+class BigCard extends SafeCard { constructor(word) { super(word); this.level = 5; } }
+const big = new BigCard("suw");
+[big.level, big.due, big instanceof BigCard, big instanceof Card];         // [5, 0, true, true]
+run(() => SafeCard("kitap"));                                              // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- с `new target(...args)` вместо Reflect.construct `big instanceof BigCard` —
+  false, хотя `big.level` — 5: объяснено, откуда взялся прототип и почему поле всё равно
+  встало;
+- объяснено, почему `c instanceof SafeCard` — true, хотя SafeCard — прокси, и почему
+  умолчание не перекрывает `level`, если его ставит сам конструктор.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свой Reflect.get" level="hard" time="12">
+<Goal>перенести 28.1.5 и OrdinaryGet в код.</Goal>
+
+Напишите `myGet(target, key, receiver = target)` без Reflect: цель не объект — TypeError; дальше —
+по шагам [OrdinaryGet](https://tc39.es/ecma262/2026/#sec-ordinaryget) (10.1.8.1), вверх по цепочке
+через `Object.getOwnPropertyDescriptor` и `Object.getPrototypeOf`; геттер — с
+`this` = `receiver`.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const proto = { get who() { return this.name; }, kind: "proto" };
+const obj = Object.create(proto, { name: { value: "obj" } });
+[myGet(obj, "who"), myGet(obj, "who", { name: "другой" }), myGet(obj, "kind"), myGet(obj, "none")];   // ["obj", "другой", "proto", undefined]
+myGet(obj, "who") === Reflect.get(obj, "who");                             // true
+run(() => myGet(1, "x"));                                                  // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- для `new Proxy({ x: 1 }, { get() { return 2; } })` Reflect.get даёт 2, а
+  `myGet` — 1: объяснено, чей \[\[Get\]\] зовёт каждая;
+- у свойства с одним сеттером обе дают undefined — назван шаг OrdinaryGet.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: Symbol.for" level="hard" time="8">
+<Goal>прочитать разделы, которые на лекции были одной строкой.</Goal>
+
+Прочитайте [20.4.1.1 Symbol](https://tc39.es/ecma262/2026/#sec-symbol-description),
+20.4.2.2 Symbol.for и 20.4.5.1 KeyForSymbol и предскажите строку.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const a = Symbol.for(1), b = Symbol.for("1"), c = Symbol({ toString() { return "obj"; } });
+console.log(a === b, a.description, typeof a.description, c.description, Symbol.keyFor(c), run(() => Symbol.for(Symbol())), Symbol().description, Symbol(undefined).description, Symbol(null).description, JSON.stringify(Symbol.keyFor(Symbol.for())));
+```
+
+<Criteria>
+- предсказана строка;
+- для каждого значения назван шаг 20.4.1.1, 20.4.2.2 или 20.4.5.1;
+- объяснено, почему `Symbol(undefined)` и `Symbol(null)` различаются, а
+  `Symbol.for()` кладёт в реестр строку «undefined».
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect)
+(Reflect, Reflect.get(), Reflect.construct(), Symbol.toPrimitive, Symbol.toStringTag, Symbol.species,
+Symbol.hasInstance, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

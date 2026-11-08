@@ -1,0 +1,756 @@
+---
+title: "День 15 — Экзотические объекты: массив, строка, arguments, связанная функция"
+day: День 15 • урок 1
+heading: "Экзотические объекты: массив, строка, arguments, связанная функция"
+lead: Курс 3, Advanced. Модуль «Объекты изнутри» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #ec4899; }
+  h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+  h3 { color: #9d174d; }
+  .step-number { background: #ec4899; }
+  .toc a { color: #be185d; }
+---
+
+<Goals>
+- называть, какие внутренние методы заменяет каждый встроенный экзотический объект и зачем;
+- проходить \[\[Call\]\] и \[\[Construct\]\] связанной функции, в том числе `bind` от `bind`;
+- предсказывать `length` массива после записи индекса и после записи в `length`, даже
+  когда удаление застревает;
+- объяснять запись в индекс строки и связь `arguments` с параметрами по шагам их методов.
+</Goals>
+
+<Toc />
+
+## 1. Экзотика в разделе 10.4 {#exotic}
+
+День 1 дал определение 4.4.10: экзотический объект — тот, у кого хоть один внутренний метод не обычный. День 14
+разобрал обычные методы 10.1. [Раздел 10.4](https://tc39.es/ecma262/2026/#sec-built-in-exotic-object-internal-methods-and-slots)
+перечисляет встроенную экзотику: у каждого вида свои методы — только там, где обычного поведения мало, остальные
+взяты из 10.1.
+
+| Объект | Свои методы | Свои слоты | Кто создаёт |
+| --- | --- | --- | --- |
+| связанная функция, 10.4.1 | \[\[Call\]\], \[\[Construct\]\] | \[\[BoundTargetFunction\]\], \[\[BoundThis\]\], \[\[BoundArguments\]\] | BoundFunctionCreate |
+| массив, 10.4.2 | \[\[DefineOwnProperty\]\] | — | ArrayCreate |
+| объект String, 10.4.3 | \[\[GetOwnProperty\]\], \[\[DefineOwnProperty\]\], \[\[OwnPropertyKeys\]\] | \[\[StringData\]\] | StringCreate |
+| `arguments` нестрогой функции, 10.4.4 | \[\[GetOwnProperty\]\], \[\[DefineOwnProperty\]\], \[\[Get\]\], \[\[Set\]\], \[\[Delete\]\] | \[\[ParameterMap\]\] | CreateMappedArgumentsObject |
+| типизированный массив, 10.4.5 | восемь методов | буфер, смещение, длина и другие | день 20 |
+| пространство имён модуля, 10.4.6 | все одиннадцать | \[\[Module\]\], \[\[Exports\]\] | ModuleNamespaceCreate |
+| неизменяемый прототип, 10.4.7 | \[\[SetPrototypeOf\]\] | — | отдельной операции нет |
+
+Proxy — тоже экзотика, но в разделе 10.5 и на дне 16. Методы и слоты из кода не видны, зато их видят встроенные
+функции. `Object.prototype.toString` (20.1.3.6) выбирает метку по порядку: IsArray — «Array», слот
+\[\[ParameterMap\]\] — «Arguments», метод \[\[Call\]\] — «Function», слот \[\[StringData\]\] — «String»:
+
+```js
+function sloppy() { return arguments; }
+function strict() { "use strict"; return arguments; }
+const tag = (x) => Object.prototype.toString.call(x).slice(8, -1);
+console.log(tag([]), tag(new String("ab")), tag(sloppy()), tag(strict()), tag(sloppy.bind(null)));
+console.log(Array.isArray(Array.prototype), Array.prototype.length, tag(String.prototype), String.prototype.length, Array.isArray(sloppy()));
+```
+
+<ResultBox>
+Array String Arguments Arguments Function\
+true 0 String 0 false
+</ResultBox>
+
+Оба `arguments` дают «Arguments», хотя экзотический только первый: у обычного слот \[\[ParameterMap\]\]
+тоже есть, всегда undefined, — ради этой метки (примечание 1 к 10.4.4). `Array.prototype` — сам массив
+(23.1.3), `String.prototype` — объект String с пустой строкой (22.1.3). А IsArray (день 9) номерами и
+`length` не обманешь: `arguments` не массив.
+
+## 2. Связанная функция: слоты и создание {#bound}
+
+[10.4.1](https://tc39.es/ecma262/2026/#sec-bound-function-exotic-objects): связанная функция —
+обёртка вокруг другой функции. Её слоты (таблица 26) день 2 курса 2 рисовал на схеме `bind`:
+\[\[BoundTargetFunction\]\] — цель, \[\[BoundThis\]\] — `this` для цели, \[\[BoundArguments\]\] — первые аргументы.
+Слотов таблицы 25 (день 14) у неё нет: ни кода, ни \[\[Environment\]\], ни \[\[HomeObject\]\].
+
+[BoundFunctionCreate](https://tc39.es/ecma262/2026/#sec-boundfunctioncreate) (10.4.1.3): прототип —
+тот, что у цели *сейчас*; объект со слотами; \[\[Call\]\] — всегда, \[\[Construct\]\] — только если цель —
+конструктор; три слота. Потом [Function.prototype.bind](https://tc39.es/ecma262/2026/#sec-function.prototype.bind)
+(20.2.3.2, страница MDN [Function.prototype.bind()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/bind))
+ставит `length` и `name`, а свойства `prototype` не ставит никто:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+async function load() {}
+function plain() { return "plain"; }
+const early = plain.bind(null);
+Object.setPrototypeOf(plain, { tag: "свой" });
+const late = Function.prototype.bind.call(plain, null);
+const boundLoad = load.bind(null), boundArrow = (() => {}).bind(null);
+console.log(Object.getPrototypeOf(boundLoad) === Object.getPrototypeOf(load), late.tag, early.tag, Object.hasOwn(late, "prototype"), late());
+console.log(run(() => new boundArrow()), "|", run(() => new boundLoad()), "|", run(() => new late()));
+```
+
+<ResultBox>
+true свой undefined false plain\
+TypeError: boundArrow is not a constructor | TypeError: boundLoad is not a constructor | ok
+</ResultBox>
+
+Прототип снят в момент создания: `early` получил `Function.prototype`, `late` —
+новый. `bind` пришлось взять через `call`: после `setPrototypeOf` у
+`plain` нет цепочки до `Function.prototype`, но вызывать её можно — \[\[Call\]\] не свойство. У
+стрелки и async-функции нет \[\[Construct\]\], значит, нет и у обёртки.
+
+`length` по 20.2.3.2: есть у цели своё числовое `length` — оно минус число закреплённых
+аргументов, но не меньше 0; +∞ остаётся +∞, дробь отбрасывается; своего нет или не число — 0. `name` —
+«bound » и имя цели; имя не строка — пустая строка:
+
+```js
+function f(a, b) {}
+Object.defineProperty(f, "length", { value: Infinity });
+const g = function (a) {};
+Object.defineProperty(g, "name", { value: 42 });
+console.log(f.bind(null, 1).length, g.bind(null, 1, 2, 3).length, JSON.stringify(g.bind().name));
+```
+
+<ResultBox>
+Infinity 0 "bound "
+</ResultBox>
+
+## 3. Практика: bind от bind {#bound-call}
+
+[\[\[Call\]\]](https://tc39.es/ecma262/2026/#sec-bound-function-exotic-objects-call-thisargument-argumentslist)
+(10.4.1.1) делает два дела: склеивает \[\[BoundArguments\]\] с пришедшими аргументами и вызывает цель с \[\[BoundThis\]\].
+Параметр thisArgument не используется вовсе. Отсюда «второй `bind` тоже не помог» из дня 2 курса 2:
+внешняя обёртка зовёт внутреннюю со своим `this`, а та его выбрасывает. Аргументы же копятся:
+
+```js
+function show(a, b, c) { return `${this.name}: ${a} ${b} ${c}`; }
+const first = show.bind({ name: "первый" }, 1);
+const second = first.bind({ name: "второй" }, 2);
+console.log(second(3), "|", second.call({ name: "третий" }, 3), "|", second.name, second.length, first.length);
+```
+
+<ResultBox>
+первый: 1 2 3 | первый: 1 2 3 | bound bound show 1 2
+</ResultBox>
+
+<Scheme src="scheme-bound-call.svg">bind от bind: this у первого, аргументы — от всех</Scheme>
+
+Примечание 2 к 20.2.3.2 говорит то же о стрелке: `this`, переданный её `bind`, не дойдёт —
+стрелка свой `this` не принимает (OrdinaryCallBindThis, день 9). Длины: у `first` 3 − 1 = 2,
+у `second` 2 − 1 = 1; имя получило приставку дважды.
+
+## 4. \[\[Construct\]\] связанной функции {#bound-construct}
+
+[\[\[Construct\]\]](https://tc39.es/ecma262/2026/#sec-bound-function-exotic-objects-construct-argumentslist-newtarget)
+(10.4.1.2): склеить аргументы; если newTarget — сама связанная функция, заменить его целью; вызвать Construct цели.
+\[\[BoundThis\]\] не участвует: `this` создаст \[\[Construct\]\] цели (день 14).
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class Point { constructor(x, y) { this.x = x; this.y = y; this.target = new.target.name; } }
+const OnAxis = Point.bind({ ignored: true }, 0);
+const p = new OnAxis(5);
+console.log(JSON.stringify(p), p instanceof OnAxis, p instanceof Point, OnAxis.prototype);
+console.log(run(() => OnAxis(1)), "|", run(() => { class Sub extends OnAxis {} }));
+```
+
+<ResultBox>
+\{"x":0,"y":5,"target":"Point"\} true true undefined\
+TypeError: Class constructor Point cannot be invoked without 'new' | TypeError: Class extends value does not have valid prototype property undefined
+</ResultBox>
+
+`new.target` внутри — `Point`: сработала замена. `instanceof OnAxis` — true без
+всякого `prototype`: [OrdinaryHasInstance](https://tc39.es/ecma262/2026/#sec-ordinaryhasinstance)
+(7.3.21, день 7) сразу после проверки IsCallable смотрит слот \[\[BoundTargetFunction\]\] и задаёт вопрос цели. Вызов без
+`new` — \[\[Call\]\], а класс бросает (день 14). `extends` читает `prototype`
+суперкласса — undefined не годится.
+
+Когда newTarget не заменяется? Когда \[\[Construct\]\] зовут с чужим newTarget — так делает `super()`
+наследника. Дадим `OnAxis` свойство `prototype` руками: в остальном связанная функция —
+обычный объект.
+
+```js
+class Point { constructor(x, y) { this.x = x; this.y = y; this.target = new.target.name; } }
+const OnAxis = Point.bind(null, 0);
+OnAxis.prototype = Point.prototype;
+class Sub extends OnAxis {}
+const s = new Sub(7);
+console.log(JSON.stringify(s), s instanceof Sub, Object.getPrototypeOf(s) === Sub.prototype);
+```
+
+<ResultBox>
+\{"x":0,"y":7,"target":"Sub"\} true true
+</ResultBox>
+
+SuperCall (13.3.7.1, день 14) зовёт Construct(OnAxis, \[7\], Sub). Sub — не OnAxis, newTarget остаётся
+`Sub`: прототип объекта — `Sub.prototype`, а закреплённый 0 всё равно впереди.
+
+## 5. Массив: индексы и length {#array}
+
+[10.4.2](https://tc39.es/ecma262/2026/#sec-array-exotic-objects): массив экзотичен одним методом —
+\[\[DefineOwnProperty\]\]. Индекс массива (6.1.7, день 14) — каноническая строка целого от 0 до 2³² − 2, свойство с таким
+именем — элемент. Инвариант: у массива всегда своё неудаляемое `length`, целое меньше 2³², и оно больше
+имени любого своего элемента. Унаследованных индексов инвариант не касается.
+
+[\[\[DefineOwnProperty\]\]](https://tc39.es/ecma262/2026/#sec-array-exotic-objects-defineownproperty-p-desc)
+(10.4.2.1):
+
+1. P — `"length"`: отдать всё ArraySetLength (раздел 7);
+2. P — индекс: прочитать дескриптор `length`; индекс ≥ length, а `length` незаписываемый —
+   false;
+3. определить элемент обычным OrdinaryDefineOwnProperty; не вышло — false;
+4. индекс ≥ length — записать length = индекс + 1 (это всегда удаётся), ответ true;
+5. прочие ключи — обычный OrdinaryDefineOwnProperty.
+
+\[\[Get\]\] и \[\[Set\]\] у массива обычные. Присваивание `a[i] = v` доходит до шага 2 так:
+OrdinarySetWithOwnDescriptor (день 14) своего элемента не находит и зовёт CreateDataProperty у Receiver, а это и есть
+\[\[DefineOwnProperty\]\] массива.
+
+## 6. Практика: запись за концом массива {#array-end}
+
+```js
+const a = [1, 2];
+a[5] = 6;
+console.log(a.length, 3 in a, JSON.stringify(a));
+a["4294967295"] = "не индекс"; a["02"] = "тоже"; a[-1] = "и это";
+console.log(a.length, Object.keys(a).join(" "));
+a["4294967294"] = "последний индекс";
+console.log(a.length === 2 ** 32 - 1);
+```
+
+<ResultBox>
+6 false \[1,2,null,null,null,6\]\
+6 0 1 5 4294967295 02 -1\
+true
+</ResultBox>
+
+Шаг 4 поднял `length` до 6, а элементы 2, 3, 4 не созданы — это дыры: `in` отвечает false,
+JSON пишет null, консоль — «empty × 3». `"4294967295"` — это 2³² − 1, уже не индекс: `length`
+не тронут, ключ стоит среди строк. `"02"` не каноническая, `"-1"` отрицательная — тоже строки.
+Последний индекс 2³² − 2 поднимает `length` до предела.
+
+Теперь `length` незаписываемый. Шаг 2 закрывает только место за концом:
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const a = [1, 2, 3];
+Object.defineProperty(a, "length", { writable: false });
+console.log(run(() => { a[1] = 20; }), "|", run(() => { a[3] = 4; }), "|", run(() => a.push(4)));
+console.log(run(() => Object.defineProperty(a, 3, { value: 4 })), "|", Object.isExtensible(a), a.join());
+```
+
+<ResultBox>
+ok | TypeError: Cannot assign to read only property 'length' of object '\[object Array\]' | TypeError: Cannot assign to read only property 'length' of object '\[object Array\]'\
+TypeError: Cannot define property 3, object is not extensible | true 1,20,3
+</ResultBox>
+
+Внутрь можно, за конец — false из шага 2, а `push` упирается в тот же шаг через Set(O, "3", v, true)
+(день 7). V8 описывает один и тот же false по-разному: присваивание — словами о `length`,
+`defineProperty` — «object is not extensible», хотя `Object.isExtensible(a)` — true. Текст
+ошибки выбирает движок, спецификация знает только false.
+
+## 7. ArraySetLength по шагам {#set-length}
+
+[ArraySetLength](https://tc39.es/ecma262/2026/#sec-arraysetlength) (10.4.2.4) — запись в
+`length` (страница MDN [Array: length](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length)
+— день 19 Essentials):
+
+1. в дескрипторе нет `value` — обычное определение (так `freeze` делает
+   `length` незаписываемым);
+2. newLen = ToUint32(value), numberLen = ToNumber(value); не SameValueZero — RangeError;
+3. newLen ≥ старой длины — просто записать;
+4. `length` незаписываемый — false;
+5. просят `writable: false` — отложить его до конца удаления;
+6. записать newLen и удалять индексы ≥ newLen *с конца*; первый неудаляемый — length = его индекс + 1,
+   поставить отложенный `writable: false`, ответ false;
+7. всё удалено — поставить отложенный `writable: false`, ответ true.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+let calls = 0;
+const b = [];
+b.length = { valueOf() { calls++; return 2; } };
+console.log(calls, b.length, run(() => { b.length = 1.5; }));
+console.log(run(() => { b.length = 2 ** 32; }), "|", run(() => { b.length = "3"; }), b.length);
+```
+
+<ResultBox>
+2 2 RangeError: Failed to set the 'length' property on 'Array': Invalid array length\
+RangeError: Failed to set the 'length' property on 'Array': Invalid array length | ok 3
+</ResultBox>
+
+`valueOf` вызван дважды: ToUint32 и ToNumber каждая делает ToPrimitive (день 5). Примечание к разделу
+называет это наследием второго издания. У 1.5 и 2³² ToUint32 даёт 1 и 0 — не то же число, RangeError (ToUint32 —
+день 6). Строка `"3"` проходит: оба преобразования дают 3.
+
+<Scheme src="scheme-set-length.svg">Шаг 6 ArraySetLength: удаление застревает на первом неудаляемом элементе</Scheme>
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const a = ["a", "b", "c", "d"];
+Object.defineProperty(a, 1, { configurable: false });
+console.log(run(() => { a.length = 0; }), "|", a.length, JSON.stringify(a));
+const b = ["a", "b", "c", "d"];
+Object.defineProperty(b, 1, { configurable: false });
+console.log(run(() => Object.defineProperty(b, "length", { value: 0, writable: false })), "|", b.length, Object.getOwnPropertyDescriptor(b, "length").writable);
+```
+
+<ResultBox>
+TypeError: Failed to set the 'length' property on 'Array': Cannot delete property '1' of \[object Array\] | 2 \["a","b"\]\
+TypeError: Cannot delete property '1' of \[object Array\] | 2 false
+</ResultBox>
+
+«d» и «c» удалены, на «b» застряло — `length` стал 2, и «a» уцелел. Во втором случае отложенный
+`writable: false` поставлен и при неудаче: массив закрыт на длине 2. В нестрогом коде то же самое, только
+молча.
+
+## 8. Практика: arr.length = 0 {#length-zero}
+
+День 19 Essentials чистил корзину `cart.length = 0`. Это не новый пустой массив, а тот же объект:
+ArraySetLength удаляет элементы у всех, кто держит ссылку. Присваивание `[]` переменной создаёт новый
+массив, а старый живёт у остальных. Рост `length` элементов не создаёт — только дыры:
+
+```js
+const cards = ["kitap", "galam", "depder"];
+const same = cards;
+cards.length = 0;
+console.log(same.length, JSON.stringify(same));
+let list = ["kitap", "galam"];
+const old = list;
+list = [];
+console.log(old.length);
+const grow = ["kitap"];
+grow.length = 3;
+console.log(grow.length, 1 in grow, Object.keys(grow).join(" "));
+```
+
+<ResultBox>
+0 \[\]\
+2\
+3 false 0
+</ResultBox>
+
+А если массив запечатан? `Object.seal` — SetIntegrityLevel (день 14): элементы неудаляемые,
+`length` записываемый. Очистка застрянет на последнем элементе, запись внутрь пройдёт:
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const s = Object.seal(["a", "b"]);
+console.log(run(() => { s.length = 0; }), "|", run(() => { s[0] = "A"; }), "|", run(() => s.push("c")), "|", s.join());
+```
+
+<ResultBox>
+TypeError: Failed to set the 'length' property on 'Array': Cannot delete property '1' of \[object Array\] | ok | TypeError: Cannot add property 2, object is not extensible | A,b
+</ResultBox>
+
+## 9. ArrayCreate и ArraySpeciesCreate {#array-create}
+
+[ArrayCreate](https://tc39.es/ecma262/2026/#sec-arraycreate) (10.4.2.2): длина больше 2³² − 1 —
+RangeError; иначе объект с прототипом %Array.prototype% (или данным), своим \[\[DefineOwnProperty\]\] и
+`length` с флагами writable: true, enumerable: false, configurable: false. Её зовут почти два десятка мест:
+литерал, конструктор `Array`, CreateArrayFromList (так встроенные функции отдают списки, например
+`Object.keys`), `toSorted` с соседями и
+[ArraySpeciesCreate](https://tc39.es/ecma262/2026/#sec-arrayspeciescreate) (10.4.2.3). Через последнюю
+`map`, `filter`, `slice`, `splice`, `concat`,
+`flat` и `flatMap` создают результат:
+
+1. исходный объект не массив — ArrayCreate;
+2. C — его `constructor`; если это %Array% чужого реалма — забыть его;
+3. C — объект: взять у него `Symbol.species` (день 17); null — как undefined;
+4. C undefined — ArrayCreate; не конструктор — TypeError; иначе `new C(длина)`.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class Deck extends Array {}
+const d = Deck.from(["kitap", "galam"]);
+console.log(d.map((w) => w.toUpperCase()) instanceof Deck, d.filter(Boolean).constructor.name, d.toSorted() instanceof Deck);
+const plain = ["kitap"];
+plain.constructor = function NotArray() {};
+console.log(Array.isArray(plain.map((w) => w)), run(() => Array.prototype.map.call({ length: 2 ** 32 }, (w) => w)));
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const foreign = new frame.contentWindow.Array("kitap");
+console.log(foreign.map((w) => w) instanceof Array, Array.prototype.map.call(foreign, (w) => w) instanceof Array);
+```
+
+<ResultBox>
+true Deck false\
+true RangeError: Invalid array length\
+false true
+</ResultBox>
+
+Наследник `Array` получает наследников: `Deck` наследует статический геттер
+`Symbol.species`, который отдаёт `this`. `toSorted` зовёт ArrayCreate прямо — ему
+наследник не важен. У функции `NotArray` нет `Symbol.species` — шаг 3 даёт undefined, результат
+— обычный массив. Объект с `length` 2³² — не массив, ArrayCreate бросает RangeError. Последняя строка —
+примечание к 10.4.2.3: `map` нашего реалма над массивом рамки (день 9) создаёт массив нашего реалма, а
+`map` рамки — массив рамки.
+
+## 10. Строка: свойства-символы {#string}
+
+[10.4.3](https://tc39.es/ecma262/2026/#sec-string-exotic-objects): объект String хранит строку в слоте
+\[\[StringData\]\] и показывает каждую кодовую единицу как свойство-индекс: незаписываемое, неудаляемое, перечисляемое.
+В объекте этих свойств нет — их собирают на лету три метода:
+
+- [\[\[GetOwnProperty\]\]](https://tc39.es/ecma262/2026/#sec-string-exotic-objects-getownproperty-p)
+  (10.4.3.1) — сначала обычный поиск, потом [StringGetOwnProperty](https://tc39.es/ecma262/2026/#sec-stringgetownproperty)
+  (10.4.3.5): P не строка — нет; CanonicalNumericIndexString (день 5) — не целое — нет; −0 или меньше нуля —
+  нет; за концом строки — нет; иначе \{value: символ, writable: false, enumerable: true, configurable: false\};
+- \[\[DefineOwnProperty\]\] (10.4.3.2) — для индекса строки только проверка IsCompatiblePropertyDescriptor
+  (ValidateAndApply без записи, день 14), иначе обычное определение;
+- \[\[OwnPropertyKeys\]\] (10.4.3.3) — индексы строки, потом свои индексы за её концом, потом строки и символы по
+  времени создания.
+
+StringCreate (10.4.3.4) ставит `length` — тоже незаписываемый и неудаляемый (страница MDN
+[String: length](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/length)
+— день 16 Essentials).
+
+```js
+const s = new String("ab");
+s[5] = "f"; s.x = "x"; s[-1] = "минус";
+console.log(Object.getOwnPropertyNames(s).join(" "), JSON.stringify(Object.getOwnPropertyDescriptor(s, "0")));
+console.log(s["1.0"], s["-0"], s[1], "2" in s, Object.hasOwn("ab", 1), Object.keys("😀").join(" "));
+```
+
+<ResultBox>
+0 1 5 length x -1 \{"value":"a","writable":false,"enumerable":true,"configurable":false\}\
+undefined undefined b false true 0 1
+</ResultBox>
+
+`length` стоит после 5: он создан в StringCreate раньше всех строк, а индексы идут первыми.
+`"1.0"` — не каноническая запись единицы, `"-0"` отсеивает отдельный шаг. Эмодзи — две кодовые
+единицы (день 20 курса 2), значит, два свойства. Определение поверх индекса строки:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const s = new String("ab");
+console.log(run(() => Object.defineProperty(s, 0, { value: "a" })), "|", run(() => Object.defineProperty(s, 0, { value: "z" })), "|", run(() => Object.defineProperty(s, 2, { value: "c", enumerable: true })), s.length, Object.keys(s).join(" "));
+Object.preventExtensions(s);
+console.log(run(() => Object.defineProperty(s, 1, { value: "b" })), "|", run(() => Object.defineProperty(s, 3, { value: "d" })));
+```
+
+<ResultBox>
+ok | TypeError: Cannot redefine property: 0 | ok 2 0 1 2\
+ok | TypeError: Cannot define property 3, object is not extensible
+</ResultBox>
+
+Тот же символ — совместимо, другой — нет. Индекс 2 за концом строки — обычное свойство, и `length` не
+меняется: это не массив. На нерасширяемом объекте индекс строки «определяется» по-прежнему —
+IsCompatiblePropertyDescriptor ничего не создаёт, а новый индекс 3 — шаг 1 ValidateAndApply, false.
+
+## 11. Практика: запись в индекс строки {#string-strict}
+
+У примитива своих свойств нет. `word[0] = "K"` — PutValue (день 4): ToObject даёт обёртку, её \[\[Set\]\]
+зовётся с Receiver — самой строкой. Дальше OrdinarySetWithOwnDescriptor (день 14): у индекса 0 дескриптор
+незаписываемый — false; у индекса 9 своего нет, цепочка кончилась, а Receiver не объект — false. В строгом коде
+false — TypeError:
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const word = "kitap";
+console.log(run(() => { word[0] = "K"; }));
+console.log(run(() => { word[9] = "!"; }));
+console.log(run(() => { word.length = 1; }));
+const boxed = new String("kitap");
+console.log(run(() => { boxed[0] = "K"; }), "|", run(() => { boxed[9] = "!"; }), boxed[9], "|", run(() => delete boxed[0]));
+```
+
+<ResultBox>
+TypeError: Cannot assign to read only property '0' of string 'kitap'\
+TypeError: Cannot create property '9' on string 'kitap'\
+TypeError: Cannot assign to read only property 'length' of string 'kitap'\
+TypeError: Cannot assign to read only property '0' of object '\[object String\]' | ok ! | TypeError: Cannot delete property '0' of \[object String\]
+</ResultBox>
+
+У обёртки индекс 9 записывается: Receiver — объект, CreateDataProperty создаёт обычное свойство. `delete`
+индекса строки — обычный \[\[Delete\]\], а свойство неудаляемое. В нестрогом скрипте те же строки молчат, и
+`word` остаётся «kitap». Строку не меняет ничто — нужна новая: `"K" + word.slice(1)`.
+
+## 12. arguments: обычный и экзотический {#args-kinds}
+
+[10.4.4](https://tc39.es/ecma262/2026/#sec-arguments-exotic-objects) (страница MDN
+[The arguments object](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments)
+— день 4 курса 2). Какой `arguments` получит функция, решает FunctionDeclarationInstantiation (шаг 3
+списка дня 14): у нестрогой функции с простым списком параметров —
+[CreateMappedArgumentsObject](https://tc39.es/ecma262/2026/#sec-createmappedargumentsobject), иначе
+[CreateUnmappedArgumentsObject](https://tc39.es/ecma262/2026/#sec-createunmappedargumentsobject). Общее
+у них: индексы со значениями, `length` и `Symbol.iterator` — та же функция, что
+`Array.prototype.values`. Разница — `callee`: у связанного это сама функция, у несвязанного —
+аксессор %ThrowTypeError% (день 14).
+
+```js
+function sloppy(a) { return arguments; }
+function strict(a) { "use strict"; return arguments; }
+const m = sloppy(1), u = strict(1);
+const cm = Object.getOwnPropertyDescriptor(m, "callee"), cu = Object.getOwnPropertyDescriptor(u, "callee");
+console.log(cm.value === sloppy, cu.get === cu.set, m[Symbol.iterator] === Array.prototype.values, u[Symbol.iterator] === m[Symbol.iterator]);
+console.log(Object.getOwnPropertyNames(m).join(" "), JSON.stringify(Object.getOwnPropertyDescriptor(m, "length")));
+```
+
+<ResultBox>
+true true true true\
+0 length callee \{"value":1,"writable":true,"enumerable":false,"configurable":true\}
+</ResultBox>
+
+`length` за индексами не следит — это не массив. А перебор (`for...of`, spread) идёт
+итератором массива и читает именно `length`:
+
+```js
+function f(a, b, c) {
+  arguments.length = 1;
+  const spread = [...arguments];
+  arguments[5] = "шесть";
+  return `${spread.length} ${arguments.length} ${Object.keys(arguments).join(",")}`;
+}
+console.log(f(1, 2, 3));
+```
+
+<ResultBox>
+1 1 0,1,2,5
+</ResultBox>
+
+## 13. \[\[ParameterMap\]\] и пять методов {#args-map}
+
+CreateMappedArgumentsObject (10.4.4.7) заводит скрытый объект map с прототипом null. Параметры идут с конца: для
+каждого имени, которое ещё не встречалось, и только если его номер меньше числа переданных аргументов, map получает
+аксессор — геттер читает привязку из окружения функции (MakeArgGetter), сеттер пишет в неё (MakeArgSetter). Из кода
+map не видна (примечание 3). Пять методов сверяются с ней:
+
+- [\[\[GetOwnProperty\]\]](https://tc39.es/ecma262/2026/#sec-arguments-exotic-objects-getownproperty-p)
+  (10.4.4.1) — дескриптор обычный, значение — из map;
+- \[\[Get\]\] (10.4.4.3) — индекс есть в map — значение привязки, иначе OrdinaryGet;
+- \[\[Set\]\] (10.4.4.4) — если Receiver — сам `arguments` и индекс в map, сначала пишет в привязку, потом
+  OrdinarySet;
+- \[\[DefineOwnProperty\]\] (10.4.4.2) — `value` пишет в привязку; аксессор или
+  `writable: false` рвут связь, причём `writable: false` сначала фиксирует текущее
+  значение;
+- \[\[Delete\]\] (10.4.4.5) — удалённый индекс уходит из map навсегда.
+
+<Scheme src="scheme-args-map.svg">Связанный arguments: индекс и параметр — одна привязка, пока map помнит индекс</Scheme>
+
+```js
+function f(a, b) {
+  b = "b";
+  arguments[0] = "A";
+  arguments[1] = "второй";
+  return `${a} ${b} ${arguments[1]} ${arguments.length}`;
+}
+function dup(x, x) { arguments[0] = "нулевой"; const before = x; arguments[1] = "первый"; return `${before} ${x}`; }
+console.log(f(1), "|", dup(1, 2));
+```
+
+<ResultBox>
+A b второй 1 | 2 первый
+</ResultBox>
+
+У `f(1)` связан только индекс 0. Повтор имён: с конца имя `x` первым попадает в map под
+номером 1, номеру 0 оно уже не достаётся — `x` означает последний параметр (шаг 4 списка дня 14). Теперь
+связь рвём:
+
+```js
+function viaDelete(a) { delete arguments[0]; arguments[0] = "новое"; a = "параметр"; return `${a} ${arguments[0]}`; }
+function viaFreeze(a) { Object.defineProperty(arguments, 0, { writable: false }); a = "параметр"; return `${a} ${arguments[0]}`; }
+function viaAccessor(a) { Object.defineProperty(arguments, 0, { get() { return "геттер"; } }); a = "параметр"; return `${a} ${arguments[0]}`; }
+function viaValue(a) { Object.defineProperty(arguments, 0, { value: "дескриптор" }); const was = a; a = "параметр"; return `${was} ${arguments[0]}`; }
+function viaChild(a) { const child = Object.create(arguments); child[0] = "наследник"; return `${a} ${arguments[0]} ${child[0]}`; }
+console.log(viaDelete(1), "|", viaFreeze(1), "|", viaAccessor(1), "|", viaValue(1), "|", viaChild(1));
+```
+
+<ResultBox>
+параметр новое | параметр 1 | параметр геттер | дескриптор параметр | 1 1 наследник
+</ResultBox>
+
+Примечание 2 к 10.4.4 называет ровно это: удаление с новым определением и аксессор рвут связь;
+`writable: false` рвёт её тоже, оставив прежнюю 1. `defineProperty` с `value` —
+запись через map, связь цела. У наследника \[\[Set\]\] `arguments` вызван с Receiver = `child`,
+SameValue — false, map не тронута, и свойство появилось у `child`.
+
+## 14. Практика: простые и сложные параметры {#args-practice}
+
+```js
+function simple(a) { a = "новое"; return arguments[0]; }
+function withDefault(a = 0) { a = "новое"; return arguments[0]; }
+function withRest(a, ...rest) { a = "новое"; return arguments[0]; }
+function withPattern({ x }) { x = "новое"; return arguments[0].x; }
+function strictSimple(a) { "use strict"; a = "новое"; return arguments[0]; }
+const lit = { method(a) { a = "новое"; return arguments[0]; } };
+class Box { method(a) { a = "новое"; return arguments[0]; } }
+console.log(simple(1), withDefault(1), withRest(1), withPattern({ x: 1 }), strictSimple(1), lit.method(1), new Box().method(1));
+```
+
+<ResultBox>
+новое 1 1 1 1 новое 1
+</ResultBox>
+
+Связь — только у нестрогой функции с простым списком: первый шаг CreateMappedArgumentsObject прямо утверждает, что
+в списке нет rest, шаблонов и умолчаний. Метод литерала нестрогий — связан. Метод класса строгий (тело класса
+строгое всегда, день 8 курса 2) — копия. У стрелки `arguments` нет вовсе (шаг 2 списка дня 14). Вывод курса
+2 в силе: в новом коде — `...rest`.
+
+## 15. Пространство имён модуля {#namespace}
+
+[10.4.6](https://tc39.es/ecma262/2026/#sec-module-namespace-exotic-objects) и
+[28.3](https://tc39.es/ecma262/2026/#sec-module-namespace-objects): `import * as ns` (страница
+MDN [import](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import) — день 30
+курса 2) и `import()` (день 31) отдают объект, у которого заменены все одиннадцать методов. Строковые
+ключи — имена экспорта (\[\[Exports\]\], по порядку кодовых единиц); свойства \{writable: true, enumerable: true,
+configurable: false\}, но \[\[Set\]\] всегда false, \[\[Get\]\] читает живую привязку модуля, прототип null и неизменяем,
+объект нерасширяем. Свой символ один — <a href="https://tc39.es/ecma262/2026/#sec-%symbol.tostringtag%">Symbol.toStringTag</a>
+\= «Module» (28.3.1). Модуль из адреса `data:` — текст модуля прямо в URL:
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const source = "export let count = 0; export function add() { count++; } export const Z = 'z';";
+import(`data:text/javascript,${encodeURIComponent(source)}`).then((ns) => {
+  ns.add();
+  console.log(Object.keys(ns).join(" "), ns.count, Object.getPrototypeOf(ns), Object.prototype.toString.call(ns), Object.isFrozen(ns));
+  console.log(run(() => { ns.count = 5; }), "|", run(() => Object.defineProperty(ns, "count", { value: 1 })), "|", run(() => Object.setPrototypeOf(ns, {})));
+});
+```
+
+<ResultBox>
+Z add count 1 null \[object Module\] false\
+TypeError: Cannot assign to property 'count' of \[object Module\] | ok | TypeError: \[object Module\] is not extensible
+</ResultBox>
+
+«Z» раньше «add» — порядок кодовых единиц, а не порядок экспорта. `count` после `add()` —
+1: свойство не копия, а окно в привязку. `isFrozen` — false: свойства числятся записываемыми, хотя записать
+нельзя; `defineProperty` с тем же значением проходит (SameValue). Прототип защищает SetImmutablePrototype
+из следующего раздела; V8 пишет «not extensible».
+
+## 16. Неизменяемый прототип {#immutable}
+
+[10.4.7](https://tc39.es/ecma262/2026/#sec-immutable-prototype-exotic-objects): у такого объекта
+\[\[SetPrototypeOf\]\] — SetImmutablePrototype (10.4.7.2): тот же прототип — true, любой другой — false. Отдельной
+операции создания нет (примечание): в языке это %Object.prototype%, остальные — объекты хоста. В браузере
+неизменяемы `window`, `location` и прототипы окна:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(run(() => Object.setPrototypeOf(Object.prototype, {})), "|", run(() => Object.setPrototypeOf(Object.prototype, null)));
+console.log(run(() => { window.__proto__ = {}; }), "|", run(() => Object.setPrototypeOf(location, {})), "|", run(() => Object.setPrototypeOf(Window.prototype, {})));
+```
+
+<ResultBox>
+TypeError: Immutable prototype object 'Object.prototype' cannot have their prototype set | ok\
+TypeError: Immutable prototype object '#\<Window>' cannot have their prototype set | TypeError: Immutable prototype object '\[object Location\]' cannot have their prototype set | TypeError: Immutable prototype object '#\<Window>' cannot have their prototype set
+</ResultBox>
+
+Зачем: цепочка почти любого объекта кончается на `Object.prototype`. Подставь ему прототип — и поиск
+любого отсутствующего свойства во всей программе заходил бы в чужой объект. Обычный \[\[SetPrototypeOf\]\] (день 14)
+остановил бы только цикл: `{}` из примера ведёт обратно в `Object.prototype`, а объект из
+`Object.create(null)` он пропустил бы.
+
+## 17. «Карточки 2.0»: чей это массив {#cards}
+
+Колода отдаёт карточки на сегодня методом `due`:
+
+```js
+// deck.js, день 33 курса 2 — настоящий due
+  due(today) {
+    return [...this.#cards.values()].filter((card) => {
+      const state = this.#progress.get(card.id);
+      return state === undefined || Temporal.PlainDate.compare(state.next, today) <= 0;
+    });
+  }
+```
+
+Каждый вызов строит новый массив: spread в литерале — ArrayCreate, `filter` — ArraySpeciesCreate, а
+каждая подходящая карточка — CreateDataPropertyOrThrow, то есть шаг 4 \[\[DefineOwnProperty\]\] массива. Поэтому
+`main.js` может делать с результатом что угодно — колоду он не испортит. Модель: три способа отдать список
+наружу (модули строгие — модель тоже):
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+class Deck {
+  #list;
+  constructor(words) { this.#list = words; }
+  get leaky() { return this.#list; }
+  get copy() { return this.#list.filter(() => true); }
+  get frozen() { return Object.freeze([...this.#list]); }
+  get size() { return this.#list.length; }
+}
+const deck = new Deck(["kitap", "galam", "depder"]);
+deck.copy.length = 0;
+console.log(deck.size, run(() => deck.frozen.push("sözlük")), "|", run(() => { deck.frozen.length = 0; }));
+deck.leaky.length = 0;
+console.log(deck.size);
+```
+
+<ResultBox>
+3 TypeError: Cannot add property 3, object is not extensible | TypeError: Cannot assign to read only property 'length' of object '\[object Array\]'\
+0
+</ResultBox>
+
+`copy` — свежий массив, его очистка колоде не вредит. `frozen` — массив после
+SetIntegrityLevel, и `length` у него незаписываемый. `push` получает false ещё на шаге 2
+\[\[DefineOwnProperty\]\] массива (V8 опять пишет «not extensible»), `length = 0` — от
+OrdinarySetWithOwnDescriptor, до ArraySetLength дело не доходит.
+А `leaky` отдаёт сам `#list`: очистка снаружи — ArraySetLength над приватным списком, и колода
+пуста. Приватное поле прячет имя, а не объект. «Карточки 2.0» поступают как `copy`.
+
+## 18. Что будет завтра {#next}
+
+Сегодня — встроенная экзотика: свои методы ровно там, где обычных мало. Завтра, на дне 16, — Proxy: объект, у
+которого все внутренние методы пишете вы, и инварианты, которые он обязан соблюдать.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [10.4 Built-in Exotic Object Internal Methods and Slots](https://tc39.es/ecma262/2026/#sec-built-in-exotic-object-internal-methods-and-slots) | встроенная экзотика, остальные методы из 10.1 | <Full /> |
+| [10.4.1 Bound Function Exotic Objects](https://tc39.es/ecma262/2026/#sec-bound-function-exotic-objects) | \[\[Call\]\], \[\[Construct\]\], слоты таблицы 26 (день 2 курса 2) | <Full /> |
+| [10.4.2 Array Exotic Objects](https://tc39.es/ecma262/2026/#sec-array-exotic-objects) | индексы и `length`, ArraySetLength, ArraySpeciesCreate | <Full /> |
+| [10.4.3 String Exotic Objects](https://tc39.es/ecma262/2026/#sec-string-exotic-objects) | индексы-символы из \[\[StringData\]\] | <Full /> |
+| [10.4.4 Arguments Exotic Objects](https://tc39.es/ecma262/2026/#sec-arguments-exotic-objects) | \[\[ParameterMap\]\], связь с параметрами (день 4 курса 2) | <Full /> |
+| [10.4.6 Module Namespace Exotic Objects](https://tc39.es/ecma262/2026/#sec-module-namespace-exotic-objects) | живые привязки, запись — false (день 30 курса 2) | <Brief /> |
+| [10.4.7 Immutable Prototype Exotic Objects](https://tc39.es/ecma262/2026/#sec-immutable-prototype-exotic-objects) | `Object.prototype`, `window` | <Brief /> |
+| [28.3 Module Namespace Objects](https://tc39.es/ecma262/2026/#sec-module-namespace-objects) | объект `import * as` и `import()` | <Brief /> |
+| <a href="https://tc39.es/ecma262/2026/#sec-%symbol.tostringtag%">28.3.1 %Symbol.toStringTag%</a> | метка «Module» | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// экзотический объект: свои методы только там, где надо, остальные — из 10.1
+// связанная функция: [[Call]] — цель с [[BoundThis]]; bind от bind — this первого, аргументы всех
+// new связанной: [[BoundThis]] не нужен; newTarget = она сама → цель; prototype нет, instanceof спрашивает цель
+// массив: индекс ≥ length → length = индекс + 1; length незаписываемый — за конец нельзя
+// length = n: ToUint32 и ToNumber (RangeError), удаление с конца до первого неудаляемого
+// строка: индексы незаписываемые и неудаляемые; запись в индекс примитива — false (строгий код — TypeError)
+// arguments связан только у нестрогой функции с простыми параметрами; delete, аксессор, writable: false рвут связь
+// пространство имён модуля: [[Set]] — false, прототип null навсегда; Object.prototype — неизменяемый прототип
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `second.call({ name: "третий" }, 3)` всё равно печатает «первый»?
+   <Answer>\[\[Call\]\] связанной функции не использует thisArgument: внешняя обёртка зовёт внутреннюю со своим
+   \[\[BoundThis\]\], а внутренняя заменяет его своим — последнее слово за первым `bind`.</Answer>
+2. Чему равен `length` массива `[1, 2]` после `a[9] = 1`? А если
+   `length` незаписываемый?
+   <Answer>10, элементы 2–8 — дыры. С незаписываемым `length` шаг 2 \[\[DefineOwnProperty\]\] отвечает
+   false: в строгом коде TypeError, массив не меняется.</Answer>
+3. Почему `"kitap"[0] = "K"` в строгом коде — TypeError, а `new String("kitap")[9] = "!"`
+   — нет?
+   <Answer>Индекс 0 — незаписываемое свойство-символ, \[\[Set\]\] отвечает false. У обёртки индекс 9 за концом
+   строки — обычное новое свойство, а Receiver — объект.</Answer>
+4. В какой функции `arguments[0] = 5` поменяет параметр `a`: `function f(a) {}`,
+   `function g(a = 1) {}`, метод класса `m(a) {}`, метод литерала `m(a) {}`?
+   <Answer>В `f` и в методе литерала: они нестрогие и с простым списком. У `g` умолчание,
+   метод класса строгий — там `arguments` обычный.</Answer>
+5. Почему `Object.isFrozen(ns)` у пространства имён модуля — false, хотя записать в него ничего
+   нельзя?
+   <Answer>Свойства описаны как writable: true, а запрет — в \[\[Set\]\], который всегда отвечает false.</Answer>
+6. Почему `p instanceof OnAxis` — true, хотя у `OnAxis` нет `prototype`?
+   <Answer>OrdinaryHasInstance видит слот \[\[BoundTargetFunction\]\] и передаёт вопрос цели — классу
+   `Point`.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/bind)
+(Function.prototype.bind(), Array: length, The arguments object, import, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

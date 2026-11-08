@@ -1,0 +1,137 @@
+---
+title: День 15 — конспект
+css: |
+  h1 { border-bottom-color: #ec4899; }
+  h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+---
+
+# День 15. Экзотические объекты: массив, строка, arguments, связанная функция
+
+<Subtitle>Выжимка лекции: связанная функция, индексы и `length` массива, свойства-символы строки, связанный `arguments`, пространство имён модуля и неизменяемый прототип.</Subtitle>
+
+## Главное
+
+<Definition>
+Экзотический объект — тот, у кого хоть один внутренний метод свой, остальные взяты из 10.1. Связанная функция
+заменяет \[\[Call\]\] и \[\[Construct\]\], массив — \[\[DefineOwnProperty\]\], объект String — \[\[GetOwnProperty\]\],
+\[\[DefineOwnProperty\]\] и \[\[OwnPropertyKeys\]\], связанный `arguments` — ещё \[\[Get\]\], \[\[Set\]\] и
+\[\[Delete\]\], пространство имён модуля — все одиннадцать, `Object.prototype` — \[\[SetPrototypeOf\]\].
+</Definition>
+
+## Связанная функция
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+function show(a, b) { return `${this.name} ${a} ${b}`; }
+const once = show.bind({ name: "первый" }, 1);
+const twice = once.bind({ name: "второй" }, 2);
+console.log(twice(), twice.name, twice.length);           // первый 1 2 bound bound show 0 — this у первого bind, аргументы от всех
+class Point { constructor(x, y) { this.x = x; this.y = y; } }
+const OnAxis = Point.bind(null, 0);
+console.log(new OnAxis(5).y, new OnAxis(5) instanceof OnAxis, OnAxis.prototype);   // 5 true undefined — instanceof спрашивает цель
+console.log(run(() => new ((() => {}).bind(null))()));    // TypeError — у стрелки нет [[Construct]], у обёртки тоже
+```
+
+| Что | Как у связанной функции |
+| --- | --- |
+| \[\[Call\]\] | цель с \[\[BoundThis\]\] и склеенными аргументами, `this` вызова не нужен |
+| \[\[Construct\]\] | есть, только если цель — конструктор; newTarget = она сама → цель |
+| прототип | тот, что у цели в момент `bind` |
+| `length`, `name` | длина цели минус закреплённые (не меньше 0); «bound » и имя цели |
+| `prototype` | нет; `instanceof` спрашивает цель |
+
+<Remember>
+Ни `call`, ни второй `bind` не сменят `this` связанной функции: внутренняя
+обёртка ставит свой \[\[BoundThis\]\] последней. `super()` наследника передаёт свой newTarget — тогда
+замены нет, и прототип объекта берётся у наследника.
+</Remember>
+
+## Массив
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const a = [1, 2];
+a[4] = 5;
+console.log(a.length, 2 in a);                             // 5 false — индекс за концом поднял length, 2 и 3 — дыры
+a["4294967295"] = "строка";
+console.log(a.length);                                     // 5 — 2³² − 1 уже не индекс
+const b = ["a", "b", "c"];
+Object.defineProperty(b, 0, { configurable: false });
+b.length = 0;
+console.log(b.length, b[0]);                               // 1 a — удаление с конца застряло на неудаляемом
+console.log(run(() => { [].length = -1; }), run(() => { [].length = 1.5; }));   // RangeError RangeError — ToUint32 не совпал с числом
+class Deck extends Array {}
+console.log(Deck.from([1]).map((x) => x) instanceof Deck, Deck.from([1]).toSorted() instanceof Deck);   // true false — map через ArraySpeciesCreate, toSorted через ArrayCreate
+```
+
+| Запись | Что делает массив |
+| --- | --- |
+| `a[i] = v`, i \< length | обычное определение элемента |
+| `a[i] = v`, i ≥ length | элемент и length = i + 1; length незаписываемый — false |
+| `a.length = n`, n ≥ length | только length, новые места — дыры |
+| `a.length = n`, n \< length | удаление с конца до первого неудаляемого |
+| `a.length = 1.5`, −1, 2³² | RangeError в любом коде |
+
+<Remember>
+Индекс — каноническая строка целого от 0 до 2³² − 2. `length = 0` очищает тот же объект — у всех,
+кто держит ссылку. `freeze` делает `length` незаписываемым, `seal` оставляет
+записываемым, но элементы неудаляемые. `map`, `filter`, `slice`,
+`splice`, `concat`, `flat` и `flatMap` создают результат через
+ArraySpeciesCreate — наследник `Array` даёт наследника.
+</Remember>
+
+## Строка и arguments
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const word = "kitap";
+console.log(run(() => { "use strict"; word[0] = "K"; }), run(() => { word[0] = "K"; }), word);   // TypeError ok kitap — индекс строки незаписываемый, нестрогий код молчит
+console.log(Object.keys(new String("ab")).join(" "), new String("ab")["-0"]);   // 0 1 undefined — индексы из [[StringData]], "-0" не индекс
+function sloppy(a) { arguments[0] = "новое"; return a; }
+function strict(a) { "use strict"; arguments[0] = "новое"; return a; }
+function withDefault(a = 0) { arguments[0] = "новое"; return a; }
+console.log(sloppy(1), strict(1), withDefault(1));        // новое 1 1 — связь только у нестрогой функции с простым списком
+function cut(a) { delete arguments[0]; arguments[0] = "новое"; return a; }
+console.log(cut(1));                                       // 1 — delete убрал индекс из [[ParameterMap]]
+```
+
+| Функция | `arguments` | `callee` |
+| --- | --- | --- |
+| нестрогая, простые параметры | связанный, экзотический | сама функция |
+| строгая или со сложными параметрами | обычный объект, копия | %ThrowTypeError% |
+| стрелка | своего нет | — |
+
+<Remember>
+Индексы строки — незаписываемые, неудаляемые, перечисляемые. Запись за концом строки создаёт у объекта String
+обычное свойство, у примитива — false (Receiver не объект). Связаны только индексы меньше числа переданных
+аргументов, при повторе имён — последний; связь рвут `delete`, аксессор и
+`writable: false`. Пространство имён модуля: ключи — экспорт по порядку кодовых единиц, \[\[Set\]\] —
+false, прототип null навсегда. `Object.prototype`, `window` и `location` тоже не
+дают сменить прототип.
+</Remember>
+
+<Homework>
+1. Предскажите `fn()` и `fn.length` для
+   `function f(a, b, c) { return [this.n, a, b, c].join(); } const fn = f.bind({ n: 1 }, "x").bind({ n: 2 }, "y");`
+   и объясните шагами \[\[Call\]\] и `bind`.
+2. В нестрогом коде
+   `const a = ["a", "b", "c", "d"]; Object.defineProperty(a, 2, { configurable: false }); a.length = 1;`
+   Чему равен `a.length` и какие элементы остались? Что будет после
+   `Object.defineProperty(a, "length", { value: 1, writable: false })`?
+3. Что вернут `d(1, 2)` и `d(1)` для
+   `function d(x, x) { arguments[1] = "новое"; return x; }`? Какие индексы попали в
+   \[\[ParameterMap\]\] в каждом вызове?
+4. Прочитайте на MDN
+   [The
+   arguments object](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments) раздел «Assigning to indices»: нестрогие функции с простыми параметрами синхронизируют
+   параметры и `arguments` «and vice versa». Назовите по лекции три случая, когда у такой функции
+   индекс и параметр всё же не связаны.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/bind)
+(Function.prototype.bind(), Array: length, The arguments object, import, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

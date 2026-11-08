@@ -1,0 +1,252 @@
+---
+title: День 11 — задания
+---
+
+# День 11. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-11` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага.</Subtitle>
+
+## Разминка
+
+<Task title="1. Мёртвая зона по шагам" level="easy" time="7">
+<Goal>находить, когда привязка уже есть, но ещё без значения.</Goal>
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+const read = () => value;
+console.log(attempt(read));
+let value = "есть";
+console.log(attempt(read));
+function shadow() { const out = attempt(() => typeof outer); let outer = 1; return out; }
+let outer = "снаружи";
+console.log(shadow(), attempt(() => { let [a, b = a] = [1]; return b; }), attempt(() => { const { c = d } = {}, d = 1; return c; }));
+```
+
+<Criteria>
+- предсказаны три строки, у каждой ошибки — шаг, где привязку создали, и шаг, где её инициализируют;
+- объяснено, почему `typeof outer` внутри `shadow` не спасает, хотя снаружи
+  `outer` есть;
+- объяснено, почему `b = a` работает, а `c = d` — нет.
+</Criteria>
+</Task>
+
+<Task title="2. Пять циклов" level="easy" time="7">
+<Goal>проходить ForBodyEvaluation и CreatePerIterationEnvironment.</Goal>
+
+```js
+const run = (make) => { const fns = []; make(fns); return fns.map((f) => f()).join(); };
+console.log(run((fns) => { for (let i = 0; i < 3; i++) fns.push(() => i); }));
+console.log(run((fns) => { for (let i = 0; i < 3; i++) { fns.push(() => i); i += 0.5; } }));
+console.log(run((fns) => { let i; for (i = 0; i < 3; i++) fns.push(() => i); }));
+console.log(run((fns) => { for (const v of [1, 2, 3]) fns.push(() => v * 10); }));
+console.log(run((fns) => { for (let i = 0, j = 10; i < 2; i++, j--) fns.push(() => i + j); }));
+```
+
+<Criteria>
+- предсказаны пять строк;
+- для второй строки нарисованы окружения по шагам: где выполнено `i += 0.5`, где —
+  `i++`;
+- объяснено, почему в третьем цикле копий нет, хотя переменная объявлена через `let`.
+</Criteria>
+</Task>
+
+<Task title="3. switch и finally по шагам" level="easy" time="6">
+<Goal>проходить CaseBlockEvaluation и записи `try` внутри цикла.</Goal>
+
+```js
+const log = [];
+const s = (v) => { log.push(`case ${v}`); return v; };
+function pick(x) {
+  log.length = 0;
+  switch (x) {
+    case s(1): log.push("один");
+    case s(2): log.push("два"); break;
+    default: log.push("иначе");
+    case s(3): log.push("три");
+  }
+  return log.join(" ");
+}
+console.log(pick(2), "|", pick(3), "|", pick(5));
+function count() { let n = 0; for (const v of [1, 2, 3]) { try { if (v === 2) break; n += v; } finally { n += 10; } } return n; }
+console.log(count());
+```
+
+<Criteria>
+- предсказаны обе строки;
+- для `pick(5)` назван шаг 14.12.2, после которого вычисляется `default`;
+- для `count` объяснено, почему `finally` выполнился и на `break`.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Своя ForBodyEvaluation" level="medium" time="14">
+<Goal>перенести 14.7.4.3–14.7.4.4 на модель окружений.</Goal>
+
+Окружение — объект с переменными. Напишите `forLet(header, test, step, body)`: окружение
+заголовка не трогать; перед первой проверкой и перед каждым шагом — новая копия
+(`{ ...env }`); условие, тело и шаг получают текущую копию. Замыкание в теле — функция, которая
+запомнила объект своей копии.
+
+<Example>
+```js
+const fns = [];
+forLet({ i: 0 }, (e) => e.i < 3, (e) => { e.i++; }, (e) => fns.push(() => e.i));
+fns.map((f) => f()).join();     // "0,1,2"
+const header = { i: 0 };
+const seen = [];
+forLet(header, (e) => e.i < 2, (e) => { e.i++; }, (e) => seen.push(e === header));
+seen.join();                    // "false,false"
+header.i;                       // 0
+```
+</Example>
+
+<Criteria>
+- все три строки примера дают то, что в комментариях;
+- копий столько же, сколько у настоящего `for`: на два прохода тела — три (раздел 7 лекции);
+- второй цикл задания 2 на модели даёт тот же ответ, что в языке.
+</Criteria>
+</Task>
+
+<Task title="5. Свой switch" level="medium" time="12">
+<Goal>перенести CaseBlockEvaluation (14.12.2) в код.</Goal>
+
+Ветка — `{ selector, body }`: `selector()` возвращает значение `case`, у
+`default` селектора нет; `body()` возвращает `true`, если ветка кончается
+`break`. Напишите `caseBlock(input, clauses)`: ветки A до `default`, потом
+селекторы B, потом `default` и тела B; селектор вычисляется только пока совпадения нет; сравнение
+`===`.
+
+<Example>
+```js
+const log = [];
+const clause = (name, value, stop) => ({ selector: () => { log.push(`?${name}`); return value; }, body: () => { log.push(name); return stop; } });
+const clauses = [clause("a", 1, false), { body: () => { log.push("default"); return false; } }, clause("b", 2, true), clause("c", 3, false)];
+const run = (input) => { log.length = 0; caseBlock(input, clauses); return log.join(" "); };
+run(1);     // "?a a default b"
+run(2);     // "?a ?b b"
+run(3);     // "?a ?b ?c c"
+run(9);     // "?a ?b ?c default b"
+```
+</Example>
+
+<Criteria>
+- все четыре строки примера дают то, что в комментариях;
+- тот же `switch`, записанный в языке с теми же логами, даёт те же четыре строки;
+- назван шаг 14.12.2, который снова проходит тела B после `default`.
+</Criteria>
+</Task>
+
+<Task title="6. Свой try на записях" level="medium" time="10">
+<Goal>повторить 14.15.3 на записях вместо исключений.</Goal>
+
+Запись — `{ type, value }`. Напишите `tryStatement(block, catcher, finalizer)`:
+`block()` даёт B; если B — throw и есть `catcher`, C = `catcher(B.value)`, иначе
+C = B; если есть `finalizer`, F = `finalizer()` и ответ — C, когда F обычная, иначе F.
+
+<Example>
+```js
+const normal = (value) => ({ type: "normal", value });
+const ret = (value) => ({ type: "return", value });
+const thr = (value) => ({ type: "throw", value });
+const show = (c) => `${c.type} ${c.value}`;
+show(tryStatement(() => ret(1), null, () => normal("уборка")));         // "return 1"
+show(tryStatement(() => thr("x"), (e) => normal(`поймано ${e}`), null));   // "normal поймано x"
+show(tryStatement(() => ret(1), null, () => ret(2)));                  // "return 2"
+show(tryStatement(() => thr("x"), () => thr("из catch"), () => normal(0)));   // "throw из catch"
+```
+</Example>
+
+<Criteria>
+- все четыре строки примера дают то, что в комментариях;
+- каждая строка переписана настоящим `try` в функции и даёт тот же исход;
+- объяснено, где в 14.15.3 стоит UpdateEmpty и почему в модели без пустых значений он не нужен.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: openDeck с finally" level="medium" time="10">
+<Goal>прятать индикатор загрузки при любом исходе.</Goal>
+
+Перепишите `openDeck` из раздела 15 лекции: `openDeck(ui, load)` ставит
+`ui.loading`, ловит ошибку загрузки с `cause` и в *любом* случае снимает
+`ui.loading`. Ошибку без `cause` `catch` не разбирает, а бросает дальше
+(`throw err`): иначе он сам упадёт на `err.cause.message`, и наружу уйдёт уже не она.
+
+<Example>
+```js
+const ui = { loading: false, error: "" };
+openDeck(ui, () => { throw new Error("нет колоды", { cause: new Error("404") }); });
+ui.loading;    // false
+ui.error;      // "нет колоды: 404"
+openDeck(ui, () => { throw new TypeError("опечатка"); }).catch((e) => console.log("наружу:", e.message));
+ui.loading;    // false
+```
+</Example>
+
+<Criteria>
+- все три строки примера дают то, что в комментариях, — до первого `await` всё случилось сразу;
+- снаружи напечатана сама «опечатка», а не TypeError из `catch`;
+- в своём `main.js` строка с `loading.hidden` переехала в `finally`.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свой for-in" level="hard" time="12">
+<Goal>написать генератор по примечанию 1 к 14.7.5.9.</Goal>
+
+Примечание даёт образец генератора, но через `Reflect` (день 17). Напишите
+`enumerate(obj)` на `Object.getOwnPropertyNames`, `Object.getOwnPropertyDescriptor`
+и `Object.getPrototypeOf`: свои ключи с запоминанием «уже видели», потом — рекурсивно ключи прототипа,
+которых ещё не было.
+
+<Example>
+```js
+const proto = { p: 1, shadow: 2 };
+const obj = Object.create(proto);
+obj.b = 1; obj[2] = 1; obj.a = 1;
+Object.defineProperty(obj, "shadow", { value: 0, enumerable: false });
+[...enumerate(obj)].join(" ");     // "2 b a p"
+[...enumerate([7, 8])].join(" ");   // "0 1"
+```
+</Example>
+
+<Criteria>
+- обе строки примера дают то, что в комментариях;
+- на трёх своих объектах ответ совпадает с `for-in`;
+- объяснено, почему неперечисляемый ключ тоже попадает в «уже видели».
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомые разделы: var в catch" level="hard" time="8">
+<Goal>прочитать раздел приложения B, которого не было на лекции.</Goal>
+
+Прочитайте [B.3.4 VariableStatements
+in Catch Blocks](https://tc39.es/ecma262/2026/#sec-variablestatements-in-catch-blocks) и его примечание и предскажите две строки.
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+function f() {
+  const seen = [];
+  try { throw "из try"; } catch (e) { var e = "из var"; seen.push(e); }
+  seen.push(String(e));
+  return seen.join(" | ");
+}
+console.log(f());
+console.log(parse("try {} catch (e) { var e; }"), "|", parse("try {} catch ([e]) { var e; }"));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- объяснено через ResolveBinding (день 9) и примечание B.3.4, куда записал `var e = …`;
+- найдено, какое правило 14.15.1 разрешает первую строку `parse` и запрещает вторую.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for)
+(for, for...in, for...of, switch, try...catch, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

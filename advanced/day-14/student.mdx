@@ -1,0 +1,129 @@
+---
+title: День 14 — конспект
+css: |
+  h1 { border-bottom-color: #ec4899; }
+  h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+---
+
+# День 14. Внутренние методы обычных объектов и функций
+
+<Subtitle>Выжимка лекции: дескрипторы, чтение и запись по цепочке, порядок ключей, \[\[Call\]\] и \[\[Construct\]\] функций, FunctionDeclarationInstantiation.</Subtitle>
+
+## Главное
+
+<Definition>
+Обычный объект — тот, у кого все одиннадцать внутренних методов взяты из 10.1, а у функции ещё \[\[Call\]\] и
+\[\[Construct\]\] из 10.2 или 10.3. Код зовёт их через операции: `o.x` — \[\[Get\]\], `o.x = v` —
+\[\[Set\]\], `defineProperty` — \[\[DefineOwnProperty\]\], `Object.keys` — \[\[OwnPropertyKeys\]\].
+\[\[Get\]\] и \[\[Set\]\] идут по цепочке прототипов и помнят Receiver — объект, с которого начали.
+</Definition>
+
+## Свойства: определить, прочитать, записать
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const proto = Object.defineProperty({}, "fixed", { value: 1, writable: false });
+const child = Object.create(proto);
+child.fixed = 2;
+console.log(child.fixed, Object.hasOwn(child, "fixed"));   // 1 false — [[Set]] нашёл незаписываемое и ответил false
+const o = {};
+Object.defineProperty(o, "x", { value: 1, writable: true });
+console.log(run(() => Object.defineProperty(o, "x", { writable: false })), run(() => Object.defineProperty(o, "x", { writable: true })));   // ok TypeError — закрыть можно, открыть нельзя
+const base = { get who() { return this.name; }, name: "base" };
+const kid = Object.create(base);
+kid.name = "kid";
+console.log(kid.who);                                      // kid — геттер прототипа вызван с this = Receiver
+```
+
+<Remember>
+`defineProperty` берёт недостающие флаги false, присваивание — true. У неудаляемого свойства нельзя
+менять enumerable, вид и get/set, а незаписываемое нельзя открыть и переписать другим значением (SameValue).
+\[\[Set\]\]: данные в прототипе — своё свойство у Receiver, незаписываемые — false, аксессор — сеттер с
+`this` = Receiver. False бросает только строгий код. Поле класса определяется, а не присваивается, —
+сеттер прототипа не зовётся.
+</Remember>
+
+## Ключи и кто зовёт методы
+
+```js
+const keys = { b: 1, 10: 1, [Symbol("s")]: 1, a: 1, 2: 1, "01": 1 };
+console.log(Object.keys(keys).join(" "));                  // 2 10 b a 01 — индексы по числу, строки по времени, символов нет
+const log = [];
+class Model { set title(v) { log.push(v); } }
+class Field extends Model { title = "поле"; }
+new Field();
+Object.assign(new Model(), { title: "assign" });
+console.log(log.join());                                   // assign — поле определено, assign прошёл через [[Set]]
+```
+
+| Код | Внутренний метод |
+| --- | --- |
+| `o.x`, `o.x = v` | \[\[Get\]\], \[\[Set\]\] с Receiver = `o` |
+| `"x" in o`, `delete o.x` | \[\[HasProperty\]\], \[\[Delete\]\] |
+| `Object.defineProperty`, поле класса | \[\[DefineOwnProperty\]\] |
+| `Object.keys`, `for-in`, `{ ...o }` | \[\[OwnPropertyKeys\]\], \[\[GetOwnProperty\]\] (у spread и \[\[Get\]\]) |
+| `Object.getPrototypeOf`, `instanceof` | \[\[GetPrototypeOf\]\] |
+| `Object.freeze` | \[\[PreventExtensions\]\] и \[\[DefineOwnProperty\]\] каждому ключу |
+
+<Remember>
+Порядок ключей: индексы массива (0 … 2³² − 2) по возрастанию числа, потом строки и символы по времени
+создания. `"01"` и `"-1"` — строки, не индексы. \[\[SetPrototypeOf\]\] не даст сделать цикл и
+не сменит прототип нерасширяемого. Новый объект для `new` берёт прототип у newTarget, а если там не
+объект — у реалма конструктора.
+</Remember>
+
+## Функции изнутри
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+class C {}
+console.log(run(() => C()));                              // TypeError — [[Call]] класса бросает
+function Base() { this.a = 1; return 42; }
+class Derived extends Object { constructor() { super(); return 1; } }
+console.log(new Base().a, run(() => new Derived()));     // 1 TypeError — base отдаёт this, derived — только объект или undefined
+class P { constructor() { this.kind = new.target.name; } }
+class Q extends P {}
+console.log(new Q().kind);                                 // Q — new.target и прототип от newTarget
+function shadow(x) { function x() {} return typeof x; }
+console.log(shadow(1));                                    // function — функция тела поверх параметра
+console.log("prototype" in Math.max, Object.getOwnPropertyNames(Math.max).join());   // false length,name — у встроенной нет prototype
+```
+
+| Функция | \[\[Call\]\] | \[\[Construct\]\] | `prototype` |
+| --- | --- | --- | --- |
+| `function f() {}` | тело, `this` по \[\[ThisMode\]\] | base: `this` из newTarget | есть |
+| `class C {}` | TypeError | base или derived | есть, незаписываемый |
+| стрелка, метод | тело | нет | нет |
+| встроенная (`Math.max`) | по описанию | только у конструкторов | только у конструкторов |
+
+<Remember>
+\[\[Call\]\]: новый контекст и окружение (newTarget — undefined), класс — TypeError из реалма класса, привязка
+`this`, тело. \[\[Construct\]\]: у base `this` создаётся сразу и получает поля, у derived его
+даёт `super()`; вернуть объект можно всегда, примитив base игнорирует, derived — TypeError, без
+`super()` — ReferenceError. FunctionDeclarationInstantiation: функции тела с конца и поверх
+параметров, `var` с именем параметра сохраняет значение, `arguments` нужен не всегда.
+</Remember>
+
+<Homework>
+1. Предскажите, какие свойства окажутся у `o`, и объясните шагами \[\[Set\]\]:
+   `const proto = { set x(v) { this._x = v; } }; const o = Object.create(proto); o.x = 1;`
+2. Предскажите `Object.keys` для
+   `{ 3: 1, b: 1, "007": 1, 0: 1, a: 1, 4294967294: 1, 4294967295: 1 }` и объясните, почему
+   `4294967295` стоит среди строк.
+3. Что вернёт `g(1, 2)` для
+   `function g(x, y) { var x; function y() {} return [typeof x, typeof y].join(); }`? Найдите оба
+   шага FunctionDeclarationInstantiation.
+4. Прочитайте на MDN
+   [Enumerability
+   and ownership of properties](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Enumerability_and_ownership_of_properties) таблицы «Querying» и «Traversing». Объясните внутренними методами, почему
+   `in` видит унаследованное, а `Object.hasOwn` — нет, и чем отличаются строки
+   `Object.keys`, `for...in` и spread.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain)
+(Inheritance and the prototype chain, Object.defineProperty(), Enumerability and ownership of properties, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

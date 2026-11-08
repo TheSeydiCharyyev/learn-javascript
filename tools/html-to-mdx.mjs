@@ -51,6 +51,9 @@ const TEXT_BOXES = {
   summary: 'Summary',
 };
 const BLOCK_BOXES = { goals: 'Goals', cheatsheet: 'Cheatsheet', selfcheck: 'Selfcheck', criteria: 'Criteria', example: 'Example', homework: 'Homework', compare: 'Compare' };
+// a nonterminal of a grammar rule, *Name* (the same pattern as in site/lib/course.tsx)
+const GRAMMAR_EM = /^\*([A-Za-z][A-Za-z0-9]*)\*$/;
+const GRAMMAR_EM_ALL = /\*([A-Za-z][A-Za-z0-9]*)\*/g;
 const BLOCK = new Set(['p', 'div', 'ul', 'ol', 'pre', 'table', 'h1', 'h2', 'h3', 'h4', 'figure', 'details']);
 const PUNCT = /[\p{P}\p{S}]/u;
 const SPACE = /\s/u;
@@ -223,10 +226,25 @@ function convert(file) {
     const lang = { 'code js': 'js', 'code html': 'html', 'plain-out': 'plain-out', grammar: 'grammar' }[c];
     if (!lang) fail(n, `<pre class="${c}">`);
     onlyAttrs(n, ['class', 'data-file', 'data-page']);
-    if (elems(n).length) fail(n, '<pre> with elements inside');
     if (kids(n).some((k) => k.nodeName === '#comment')) fail(n, '<pre> with a comment inside');
     const meta = ['data-file', 'data-page'].filter((a) => attr(n, a) !== undefined).map((a) => `${a.slice(5)}="${attr(n, a)}"`).join(' ');
-    const text = textOf(n);
+    let text;
+    if (lang === 'grammar') {
+      // a grammar rule's nonterminals are in italics: <em>WhileStatement</em> → *WhileStatement* (lib/course.tsx turns
+      // it back); checked both ways — read back, the text gives exactly these <em> and no others (a literal "*a*" in a
+      // rule would fail here)
+      const ems = [];
+      text = kids(n).map((k) => {
+        if (k.nodeName === '#text') return k.value;
+        if (k.tagName === 'em' && !(k.attrs ?? []).length && elems(k).length === 0 && GRAMMAR_EM.test(`*${textOf(k)}*`)) { ems.push(textOf(k)); return `*${textOf(k)}*`; }
+        return fail(n, `<pre class="grammar"> with <${k.tagName}> inside`);
+      }).join('');
+      const back = [...text.matchAll(GRAMMAR_EM_ALL)].map((m) => m[1]);
+      if (back.join('\n') !== ems.join('\n') || text.replace(GRAMMAR_EM_ALL, '$1') !== textOf(n)) fail(n, 'a grammar rule that reads back differently ("*Name*" in its text?)');
+    } else {
+      if (elems(n).length) fail(n, '<pre> with elements inside');
+      text = textOf(n);
+    }
     const runs = text.match(/`{3,}/g) ?? [];
     const fence = '`'.repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
     return `${fence}${lang}${meta ? ' ' + meta : ''}\n${text}\n${fence}`;

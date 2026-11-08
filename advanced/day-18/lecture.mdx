@@ -1,0 +1,745 @@
+---
+title: День 18 — Глобальный объект и стандартные встроенные объекты
+day: День 18 • урок 1
+heading: Глобальный объект и стандартные встроенные объекты
+lead: Курс 3, Advanced. Модуль «Объекты изнутри» — пятый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #ec4899; }
+  h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+  h3 { color: #9d174d; }
+  .step-number { background: #ec4899; }
+  .toc a { color: #be185d; }
+---
+
+<Goals>
+- предсказывать `length`, `name`, атрибуты и \[\[Construct\]\] встроенной функции по
+  правилам главы 18;
+- отличать в `globalThis` свойства стандарта, хозяина и своей программы;
+- проходить `parseInt` и функции URI по шагам 19.2.5 и 19.2.6;
+- называть, что реализации разрешено добавить к языку, а что запрещено (глава 17).
+</Goals>
+
+<Toc />
+
+## 1. Встроенные объекты: стандарт и реализация {#builtin}
+
+День 1 оставил на сегодня четыре термина. *Стандартный объект*
+([4.4.11](https://tc39.es/ecma262/2026/#sec-standard-object)) — тот, чьё поведение описывает этот
+стандарт. *Встроенный* ([4.4.12](https://tc39.es/ecma262/2026/#sec-built-in-object)) — тот, кого
+даёт реализация ещё до программы; примечание: стандартные встроенные описаны здесь, а реализация может добавить
+свои. *Встроенная функция* ([4.4.35](https://tc39.es/ecma262/2026/#sec-built-in-function)) —
+например `parseInt` и `Math.exp`, *встроенный конструктор*
+([4.4.36](https://tc39.es/ecma262/2026/#sec-built-in-constructor)) — `Object` и
+`Function`; хозяин может дать и такие, которых в стандарте нет.
+
+Глава [18](https://tc39.es/ecma262/2026/#sec-ecmascript-standard-built-in-objects) задаёт общие
+правила для всех встроенных: прототип функции — %Function.prototype%, прототип прототипа — %Object.prototype%,
+\[\[Extensible\]\] — true, у каждой функции слот \[\[Realm\]\] (день 9). Функция хозяина выглядит так же:
+
+```js
+console.log(typeof parseInt, Object.getPrototypeOf(parseInt) === Function.prototype, Object.isExtensible(Math), Object.getPrototypeOf(Map.prototype) === Object.prototype);
+console.log(typeof setTimeout, Object.getPrototypeOf(setTimeout) === Function.prototype, setTimeout.name, setTimeout.length, "prototype" in setTimeout);
+```
+
+<ResultBox>
+function true true true\
+function true setTimeout 1 false
+</ResultBox>
+
+`setTimeout` описан не в ECMA-262, а в стандарте HTML, но по 4.4.12 это тоже встроенная функция:
+её дал хозяин, и правила у неё те же. Слот \[\[Realm\]\] значит, что встроенные у каждого реалма свои:
+
+```js
+const frame = document.body.appendChild(document.createElement("iframe"));
+const other = frame.contentWindow;
+console.log(other.parseInt === parseInt, other.parseInt("7"), Object.getPrototypeOf(other.parseInt) === other.Function.prototype, other.Math === Math, [] instanceof other.Array);
+```
+
+<ResultBox>
+false 7 true false false
+</ResultBox>
+
+У рамки свои `parseInt`, Math и Array, и прототип её функций — её же Function.prototype. Поэтому
+массив из одного окна не `instanceof` Array другого, а Array.isArray (день 9) его узнаёт.
+
+## 2. length встроенной функции {#length}
+
+Правило главы 18: `length` — число обязательных параметров в заголовке раздела; необязательные (в
+квадратных скобках) и остаточные не считаются. Примечание 2 разбирает заголовок «Array.prototype.map (callback \[,
+thisArg\])»: длина — 1. Но «unless otherwise specified» — и у части функций длина записана отдельно:
+
+```js
+const lengths = [Array.prototype.map, Array.prototype.push, Array.from, Math.max, parseInt, JSON.stringify, Object.assign, Promise.all, String.prototype.padStart, Reflect.set, Map, Date].map((f) => `${f.name}:${f.length}`);
+console.log(lengths.join(" "));
+const d = Object.getOwnPropertyDescriptor(Math.max, "length");
+console.log(d.value, d.writable, d.enumerable, d.configurable);
+```
+
+<ResultBox>
+map:1 push:1 from:1 max:2 parseInt:2 stringify:3 assign:2 all:1 padStart:1 set:3 Map:0 Date:7\
+2 false false true
+</ResultBox>
+
+У `Math.max (...args)` по правилу вышел бы 0, у `push (...items)` и
+`Date (...values)` — тоже 0; спецификация отдельно пишет 2, 1 и 7. Атрибуты
+`length` — незаписываемое, но удаляемое. Длина конструктора — тоже по заголовку:
+
+```js
+console.log([Promise, RegExp, Proxy, Error, Array.prototype.concat, Object.prototype.hasOwnProperty].map((f) => `${f.name}:${f.length}`).join(" "));
+```
+
+<ResultBox>
+Promise:1 RegExp:2 Proxy:2 Error:1 concat:1 hasOwnProperty:1
+</ResultBox>
+
+«Promise (executor)», «RegExp (pattern, flags)», «Proxy (target, handler)» — все параметры обязательны;
+«Error (message \[, options\])» и «concat (...items)» дают 1 по общему правилу. Незаписываемое, но удаляемое —
+значит, присвоить нельзя, а переопределить и удалить можно:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(run(() => { "use strict"; parseInt.length = 5; }), "|", Object.defineProperty(parseInt, "length", { value: 5 }).length, parseInt.bind(null, "10").length, delete parseInt.length, parseInt.length, Object.hasOwn(parseInt, "length"));
+```
+
+<ResultBox>
+TypeError: Cannot assign to read only property 'length' of function 'function parseInt() \{ \[native code\] \}' | 5 4 true 0 false
+</ResultBox>
+
+`bind` посчитал длину от новой: 5 − 1 = 4 (день 15). После удаления `length` берётся из
+прототипа — у Function.prototype он 0.
+
+## 3. name встроенной функции {#name}
+
+`name` — имя функции в спецификации, для свойства — его ключ. Геттер и сеттер получают префикс
+«get» и «set» (параметр prefix у CreateBuiltinFunction, 10.3.4), у ключа-символа имя записано явно, а анонимные
+функции получают пустую строку:
+
+```js
+const getter = (o, k) => Object.getOwnPropertyDescriptor(o, k).get.name;
+console.log(getter(Map.prototype, "size"), "|", getter(RegExp.prototype, "flags"), "|", RegExp.prototype[Symbol.split].name, "|", Array.prototype[Symbol.iterator].name, Array.prototype[Symbol.iterator] === Array.prototype.values);
+console.log(JSON.stringify(Promise.withResolvers().resolve.name), JSON.stringify(Proxy.revocable({}, {}).revoke.name), Math.max.bind(null).name);
+```
+
+<ResultBox>
+get size | get flags | \[Symbol.split\] | values true\
+"" "" bound max
+</ResultBox>
+
+`Array.prototype[Symbol.iterator]` назван «values»: спецификация кладёт под символ ту же функцию, что
+и под `values`. Функции resolve промиса и revoke прокси анонимны (у revoke это видел день 16), а
+`bind` добавляет «bound » сам (день 15). Ещё три имени:
+
+```js
+console.log(Object.getOwnPropertyDescriptor(Object.prototype, "__proto__").get.name, JSON.stringify(Function.prototype.name), Symbol.prototype[Symbol.toPrimitive].name);
+```
+
+<ResultBox>
+get \_\_proto\_\_ "" \[Symbol.toPrimitive\]
+</ResultBox>
+
+Сам Function.prototype — тоже встроенная функция, и у неё `name` — пустая строка (20.2.3).
+
+## 4. Лишние и недостающие аргументы {#args}
+
+Глава 18: недостающие аргументы ведут себя как undefined, но считаются «not present», и алгоритм вправе это
+различить. Лишние вычисляются и отбрасываются, и реализация не может бросить TypeError только за то, что их
+передали:
+
+```js
+console.log(parseInt("10", 2, "лишний"), "kitap".at(), [5, 7].indexOf(), Math.max(), [1, , 3].includes());
+console.log([1, 2].reduce((a, b) => a + b), [1, 2].reduce((a, b) => a + b, undefined), isNaN(new Date(undefined)), isNaN(new Date()));
+```
+
+<ResultBox>
+2 k -1 -Infinity true\
+3 NaN true false
+</ResultBox>
+
+Первая строка — правило «как undefined»: `at()` — индекс 0, `indexOf()` ищет undefined,
+`includes()` находит его в дыре. Вторая — «not present»: `reduce` проверяет «If
+initialValue is present», и явный undefined — уже начальное значение; Date смотрит число аргументов. Примечание 1
+советует реализациям добавлять новые функции, а не новые параметры старым.
+
+## 5. Конструктор или нет {#construct}
+
+Встроенная функция, не названная конструктором, не имеет \[\[Construct\]\] и свойства `prototype`. У
+конструктора один алгоритм на \[\[Call\]\] и \[\[Construct\]\], и различает их проверка «NewTarget is undefined»:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(run(() => new Math.max()), "|", run(() => new parseInt()), "|", "prototype" in Math.max, "prototype" in Map, Object.hasOwn(Array.prototype.map, "prototype"));
+console.log(typeof Date(), typeof new Date(), Array(2).length, run(() => Map()), "|", run(() => Promise()));
+```
+
+<ResultBox>
+TypeError: Math.max is not a constructor | TypeError: parseInt is not a constructor | false true false\
+string object 2 TypeError: Constructor Map requires 'new' | TypeError: Promise constructor cannot be invoked without 'new'
+</ResultBox>
+
+Без `new` Date отдаёт строку, Array работает как с `new`, а Map и Promise бросают — это
+первый шаг их алгоритмов. Symbol (день 17) — наоборот: бросает с `new`.
+
+## 6. Атрибуты свойств {#attrs}
+
+Последние абзацы главы 18: любое другое свойство данных глав 19–28 — записываемое, неперечисляемое, удаляемое;
+аксессор — неперечисляемый и удаляемый, а если описан только геттер, сеттер — undefined. Исключения записаны
+отдельно: `Math.PI`, `NaN`.
+
+```js
+const flags = (o, k) => { const d = Object.getOwnPropertyDescriptor(o, k); return [d.writable, d.enumerable, d.configurable].join(); };
+console.log(flags(Math, "max"), flags(Math, "PI"), flags(globalThis, "parseInt"), flags(globalThis, "NaN"), flags(Math.max, "name"));
+console.log(Object.keys(Math).length, Object.getOwnPropertyNames(Math).length > 40, JSON.stringify(Object.getOwnPropertyDescriptor(Map.prototype, "size"), (k, v) => (typeof v === "function" ? v.name : v)));
+```
+
+<ResultBox>
+true,false,true false,false,false true,false,true false,false,false false,false,true\
+0 true \{"get":"get size","enumerable":false,"configurable":true\}
+</ResultBox>
+
+Поэтому `Object.keys(Math)` пуст, а `for...in` по встроенным ничего не находит: всё
+неперечисляемое. В JSON дескриптора нет `set` — он undefined. Отсюда и старое правило не дописывать
+методы в Array.prototype присваиванием: такое свойство перечисляемое, и `for...in` по любому массиву
+его покажет, а метод самой спецификации — никогда.
+
+## 7. Глава 17: что реализации нельзя {#forbidden}
+
+Глава [17](https://tc39.es/ecma262/2026/#sec-error-handling-and-language-extensions) делит ошибки на
+ранние (до выполнения скрипта — SyntaxError разбора, день 13) и ошибки выполнения и разрешает хозяину расширять
+синтаксис, добавлять типы, объекты, свойства и функции — с оговоркой «Except as restricted in 17.1».
+[17.1](https://tc39.es/ecma262/2026/#sec-forbidden-extensions) перечисляет запреты: своих
+`caller` и `arguments` нет у строгих функций, стрелок, методов, генераторов, классов,
+встроенных и связанных функций; `caller` никогда не отдаёт строгую функцию; методы ECMA-402 не
+расширять; в модулях — без HTML-подобных комментариев `<!--` приложения B.1.1.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+function sloppy() {}
+function strict() { "use strict"; }
+console.log(Object.getOwnPropertyNames(sloppy).join(), "|", Object.getOwnPropertyNames(() => {}).join(), "|", Object.getOwnPropertyNames(class {}).join());
+function who() { return who.caller; }
+function callerSloppy() { return who(); }
+function callerStrict() { "use strict"; return who(); }
+console.log(callerSloppy() === callerSloppy, callerStrict(), run(() => strict.caller));
+```
+
+<ResultBox>
+length,name,prototype | length,name | length,name,prototype\
+true null TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+</ResultBox>
+
+Chrome не дал своего `caller` даже нестрогой функции: он аксессор на Function.prototype. По 10.2.4
+его геттер должен быть %ThrowTypeError%, но в Chrome он отвечает для нестрогих функций — на строгую вызывающую
+`null`, как требует 17.1. Это наследие, разберём на дне 31.
+
+### Ранние ошибки и ошибки выполнения {#early}
+
+Глава 17 запрещает и обратное: считать ранней ошибку, которой нет в разделах «Static Semantics: Early Errors»,
+«even if the compiler can prove that a construct cannot execute without error». Код в `eval` проверяется
+при вызове, и это видно:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(run(() => eval("if (false) { 1 + ; }")), "|", run(() => eval("if (false) { null.x; }")), "|", run(() => eval("null.x")));
+console.log(run(() => eval("'use strict'; if (false) { delete kitap; }")), "|", run(() => new Function("return 1 +")));
+```
+
+<ResultBox>
+SyntaxError: Unexpected token ';' | ok | TypeError: Cannot read properties of null (reading 'x')\
+SyntaxError: Delete of an unqualified identifier in strict mode. | SyntaxError: Unexpected token '\}'
+</ResultBox>
+
+Ветка `if (false)` не выполнится никогда, но синтаксис и правило строгого режима для
+`delete` — ранние ошибки, и код не запускается. `null.x` там же — заведомая ошибка, но она
+ошибка выполнения: пока ветка не выполнена, её нет.
+
+## 8. Глобальный объект {#global}
+
+Глава [19](https://tc39.es/ecma262/2026/#sec-global-object): глобальный объект создаётся до любого
+контекста выполнения (у каждого реалма свой, день 9), у него нет ни \[\[Construct\]\], ни \[\[Call\]\], прототип задаёт
+хозяин, и у него могут быть свойства хозяина: «This may include a property whose value is the global object
+itself».
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(run(() => globalThis()), "|", run(() => new globalThis()), "|", globalThis === window, window === self, window.window === window);
+const chain = [];
+for (let o = Object.getPrototypeOf(globalThis); o !== null; o = Object.getPrototypeOf(o)) chain.push(Object.prototype.toString.call(o));
+console.log(chain.join(" → "));
+```
+
+<ResultBox>
+TypeError: globalThis is not a function | TypeError: globalThis is not a constructor | true true true\
+\[object Window\] → \[object WindowProperties\] → \[object EventTarget\] → \[object Object\]
+</ResultBox>
+
+В браузере `window`, `self` и `globalThis` — один объект, а цепочку из
+Window.prototype, WindowProperties и EventTarget.prototype построил хозяин. Прототип у `window` сменить
+нельзя (день 15).
+
+Глобальный объект — только один из двух слоёв глобального окружения (день 13): `var` и объявления
+функций становятся его свойствами, а `let`, `const` и классы живут в отдельной записи:
+
+```js
+var a = 1;
+let b = 2;
+function f() {}
+console.log(globalThis.a, globalThis.b, "b" in globalThis, typeof globalThis.f, b);
+```
+
+<ResultBox>
+1 undefined false function 2
+</ResultBox>
+
+## 9. globalThis, Infinity, NaN, undefined {#values}
+
+[19.1](https://tc39.es/ecma262/2026/#sec-value-properties-of-the-global-object) — четыре значения.
+`globalThis` (19.1.1) — \[\[GlobalThisValue\]\] глобального окружения реалма, записываемое и удаляемое.
+`Infinity`, `NaN` и `undefined` (19.1.2–19.1.4, термины 4.4.26 и 4.4.27 дня 1) —
+незаписываемые и неудаляемые:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+undefined = 1;
+NaN = 2;
+var Infinity = 3;
+console.log(undefined, NaN, Infinity, globalThis.undefined === void 0, (() => { let undefined = 5; return undefined; })());
+console.log(run(() => { "use strict"; undefined = 1; }));
+```
+
+<ResultBox>
+undefined NaN Infinity true 5\
+TypeError: Cannot assign to read only property 'undefined' of object '#\<Window>'
+</ResultBox>
+
+Нестрогое присваивание молчит, строгое бросает (OrdinarySetWithOwnDescriptor, день 14). `var
+Infinity` разрешён: GlobalDeclarationInstantiation (день 13) не мешает `var` с именем
+существующего свойства, а запись в него снова молча не проходит. Внутри функции `undefined` — обычное
+имя. Но `let` на верхнем уровне скрипта — нет:
+
+```js
+let undefined = 5;
+console.log("не дойдёт");
+```
+
+<ResultBox>
+Uncaught SyntaxError: Identifier 'undefined' has already been declared
+</ResultBox>
+
+HasRestrictedGlobalProperty видит неудаляемое свойство глобального объекта, и весь скрипт не выполняется. А
+вот `globalThis` — обычное удаляемое свойство, и после удаления имени больше нет:
+
+```js
+console.log(delete globalThis.globalThis, typeof globalThis, delete window.undefined, typeof undefined);
+```
+
+<ResultBox>
+true undefined false undefined
+</ResultBox>
+
+Сам глобальный объект никуда не делся — пропало только свойство, через которое его находят;
+`window` остался. `undefined` удалить нельзя: delete отвечает false.
+
+Зачем вообще понадобилось имя `globalThis`, объясняет страница MDN
+[globalThis](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/globalThis):
+«Historically, accessing the global object has required different syntax in different JavaScript environments» —
+в браузере `window`, `self` или `frames`, в воркере только `self`, в
+Node.js — `global`. И важная оговорка раздела «HTML and the WindowProxy»: в браузере
+`globalThis` — не сам глобальный объект, а прокси вокруг него. Поэтому 19.1.1 и говорит о
+\[\[GlobalThisValue\]\]: значение задаёт хозяин.
+
+## 10. Практика: стандарт и хозяин в globalThis {#host}
+
+19.1–19.4 дают глобальному объекту 59 свойств: 4 значения, 9 функций, 42 конструктора и 4 объекта. ECMA-402
+добавляет `Intl`, приложение B — `escape` и `unescape` (день 31). Всё остальное
+положили хозяин и сама программа:
+
+<Scheme src="scheme-host.svg">Кто кладёт свойства в globalThis</Scheme>
+
+```js
+var kitap = 1;
+const own = Object.getOwnPropertyNames(globalThis);
+const std = ["globalThis", "Infinity", "NaN", "undefined", "eval", "isFinite", "isNaN", "parseFloat", "parseInt", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "Math", "JSON", "Reflect"];
+console.log(own.length > 900, std.every((k) => own.includes(k)), own.includes("Intl"), own.includes("document"), own.includes("kitap"));
+const where = (k) => { const d = Object.getOwnPropertyDescriptor(globalThis, k); return `${k}:${d.enumerable ? "e" : "-"}${d.configurable ? "c" : "-"}`; };
+console.log(["parseInt", "Math", "Map", "Intl", "alert", "setTimeout", "document", "console", "kitap"].map(where).join(" "));
+```
+
+<ResultBox>
+true true true true true\
+parseInt:-c Math:-c Map:-c Intl:-c alert:ec setTimeout:ec document:e- console:-c kitap:e-
+</ResultBox>
+
+Своих свойств у `window` больше девятисот, из них стандарту принадлежат шесть десятков. Отличить
+помогают атрибуты: у ECMA-262 и ECMA-402 — «-c» по главе 18. Операции хозяина (`alert`,
+`setTimeout`) перечисляемые, `document` ещё и неудаляемый, а пространство имён
+`console` выглядит как стандартное — его выдаёт только то, что в 19.1–19.4 его нет. `var
+kitap` стал свойством «e-»: `var` верхнего уровня даёт неудаляемое свойство окна (день 13; в
+тексте спецификации это CreateGlobalVarBinding).
+
+Хозяин кладёт имена и в прототип. Элемент с `id` становится глобальным именем — его отдаёт объект
+WindowProperties из цепочки раздела 8:
+
+```js
+const box = document.body.appendChild(document.createElement("div"));
+box.id = "deck";
+const named = Object.getPrototypeOf(Object.getPrototypeOf(window));
+console.log(typeof deck, deck === box, "deck" in window, Object.hasOwn(window, "deck"), Object.hasOwn(named, "deck"), Object.prototype.toString.call(named));
+```
+
+<ResultBox>
+object true true false true \[object WindowProperties\]
+</ResultBox>
+
+Своего свойства `deck` у `window` нет — имя нашлось в прототипе. Это и есть «host-defined
+behaviour instead of throwing an error (such as ReferenceError)» из главы 17: без хозяина `deck` было бы
+ReferenceError.
+
+## 11. isFinite, isNaN, parseFloat {#numbers}
+
+[19.2](https://tc39.es/ecma262/2026/#sec-function-properties-of-the-global-object) — девять функций:
+`eval` (день 13), четыре числовые и четыре для URI. Глобальные `isFinite` и
+`isNaN` (19.2.2, 19.2.3) начинают с ToNumber, а методы Number — нет; примечание к isNaN советует
+надёжную проверку `X !== X`. `parseFloat` (19.2.4) берёт самый длинный префикс, который
+подходит под StrDecimalLiteral:
+
+```js
+console.log(isNaN("kitap"), Number.isNaN("kitap"), isFinite("12"), Number.isFinite("12"), isNaN(undefined), isNaN(null));
+console.log(parseFloat("  3.5e2px"), parseFloat(".5"), parseFloat("Infinity!"), parseFloat("0x10"), parseFloat("1_000"), Number("1_000"));
+```
+
+<ResultBox>
+true false true false true false\
+350 0.5 Infinity 0 1 NaN
+</ResultBox>
+
+У `parseFloat` нет шестнадцатеричной записи и разделителей `_`: префикс «0» и «1».
+`Infinity` — часть StrDecimalLiteral, поэтому распознан. Методы Number — не всегда двойники:
+
+```js
+console.log(Number.parseInt === parseInt, Number.parseFloat === parseFloat, Number.isNaN === isNaN, Number.isFinite === isFinite);
+```
+
+<ResultBox>
+true true false false
+</ResultBox>
+
+Number.parseInt и Number.parseFloat — те же функции %parseInt% и %parseFloat% (раздел 21.1.2 так и пишет), а
+Number.isNaN и Number.isFinite — новые, без ToNumber.
+
+## 12. parseInt по шагам {#parseint}
+
+[19.2.5](https://tc39.es/ecma262/2026/#sec-parseint-string-radix): строку — ToString и TrimString
+(пробелы и переводы строк, в том числе неразрывный пробел и BOM, день 2); знак «-» запомнить, «+» или «-» снять;
+основание — ToInt32 (день 6); дальше — по схеме:
+
+<Scheme src="scheme-parseint.svg">19.2.5: шаги parseInt</Scheme>
+
+```js
+console.log(parseInt("  -0x1F"), parseInt("0x1F", 16), parseInt("0x1F", 10), parseInt("-0"), Object.is(parseInt("-0"), -0), parseInt("12px"), parseInt(""), parseInt("z", 36), parseInt("Z", 36), parseInt(" ﻿7"));
+```
+
+<ResultBox>
+-31 31 0 -0 true 12 NaN 35 35 7
+</ResultBox>
+
+Знак снимают раньше префикса, поэтому «-0x1F» — −31. С основанием 10 префикс не снимается, и цифры кончаются
+на «x»: 0. Буквы цифр — без учёта регистра. Рядом с `parseFloat` и `Number` (ToNumber, день
+5\) разница видна на одних входах:
+
+```js
+const inputs = ["", " ", "12px", "0x10", "1e3", "0b101", "\t7\n", "1_000"];
+console.log(inputs.map((s) => `${JSON.stringify(s)}: ${parseInt(s)} ${parseFloat(s)} ${Number(s)}`).join(" | "));
+```
+
+<ResultBox>
+"": NaN NaN 0 | " ": NaN NaN 0 | "12px": 12 12 NaN | "0x10": 16 0 16 | "1e3": 1 1000 1000 | "0b101": 0 0 5 | "\\t7\\n": 7 7 7 | "1_000": 1 1 NaN
+</ResultBox>
+
+Number читает строку целиком (StringNumericLiteral): пустая — 0, хвост — NaN, зато знает 0x и 0b. Два
+разборщика читают префикс: `parseInt` — только целое с 0x, `parseFloat` — десятичную запись с
+экспонентой. Разделителей `_` не знает никто из трёх.
+
+## 13. Практика: загадки parseInt {#puzzles}
+
+Ловушку `map(parseInt)` мы видели в Essentials (день 20): `map` передаёт индекс вторым
+аргументом. Теперь — шагами 19.2.5:
+
+```js
+console.log([1, 2, 3].map(parseInt), ["10", "10", "10", "10"].map(parseInt));
+console.log(parseInt(0.0000005), parseInt(null, 36), parseInt("12", 4294967298), parseInt(1e21), parseInt("11", 37), parseInt("11", -0));
+console.log(parseInt(Infinity, 19), parseInt(Infinity), parseInt("Infinity", 36), parseInt("123456789012345678901234567890"));
+```
+
+<ResultBox>
+(3) \[1, NaN, NaN\] (4) \[10, NaN, 2, 3\]\
+5 1112745 1 1 NaN 11\
+18 NaN 1461559270678 1.2345678901234568e+29
+</ResultBox>
+
+Индекс 0 — шаг 9: R = 10. Индекс 1 — шаг 8: меньше 2, NaN. «3» при R = 2 — первая же цифра чужая, Z пусто. Во
+второй строке работает шаг 1: ToString(0.0000005) — «5e-7», ToString(1e21) — «1e+21», а `null` в
+системе 36 — это слово «null». 4294967298 после ToInt32 — 2, −0 — 0, то есть 10. Третья строка — та же ToString:
+`Infinity` становится словом «Infinity», и в системе 19 из него годна только первая буква: «I» — 18,
+«n» — уже 23. Для длинных чисел шаг 14 разрешает реализации заменить цифры после двадцатой нулями: тридцать цифр
+всё равно не помещаются в Number точно, и ответ — ближайшее число.
+
+## 14. Функции URI: Encode и Decode {#uri}
+
+[19.2.6](https://tc39.es/ecma262/2026/#sec-uri-handling-functions): `encodeURI` и
+`decodeURI` — для целого адреса, зарезервированные знаки они оставляют; `encodeURIComponent`
+и `decodeURIComponent` — для его части (Essentials, день 31). Все четыре сводятся к Encode и Decode:
+
+<Scheme src="scheme-uri.svg">19.2.6.5: Encode</Scheme>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(encodeURIComponent("a b_c-d.e!~*'()&=/#ü"), "|", encodeURI("https://x.tm/a b?q=1&r=ü#top"));
+console.log(encodeURIComponent("😀"), run(() => encodeURIComponent("\uD83D")), "|", decodeURI("%23%2F%41"), decodeURIComponent("%23%2F%41"));
+console.log(run(() => decodeURIComponent("%E0%A4%A")), "|", run(() => decodeURIComponent("%C0%80")), "|", run(() => decodeURIComponent("%zz")), "|", decodeURIComponent("%F0%9F%98%80"));
+```
+
+<ResultBox>
+a%20b_c-d.e!~\*'()%26%3D%2F%23%C3%BC | https://x.tm/a%20b?q=1&r=%C3%BC#top\
+%F0%9F%98%80 URIError: URI malformed | %23%2FA #/A\
+URIError: URI malformed | URIError: URI malformed | URIError: URI malformed | 😀
+</ResultBox>
+
+«ASCII word characters» из Encode — буквы, цифры и подчёркивание, поэтому `_` не кодируется.
+Эмодзи — одна кодовая точка из двух половинок, четыре байта UTF-8; одна половинка — URIError (курс 2, день 20).
+decodeURI бережёт escape-последовательности знаков из своего набора: «%23» и «%2F» остались. Три URIError
+последней строки — три разных шага Decode: обрыв «%A» (k + 3 > len), запрещённая последовательность C0 80
+(примечание ссылается на RFC 3629) и ParseHexOctet, не узнавший «zz».
+
+```js
+console.log(encodeURI("http://[::1]/"), decodeURI("%3B%c3%bc"), decodeURIComponent("%3B%c3%bc"));
+```
+
+<ResultBox>
+http://%5B::1%5D/ %3Bü ;ü
+</ResultBox>
+
+Примечание 1 к 19.2.6: набор зарезервированных знаков взят из RFC 2396, а не из нового RFC 3986, поэтому
+квадратные скобки адреса IPv6 encodeURI кодирует. Encode пишет шестнадцатеричные цифры заглавными, а Decode
+принимает и строчные. Итог по знакам ASCII, кроме букв и цифр:
+
+| Знаки | encodeURIComponent | encodeURI |
+| --- | --- | --- |
+| `_ - . ! ~ * ' ( )` | как есть | как есть |
+| `; / ? : @ & = + $ , #` | %XX | как есть |
+| пробел, `[ ]` и остальные | %XX | %XX |
+
+## 15. Конструкторы, четыре объекта и Boolean {#constructors}
+
+[19.3](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object) — 42
+конструктора, у каждого одна строка «See …»: восемь видов ошибок, коллекции, Promise, Proxy (день 16), Iterator,
+обёртки примитивов, а ArrayBuffer, SharedArrayBuffer, DataView, WeakRef, FinalizationRegistry и 12 типизированных
+массивов ждут дней 20–24. [19.4](https://tc39.es/ecma262/2026/#sec-other-properties-of-the-global-object)
+— четыре обычных объекта: Atomics (день 22), JSON, Math и Reflect (день 17).
+
+| Группа | Конструкторы 19.3 | Сколько |
+| --- | --- | --- |
+| ошибки | Error, AggregateError, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError | 8 |
+| обёртки примитивов | Boolean, Number, BigInt, String, Symbol | 5 |
+| коллекции и ссылки | Map, Set, WeakMap, WeakSet, WeakRef, FinalizationRegistry | 6 |
+| двоичные данные | ArrayBuffer, SharedArrayBuffer, DataView и 12 типизированных массивов | 15 |
+| остальные | Object, Function, Array, Date, RegExp, Promise, Proxy, Iterator | 8 |
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const flags = (k) => { const d = Object.getOwnPropertyDescriptor(globalThis, k); return [d.writable, d.enumerable, d.configurable].join(); };
+console.log(flags("Map"), flags("JSON"), typeof JSON, typeof Iterator, run(() => new JSON()), "|", run(() => Math()));
+const RealPromise = Promise;
+Promise = null;
+const p = (async () => 1)();
+console.log(p instanceof RealPromise, Object.prototype.toString.call(p), typeof Promise);
+Promise = RealPromise;
+```
+
+<ResultBox>
+true,false,true true,false,true object function TypeError: JSON is not a constructor | TypeError: Math is not a function\
+true \[object Promise\] object
+</ResultBox>
+
+Глобальные свойства можно перезаписать, но язык им не верит: асинхронная функция создаёт промис из
+%Promise% — внутреннего объекта реалма (6.1.7.4), а не из того, что сейчас лежит в `Promise`.
+
+Глава [20](https://tc39.es/ecma262/2026/#sec-fundamental-objects) «Fundamental Objects» в плане
+дня — одним разделом [20.3](https://tc39.es/ecma262/2026/#sec-boolean-objects), объект Boolean (термин
+4.4.19 дня 1). Конструктор (20.3.1) без `new` — ToBoolean, с `new` — обёртка со слотом
+\[\[BooleanData\]\]; прототип (20.3.3) — сам объект Boolean со значением false:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const no = new Boolean(false);
+console.log(typeof no, !!no, no.valueOf(), Boolean(no), Boolean("false"), Boolean(0n), Boolean.length);
+class Flag extends Boolean {}
+console.log(Boolean.prototype.valueOf(), Object.prototype.toString.call(Boolean.prototype), run(() => Boolean.prototype.toString.call({})), new Flag(0).valueOf(), new Flag(0) instanceof Boolean);
+```
+
+<ResultBox>
+object true false true true false 1\
+false \[object Boolean\] TypeError: Boolean.prototype.toString requires that 'this' be a Boolean false true
+</ResultBox>
+
+Обёртка — объект, а любой объект истинен: `!!new Boolean(false)` — true. Методы прототипа идут
+через ThisBooleanValue и принимают только булево или объект со слотом \[\[BooleanData\]\]. Наследник получает слот
+через `super`.
+
+## 16. «Карточки 2.0»: настройки из ссылки {#cards}
+
+Колодой делятся ссылкой: настройки лежат в её части после «?». Разберём их функциями дня — с явным основанием
+10 и с перехватом URIError:
+
+```js
+function readSettings(query) {
+  const out = {};
+  for (const pair of query.replace(/^\?/, "").split("&")) {
+    const [key, value = ""] = pair.split("=");
+    try { out[decodeURIComponent(key)] = decodeURIComponent(value.replaceAll("+", " ")); } catch (e) { out[key] = e.name; }
+  }
+  return out;
+}
+const s = readSettings("?perDay=20&deck=%D0%BA%D0%B8%D1%82%D0%B0%D0%BF&level=0x10&bad=%E0%A4%A");
+console.log(JSON.stringify(s), parseInt(s.perDay, 10), parseInt(s.level, 10), parseInt(s.level), Number(s.level));
+const link = "?deck=" + encodeURIComponent("kitap & galam") + "&perDay=" + 20;
+console.log(link, readSettings(link).deck);
+```
+
+<ResultBox>
+\{"perDay":"20","deck":"китап","level":"0x10","bad":"URIError"\} 20 0 16 16\
+?deck=kitap%20%26%20galam&perDay=20 kitap & galam
+</ResultBox>
+
+Сломанная часть не роняет разбор. «0x10» с основанием 10 — 0, без основания — 16: явное основание защищает от
+шестнадцатеричных сюрпризов. `encodeURIComponent` закодировал «&» внутри значения, иначе он разрезал
+бы пару. Плюс вместо пробела — правило HTML-форм, а не ECMAScript: страница MDN
+[encodeURIComponent](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent)
+пишет «for application/x-www-form-urlencoded, spaces are to be replaced by +», а
+`decodeURIComponent("a+b")` плюс не трогает, поэтому `readSettings` меняет его сама. Хозяин браузера даёт для всего этого готовый
+URLSearchParams, но это уже не ECMAScript.
+
+## 17. Что будет завтра {#next}
+
+День 19 — мини-проект: наблюдаемое хранилище на Proxy и Reflect. Запись, удаление и новое свойство доходят до
+подписчиков, и страница перерисовывается сама; операции пересылаются через Reflect с верным Receiver, вложенные
+объекты оборачиваются при чтении, а у каждого необычного места — ссылка на раздел спецификации.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [17 Error Handling and Language Extensions](https://tc39.es/ecma262/2026/#sec-error-handling-and-language-extensions) | ранние ошибки; что хозяину можно | <Brief /> |
+| [17.1 Forbidden Extensions](https://tc39.es/ecma262/2026/#sec-forbidden-extensions) | `caller` не отдаёт строгую функцию | <Brief /> |
+| [18 ECMAScript Standard Built-in Objects](https://tc39.es/ecma262/2026/#sec-ecmascript-standard-built-in-objects) | `length`, `name`, аргументы, атрибуты | <Full /> |
+| [19 The Global Object](https://tc39.es/ecma262/2026/#sec-global-object) | не функция, прототип — от хозяина | <Full /> |
+| [19.1 Value Properties of the Global Object](https://tc39.es/ecma262/2026/#sec-value-properties-of-the-global-object) | четыре значения | <Full /> |
+| [19.1.1 globalThis](https://tc39.es/ecma262/2026/#sec-globalthis) | \[\[GlobalThisValue\]\], записываемое | <Brief /> |
+| [19.1.2 Infinity](https://tc39.es/ecma262/2026/#sec-value-properties-of-the-global-object-infinity) | неизменяемое | <Brief /> |
+| [19.1.3 NaN](https://tc39.es/ecma262/2026/#sec-value-properties-of-the-global-object-nan) | неизменяемое | <Brief /> |
+| [19.1.4 undefined](https://tc39.es/ecma262/2026/#sec-undefined) | `let undefined` наверху — SyntaxError | <Brief /> |
+| [19.2 Function Properties of the Global Object](https://tc39.es/ecma262/2026/#sec-function-properties-of-the-global-object) | девять функций | <Full /> |
+| [19.2.2 isFinite](https://tc39.es/ecma262/2026/#sec-isfinite-number) | сначала ToNumber | <Brief /> |
+| [19.2.3 isNaN](https://tc39.es/ecma262/2026/#sec-isnan-number) | сначала ToNumber; `X !== X` | <Brief /> |
+| [19.2.4 parseFloat](https://tc39.es/ecma262/2026/#sec-parsefloat-string) | префикс StrDecimalLiteral | <Brief /> |
+| [19.2.5 parseInt](https://tc39.es/ecma262/2026/#sec-parseint-string-radix) | шаги и загадки | <Full /> |
+| [19.2.6 URI Handling Functions](https://tc39.es/ecma262/2026/#sec-uri-handling-functions) | Encode и Decode | <Full /> |
+| [19.3 Constructor Properties of the Global Object](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object) | 42 конструктора | <Brief /> |
+| [19.3.1 AggregateError](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-aggregate-error) | ошибка из многих | <Brief /> |
+| [19.3.2 Array](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-array) | без `new` — как с ним | <Brief /> |
+| [19.3.3 ArrayBuffer](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-arraybuffer) | день 20 | <Brief /> |
+| [19.3.4 BigInt](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-bigint) | только без `new` | <Brief /> |
+| [19.3.5 BigInt64Array](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-bigint64array) | день 20 | <Brief /> |
+| [19.3.6 BigUint64Array](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-biguint64array) | день 20 | <Brief /> |
+| [19.3.7 Boolean](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-boolean) | раздел 15 | <Brief /> |
+| [19.3.8 DataView](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-dataview) | день 21 | <Brief /> |
+| [19.3.9 Date](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-date) | без `new` — строка | <Brief /> |
+| [19.3.10 Error](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-error) | основа ошибок | <Brief /> |
+| [19.3.11 EvalError](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-evalerror) | язык её больше не бросает | <Brief /> |
+| [19.3.12 FinalizationRegistry](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-finalization-registry) | день 24 | <Brief /> |
+| [19.3.13 Float16Array](https://tc39.es/ecma262/2026/#sec-float16array) | день 21 | <Brief /> |
+| [19.3.14 Float32Array](https://tc39.es/ecma262/2026/#sec-float32array) | день 20 | <Brief /> |
+| [19.3.15 Float64Array](https://tc39.es/ecma262/2026/#sec-float64array) | день 20 | <Brief /> |
+| [19.3.16 Function](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-function) | код из строки | <Brief /> |
+| [19.3.17 Int8Array](https://tc39.es/ecma262/2026/#sec-int8array) | день 20 | <Brief /> |
+| [19.3.18 Int16Array](https://tc39.es/ecma262/2026/#sec-int16array) | день 20 | <Brief /> |
+| [19.3.19 Int32Array](https://tc39.es/ecma262/2026/#sec-int32array) | день 20 | <Brief /> |
+| [19.3.20 Iterator](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-iterator) | основа итераторов | <Brief /> |
+| [19.3.21 Map](https://tc39.es/ecma262/2026/#sec-map) | без `new` — TypeError | <Brief /> |
+| [19.3.22 Number](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-number) | без `new` — ToNumeric | <Brief /> |
+| [19.3.23 Object](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-object) | пример 4.4.36 | <Brief /> |
+| [19.3.24 Promise](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-promise) | язык берёт %Promise% | <Brief /> |
+| [19.3.25 Proxy](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-proxy) | день 16 | <Brief /> |
+| [19.3.26 RangeError](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-rangeerror) | значение вне допустимого | <Brief /> |
+| [19.3.27 ReferenceError](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-referenceerror) | нет такого имени | <Brief /> |
+| [19.3.28 RegExp](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-regexp) | день 17: `RegExp(re)` | <Brief /> |
+| [19.3.29 Set](https://tc39.es/ecma262/2026/#sec-set) | без `new` — TypeError | <Brief /> |
+| [19.3.30 SharedArrayBuffer](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-sharedarraybuffer) | день 22 | <Brief /> |
+| [19.3.31 String](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-string) | без `new` — строка | <Brief /> |
+| [19.3.32 Symbol](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-symbol) | день 17: с `new` — TypeError | <Brief /> |
+| [19.3.33 SyntaxError](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-syntaxerror) | ранние ошибки | <Brief /> |
+| [19.3.34 TypeError](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-typeerror) | чаще всех сегодня | <Brief /> |
+| [19.3.35 Uint8Array](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-uint8array) | день 20 | <Brief /> |
+| [19.3.36 Uint8ClampedArray](https://tc39.es/ecma262/2026/#sec-uint8clampedarray) | день 20 | <Brief /> |
+| [19.3.37 Uint16Array](https://tc39.es/ecma262/2026/#sec-uint16array) | день 20 | <Brief /> |
+| [19.3.38 Uint32Array](https://tc39.es/ecma262/2026/#sec-uint32array) | день 20 | <Brief /> |
+| [19.3.39 URIError](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-urierror) | раздел 14 | <Brief /> |
+| [19.3.40 WeakMap](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-weakmap) | ключи — объекты | <Brief /> |
+| [19.3.41 WeakRef](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-weakref) | день 24 | <Brief /> |
+| [19.3.42 WeakSet](https://tc39.es/ecma262/2026/#sec-constructor-properties-of-the-global-object-weakset) | ключи — объекты | <Brief /> |
+| [19.4 Other Properties of the Global Object](https://tc39.es/ecma262/2026/#sec-other-properties-of-the-global-object) | четыре объекта | <Brief /> |
+| [19.4.1 Atomics](https://tc39.es/ecma262/2026/#sec-atomics) | день 22 | <Brief /> |
+| [19.4.2 JSON](https://tc39.es/ecma262/2026/#sec-json) | не конструктор | <Brief /> |
+| [19.4.3 Math](https://tc39.es/ecma262/2026/#sec-math) | не функция | <Brief /> |
+| [19.4.4 Reflect](https://tc39.es/ecma262/2026/#sec-reflect) | день 17 | <Brief /> |
+| [20 Fundamental Objects](https://tc39.es/ecma262/2026/#sec-fundamental-objects) | в плане — только Boolean | <Brief /> |
+| [20.3 Boolean Objects](https://tc39.es/ecma262/2026/#sec-boolean-objects) | термин 4.4.19 | <Brief /> |
+| [20.3.1 The Boolean Constructor](https://tc39.es/ecma262/2026/#sec-boolean-constructor) | без `new` — ToBoolean | <Brief /> |
+| [20.3.2 Properties of the Boolean Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-boolean-constructor) | прототип — %Function.prototype% | <Brief /> |
+| [20.3.3 Properties of the Boolean Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-boolean-prototype-object) | сам Boolean со значением false | <Brief /> |
+| [20.3.4 Properties of Boolean Instances](https://tc39.es/ecma262/2026/#sec-properties-of-boolean-instances) | слот \[\[BooleanData\]\] | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// встроенная функция: прототип %Function.prototype%, [[Realm]], length — обязательные параметры (кроме «otherwise»)
+// name — ключ свойства; геттер «get x», символ — «[Symbol.x]», анонимная — ""
+// недостающий аргумент = undefined, но «not present»; лишние вычисляются и отбрасываются
+// не конструктор — нет [[Construct]] и prototype; конструктор отличает new по NewTarget
+// свойства глав 19–28: writable, не enumerable, configurable (кроме записанных особо)
+// глобальный объект: не функция, прототип от хозяина; Infinity, NaN, undefined неизменяемы
+// parseInt: ToString → знак → ToInt32(radix) → 0x при 0 или 16 → цифры до чужой → −0
+// Encode: буквы, цифры, _ -.!~*'() как есть; остальное — UTF-8 по %XX; одинокая половинка — URIError
+// язык берёт %Promise%, %Map% и других у реалма, а не из глобальных свойств
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `Array.prototype.map.length` — 1, а `Math.max.length` — 2?
+   <Answer>По правилу главы 18 считаются обязательные параметры: у map — callback (thisArg необязателен). У
+   max (...args) по правилу вышел бы 0, но спецификация записала длину 2 отдельно.</Answer>
+2. Чем `[1, 2].reduce(f)` отличается от `[1, 2].reduce(f, undefined)`?
+   <Answer>Недостающий аргумент «not present»: reduce без него берёт первый элемент. Явный undefined —
+   начальное значение, и первое сложение даёт NaN.</Answer>
+3. Почему `new Math.max()` — TypeError, а `Date()` работает?
+   <Answer>Math.max не назван конструктором — у него нет \[\[Construct\]\]. Date — конструктор с одним алгоритмом
+   на вызов и new: при NewTarget undefined он отдаёт строку.</Answer>
+4. Почему `let undefined = 5` на верхнем уровне скрипта — SyntaxError, а в функции — нет?
+   <Answer>undefined — неудаляемое свойство глобального объекта, и HasRestrictedGlobalProperty запрещает
+   лексическое объявление с таким именем. В функции это обычное локальное имя.</Answer>
+5. Что вернёт `parseInt("0x1F", 10)` и почему?
+   <Answer>0: при R = 10 префикс не снимается (stripPrefix — false), цифры кончаются на «x», Z = «0».</Answer>
+6. Почему `encodeURIComponent("\uD83D")` — URIError, а `encodeURIComponent("😀")` —
+   нет?
+   <Answer>CodePointAt у одиночной старшей половинки ставит \[\[IsUnpairedSurrogate\]\] — Encode бросает. Эмодзи —
+   пара половинок, одна кодовая точка, четыре байта UTF-8.</Answer>
+7. Если перезаписать глобальный `Promise`, что вернёт асинхронная функция?
+   <Answer>Настоящий промис: язык создаёт его из %Promise% реалма, а не через глобальное свойство.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/globalThis)
+(globalThis, encodeURIComponent(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

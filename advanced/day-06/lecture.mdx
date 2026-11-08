@@ -1,0 +1,867 @@
+---
+title: "День 6 — Числа как биты: побитовые операторы, ToInt32 и void"
+day: День 6 • урок 1
+heading: "Числа как биты: побитовые операторы, ToInt32 и void"
+lead: Курс 3, Advanced. Модуль «Типы и абстрактные операции» — третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #6d28d9; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #7c3aed; }
+---
+
+<Goals>
+- переводить число в 32-битное целое по шагам ToInt32 и ToUint32;
+- читать отрицательные числа в дополнительном коде;
+- предсказывать `&`, `|`, `^`, `~`, `<<`,
+  `>>` и `>>>` для чисел и BigInt;
+- помнить, что `&` слабее `===`, а сдвиг слабее сложения;
+- хранить флаги и цвета в битах и знать, где ломается граница 2<sup>31</sup>;
+- объяснять, что вычисляет `void` и зачем он нужен сегодня.
+</Goals>
+
+<Toc />
+
+## 1. Числа как биты {#bits}
+
+В таблице операторов Essentials (день 6) была строка «побитовые — курс 3». Пришла пора. Число в JavaScript —
+64-битная дробь (день 4), но семь операторов работают с ним так, будто это 32-битное целое:
+`&`, `|`, `^`, `~`, `<<`, `>>` и
+`>>>`. Они на время переводят операнды в 32 разряда, работают с каждым разрядом и
+возвращают обычное число.
+
+```js
+console.log(5 & 3, 5 | 3, 5 ^ 3, ~5, 5 << 1, -5 >> 1, -5 >>> 28);
+console.log(2.7 | 0, 2 ** 32 | 0, 3e9 | 0, "12" | 0, 1n | 2n);
+```
+
+<ResultBox>
+1 7 6 -6 10 -3 15\
+2 0 -1294967296 12 3n
+</ResultBox>
+
+Вторая строка — весь день в миниатюре: дробь пропала, 2<sup>32</sup> стало нулём, три миллиарда —
+отрицательным числом, строка — числом, а BigInt остался BigInt. Операторы живут в трёх разделах: [13.5.6](https://tc39.es/ecma262/2026/#sec-bitwise-not-operator) — `~`,
+[13.9](https://tc39.es/ecma262/2026/#sec-bitwise-shift-operators) — сдвиги,
+[13.12](https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators) — `&`,
+`^` и `|`. Сами разделы короткие: каждый отсылает к
+[EvaluateStringOrNumericBinaryExpression](https://tc39.es/ecma262/2026/#sec-evaluatestringornumericbinaryexpression),
+а та — к [ApplyStringOrNumericBinaryOperator](https://tc39.es/ecma262/2026/#sec-applystringornumericbinaryoperator)
+(13.15.3), общему алгоритму всех двуместных арифметических операторов. Путь у шести побитовых такой же, как у `*`: оба операнда
+через ToNumeric, типы должны совпасть, а дальше — операция из таблицы: для чисел
+`Number::leftShift`, `Number::bitwiseAND` и соседи (6.1.6.1), для BigInt —
+`BigInt::leftShift` и соседи (6.1.6.2). Внутри числовых операций и стоит то, ради чего день назван
+«числа как биты», — [ToInt32](https://tc39.es/ecma262/2026/#sec-toint32) и
+[ToUint32](https://tc39.es/ecma262/2026/#sec-touint32).
+
+И восьмой оператор дня — `void`. Он не побитовый, но живёт рядом с `~` в разделе унарных
+операторов, и в курсах 1–2 его не было. Ему — раздел 14.
+
+## 2. Дополнительный код: 32 разряда {#twos}
+
+32-битное целое со знаком хранится в **дополнительном коде** (two's complement). Разряды
+нумеруются справа налево от 0 до 31. Разряд *k* весит 2<sup>*k*</sup>, и только старший, 31-й,
+весит −2<sup>31</sup>. Поэтому если старший разряд — 1, число отрицательное, а строка из одних единиц — это
+−2<sup>31</sup> + (2<sup>31</sup> − 1) = −1. Получить −x просто: перевернуть все разряды и прибавить 1.
+Диапазон — от −2<sup>31</sup> (−2147483648) до 2<sup>31</sup> − 1 (2147483647).
+
+Функция `bits` печатает 32 разряда числа; как она устроена — раздел 9.
+
+```js
+const bits = (n) => (n >>> 0).toString(2).padStart(32, "0");
+console.log(bits(9));
+console.log(bits(-9));
+console.log(bits(-1));
+console.log(bits(2 ** 31 - 1));
+console.log(bits(-(2 ** 31)));
+console.log((9).toString(2), (-9).toString(2), ~9 + 1);
+```
+
+<ResultBox>
+00000000000000000000000000001001\
+11111111111111111111111111110111\
+11111111111111111111111111111111\
+01111111111111111111111111111111\
+10000000000000000000000000000000\
+1001 -1001 -9
+</ResultBox>
+
+−9 — это перевёрнутое 9 (…11110110) плюс 1: …11110111. Наибольшее число — ноль и тридцать одна единица,
+наименьшее — единица и тридцать один ноль. А `toString(2)` (Essentials, день 16) пишет −9 как
+«-1001» — знак и модуль: о 32 разрядах метод числа ничего не знает. `~9 + 1` — рецепт «перевернуть
+и прибавить 1»: `~` переворачивает разряды (раздел 7).
+
+## 3. ToInt32 по шагам {#toint32}
+
+[ToInt32](https://tc39.es/ecma262/2026/#sec-toint32) (7.1.6) — пять шагов, и каждый виден из кода:
+
+<Scheme src="scheme-toint32.svg">ToInt32 по шагам 7.1.6</Scheme>
+
+Повторим алгоритм своим кодом — шаг за шагом — и сверим с `| 0`, который зовёт настоящий ToInt32:
+
+```js
+const toInt32 = (x) => {
+  const number = +x;                                          // 1. ToNumber
+  if (!Number.isFinite(number) || number === 0) return 0;     // 2. NaN, ±Infinity, ±0
+  const int = Math.trunc(number);                             // 3. truncate
+  const int32bit = ((int % 2 ** 32) + 2 ** 32) % 2 ** 32;     // 4. modulo, а не %
+  return int32bit >= 2 ** 31 ? int32bit - 2 ** 32 : int32bit; // 5. знак
+};
+const values = [2.9, -2.9, 2 ** 31 - 1, 2 ** 31, 2 ** 32, 2 ** 32 + 5, -(2 ** 31) - 1, 3e9, 1e21, NaN, Infinity, -0, "12", "0x10", [], null];
+console.log(values.map(toInt32).join(" "));
+console.log(values.map((v) => v | 0).join(" "));
+console.log(values.every((v) => Object.is(toInt32(v), v | 0)));
+```
+
+<ResultBox>
+2 -2 2147483647 -2147483648 0 5 2147483647 -1294967296 -559939584 0 0 0 12 16 0 0\
+2 -2 2147483647 -2147483648 0 5 2147483647 -1294967296 -559939584 0 0 0 12 16 0 0\
+true
+</ResultBox>
+
+Шестнадцать значений, ни одного расхождения — даже −0 превратился в +0 у обоих. Самое важное на шаге 4.
+Слово *modulo* в спецификации — математический остаток, он всегда того же знака, что делитель, то есть
+неотрицательный. А оператор `%` (день 6 Essentials) берёт знак делимого. Поэтому в функции
+стоит «прибавить делитель и взять остаток ещё раз»:
+
+```js
+console.log(-1 % 2 ** 32, ((-1 % 2 ** 32) + 2 ** 32) % 2 ** 32);
+console.log(-7 % 3, ((-7 % 3) + 3) % 3);
+```
+
+<ResultBox>
+-1 4294967295\
+-1 2
+</ResultBox>
+
+Примечание к ToInt32 добавляет два свойства. Первое: операция идемпотентна — применённая к своему же
+результату, ничего не меняет. Второе: ToInt32 от результата ToUint32 — то же, что ToInt32 сразу. Ради второго
+свойства бесконечности и отображаются в +0, а не в «самое большое число»:
+
+```js
+const x = -1.5e10;
+console.log(x | 0, (x | 0) | 0, x >>> 0, (x >>> 0) | 0);
+console.log(Infinity | 0, -Infinity >>> 0, Object.is(-0 | 0, 0));
+```
+
+<ResultBox>
+-2115098112 -2115098112 2179869184 -2115098112\
+0 0 true
+</ResultBox>
+
+## 4. ToUint32 и операции на 16, 8 и 64 бита {#touint32}
+
+[ToUint32](https://tc39.es/ecma262/2026/#sec-touint32) (7.1.7) — те же шаги без пятого: остаток
+от деления на 2<sup>32</sup> так и остаётся ответом, от 0 до 4294967295. За ними в главе 7 идут операции с
+другим числом разрядов. В коде их не вызвать: они нужны встроенным функциям и типизированным массивам (день 20).
+
+| Операция | Диапазон | Где встретим |
+| --- | --- | --- |
+| ToInt32 / ToUint32 | −2<sup>31</sup>…2<sup>31</sup> − 1 / 0…2<sup>32</sup> − 1 | побитовые операторы, `Math.imul`, `Math.clz32`, длина массива |
+| [ToInt16](https://tc39.es/ecma262/2026/#sec-toint16) / [ToUint16](https://tc39.es/ecma262/2026/#sec-touint16) | −32768…32767 / 0…65535 | `String.fromCharCode` (ToUint16); `Int16Array`, `Uint16Array` — день 20 |
+| [ToInt8](https://tc39.es/ecma262/2026/#sec-toint8) / [ToUint8](https://tc39.es/ecma262/2026/#sec-touint8) | −128…127 / 0…255 | `Int8Array`, `Uint8Array` — день 20 |
+| [ToUint8Clamp](https://tc39.es/ecma262/2026/#sec-touint8clamp) | 0…255, с зажимом | `Uint8ClampedArray` — пиксели картинки: 300 → 255, −5 → 0; дробь округляется к чётному (2.5 → 2, 3.5 → 4), а не отбрасывается |
+| [ToBigInt64](https://tc39.es/ecma262/2026/#sec-tobigint64) / [ToBigUint64](https://tc39.es/ecma262/2026/#sec-tobiguint64) | −2<sup>63</sup>…2<sup>63</sup> − 1 / 0…2<sup>64</sup> − 1 | `BigInt64Array` — день 20; та же арифметика, что у `BigInt.asIntN(64, x)` и `asUintN` (день 21 курса 2) |
+
+Следы этих операций видны во встроенных функциях. [String.fromCharCode](https://tc39.es/ecma262/2026/#sec-string.fromcharcode)
+зовёт ToUint16 для каждого аргумента, [Math.imul](https://tc39.es/ecma262/2026/#sec-math.imul) и
+[Math.clz32](https://tc39.es/ecma262/2026/#sec-math.clz32) (Essentials, день 18) — ToUint32,
+[BigInt.asIntN](https://tc39.es/ecma262/2026/#sec-bigint.asintn) — ту же «остаток и знак», что
+ToBigInt64:
+
+```js
+console.log(-1 >>> 0, 2 ** 32 >>> 0, 2 ** 32 + 5 >>> 0);
+console.log(String.fromCharCode(65 + 2 ** 16), String.fromCharCode(2 ** 16 + 0x44B), String.fromCharCode(-1).charCodeAt(0));
+console.log(Math.imul(0xFFFFFFFF, 5), Math.imul(0x7FFFFFFF, 0x7FFFFFFF), (0x7FFFFFFF * 0x7FFFFFFF) | 0);
+console.log(Math.clz32(1), Math.clz32(-1), Math.clz32(0), Math.clz32(2 ** 32));
+console.log(BigInt.asIntN(64, 2n ** 63n), BigInt.asUintN(64, -1n));
+```
+
+<ResultBox>
+4294967295 0 5\
+A ы 65535\
+-5 1 0\
+31 0 32 32\
+-9223372036854775808n 18446744073709551615n
+</ResultBox>
+
+Код 65 + 65536 стал «A», а 65536 + 0x44B — «ы»: 17-й разряд отброшен. `Math.imul` перемножает
+32-битные целые: `0xFFFFFFFF` для неё −1, и −1 · 5 = −5. А обычное умножение и `| 0` дают 0
+вместо 1: произведение больше 2<sup>53</sup>, младшие разряды потерялись ещё в дроби. `Math.clz32(-1)`
+— 0: −1 для ToUint32 — 32 единицы.
+
+Ещё одно место — длина массива. Её задаёт [ArraySetLength](https://tc39.es/ecma262/2026/#sec-arraysetlength)
+(10.4.2.4): новое значение проходит через ToUint32 и отдельно через ToNumber, и если результаты не совпали —
+`RangeError`. Две операции — два вызова `valueOf`:
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const list = [];
+let calls = 0;
+list.length = { valueOf() { calls++; return 3; } };
+console.log(list.length, calls);
+console.log(attempt(() => { list.length = 2 ** 32; }));
+console.log(attempt(() => { list.length = 1.5; }));
+list.length = 2 ** 32 - 1;
+console.log(list.length);
+```
+
+<ResultBox>
+3 2\
+RangeError: Failed to set the 'length' property on 'Array': Invalid array length\
+RangeError: Failed to set the 'length' property on 'Array': Invalid array length\
+4294967295
+</ResultBox>
+
+2<sup>32</sup> для ToUint32 — 0, для ToNumber — 2<sup>32</sup>: не совпали. 1.5 — 1 против 1.5: тоже. Отсюда и
+наибольшая длина массива — 2<sup>32</sup> − 1, а наибольший индекс — на единицу меньше (день 4).
+
+И хозяин. Задержку `setTimeout` описывает стандарт HTML, и принимает он её как тип
+`long` из WebIDL, а перевод в `long` — та же арифметика, что у ToInt32. Отсюда строка
+таблицы дня 30 Essentials: задержка больше 2147483647 мс «переполняется»:
+
+```js
+setTimeout(() => console.log("2 ** 32 + 100 мс"), 2 ** 32 + 100);
+setTimeout(() => console.log("300 мс"), 300);
+```
+
+<ResultBox>
+2 \*\* 32 + 100 мс\
+300 мс
+</ResultBox>
+
+«Сорок девять дней» сработали через 100 мс — раньше таймера на 300 мс.
+
+## 5. &, | и ^: NumberBitwiseOp {#andorxor}
+
+Для чисел все три оператора ведут в одну операцию — [NumberBitwiseOp](https://tc39.es/ecma262/2026/#sec-numberbitwiseop)
+(6.1.6.1.16). Она переводит оба операнда через ToInt32, записывает их 32-разрядными строками и проходит по
+парам разрядов: первый с первым, второй со вторым. Результат собирается из ответов по таблице:
+
+| x | y | x & y (оба) | x \| y (хотя бы один) | x ^ y (ровно один) |
+| --- | --- | --- | --- | --- |
+| 0 | 0 | 0 | 0 | 0 |
+| 0 | 1 | 0 | 1 | 1 |
+| 1 | 0 | 0 | 1 | 1 |
+| 1 | 1 | 1 | 1 | 0 |
+
+Пример страниц MDN: 14 — это 1110, 9 — 1001. Общая единица только в разряде 3 — `&` даёт 1000,
+то есть 8; `|` — 1111, 15; `^` — 0111, 7. Операнды могут быть чем угодно: ToNumeric
+сделает из них числа.
+
+```js
+console.log(14 & 9, 14 | 9, 14 ^ 9, 0b1010 & 0b0110);
+console.log("3" & "5", [7] | 0, null | 8, "x" | 0, {} ^ 6, true << 3);
+```
+
+<ResultBox>
+8 15 7 2\
+1 7 8 0 6 8
+</ResultBox>
+
+«x» стал NaN, а NaN на шаге 2 ToInt32 — 0. Объект `{}` — тоже NaN, то есть 0, и 0 ^ 6 = 6.
+Порядок вычисления — как у всех двуместных операторов: сначала левый операнд целиком, потом правый, потом
+ToNumeric слева и ToNumeric справа — как журнал `valueOf` у сравнений на дне 5. И, в отличие от
+`+`, здесь нет шага «ToPrimitive без
+подсказки»: дата отдаёт число, а не строку:
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const log = [];
+const a = { valueOf() { log.push("a"); return 6; } };
+const b = { valueOf() { log.push("b"); return 3; } };
+console.log(a & b, a | b, a ^ b, log.join(" "));
+console.log(new Date(5) | 0, typeof (new Date(5) + 0));
+console.log(attempt(() => Symbol() | 0));
+```
+
+<ResultBox>
+2 7 5 a b a b a b\
+5 string\
+TypeError: Cannot convert a Symbol value to a number
+</ResultBox>
+
+## 6. Приоритет: & слабее === {#precedence}
+
+Грамматика раздела [13.12](https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators) выстраивает
+лесенку: `|` собирается из `^`, `^` — из `&`, а `&` —
+из выражений равенства. Значит, `==` и `===` связывают сильнее, чем `&`.
+Сдвиги (13.9) стоят между сравнениями и сложением: их операнды — выражения сложения, поэтому
+`1 << 2 + 1` — это `1 << 3`. От сильного к слабому: `+ -`, затем
+`<< >> >>>`, затем `< >`, затем `== ===`, затем
+`&`, `^`, `|` и только потом `&&` и `||`.
+
+```js
+const n = 4;
+console.log(n & 1 === 0, (n & 1) === 0);
+console.log(1 << 2 + 1, (1 << 2) + 1);
+console.log(1 | 2 ^ 3 & 4, ((1 | 2) ^ 3) & 4);
+console.log(6 & 3 > 1, 5 & 3 > 1);
+```
+
+<ResultBox>
+0 true\
+8 5\
+3 0\
+0 1
+</ResultBox>
+
+Первая строка — классическая ошибка проверки на чётность. `n & 1 === 0` читается как
+`n & (1 === 0)`, то есть `4 & false`, то есть 0 — ложь для любого `n`.
+Последняя строка ещё коварнее: `3 > 1` — `true`, то есть 1, и ответ зависит от последнего
+разряда левого числа. Правило простое: побитовое выражение рядом со сравнением — всегда в скобках.
+
+## 7. ~ и \~\~ {#not}
+
+Вычисление `~` ([13.5.6.1](https://tc39.es/ecma262/2026/#sec-bitwise-not-operator-runtime-semantics-evaluation)):
+ToNumeric операнда; число — в [Number::bitwiseNOT](https://tc39.es/ecma262/2026/#sec-numeric-types-number-bitwiseNOT),
+которая делает ToInt32 и переворачивает все 32 разряда; BigInt — в
+[BigInt::bitwiseNOT](https://tc39.es/ecma262/2026/#sec-numeric-types-bigint-bitwiseNOT), а там
+просто −x − 1. Для 32-битных чисел ответ тот же: перевернуть и прибавить 1 — это −x, значит, просто
+перевернуть — −x − 1.
+
+```js
+console.log(~9, ~-1, ~0, ~"5", ~"x", ~undefined, ~null, ~2.7);
+console.log(~~2.7, ~~-2.7, ~~"12.9", ~~NaN, ~~3e9);
+console.log(~0n, ~4294967295n, ~-1n);
+const words = ["kitap", "galam"];
+console.log(~words.indexOf("galam"), ~words.indexOf("depder"), words.includes("depder"));
+```
+
+<ResultBox>
+-10 0 -1 -6 -1 -1 -1 -3\
+2 -2 12 0 -1294967296\
+-1n -4294967296n 0n\
+-2 0 false
+</ResultBox>
+
+`~"x"`, `~undefined` и `~null` — все −1: ToInt32 сделал из них 0. Двойная
+тильда `~~x` — это ToInt32 и больше ничего: на маленьких числах похоже на `Math.trunc`, на
+3e9 — нет (раздел 12). BigInt не обрезается: `~4294967295n` — −4294967296n, не 0. Последняя
+строка — старая привычка: `indexOf` без находки даёт −1, а `~(-1)` — 0, единственный ложный
+ответ `~` у чисел. Так проверяли «есть ли в массиве» до `includes`; сегодня так не пишут, но в чужом
+коде встретите.
+
+## 8. Сдвиги \<\< и >> {#shifts}
+
+[Number::leftShift](https://tc39.es/ecma262/2026/#sec-numeric-types-number-leftShift) (6.1.6.1.9):
+левый операнд — ToInt32, правый — *ToUint32*, и от правого берётся остаток от деления на 32. Потом левое
+число сдвигается на столько разрядов влево, справа вдвигаются нули, а то, что вышло за 32 разряда, пропадает.
+[Number::signedRightShift](https://tc39.es/ecma262/2026/#sec-numeric-types-number-signedRightShift)
+(6.1.6.1.10) — то же вправо, но слева вдвигаются копии старшего разряда: знак сохраняется.
+
+```js
+console.log(9 << 2, 9 << 3, 1 << 30, 1 << 31, 1 << 32, 1 << 33, 1 << -1);
+console.log(-9 >> 2, Math.floor(-9 / 4), Math.trunc(-9 / 4), 9 >> 2, -1 >> 5);
+console.log(2 ** 30 << 1, 2 ** 30 * 2, 1.9 << 1, 5 << 1.9, "2" << "3");
+```
+
+<ResultBox>
+36 72 1073741824 -2147483648 1 2 -2147483648\
+-3 -3 -2 2 -1\
+-2147483648 2147483648 2 10 16
+</ResultBox>
+
+Сдвиг влево на *k* — умножение на 2<sup>*k*</sup>, пока единица не дошла до разряда 31:
+`1 << 31` уже отрицательное. Сдвиг на 32 — это сдвиг на 0 (32 по модулю 32), на 33 — на 1, а на
+−1 — ToUint32(−1) = 4294967295, по модулю 32 это 31. Сдвиг вправо на *k* — деление на
+2<sup>*k*</sup> с округлением *вниз*, как `Math.floor`, а не к нулю: −9 >> 2 — −3,
+а не −2. Дробь у счётчика сдвига тоже отбрасывается: `5 << 1.9` — сдвиг на 1.
+
+<Scheme src="scheme-shifts.svg">Сдвиги на 32 разрядах: пример −9 со страниц MDN</Scheme>
+
+## 9. >>> и приём >>> 0 {#unsigned}
+
+[Number::unsignedRightShift](https://tc39.es/ecma262/2026/#sec-numeric-types-number-unsignedRightShift)
+(6.1.6.1.11) отличается от `>>` двумя вещами: левый операнд переводит ToUint32, а не ToInt32, и
+слева вдвигает нули. Результат всегда неотрицательный — от 0 до 2<sup>32</sup> − 1. Отсюда приём
+`x >>> 0`: сдвиг на ноль разрядов не делает ничего, кроме ToUint32. Им и пользуется функция
+`bits` из раздела 2: −9 как беззнаковое — 4294967287, и его двоичная запись — ровно 32 разряда
+дополнительного кода.
+
+```js
+console.log(-9 >>> 2, 9 >>> 2, -1 >>> 0, -1 >>> 31);
+console.log((-9 >>> 0).toString(2), (-9).toString(2));
+console.log((-9 >>> 0).toString(16), 0xFFFFFFF7 | 0, 0xFFFFFFF7 >>> 0);
+```
+
+<ResultBox>
+1073741821 2 4294967295 1\
+11111111111111111111111111110111 -1001\
+fffffff7 -9 4294967287
+</ResultBox>
+
+Для положительных чисел `>>` и `>>>` совпадают (9 → 2), для отрицательных
+расходятся: −9 >>> 2 — большое положительное число, как на схеме. `-1 >>> 31` — 1: из 32
+единиц осталась одна. Последняя строка показывает, что одни и те же 32 разряда — это −9 для ToInt32 и
+4294967287 для ToUint32. Разряды одни, прочтения два.
+
+## 10. BigInt: биты без конца {#bigint}
+
+У BigInt нет 32 разрядов — у него их бесконечно много. [BigIntBitwiseOp](https://tc39.es/ecma262/2026/#sec-bigintbitwiseop)
+(6.1.6.2.17) идёт по разрядам обоих чисел, пока каждое не станет 0 или −1, то есть пока дальше не потянутся
+одни нули или одни единицы. Положительное число — бесконечные нули слева, отрицательное — бесконечные единицы
+(день 4). Поэтому `-1n & 0xFFn` — 255n: у −1 единицы везде, и `&` оставляет младший
+байт.
+
+```js
+console.log(14n & 9n, -1n & 0xFFn, -256n | 255n, 5n & -2n);
+console.log(1n << 64n, -9n >> 2n, 1n << -1n, -1n << -1n, -1n >> 100n, 9n >> -2n);
+```
+
+<ResultBox>
+8n 255n -1n 4n\
+18446744073709551616n -3n 0n -1n -1n 36n
+</ResultBox>
+
+[BigInt::leftShift](https://tc39.es/ecma262/2026/#sec-numeric-types-bigint-leftShift)
+(6.1.6.2.9) не берёт счётчик по модулю: `1n << 64n` — честные 2<sup>64</sup>. Отрицательный
+счётчик сдвигает в другую сторону с округлением вниз: ⌊1/2⌋ = 0, ⌊−1/2⌋ = −1. А
+`>>` у BigInt — это `<<` с минусом. Для `>>>` места не нашлось:
+«вдвинуть нули слева» нельзя, потому что левого края нет.
+[BigInt::unsignedRightShift](https://tc39.es/ecma262/2026/#sec-numeric-types-bigint-unsignedRightShift)
+(6.1.6.2.11) состоит из одного шага — бросить `TypeError`:
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() => 5n >>> 1n));
+console.log(attempt(() => 1n << 1));
+console.log(attempt(() => 1n << 2n ** 40n));
+let c = 5n;
+console.log(attempt(() => { c >>>= 2n; return c; }), c);
+```
+
+<ResultBox>
+TypeError: BigInts have no unsigned right shift, use >> instead\
+TypeError: Cannot mix BigInt and other types, use explicit conversions\
+RangeError: Maximum BigInt size exceeded\
+TypeError: BigInts have no unsigned right shift, use >> instead 5n
+</ResultBox>
+
+Смешивать BigInt и число нельзя: ApplyStringOrNumericBinaryOperator проверяет SameType. Сдвиг на
+2<sup>40</sup> разрядов спецификация разрешает, но у V8 свой предел размера BigInt — это реализация (день 1).
+Последняя строка — поправка к MDN: на странице
+[Unsigned
+right shift assignment](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift_assignment) в примере написано `c >>>= 2n; // 1n`. Это неверно: составное
+присваивание идёт тем же путём, что `>>>`, Chrome бросает ту же ошибку, и `c`
+остаётся 5n. Страница [Unsigned
+right shift](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift) пишет верно: «doesn't work with BigInts».
+
+## 11. Составные присваивания {#compound}
+
+У каждого из шести двуместных операторов есть составное присваивание: `&=`, `|=`,
+`^=`, `<<=`, `>>=`, `>>>=`. Страницы MDN говорят:
+`x <<= y` — это `x = x << y`, только `x` вычисляется один раз.
+В спецификации это видно по шагам [13.15.2](https://tc39.es/ecma262/2026/#sec-assignment-operators-runtime-semantics-evaluation):
+ссылка слева вычисляется один раз, из неё читается значение, вычисляется правая часть, по таблице выбирается
+оператор без «=», результат ApplyStringOrNumericBinaryOperator записывается PutValue в ту же ссылку (день 4).
+
+```js
+const o = { a: 5 };
+let calls = 0;
+const pick = () => { calls++; return "a"; };
+o[pick()] <<= 2;
+console.log(o.a, calls);
+o[pick()] = o[pick()] << 2;
+console.log(o.a, calls);
+let s = "3";
+s &= "6";
+let neg = -5;
+neg >>>= 2;
+console.log(s, typeof s, neg);
+```
+
+<ResultBox>
+20 1\
+80 3\
+2 number 1073741822
+</ResultBox>
+
+Составное присваивание позвало `pick` один раз, развёрнутая запись — два: с побочным эффектом
+разница настоящая. Строка «3» после `&=` стала числом 2: результат побитового оператора — всегда
+число или BigInt.
+
+## 12. x | 0 против Math.trunc {#trunc}
+
+Шесть страниц MDN дня, все, кроме `>>>` и `void`, предупреждают:
+`| 0`, `& -1`, `^ 0`, `~~`, `<< 0` и
+`>> 0` иногда пишут, чтобы отбросить дробь, а это не то же, что `Math.trunc`. Теперь мы знаем почему: это ToInt32, и он не только отбрасывает дробь, но и берёт остаток
+от деления на 2<sup>32</sup>. Практика дня — сравнить около 2<sup>31</sup>:
+
+```js
+const values = [2147483647.9, 2147483648, -2147483649, 3e9, 1e21, NaN, -Infinity];
+for (const v of values) console.log(v, v | 0, Math.trunc(v));
+```
+
+<ResultBox>
+2147483647.9 2147483647 2147483647\
+2147483648 -2147483648 2147483648\
+-2147483649 2147483647 -2147483649\
+3000000000 -1294967296 3000000000\
+1e+21 -559939584 1e+21\
+NaN 0 NaN\
+-Infinity 0 -Infinity
+</ResultBox>
+
+До 2147483647 включительно — одно и то же; на единицу дальше — разные знаки. NaN и бесконечности
+`| 0` молча превращает в 0, а `Math.trunc` оставляет как есть, и ошибка не прячется. Где
+граница встречается в жизни? Время в секундах от 1 января 1970 года влезает в 32 разряда недолго:
+
+```js
+const now = Date.UTC(2026, 9, 30) / 1000;              // секунды с 1970 года
+const edge = Date.UTC(2038, 0, 19, 3, 14, 8) / 1000;
+console.log(now, now | 0);
+console.log(edge - 1, (edge - 1) | 0, edge, edge | 0);
+console.log(new Date((edge - 1) * 1000).toISOString());
+```
+
+<ResultBox>
+1793318400 1793318400\
+2147483647 2147483647 2147483648 -2147483648\
+2038-01-19T03:14:07.000Z
+</ResultBox>
+
+19 января 2038 года в 03:14:08 по UTC секунды перестанут влезать в 31 разряд — это «проблема 2038 года»
+старых программ на C. `Date` хранит миллисекунды в 64-битной дроби и её не знает — пока кто-нибудь
+не напишет `| 0`. Вывод: `| 0` и `~~` — только для чисел, которые точно
+32-битные (индексы, коды символов, цвета). Для остальных — `Math.trunc`.
+
+## 13. Маски: права, чётность, цвет {#masks}
+
+Где побитовые операторы действительно нужны — там, где число — это набор флажков. Каждому флажку — свой
+разряд, `1 << k`. Права ученика в группе курса:
+
+```js
+const VIEW = 1 << 0, ANSWER = 1 << 1, EDIT = 1 << 2, SHARE = 1 << 3;
+const show = (r) => r.toString(2).padStart(4, "0");
+let rights = VIEW | ANSWER;
+console.log(show(rights), (rights & EDIT) !== 0, (rights & ANSWER) !== 0);
+rights |= EDIT;
+console.log(show(rights));
+rights &= ~ANSWER;
+console.log(show(rights));
+rights ^= SHARE;
+console.log(show(rights), (rights & (VIEW | EDIT)) === (VIEW | EDIT));
+console.log(1 << 30, 1 << 31, (1 << 31) >>> 0);
+```
+
+<ResultBox>
+0011 false true\
+0111\
+0101\
+1101 true\
+1073741824 -2147483648 2147483648
+</ResultBox>
+
+Четыре приёма: `|=` ставит флажок, `&= ~` снимает (маска со всеми единицами, кроме
+одной), `^=` переключает, `&` проверяет — в скобках, раздел 6. Проверка «есть оба» —
+сравнить пересечение с маской целиком. Флажков в числе 32, но 32-й, `1 << 31`, делает число
+отрицательным — его читают через `>>> 0`. Нужно больше флажков — BigInt.
+
+Чётность: `n & 1` — младший разряд. С `% 2` есть разница:
+
+```js
+const numbers = [4, 7, -3, -4, 2 ** 53 - 1, 2.5];
+console.log(numbers.map((n) => n % 2).join(" "));
+console.log(numbers.map((n) => n & 1).join(" "));
+```
+
+<ResultBox>
+0 1 -1 0 1 0.5\
+0 1 1 0 1 0
+</ResultBox>
+
+У −3 остаток −1, и проверка `n % 2 === 1` назовёт нечётное −3 чётным. `& 1` даёт 1:
+в дополнительном коде младший разряд нечётного — 1 при любом знаке, а остаток по модулю 2<sup>32</sup>
+чётность не меняет, поэтому проходит и 2<sup>53</sup> − 1. Зато 2.5 `& 1` молча называет чётным:
+дробь отброшена на шаге 3.
+
+И цвет организации Shapak-Apps — `#FF851B`. Шесть шестнадцатеричных цифр — три байта: красный,
+зелёный, синий. Достать их — сдвинуть нужный байт вниз и отрезать остальное маской `0xFF`:
+
+<Scheme src="scheme-masks.svg">Цвет #FF851B по байтам</Scheme>
+
+```js
+const color = 0xFF851B;
+const r = color >> 16, g = (color >> 8) & 0xFF, b = color & 0xFF;
+console.log(color, r, g, b, parseInt("FF851B", 16) === color);
+console.log(`#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0").toUpperCase()}`);
+const rgba = 0xFF851BCC;
+console.log(rgba | 0, rgba >> 24, (rgba >> 24) & 0xFF, rgba >>> 24, rgba & 0xFF);
+```
+
+<ResultBox>
+16745755 255 133 27 true\
+\#FF851B\
+-8053812 -1 255 255 204
+</ResultBox>
+
+У трёх байтов старший разряд — 23-й, до знака далеко, и голый `>> 16` работает. С четвёртым
+байтом число переходит за 2<sup>31</sup>, и голый `>> 24` даёт −1. Верхний байт достаёт
+`>>> 24` или та же маска, что у остальных: `(rgba >> 24) & 0xFF`. Частая
+ошибка разбора цветов и заголовков файлов: с тремя байтами работало, с четырьмя — минус.
+
+## 14. Оператор void {#void}
+
+[Раздел 13.5.2](https://tc39.es/ecma262/2026/#sec-void-operator) и его вычисление
+[13.5.2.1](https://tc39.es/ecma262/2026/#sec-void-operator-runtime-semantics-evaluation) — три шага:
+вычислить операнд, сделать `GetValue`, вернуть `undefined`. Примечание объясняет второй
+шаг: значение не нужно, но `GetValue` всё равно зовут — у него могут быть видимые последствия.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(void 0, void "kitap", void (2 === "2"), void 2 === "2");
+const card = { get word() { console.log("геттер"); return "kitap"; } };
+console.log(void card.word);
+console.log(attempt(() => void nope), typeof nope);
+(function () {
+  const undefined = 5;
+  console.log(undefined, void 0);
+})();
+```
+
+<ResultBox>
+undefined undefined undefined false\
+геттер\
+undefined\
+ReferenceError: nope is not defined undefined\
+5 undefined
+</ResultBox>
+
+`void 2 === "2"` — это `(void 2) === "2"`: унарный оператор связывает сильнее
+сравнения. Геттер вызвался — это и есть «видимые последствия» `GetValue`. Необъявленное имя:
+`typeof` перед `GetValue` проверяет, разрешилась ли ссылка, а `void` — нет, и
+GetValue бросает `ReferenceError` (день 4). И почему писали `void 0`:
+`undefined` — имя, а не слово языка (день 3), в функции его можно занять, а `void 0` —
+`undefined` всегда. Сжиматели кода так пишут до сих пор: это короче.
+
+Страница MDN [void](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/void)
+называет ещё три применения. Первое — немедленный вызов функции: `function` в начале инструкции —
+это объявление, и вызов после него — ошибка; любой унарный оператор делает из неё выражение, а
+`void` заодно говорит читателю «результат не нужен». Со стрелкой так нельзя — у неё свой приоритет:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("function () {}();"));
+console.log(parse("void function () {}();"));
+console.log(parse("void () => {}();"));
+void function () {
+  console.log("выполнилась сразу");
+}();
+```
+
+<ResultBox>
+SyntaxError: Function statements require a function name\
+ok\
+SyntaxError: Malformed arrow function parameter list\
+выполнилась сразу
+</ResultBox>
+
+Второе — ссылки `javascript:void(0)` в старой разметке: браузер, переходя по такой ссылке, заменяет
+страницу результатом кода, если он не `undefined`. Сегодня вместо таких ссылок вешают обработчики
+(Essentials, день 27). Третье применение живое — стрелка, которая не должна ничего возвращать:
+
+```js
+const log = [];
+const add = (word) => log.push(word);
+const addQuiet = (word) => void log.push(word);
+console.log(add("kitap"), addQuiet("galam"), log);
+const box = document.createElement("input");
+box.type = "checkbox";
+const check = () => false;          // проверка вдруг стала возвращать false
+box.onclick = () => check();
+box.click();
+console.log(box.checked);
+box.onclick = () => void check();
+box.click();
+console.log(box.checked);
+```
+
+<ResultBox>
+1 undefined (2) \['kitap', 'galam'\]\
+false\
+true
+</ResultBox>
+
+Стрелка без фигурных скобок возвращает значение выражения. Для обработчика в свойстве `onclick`
+возврат `false` — это отмена действия по умолчанию (как `preventDefault`, день 27
+Essentials): флажок не
+отметился. Функция `check` поменялась где-то в другом файле — и сломала флажок. С `void`
+стрелка возвращает `undefined` при любой `check`, и флажок отмечается.
+
+## 15. «Карточки 2.0»: шаг повторения {#cards}
+
+В «Карточках 2.0» каждое «Знаю» удваивает шаг повторения (день 34 курса 2):
+
+```js
+// deck.js, день 34 курса 2 — метод know
+  know(id, today) {
+    if (!this.#cards.has(id)) throw new CardsError(`в колоде нет карточки ${id}`);
+    const step = this.#progress.get(id)?.step ?? 1;
+    this.#progress.set(id, { next: today.add({ days: step * 2 }), step: step * 2 });
+  }
+```
+
+Шаг — всегда степень двойки: 1, 2, 4, 8… Соблазн — написать `step << 1`: «быстрее, по-взрослому».
+Проверим, где пути расходятся:
+
+```js
+let byTimes = 1;
+let byShift = 1;
+for (let i = 1; i <= 32; i++) {
+  byTimes *= 2;
+  byShift <<= 1;
+  if (i === 10 || i >= 30) console.log(i, byTimes, byShift);
+}
+```
+
+<ResultBox>
+10 1024 1024\
+30 1073741824 1073741824\
+31 2147483648 -2147483648\
+32 4294967296 0
+</ResultBox>
+
+Тридцать «Знаю» подряд — одинаково. На 31-м сдвиг даёт отрицательный шаг: повтор «в прошлом». На 32-м — ноль:
+карточка навсегда «на сегодня». До 2<sup>31</sup> дней (шесть миллионов лет) ни одна карточка не доживёт, но
+`<<` верен, только пока число гарантированно в 32 разрядах, а `* 2` — всегда. В
+«Карточках» остаётся `* 2`: он верен при любом шаге и читается проще.
+
+А вот где биты к месту — чтение: «уровень» карточки, то есть сколько раз её уже удвоили. Для степени двойки
+это номер единственного единичного разряда, и его даёт `Math.clz32` — сколько нулей перед ним:
+
+```js
+const level = (step) => 31 - Math.clz32(step);
+console.log([1, 2, 4, 8, 1024].map(level).join(" "), Math.log2(1024));
+console.log(level(2 ** 31), level(2 ** 32), level(3), level(6));
+```
+
+<ResultBox>
+0 1 2 3 10 10\
+31 -1 1 2
+</ResultBox>
+
+Для степеней двойки — как `Math.log2`, но без дробей: для 3 и 6 — номер старшего разряда, 1 и 2.
+Граница та же: 2<sup>32</sup> для ToUint32 — 0, уровень −1. Для звёздочек на кнопке колоды — с запасом.
+
+## 16. Что будет завтра {#next}
+
+Сегодня мы закончили с операциями над значениями. Завтра, на дне 7, — последний день модуля: операции над
+объектами и итераторами из глав 7.3 и 7.4 — `Get`, `Set`, `Call`,
+`Construct` и записи итераторов, то есть то, что стоит за каждой точкой, каждым вызовом и каждым
+`for...of`.
+
+<Ref>
+| Источник | Что там | Как разбираем |
+| --- | --- | --- |
+| [MDN: Bitwise AND (&)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_AND) | оба разряда — 1 | <Full /> |
+| [MDN: Bitwise OR (\|)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_OR) | хотя бы один — 1 | <Full /> |
+| [MDN: Bitwise XOR (^)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_XOR) | ровно один — 1 | <Full /> |
+| [MDN: Bitwise NOT (~)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_NOT) | −x − 1; `~~` — не `Math.trunc` | <Full /> |
+| [MDN: Left shift (\<\<)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Left_shift) | умножение на 2<sup>k</sup>, счётчик по модулю 32 | <Full /> |
+| [MDN: Right shift (>>)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Right_shift) | знак копируется | <Full /> |
+| [MDN: Unsigned right shift (>>>)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift) | нули слева; у BigInt нет | <Full /> |
+| [MDN: void](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/void) | `undefined`; немедленный вызов, стрелки | <Full /> |
+| [MDN: &=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_AND_assignment) | `x = x & y`, `x` вычисляется один раз | <Brief /> |
+| [MDN: \|=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_OR_assignment) | поставить флажок | <Brief /> |
+| [MDN: ^=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_XOR_assignment) | переключить флажок | <Brief /> |
+| [MDN: \<\<=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Left_shift_assignment) | сдвиг на месте | <Brief /> |
+| [MDN: >>=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Right_shift_assignment) | сдвиг на месте со знаком | <Brief /> |
+| [MDN: >>>=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unsigned_right_shift_assignment) | с BigInt — `TypeError` (пример страницы неверен) | <Brief /> |
+| [7.1.6 ToInt32](https://tc39.es/ecma262/2026/#sec-toint32) | пять шагов, итог от −2<sup>31</sup> до 2<sup>31</sup> − 1 | <Full /> |
+| [7.1.7 ToUint32](https://tc39.es/ecma262/2026/#sec-touint32) | без шага 5, от 0 до 2<sup>32</sup> − 1 | <Full /> |
+| [7.1.8 ToInt16](https://tc39.es/ecma262/2026/#sec-toint16) | 16 разрядов со знаком | <Brief /> |
+| [7.1.9 ToUint16](https://tc39.es/ecma262/2026/#sec-touint16) | 16 без знака; `fromCharCode` | <Brief /> |
+| [7.1.10 ToInt8](https://tc39.es/ecma262/2026/#sec-toint8) | 8 разрядов со знаком | <Brief /> |
+| [7.1.11 ToUint8](https://tc39.es/ecma262/2026/#sec-touint8) | 8 без знака | <Brief /> |
+| [7.1.12 ToUint8Clamp](https://tc39.es/ecma262/2026/#sec-touint8clamp) | зажим 0…255, округление к чётному | <Brief /> |
+| [7.1.15 ToBigInt64](https://tc39.es/ecma262/2026/#sec-tobigint64) | 64 разряда BigInt со знаком | <Brief /> |
+| [7.1.16 ToBigUint64](https://tc39.es/ecma262/2026/#sec-tobiguint64) | 64 без знака | <Brief /> |
+| [13.5.2 The void Operator](https://tc39.es/ecma262/2026/#sec-void-operator) | вычислить, GetValue, `undefined` | <Brief /> |
+| [13.5.6 Bitwise NOT Operator](https://tc39.es/ecma262/2026/#sec-bitwise-not-operator) | ToNumeric, потом bitwiseNOT | <Brief /> |
+| [13.9 Bitwise Shift Operators](https://tc39.es/ecma262/2026/#sec-bitwise-shift-operators) | грамматика: сдвиг слабее сложения | <Full /> |
+| [13.9.1 Left Shift](https://tc39.es/ecma262/2026/#sec-left-shift-operator) | через ApplyStringOrNumericBinaryOperator | <Brief /> |
+| [13.9.2 Signed Right Shift](https://tc39.es/ecma262/2026/#sec-signed-right-shift-operator) | то же, знак копируется | <Brief /> |
+| [13.9.3 Unsigned Right Shift](https://tc39.es/ecma262/2026/#sec-unsigned-right-shift-operator) | то же, нули слева | <Brief /> |
+| [13.12 Binary Bitwise Operators](https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators) | грамматика: `&` слабее `===` | <Full /> |
+| [13.12.1 Evaluation](https://tc39.es/ecma262/2026/#sec-binary-bitwise-operators-runtime-semantics-evaluation) | все три — EvaluateStringOrNumericBinaryExpression | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// & | ^ ~ << >> >>>: ToNumeric; два BigInt — без обрезки, BigInt с числом — TypeError
+// ToInt32: ToNumber; NaN ±Infinity ±0 → 0; дробь прочь; modulo 2**32 (≥ 0); ≥ 2**31 → минус 2**32
+// ToUint32 — без последнего шага: x >>> 0; −9 → 4294967287; ~x = −x − 1, разряд 31 весит −2**31
+// x << k: счётчик ToUint32 % 32 (1 << 32 = 1); 1 << 31 — уже минус
+// x >> k: деление на 2**k вниз (−9 >> 2 = −3); x >>> k: нули слева, всегда ≥ 0
+// BigInt: 1n << 64n честно, отрицательный счётчик — в другую сторону; 5n >>> 1n — TypeError
+// приоритет: + − сильнее <<; == === сильнее & ^ |: n & 1 === 0 — это n & false
+// x | 0 и ~~x — ToInt32, а не Math.trunc: 3e9 | 0 = −1294967296, NaN | 0 = 0
+
+// флажки: r |= F ставит, r &= ~F снимает, r ^= F переключает, (r & F) !== 0 проверяет
+// чётность: n & 1 (−3 → 1), а не n % 2 (−3 → −1)
+// байты: (c >> 16) & 0xFF; верхний байт 32-битного — c >>> 24
+// void x: вычислить x, GetValue (геттер сработает, необъявленное — ReferenceError), вернуть undefined
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `3e9 | 0` — отрицательное число?
+   <Answer>`|` переводит операнды ToInt32. 3000000000 — целое и меньше 2<sup>32</sup>, остаток по
+   модулю 2<sup>32</sup> — оно само, но это больше 2<sup>31</sup>, и шаг 5 вычитает 2<sup>32</sup>:
+   −1294967296.</Answer>
+2. Чем `-9 >> 2` отличается от `-9 >>> 2`?
+   <Answer>`>>` переводит −9 ToInt32 и вдвигает слева копии знакового разряда — −3, как
+   ⌊−9/4⌋. `>>>` переводит ToUint32 и вдвигает нули — 1073741821.</Answer>
+3. Почему проверка `if (n & 1 === 0)` никогда не срабатывает?
+   <Answer>По грамматике 13.12 операнд `&` — выражение равенства, поэтому сначала
+   `1 === 0`, то есть `false`, а `n & false` — 0. Нужны скобки:
+   `(n & 1) === 0`.</Answer>
+4. Что даёт `1 << 32` и что — `1n << 32n`?
+   <Answer>1: у чисел счётчик сдвига берётся по модулю 32, и сдвиг на 32 — сдвиг на 0. У BigInt модуля нет,
+   ответ — 4294967296n.</Answer>
+5. Зачем `void` вычисляет операнд, если всё равно возвращает `undefined`?
+   <Answer>Вычисление и `GetValue` могут иметь видимые последствия: сработает геттер, вызовется
+   функция, а необъявленное имя бросит `ReferenceError`. Спецификация обязывает выполнить их,
+   отбрасывается только значение.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Bitwise_AND)
+(страницы побитовых операторов, сдвигов, их присваиваний и `void`, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

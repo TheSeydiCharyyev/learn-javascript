@@ -1,0 +1,232 @@
+---
+title: День 18 — задания
+---
+
+# День 18. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-18` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага. Двоичные данные, WeakRef и FinalizationRegistry не трогаем — они на днях 20–24.</Subtitle>
+
+## Разминка
+
+<Task title="1. length, name и new" level="easy" time="7">
+<Goal>применять правила главы 18 к незнакомым функциям.</Goal>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const fs = [Array.prototype.slice, Array.prototype.fill, Object.defineProperty, String.prototype.split, Promise.prototype.then, Array.of, Set];
+console.log(fs.map((f) => `${f.name}:${f.length}`).join(" "));
+console.log(run(() => new Array.of()), run(() => new Set()), run(() => Set()), "prototype" in Array.of, Object.getOwnPropertyDescriptor(Set.prototype, "size").get.name, Set.prototype[Symbol.iterator] === Set.prototype.values);
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждой длины назван заголовок раздела спецификации и правило, по которому она получилась;
+- объяснено, почему `Set()` бросает, а `Date()` (лекция, раздел 5) — нет.
+</Criteria>
+</Task>
+
+<Task title="2. Что попадёт в globalThis" level="easy" time="7">
+<Goal>различать объявления, которые становятся свойствами глобального объекта.</Goal>
+
+```js
+var a = 1;
+let b = 2;
+function c() {}
+class D {}
+globalThis.e = 5;
+const f = (k) => { const d = Object.getOwnPropertyDescriptor(globalThis, k); return d ? (d.writable ? "w" : "-") + (d.enumerable ? "e" : "-") + (d.configurable ? "c" : "-") : "нет"; };
+console.log(["a", "b", "c", "D", "e", "undefined", "parseInt"].map(f).join(" "));
+console.log(delete globalThis.a, delete globalThis.e, typeof e, a);
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого имени назван путь: CreateGlobalVarBinding, CreateGlobalFunctionBinding, декларативная запись,
+  обычное присваивание или раздел 19.1–19.2;
+- объяснено, почему `a` не удаляется, а `e` — удаляется.
+</Criteria>
+</Task>
+
+<Task title="3. parseInt по шагам" level="easy" time="6">
+<Goal>проходить 19.2.5 на краевых входах.</Goal>
+
+```js
+console.log(["0x", "0x1g", "-", " - 5", "1_0", "٣", "Ⅻ", "12e3"].map((s) => parseInt(s)).join(" "));
+console.log(parseInt("ff", 16), parseInt("0xff", 16), parseInt("0xff", 15), parseInt("ff", "16"), parseInt("ff", 16.9), parseInt("ff", 2 ** 32 + 16));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого NaN назван шаг 19.2.5, который его дал;
+- объяснено, почему «٣» (арабско-индийская тройка) — не цифра для `parseInt` и почему основания
+  «16», 16.9 и 2<sup>32</sup> + 16 дают одно и то же.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Свой parseInt" level="medium" time="14">
+<Goal>перенести 19.2.5 в код.</Goal>
+
+Напишите `myParseInt(string, radix)` по шагам 19.2.5 без `parseInt`,
+`parseFloat` и `Number`: ToString — через `"".concat(string)`, TrimString —
+`trimStart`, ToInt32 — `radix | 0` (день 6); цифры — только ASCII, буквы без учёта
+регистра.
+
+<Example>
+```js
+myParseInt("  -0x1F");                                                    // -31
+myParseInt("0x1F", 10);                                                    // 0
+Object.is(myParseInt("-0"), -0);                                           // true
+[myParseInt("z", 36), myParseInt(null, 36), myParseInt(0.0000005)];       // [35, 1112745, 5]
+myParseInt("11", 37);                                                      // NaN
+[1, 2, 3].map(myParseInt);                                                 // [1, NaN, NaN]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на двадцати входах (с пробелами, знаками, «0x», буквами, «Infinity», неразрывным пробелом и BOM) и
+  пятнадцати основаниях (undefined, 0, 1, 2, 16, 37, NaN, «16», 16.9, 2<sup>32</sup> + 2…) модель
+  совпадает с `parseInt` через `Object.is`;
+- объяснено, почему ToString — `"".concat(x)`, а не `String(x)`: что каждый из них
+  сделает с символом и что сделает `parseInt(Symbol())`.
+</Criteria>
+</Task>
+
+<Task title="5. Свой encodeURIComponent" level="medium" time="12">
+<Goal>перенести Encode (19.2.6.5) в код вместе с UTF-8.</Goal>
+
+Напишите `myEncodeURIComponent(s, extra = "")`: знаки из «буквы, цифры, `_-.!~*'()`» и
+из `extra` — как есть; иначе кодовая точка (`codePointAt`), одинокая половинка — URIError,
+остальное — байты UTF-8, собранные сдвигами и масками (день 6), каждый — `%XX` заглавными.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+myEncodeURIComponent("a b_ü");                                             // "a%20b_%C3%BC"
+myEncodeURIComponent("€");                                                 // "%E2%82%AC"
+myEncodeURIComponent("😀");                                                // "%F0%9F%98%80"
+[run(() => myEncodeURIComponent("\uDC00x")), run(() => myEncodeURIComponent("x\uD800"))];   // ["URIError", "URIError"]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на всех кодовых точках от 0 до U+07FF и на образцах с эмодзи, U+FFFF и U+10FFFF модель совпадает с
+  `encodeURIComponent`, а с `extra = ";/?:@&=+$,#"` — с
+  `encodeURI`;
+- объяснено, сколько байт UTF-8 даёт кодовая точка в каждом из четырёх диапазонов и почему эмодзи надо
+  пропускать на две кодовые единицы.
+</Criteria>
+</Task>
+
+<Task title="6. Функция как встроенная" level="medium" time="10">
+<Goal>собрать свою функцию по правилам главы 18.</Goal>
+
+Напишите `builtinLike(name, length, fn)`: функция с именем `name`, длиной
+`length`, без \[\[Construct\]\] и без `prototype`, которая вызывает `fn` со всеми
+аргументами. Подсказка: короткий метод объекта с вычисляемым ключом.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const clamp = builtinLike("clamp", 3, (x, lo, hi) => Math.min(Math.max(x, lo), hi));
+const flags = (f, k) => { const d = Object.getOwnPropertyDescriptor(f, k); return [d.writable, d.enumerable, d.configurable].join(); };
+[clamp(15, 1, 10), clamp(5, 1, 10, "лишний"), clamp.name, clamp.length];   // [10, 5, "clamp", 3]
+["prototype" in clamp, run(() => new clamp(1, 2, 3))];                     // [false, "TypeError"]
+[flags(clamp, "length"), flags(clamp, "name")];                            // ["false,false,true", "false,false,true"]
+Object.getPrototypeOf(clamp) === Function.prototype;                       // true
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- атрибуты `length` и `name` совпадают с `Math.max`; объяснено, почему
+  `defineProperty` только со `value` не тронул остальные атрибуты;
+- найдено отличие, которое правила главы 18 не видят: `Math.max.toString()` и
+  `clamp.toString()` — объяснено по разделу 20.2.3.5.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: ссылка на колоду" level="medium" time="14">
+<Goal>передать настройки через адрес и разобрать их без доверия к входу.</Goal>
+
+Напишите `makeShareLink({ deck, perDay, sound })` → строка «?deck=…&perDay=…&sound=1|0» и
+`parseShareLink(query)` → `{ settings, errors }`. Значения по умолчанию — «», 20, true;
+плюс — пробел; `perDay` — от одной до трёх десятичных цифр со значением 1–100; `sound` —
+«1» или «0»; неизвестные ключи пропускать; сломанное или неверное значение — ключ в `errors`.
+
+<Example>
+```js
+const link = makeShareLink({ deck: "kitap & galam + ü", perDay: 15, sound: false });
+link;                                                                      // "?deck=kitap%20%26%20galam%20%2B%20%C3%BC&perDay=15&sound=0"
+JSON.stringify(parseShareLink(link));                                      // '{"settings":{"deck":"kitap & galam + ü","perDay":15,"sound":false},"errors":[]}'
+JSON.stringify(parseShareLink("?perDay=0x10&sound=yes&deck=%E0%A4%A&x=1"));    // '{"settings":{"deck":"","perDay":20,"sound":true},"errors":["perDay","sound","deck"]}'
+parseShareLink("?deck=a+b").settings.deck;                                 // "a b"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- колоды с именами «a & b», «x=y», «1+1», «100%», «ü», «😀 deck» и пустым проходят туда и обратно без
+  изменений;
+- имя с одинокой половинкой пары роняет `makeShareLink` — объяснено по Encode и исправлено
+  через `toWellFormed` (курс 2, день 20).
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свой decodeURIComponent" level="hard" time="12">
+<Goal>перенести Decode (19.2.6.6) в код со всеми проверками UTF-8.</Goal>
+
+Напишите `myDecodeURIComponent(s)`: «%» с двумя шестнадцатеричными цифрами — байт; число ведущих
+единиц решает, сколько байт у кодовой точки (1 или больше 4 — URIError); продолжения — вида 10xxxxxx; лишне длинная
+запись, половинки пар и всё выше U+10FFFF — URIError.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+myDecodeURIComponent("kitap%20%26%20%C3%BC");                              // "kitap & ü"
+myDecodeURIComponent("%F0%9F%98%80");                                      // "😀"
+myDecodeURIComponent("%c3%bc");                                            // "ü"
+[run(() => myDecodeURIComponent("%C0%80")), run(() => myDecodeURIComponent("%ED%A0%80")), run(() => myDecodeURIComponent("%E2%82"))];   // ["URIError", "URIError", "URIError"]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на всех 256 строках «%XX» и на образцах (обрыв, «%zz», F4 90 80 80, F0 80 80 80, ED 9F BF, BOM EF BB BF)
+  модель совпадает с `decodeURIComponent` — и строкой, и URIError;
+- объяснено, какой шаг Decode отвечает за каждую из трёх ошибок примера и что о C0 80 говорит
+  примечание.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: parseFloat" level="hard" time="8">
+<Goal>прочитать раздел, который на лекции был одной строкой, вместе с его грамматикой.</Goal>
+
+Прочитайте [19.2.4 parseFloat](https://tc39.es/ecma262/2026/#sec-parsefloat-string) и грамматику
+StrDecimalLiteral в [7.1.4.1](https://tc39.es/ecma262/2026/#sec-tonumber-applied-to-the-string-type) и
+предскажите строку.
+
+```js
+console.log(["  .5e-3x", "-.e1", "+Infinityx", "infinity", "1.2.3", "0b1", "1e", "1e+", "–5", " 1"].map((s) => parseFloat(s)).join(" "));
+```
+
+<Criteria>
+- предсказана строка;
+- для каждого значения назван самый длинный префикс, подходящий под StrDecimalLiteral;
+- объяснено, почему «1e» даёт 1, а не NaN, почему «–5» (тире) — NaN и почему « 1» читается.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent)
+(encodeURIComponent(), globalThis, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

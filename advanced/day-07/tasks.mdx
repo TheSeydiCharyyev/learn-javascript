@@ -1,0 +1,267 @@
+---
+title: День 7 — задания
+---
+
+# День 7. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-07` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага. `Reflect` не берём — это день 17.</Subtitle>
+
+## Разминка
+
+<Task title="1. Запись или определение" level="easy" time="7">
+<Goal>различать Set и CreateDataProperty по поведению.</Goal>
+
+У прототипа есть сеттер `word` и свойство `id` только для чтения. Пять способов дать
+объекту свойство — предскажите две строки.
+
+```js
+const log = [];
+const proto = { set word(v) { log.push("set " + v); } };
+Object.defineProperty(proto, "id", { value: 0, writable: false });
+const make = () => Object.create(proto);
+const a = make(); a.word = "kitap";
+const b = Object.assign(make(), { word: "alma" });
+const c = { ...{ word: "galam" } };
+const d = make(); d.id = 5;
+const e = Object.defineProperty(make(), "id", { value: 7 });
+console.log(Object.hasOwn(a, "word"), Object.hasOwn(b, "word"), Object.hasOwn(c, "word"), d.id, e.id, log.join(" | "));
+try { Object.assign(make(), { id: 9 }); } catch (err) { console.log(err.name); }
+```
+
+<Criteria>
+- предсказаны обе строки;
+- для каждого из пяти способов названа операция (Set или определение) и что сделал прототип;
+- объяснено, почему `d.id = 5` молчит, а `Object.assign` бросает: где флажок Throw.
+</Criteria>
+</Task>
+
+<Task title="2. Кто вызван и в каком порядке" level="easy" time="7">
+<Goal>проходить `Object.assign` (20.1.2.1) и CopyDataProperties (7.3.25) по шагам.</Goal>
+
+Предскажите две строки: ключи результата по порядку и журнал вызовов.
+
+```js
+const log = [];
+const src = { b: 1, get a() { log.push("get a"); return 2; }, 10: "x", 2: "y" };
+const target = { set a(v) { log.push("set a " + v); } };
+Object.assign(target, src, null, "hi");
+console.log(Object.keys(target).join(), log.join(" | "));
+log.length = 0;
+const copy = { ...src, a: 0 };
+console.log(Object.keys(copy).join(), copy.a, log.join(" | "));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- порядок ключей объяснён по `[[OwnPropertyKeys]]` (день 4);
+- объяснено, куда делись `null` и что дала строка `"hi"`.
+</Criteria>
+</Task>
+
+<Task title="3. Шаги итератора" level="easy" time="6">
+<Goal>предсказывать вызовы `next` и `return`.</Goal>
+
+```js
+const log = [];
+const make = (n) => ({
+  [Symbol.iterator]() {
+    let i = 0;
+    log.push("iter");
+    return {
+      next() { i++; log.push("next"); return { value: i, done: i > n }; },
+      return() { log.push("return"); return {}; },
+    };
+  },
+});
+for (const x of make(2)) log.push("body " + x);
+console.log(log.join(" "));
+log.length = 0;
+for (const x of make(5)) { if (x === 2) break; }
+console.log(log.join(" "));
+log.length = 0;
+const [p, q] = make(5);
+console.log(p, q, log.join(" "));
+log.length = 0;
+const [r, ...rest] = make(2);
+console.log(r, rest.join(), log.join(" "));
+```
+
+<Criteria>
+- предсказаны четыре строки целиком;
+- для каждой отмечено, закончился итератор сам или его закрыли;
+- объяснено, почему `[p, q]` зовёт `return`, а `[r, ...rest]` — нет.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Свой CopyDataProperties" level="medium" time="12">
+<Goal>перенести 7.3.25 в код.</Goal>
+
+Напишите `copyData(target, source, excluded = [])` по шагам 7.3.25 и верните `target`.
+Ключи — `Object.getOwnPropertyNames` и `getOwnPropertySymbols`, свойство —
+`Object.defineProperty` с атрибутами CreateDataProperty.
+
+<Example>
+```js
+const src = { b: 1, 2: "two", get g() { return "getter"; }, [Symbol.for("s")]: true };
+Object.defineProperty(src, "hidden", { value: 1, enumerable: false });
+const rest = copyData({}, src, ["b"]);
+Object.keys(rest);                 // ["2", "g"]
+rest.g;                            // "getter"
+rest[Symbol.for("s")];             // true
+Object.keys(copyData({}, "ab"));   // ["0", "1"]
+copyData({}, null);                // {}
+```
+</Example>
+
+<Criteria>
+- все пять строк примера дают то, что в комментариях;
+- ключи совпадают с `const { b, ...real } = src`;
+- на получателе с сеттером `g` показано: после `copyData` у него свойство-значение,
+  а `Object.assign` позвал бы сеттер.
+</Criteria>
+</Task>
+
+<Task title="5. Свой GroupBy" level="medium" time="12">
+<Goal>перенести 7.3.34–7.3.35 и обе обёртки в код.</Goal>
+
+Напишите `groupBy(items, callback, keyCoercion)` по шагам 7.3.35 — список групп
+`{ key, elements }`; ключ `"property"` — ToPropertyKey, `"collection"` — −0 в +0;
+группа — по `Object.is`. Над ней — `groupObject` и `groupMap`. Перебор через
+`for...of` сам закроет итератор, если колбэк бросит.
+
+<Example>
+```js
+const words = ["kitap", "alma", "galam", "at"];
+JSON.stringify(groupObject(words, (w) => w.length));   // '{"2":["at"],"4":["alma"],"5":["kitap","galam"]}'
+Object.getPrototypeOf(groupObject([], (x) => x));     // null
+groupMap([1, "1", -0, 0], (x) => x).size;             // 3
+groupMap([-0], (x) => x).has(0);                      // true
+```
+</Example>
+
+<Criteria>
+- все четыре строки примера дают то, что в комментариях;
+- `groupObject(null, f)` и `groupObject([], 5)` бросают `TypeError` до
+  перебора — как `Object.groupBy`;
+- объяснено, почему в JSON ключи идут 2, 4, 5, хотя группы появились в порядке 5, 4, 2.
+</Criteria>
+</Task>
+
+<Task title="6. «Карточки 2.0»: настройки из localStorage" level="medium" time="14">
+<Goal>сливать сохранённые данные с настройками по умолчанию без чужих ключей.</Goal>
+
+Добавим в «Карточки 2.0» настройки — тему и число карточек в день. Они лежат в `localStorage`
+строкой JSON, испортить которую мог кто угодно. Напишите `mergeSettings(defaults, text)`: новый объект,
+где ключи `defaults` взяты из сохранённого, если они там есть; испорченный JSON или не объект — просто
+`defaults`; ни лишних ключей, ни смены прототипа.
+
+<Example>
+```js
+const defaults = { theme: "light", perDay: 20 };
+mergeSettings(defaults, '{"perDay": 30}');                         // { theme: "light", perDay: 30 }
+mergeSettings(defaults, '{"__proto__": {"admin": true}}').admin;   // undefined
+Object.getPrototypeOf(mergeSettings(defaults, '{"__proto__": {}}')) === Object.prototype;   // true
+mergeSettings(defaults, "не JSON");                                // { theme: "light", perDay: 20 }
+mergeSettings(defaults, "null");                                   // { theme: "light", perDay: 20 }
+mergeSettings(defaults, '{"perDay": 30, "extra": 1}').extra;       // undefined
+```
+</Example>
+
+<Criteria>
+- все шесть строк примера дают то, что в комментариях;
+- показано, на каких строках ошибается `Object.assign({}, defaults, JSON.parse(text))`, и
+  названа операция, которая виновата;
+- `defaults` после всех вызовов не изменился.
+</Criteria>
+</Task>
+
+<Task title="7. freeze по шагам" level="medium" time="12">
+<Goal>проходить SetIntegrityLevel (7.3.15) и TestIntegrityLevel (7.3.16).</Goal>
+
+Предскажите две строки. Для каждого ответа найдите шаг, который его дал.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+const log = [];
+const o = Object.freeze({ items: [1], set note(v) { log.push(v); } });
+o.items.push(2);
+o.note = "x";
+o.extra = 1;
+console.log(o.items.length, log.join(), "extra" in o, Object.isFrozen(o), Object.isFrozen(o.items));
+console.log(attempt(() => Object.defineProperty(o, "items", { value: [] })), attempt(() => { "use strict"; o.extra = 1; }), Object.isFrozen("kitap"), Object.isFrozen(Object.seal([])), Object.isSealed(Object.freeze([])));
+```
+
+<Criteria>
+- предсказаны десять значений;
+- объяснено, почему заморозка «мелкая» и почему сеттер `note` сработал;
+- для `Object.seal([])` найдено свойство, которое мешает «заморозке», для строки — шаг
+  20.1.2.17.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свой for...of" level="hard" time="10">
+<Goal>собрать перебор из GetIterator (7.4.4), шагов 14.7.5.7 и IteratorClose (7.4.11).</Goal>
+
+Напишите `forOf(iterable, body)` без `for...of`, spread и деструктуризации;
+`body`, вернув `"break"`, останавливает перебор. `next` читается один раз,
+результат проверяется на «объект», `done` — ToBoolean.
+
+<Example>
+```js
+const log = [];
+forOf([1, 2, 3], (x) => { log.push(x); if (x === 2) return "break"; });
+const closing = { [Symbol.iterator]() { let i = 0; return { next: () => ({ value: ++i, done: i > 3 }), return: () => { log.push("return"); return {}; } }; } };
+forOf(closing, (x) => { log.push(x); if (x === 2) return "break"; });
+forOf(closing, (x) => { log.push(x); });
+log.join();   // "1,2,1,2,return,1,2,3"
+```
+</Example>
+
+<Criteria>
+- строка примера даёт то, что в комментарии;
+- ошибки как у `for...of`: `forOf(5, f)` — `TypeError`; ошибка
+  `body` важнее ошибки `return`; `return`, вернувший 5, после
+  `"break"` — `TypeError`;
+- объяснено, почему при естественном конце `return` не зовут.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: сеттер 7.3.37" level="hard" time="10">
+<Goal>прочитать операцию, которая на лекции была строкой справочника.</Goal>
+
+`constructor` и `Symbol.toStringTag` у `Iterator.prototype` (день 13 курса 2)
+— аксессоры с сеттером [7.3.37
+SetterThatIgnoresPrototypeProperties](https://tc39.es/ecma262/2026/#sec-SetterThatIgnoresPrototypeProperties). Прочитайте четыре шага и предскажите пять строк.
+
+```js
+const attempt = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const it = [1, 2].values();
+const plain = Object.create(Iterator.prototype);
+const desc = Object.getOwnPropertyDescriptor(Iterator.prototype, "constructor");
+console.log(typeof desc.get, typeof desc.set, "value" in desc);
+console.log(attempt(() => { Iterator.prototype.constructor = 5; }), attempt(() => { it.constructor = 5; }), Object.hasOwn(it, "constructor"), it.constructor);
+console.log(attempt(() => { plain[Symbol.toStringTag] = "Моё"; }), String(plain), String([3].values()));
+console.log(attempt(() => desc.set.call(7, 1)), attempt(() => desc.set.call(Iterator.prototype, 1)));
+const fixed = Object.defineProperty(Object.create(Iterator.prototype), "constructor", { value: 1, writable: false, configurable: true });
+console.log(attempt(() => desc.set.call(fixed, 2)), fixed.constructor);
+```
+
+<Criteria>
+- предсказаны пять строк, у каждого ответа — номер шага 7.3.37;
+- по примечанию к шагу 2 объяснено, почему присваивание `Iterator.prototype.constructor = 5`
+  бросает даже в нестрогом скрипте;
+- объяснено, почему `fixed.constructor = 2` до этого сеттера не дошло бы.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols)
+(Iteration protocols, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

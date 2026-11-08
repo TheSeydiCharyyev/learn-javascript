@@ -1,0 +1,929 @@
+---
+title: День 13 — Скрипты и модули изнутри, eval
+day: День 13 • урок 1
+heading: Скрипты и модули изнутри, eval
+lead: Курс 3, Advanced. Модуль «Выполнение кода» — последний день. 45 минут.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+---
+
+<Goals>
+- проходить ScriptEvaluation и GlobalDeclarationInstantiation и объяснять ошибки между скриптами;
+- читать связывание и выполнение графа модулей: InitializeEnvironment, ResolveExport, InnerModuleEvaluation;
+- отличать прямой `eval` от косвенного и предсказывать, куда попадут его имена;
+- заменять `eval` подходящим средством.
+</Goals>
+
+<Toc />
+
+## 1. Глава 16: скрипт и модуль {#chapter}
+
+[Глава 16](https://tc39.es/ecma262/2026/#sec-ecmascript-language-scripts-and-modules) — два вида
+исходного текста. Чем разобрать текст, решает хозяин: целью Script (тег `<script>`, строка
+`eval`) или Module (`type="module"`, `import()`). Дальше пути расходятся:
+
+| Что | Скрипт (16.1) | Модуль (16.2) |
+| --- | --- | --- |
+| запись | Script Record | Source Text Module Record |
+| строгий режим | только с директивой (ScriptIsStrict) | всегда |
+| имена верхнего уровня | в глобальную запись — GlobalDeclarationInstantiation | в свою запись модуля — InitializeEnvironment |
+| когда создаются | перед своим выполнением | при связывании всего графа |
+| выполнение | ScriptEvaluation, сразу | Evaluate: сначала зависимости |
+| `this` наверху | глобальный объект | `undefined` — GetThisBinding записи модуля |
+| `await` наверху | SyntaxError | можно: модуль станет асинхронным |
+
+Как это выглядит снаружи, мы видели на дне 30 курса 2. Сегодня — шаги алгоритмов, которые к этому приводят.
+Последняя часть дня — `eval`: строка, которую код сам отдаёт разбору как скрипт.
+
+## 2. Разбор скрипта и ранние ошибки {#parse}
+
+[16.1](https://tc39.es/ecma262/2026/#sec-scripts): скрипт — список инструкций, где
+`return` запрещён, а `yield` и `await` — не операторы.
+[ParseScript](https://tc39.es/ecma262/2026/#sec-parse-script) (16.1.5) разбирает текст. Ошибки —
+вернуть их список, и скрипт не выполнится ни на строку. Нет ошибок — вернуть
+[Script Record](https://tc39.es/ecma262/2026/#sec-script-records) (16.1.4, таблица 34): реалм (день 9),
+дерево разбора, загруженные модули (для `import()` из скрипта) и поле хозяина.
+
+Ранние ошибки [16.1.1](https://tc39.es/ecma262/2026/#sec-scripts-static-semantics-early-errors): повтор
+лексического имени, лексическое имя совпало с именем `var`, `super` и `new.target`
+вне прямого `eval`, повтор меток, `break` и `continue` без цели,
+`#имя` вне класса.
+[ScriptIsStrict](https://tc39.es/ecma262/2026/#sec-scriptisstrict) (16.1.2) ищет
+`"use strict"` в начале (день 3 курса 2).
+
+```html
+<!-- index.html -->
+<script>console.log("один"); let a = 1;</script>
+<script>console.log("два"); let b = 1; let b = 2;</script>
+<script>console.log("три", typeof b, a);</script>
+```
+
+<ResultBox>
+один\
+Uncaught SyntaxError: Identifier 'b' has already been declared\
+три undefined 1
+</ResultBox>
+
+«Два» не напечатано: ошибка найдена до первой строки. Примечание к 16.1.5 разрешает искать ошибки и раньше,
+но сообщать — только когда до этого скрипта дошла очередь. Ошибка при выполнении — другое: скрипт встаёт на ней,
+а строки до неё уже выполнены. Соседние скрипты от этого не зависят.
+
+## 3. ScriptEvaluation {#scripteval}
+
+[ScriptEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-scriptevaluation) (16.1.6)
+выполняет Script Record:
+
+1. новый контекст выполнения (день 9): Function — null, Realm и ScriptOrModule — из записи, оба окружения —
+   глобальная запись реалма;
+2. контекст — на вершину стека;
+3. GlobalDeclarationInstantiation (16.1.7) создаёт имена скрипта; бросила — текст не выполняется;
+4. Evaluation текста; пустое значение завершения становится `undefined` (у пустого скрипта — сразу,
+   [16.1.3](https://tc39.es/ecma262/2026/#sec-script-semantics-runtime-semantics-evaluation));
+5. контекст снимается, результат уходит хозяину.
+
+ScriptOrModule нужен `import()`: [HostLoadImportedModule](https://tc39.es/ecma262/2026/#sec-HostLoadImportedModule)
+(16.2.1.10) получает, кто просит модуль, — Script Record, запись модуля или, по примечанию 1, просто реалм,
+если `import()` стоит в атрибуте `onclick`. По нему хозяин решает, откуда грузить.
+
+Значение завершения скрипта браузер выбрасывает, консоль DevTools печатает (день 4). `eval` отдаёт
+его как результат:
+
+```js
+let ready = true;
+console.log(eval("2 + 2"), eval("var y = 2; y * 10"), eval("let s = 1"), eval("if (ready) { 'да' } else { 'нет' }"), eval("{}"), eval("({})"));
+```
+
+<ResultBox>
+4 20 undefined да undefined \{\}
+</ResultBox>
+
+У объявлений значение пустое — отсюда `undefined`. `{}` — пустой блок (день 11),
+`({})` — объект.
+
+## 4. GlobalDeclarationInstantiation по шагам {#gdi}
+
+[16.1.7](https://tc39.es/ecma262/2026/#sec-globaldeclarationinstantiation). Глобальная запись —
+две половины (день 3 курса 2): объектная — само окно (`var`, `function`, встроенные),
+декларативная — `let`, `const`, `class`. Операция берёт LexicallyDeclaredNames и
+VarDeclaredNames скрипта (день 8):
+
+1. каждое лексическое имя: уже есть лексическое (HasLexicalDeclaration) — SyntaxError; есть неудаляемое
+   свойство окна (HasRestrictedGlobalProperty) — тоже SyntaxError;
+2. каждое имя `var` и функции: есть лексическое — SyntaxError;
+3. функции — с конца списка, из одноимённых побеждает последняя; CanDeclareGlobalFunction ложно — TypeError;
+4. имена `var`: CanDeclareGlobalVar ложно — TypeError. Так бывает только у нерасширяемого глобального
+   объекта, а окно таким не сделать: `Object.preventExtensions(globalThis)` — TypeError;
+5. создание: лексические — без значения, функции — сразу объектами, `var` — со значением
+   `undefined`.
+
+Шаги 1–4 только проверяют. Примечание 2: если проверка нашла конфликт, скрипт не получает ни одного имени.
+Проверки нужны при выполнении: ранние ошибки 16.1.1 видят один скрипт, а глобальная запись у страницы общая.
+
+<Scheme src="scheme-gdi.svg">GlobalDeclarationInstantiation: сначала все проверки, потом все имена</Scheme>
+
+Между шагами 4 и 5 — вставка Normative Optional приложения B (B.3.2, день 31): функция в блоке нестрогого
+скрипта получает ещё и имя `var` со значением `undefined`, а сам объект — когда выполнение
+дойдёт до блока. У строгого скрипта вставки нет:
+
+```html
+<!-- index.html -->
+<script>console.log("inBlock" in window, typeof inBlock); { function inBlock() {} } console.log(typeof inBlock);</script>
+<script>"use strict"; { function strictBlock() {} } console.log("strictBlock" in window);</script>
+```
+
+<ResultBox>
+true undefined\
+function\
+false
+</ResultBox>
+
+## 5. Практика: скрипты страницы и одна глобальная запись {#pages}
+
+Практика плана — день 3 курса 2 по шагам 16.1.7. Шесть скриптов одной страницы:
+
+```html
+<!-- index.html -->
+<script>let count = 1; var total = 10; globalThis.label = "свойство";</script>
+<script>let total = 20;</script>
+<script>console.log("третий"); var count = 2;</script>
+<script>let label = "let"; console.log(label, globalThis.label);</script>
+<script>let undefined = 1;</script>
+<script>console.log(count, total);</script>
+```
+
+<ResultBox>
+Uncaught SyntaxError: Identifier 'total' has already been declared\
+Uncaught SyntaxError: Identifier 'count' has already been declared\
+let свойство\
+Uncaught SyntaxError: Identifier 'undefined' has already been declared\
+1 10
+</ResultBox>
+
+Второй — шаг 1: `var total` дал неудаляемое свойство окна. Третий — шаг 2, «третий» не напечатан.
+Четвёртый прошёл: `label` создан присваиванием, свойство удаляемое, и `let` его затеняет —
+примечание 2 говорит об этом прямо. Пятый — шаг 1: `undefined` — неудаляемое свойство, как
+`NaN` и `top`. А `let name` можно: у окна оно удаляемое.
+
+### Имя без значения навсегда {#dead}
+
+Шаг 5 создаёт лексическое имя до выполнения, значение даёт только строка объявления. Если она бросит:
+
+```html
+<!-- index.html -->
+<script>let broken = JSON.parse("{");</script>
+<script>
+  const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+  console.log(attempt(() => broken = 1));
+</script>
+<script>let broken = 2;</script>
+```
+
+<ResultBox>
+Uncaught SyntaxError: Expected property name or '\}' in JSON at position 1 (line 1 column 2)\
+ReferenceError: Cannot access 'broken' before initialization\
+Uncaught SyntaxError: Identifier 'broken' has already been declared
+</ResultBox>
+
+`broken` в мёртвой зоне до перезагрузки страницы: ни записать, ни объявить заново.
+
+### Chrome против текста: имена до конфликта {#chrome}
+
+Примечание 2 обещает: конфликт — ни одного имени. Проверим, и заодно шаг 3 с неудаляемым `NaN`:
+
+```html
+<!-- index.html -->
+<script>let a = 1;</script>
+<script>var before = 1; function made() {} var a = 2; var after = 3;</script>
+<script>function NaN() {}</script>
+<script>
+  console.log("before" in window, typeof made, "after" in window);
+  try { (0, eval)("function NaN() {}"); } catch (e) { console.log(`${e.name}: ${e.message}`); }
+</script>
+```
+
+<ResultBox>
+Uncaught SyntaxError: Identifier 'a' has already been declared\
+Uncaught SyntaxError: Identifier 'NaN' has already been declared\
+true function false\
+TypeError: Identifier 'NaN' has already been declared
+</ResultBox>
+
+По тексту третья строка — `false undefined false`. Chrome 156 проверяет и создаёт имена
+`var` и функций по порядку текста, и всё, что стояло до `a`, осталось: `before` со
+значением `undefined`, `made` — готовая функция. Второе расхождение — тип ошибки: у
+`NaN` свойство неудаляемое и незаписываемое, CanDeclareGlobalFunction ложно, по шагу 3 — TypeError.
+Chrome в скрипте бросает SyntaxError, а в `eval` — TypeError, как в тексте.
+
+## 6. Записи модулей {#records}
+
+[16.2](https://tc39.es/ecma262/2026/#sec-modules) — модули: грамматика и
+[16.2.1](https://tc39.es/ecma262/2026/#sec-module-semantics) «семантика модулей», в которой почти всё.
+Её ранние ошибки — как у скрипта плюс экспорты: повтор имени экспорта (отсюда запрет двух
+`export default`), экспорт необъявленного имени; `super` и `new.target` наверху
+запрещены всегда. Остальные конфликты ловит связывание. Модуль описан иерархией записей:
+
+- [Module Record](https://tc39.es/ecma262/2026/#sec-abstract-module-records) (16.2.1.5) — общая:
+  Realm, Environment (появляется при связывании), Namespace; методы LoadRequestedModules, GetExportedNames,
+  ResolveExport, Link, Evaluate;
+- [Cyclic Module Record](https://tc39.es/ecma262/2026/#sec-cyclic-module-records) (16.2.1.6) —
+  модуль, который может стоять в цикле: Status (new → unlinked → linking → linked → evaluating →
+  evaluating-async → evaluated), EvaluationError, DFSAncestorIndex, RequestedModules в порядке текста,
+  CycleRoot, HasTLA;
+- [Source Text Module Record](https://tc39.es/ecma262/2026/#sec-source-text-module-records)
+  (16.2.1.7) — модуль из текста: дерево разбора, контекст, ImportMeta и списки импортов и экспортов;
+- [Synthetic Module Record](https://tc39.es/ecma262/2026/#sec-synthetic-module-records) (16.2.1.8) —
+  модуль без текста и без импортов. ParseJSONModule (16.2.1.8.2) делает из JSON такой модуль с одним
+  экспортом `default` (день 31 курса 2).
+
+Загрузка — у хозяина: [HostLoadImportedModule](https://tc39.es/ecma262/2026/#sec-HostLoadImportedModule)
+(16.2.1.10) и [FinishLoadingImportedModule](https://tc39.es/ecma262/2026/#sec-FinishLoadingImportedModule)
+(16.2.1.11). Найти загруженное — [GetImportedModule](https://tc39.es/ecma262/2026/#sec-GetImportedModule)
+(16.2.1.9). Синтетический модуль виден по объекту модуля — в нём один ключ:
+
+```js file="words.json"
+["kitap", "suw"]
+```
+
+```js
+// main.js
+import words from "./words.json" with { type: "json" };
+import * as ns from "./words.json" with { type: "json" };
+console.log(words, Object.keys(ns), ns.default === words);
+```
+
+<ResultBox>
+(2) \['kitap', 'suw'\] (1) \['default'\] true
+</ResultBox>
+
+Именованный импорт из JSON — `import { length } from "./words.json"` — ошибка связывания: ResolveExport
+синтетической записи знает только свои \[\[ExportNames\]\]. Дальше — два метода циклических записей: Link и
+Evaluate.
+
+## 7. Связывание: InitializeEnvironment {#link}
+
+[Link](https://tc39.es/ecma262/2026/#sec-moduledeclarationlinking) (16.2.1.6.1.2) зовёт
+[InnerModuleLinking](https://tc39.es/ecma262/2026/#sec-innermoduleinstantiation) — обход в глубину:
+модуль получает linking и номер, связываются его запросы по порядку, затем его InitializeEnvironment. Модули
+одного цикла переходят в linked вместе. Ошибка — все модули стека снова unlinked, и ничего не выполнено: даже
+зависимость, которая связалась без ошибок, не напечатает ни строки (день 30 курса 2).
+
+[InitializeEnvironment](https://tc39.es/ecma262/2026/#sec-source-text-module-record-initialize-environment)
+(16.2.1.7.3.1):
+
+1. каждый пересылаемый экспорт (`export { x } from`) — ResolveExport; нет ответа — SyntaxError;
+2. новая [запись модуля](https://tc39.es/ecma262/2026/#sec-module-environment-records) поверх
+   глобальной;
+3. импорты: `import * as` — объект модуля, именованный — ResolveExport и
+   [CreateImportBinding](https://tc39.es/ecma262/2026/#sec-createimportbinding) (косвенная привязка,
+   день 30 курса 2);
+4. `var` — сразу `undefined`, функции — сразу объектами, `let`,
+   `const`, `class` — без значения.
+
+Всё это — до первой строки любого модуля графа. Цикл показывает шаг 4:
+
+```js
+// first.js
+import "./second.js";
+export var count = 1;
+export function hello() { return "привет"; }
+export const MAX = 3;
+console.log("first.js:", count, MAX);
+```
+
+```js
+// second.js
+import { count, hello, MAX } from "./first.js";
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log("second.js:", count, hello(), attempt(() => MAX));
+```
+
+```js
+// main.js
+import "./first.js";
+```
+
+<ResultBox>
+second.js: undefined привет ReferenceError: Cannot access 'MAX' before initialization\
+first.js: 1 3
+</ResultBox>
+
+`first.js` сначала выполняет зависимость, а та читает его привязки: `var` уже есть со
+значением `undefined`, функция работает, `const` в мёртвой зоне. С экспортом по умолчанию так
+же: `export default function () {}` — объявление (местное имя `*default*`) и готово при
+связывании, а `export default () => {}` получит значение, когда выполнение дойдёт до строки.
+
+## 8. ResolveExport и export \* {#resolve}
+
+[ResolveExport](https://tc39.es/ecma262/2026/#sec-resolveexport) (16.2.1.7.2.2) ищет модуль и
+привязку за именем экспорта:
+
+1. пара «модуль, имя» уже встречалась — круг, null;
+2. свой экспорт с этим именем — найдено;
+3. пересылаемый — спросить тот модуль (у `export * as ns` ответ — его объект модуля);
+4. имя `"default"` дальше не ищется: `export *` его не пересылает;
+5. спросить каждый `export *`: два ответа с разными привязками — ambiguous.
+
+[GetExportedNames](https://tc39.es/ecma262/2026/#sec-getexportednames) (16.2.1.7.2.1) собирает имена
+так же, без `"default"`, неоднозначных не отсеивает. Отсеивает
+[GetModuleNamespace](https://tc39.es/ecma262/2026/#sec-getmodulenamespace) (16.2.1.13): в объект модуля
+попадают только имена с ответом.
+
+```js
+// ru.js
+export const hello = "привет";
+export const yes = "да";
+export default "ru";
+```
+
+```js
+// tk.js
+export const hello = "salam";
+export const bye = "hoş gal";
+```
+
+```js
+// all.js
+export * from "./ru.js";
+export * from "./tk.js";
+export * as ru from "./ru.js";
+```
+
+```js
+// main.js
+import * as all from "./all.js";
+console.log(Object.keys(all), "default" in all, "hello" in all, all.ru.default);
+```
+
+<ResultBox>
+(3) \['bye', 'ru', 'yes'\] false false ru
+</ResultBox>
+
+`hello` выпал, `default` не пришёл. А `export * as ru` — шаг 3: ответ —
+объект модуля `ru.js`, и в нём `default` есть.
+
+Попросить `hello` по имени — уже ошибка связывания (шаг 3 InitializeEnvironment):
+
+```js
+// main.js
+import { hello } from "./all.js";
+console.log(hello);
+```
+
+<ResultBox>
+Uncaught SyntaxError: The requested module './all.js' contains conflicting star exports for name 'hello'
+</ResultBox>
+
+Неоднозначны только разные привязки: если `ru.js` и `tk.js` оба пересылают
+`export *` из одного `base.js`, ответ один. А свой экспорт `all.js` сильнее
+звёздочки: шаг 2 раньше шага 5.
+
+## 9. Выполнение: InnerModuleEvaluation {#evaluate}
+
+[Evaluate](https://tc39.es/ecma262/2026/#sec-moduleevaluation) (16.2.1.6.1.3) возвращает промис,
+работу делает [InnerModuleEvaluation](https://tc39.es/ecma262/2026/#sec-innermoduleevaluation) — тот же
+обход:
+
+1. модуль уже evaluated или evaluating-async — вернуть запомненную ошибку или ничего; evaluating (он на стеке,
+   это цикл) — вернуться;
+2. иначе — evaluating, номер, на стек; выполнить каждый запрос по порядку текста;
+3. есть асинхронные зависимости или свой `await` — получить номер AsyncEvaluationOrder и ждать
+   зависимостей или выполниться асинхронно (ExecuteAsyncModule); иначе ExecuteModule: тело в контексте
+   модуля;
+4. модуль — корень своего цикла: модули цикла снимаются со стека, получают evaluated (или evaluating-async) и
+   общий CycleRoot.
+
+Ошибку Evaluate записывает в EvaluationError всем модулям стека. Новый запрос того же модуля получит её же, а тело
+второй раз не выполнится:
+
+```js
+// a.js
+import "./b.js";
+console.log("a.js");
+```
+
+```js
+// b.js
+import "./a.js";
+console.log("b.js");
+```
+
+```js
+// bad.js
+console.log("bad.js выполняется");
+throw new Error("сбой в bad.js");
+```
+
+```js
+// main.js
+import "./a.js";
+const one = await import("./bad.js").catch((e) => e);
+const two = await import("./bad.js").catch((e) => e);
+console.log("main.js:", one === two, one.message);
+```
+
+<ResultBox>
+b.js\
+a.js\
+bad.js выполняется\
+main.js: true сбой в bad.js
+</ResultBox>
+
+main → a → b → снова a: он evaluating, обход возвращается, и `b.js` выполняется первым — в цикле
+первым выполняется самый глубокий модуль. Ошибка зависимости при статическом импорте останавливает обход: модули
+после неё в порядке запросов не выполнятся.
+
+Шаг 3 — `await` верхнего уровня. Модуль с HasTLA выполняется асинхронно, его импортёр считает
+его в PendingAsyncDependencies и записывается к нему в AsyncParentModules. Соседний синхронный модуль ждать
+не будет:
+
+```js
+// slow.js
+await new Promise((resolve) => setTimeout(resolve, 300));
+console.log("slow.js");
+```
+
+```js
+// quick.js
+console.log("quick.js");
+```
+
+```js
+// main.js
+import "./slow.js";
+import "./quick.js";
+console.log("main.js");
+```
+
+<ResultBox>
+quick.js\
+slow.js\
+main.js
+</ResultBox>
+
+У `main.js` счётчик — 1. Когда `slow.js` закончит, AsyncModuleExecutionFulfilled
+(16.2.1.6.1.3.4) через GatherAvailableAncestors уменьшит его до нуля, и `main.js` выполнится. Готовые одновременно родители
+выполняются по своим номерам AsyncEvaluationOrder — в порядке обхода, а не по времени.
+
+## 10. Импорты и экспорты как записи {#entries}
+
+[16.2.2](https://tc39.es/ecma262/2026/#sec-imports) и
+[16.2.3](https://tc39.es/ecma262/2026/#sec-exports) — грамматика `import` и
+`export` и операции, которые раскладывают их в записи. ImportEntry — запрос, имя у источника, местное
+имя (таблица 54); ExportEntry — ещё и имя экспорта (таблица 56):
+
+| Форма | Запись |
+| --- | --- |
+| `import v from "mod"` | ImportName `"default"`, LocalName `"v"` |
+| `import { x as v } from "mod"` | ImportName `"x"`, LocalName `"v"` |
+| `import * as ns from "mod"` | ImportName namespace-object |
+| `import "mod"` | записи нет, только запрос |
+| `export { v as x }` | ExportName `"x"`, LocalName `"v"` — свой экспорт |
+| `export { x } from "mod"` | ImportName `"x"`, LocalName null — пересылаемый |
+| `export default 42` | ExportName `"default"`, LocalName `"*default*"` |
+| `export * from "mod"` | ImportName all-but-default |
+| `export * as ns from "mod"` | ImportName all |
+
+Имя `"default"` получают все три анонимные формы, каждая своим путём: `export default function
+() {}` — при создании (15.2.4), `export default class {}` — в BindingClassDeclarationEvaluation
+(15.7.15), `export default () => {}` — через NamedEvaluation (день 8) в Evaluation экспорта
+(16.2.3.7).
+
+MDN описывает ещё две формы, обе экспериментальные. [import defer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/defer)
+и [import.defer()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/defer):
+модуль загружается и связывается, а выполняется при первом обращении к объекту.
+[import source](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/source)
+и [import.source()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/source):
+скомпилированный модуль без выполнения; его класс-предок —
+[AbstractModuleSource](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AbstractModuleSource),
+пока только у `WebAssembly.Module`. В тексте 2026 их нет, в Chrome 156 тоже: `import defer * as ns
+from "./x.js"` — SyntaxError: Unexpected token '\*'. А слова не зарезервированы:
+`import defer from "./x.js"` — обычный импорт по умолчанию.
+
+## 11. eval: прямой и косвенный {#direct}
+
+[MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval): прямой
+вызов — `eval(...)` по имени, всё остальное — косвенный: через переменную, свойство, запятую,
+`?.`. Правило — [13.3.6.1](https://tc39.es/ecma262/2026/#sec-function-calls-runtime-semantics-evaluation):
+ссылка не на свойство, имя `"eval"`, значение — сама %eval%. Тогда это прямой eval:
+PerformEval(строка, строгий ли вызов, true). Иначе — обычный вызов функции
+[19.2.1](https://tc39.es/ecma262/2026/#sec-eval-x): PerformEval(x, false, false).
+
+```js
+var where = "глобальная";
+const myEval = eval;
+function test() {
+  var where = "локальная";
+  const src = "where";
+  console.log(eval(src), (eval)(src), (0, eval)(src), globalThis.eval(src), eval?.(src), myEval(src));
+}
+test();
+```
+
+<ResultBox>
+локальная локальная глобальная глобальная глобальная глобальная
+</ResultBox>
+
+`(eval)(src)` — тоже прямой: скобки не теряют ссылку (13.2.9, день 10), а запятая отдаёт уже значение.
+`eval?.()` идёт через ChainEvaluation (13.3.9.2) прямо в EvaluateCall, проверки на `eval` там
+нет. Тегированный шаблон (13.3.11.1) — тоже EvaluateCall, и строки ему не достаётся:
+
+```js
+const parts = eval`2 + 2`;
+console.log(Array.isArray(parts), parts[0], Object.isFrozen(parts));
+```
+
+<ResultBox>
+true 2 + 2 true
+</ResultBox>
+
+Вызов косвенный, а аргумент — замороженный массив строк шаблона (GetTemplateObject, день 9), не строка: eval вернул его как есть.
+MDN сравнивает косвенный eval с отдельным тегом `<script>` — почти так, разница в разделе 13.
+
+## 12. PerformEval по шагам {#performeval}
+
+[PerformEval](https://tc39.es/ecma262/2026/#sec-performeval) (19.2.1.1):
+
+1. `x` не строка — вернуть как есть: `eval(42)` — 42, `eval(new String("2 + 2"))`
+   — сам объект;
+2. HostEnsureCanCompileStrings — спросить хозяина (раздел 15);
+3. у прямого — найти окружение `this` (GetThisEnvironment, день 9): функция ли это, метод,
+   производный конструктор, инициализатор поля;
+4. разобрать как Script; ошибка — SyntaxError. Ещё SyntaxError: `new.target` не в функции,
+   `super.x` не в методе, `super()` не в производном конструкторе, `arguments` в
+   поле;
+5. строгий ли eval: прямой из строгого кода — всегда, иначе — по своей директиве;
+6. окружения (схема): прямой — новое лексическое поверх LexicalEnvironment вызывающего, `var` — в его
+   VariableEnvironment; косвенный — новое поверх глобальной записи, `var` — в неё; строгий —
+   `var` в то же новое;
+7. новый контекст, EvalDeclarationInstantiation, Evaluation; пустое значение — `undefined`.
+
+<Scheme src="scheme-performeval.svg">Куда eval кладёт свои имена</Scheme>
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function Ctor() { this.seen = eval("new.target === Ctor"); }
+const box = { show() { return eval("super.toString === Object.prototype.toString"); } };
+class Item { label = attempt(() => eval("arguments")); }
+console.log(new Ctor().seen, box.show(), attempt(() => eval("new.target")));
+console.log(new Item().label);
+```
+
+<ResultBox>
+true true SyntaxError: new.target expression is not allowed here\
+SyntaxError: 'arguments' is not allowed in class field initializer or static initialization block
+</ResultBox>
+
+Шаг 4 — те же запреты, что днём 8 были ранними ошибками (Contains: `super` и
+`new.target`), только проверяются при вызове: текст строки до вызова неизвестен.
+
+Шаги 5 и 6: прямой eval наследует строгость и `this` вызывающего, косвенный — нет (MDN показывает
+это на `with` — день 31):
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function strictCaller() {
+  "use strict";
+  return `${attempt(() => eval("delete Object.prototype"))} | ${attempt(() => (0, eval)("delete Object.prototype"))}`;
+}
+function whoIsThis() { return [eval("this") === globalThis, (0, eval)("this") === globalThis].join(); }
+console.log(strictCaller());
+console.log(whoIsThis.call({}));
+```
+
+<ResultBox>
+TypeError: Cannot delete property 'prototype' of function Object() \{ \[native code\] \} | false\
+false,true
+</ResultBox>
+
+Удалить `Object.prototype` нельзя: свойство неудаляемое. Строгий код бросает, нестрогий тихо
+отвечает `false` (день 3 курса 2). Косвенный eval работает в глобальном окружении, и его
+`this` — окно.
+
+## 13. Практика: var из eval {#evalvar}
+
+Практика плана: `var` из `eval` в функции и в строгом режиме.
+
+```js
+function sloppy() { eval("var x = 1"); return typeof x; }
+function strict() { "use strict"; eval("var x = 1"); return typeof x; }
+function strictCode() { eval('"use strict"; var x = 1'); return typeof x; }
+function lexical() { eval("let x = 1"); return typeof x; }
+function indirect() { (0, eval)("var shared = 1"); return typeof shared; }
+console.log(sloppy(), strict(), strictCode(), lexical(), indirect());
+```
+
+<ResultBox>
+number undefined undefined undefined number
+</ResultBox>
+
+Шаг 6: нестрогий прямой кладёт `var` в окружение функции; строгий — по вызову или по своей
+директиве — в новое, которое исчезнет вместе с eval; `let` — всегда в новое (примечание к 19.2.1.1);
+косвенный — в глобальную запись. И ещё одно отличие от отдельного скрипта:
+
+```js
+function f() { var own = 1; eval("var fromEval = 2"); return [delete fromEval, typeof fromEval, delete own].join(); }
+(0, eval)("var globalFromEval = 1; let globalLet = 1");
+var globalFromScript = 1;
+console.log(f(), delete globalFromEval, delete globalFromScript, typeof globalLet);
+```
+
+<ResultBox>
+true,undefined,false true false undefined
+</ResultBox>
+
+EvalDeclarationInstantiation создаёт имена с флагом «удаляемое», GlobalDeclarationInstantiation и
+FunctionDeclarationInstantiation — без него. А `let` из косвенного eval в глобальную запись не попадает
+вовсе, хотя `let` отдельного скрипта виден всей странице.
+
+В модуле прямой eval видит область модуля, а `var` не выпускает: код модуля строгий, и строгость
+наследуется (шаг 5). Строку eval по-прежнему разбирает как Script — `import` в ней запрещён:
+
+```js
+// main.js
+const secret = "из модуля";
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(eval("secret"), eval("var leak = 1; leak"), typeof leak);
+console.log(attempt(() => eval('import x from "./x.js"')));
+```
+
+<ResultBox>
+из модуля 1 undefined\
+SyntaxError: Cannot use import statement outside a module
+</ResultBox>
+
+## 14. EvalDeclarationInstantiation {#evaldecl}
+
+[19.2.1.3](https://tc39.es/ecma262/2026/#sec-evaldeclarationinstantiation) — родственница 16.1.7. У
+нестрогого eval проверяет: имя `var` не совпадает с глобальным лексическим (если `var` идёт в
+глобальную запись), и ни одно окружение между новым лексическим и окружением `var` этого имени не
+держит — иначе `var` «перепрыгнул» бы `let`. Исключение приложения B — параметр
+`catch`. Потом функции с конца и `var`, как у скрипта.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function clash() { let n = 1; eval("var n = 2"); }
+function strictOk() { let n = 1; eval('"use strict"; var n = 2'); return n; }
+function caught() { try { throw 1; } catch (n) { eval("var n = 2"); return n; } }
+console.log(attempt(clash), "|", attempt(strictOk), "|", attempt(caught));
+```
+
+<ResultBox>
+SyntaxError: Identifier 'n' has already been declared | 1 | 2
+</ResultBox>
+
+Отсюда шаг FunctionDeclarationInstantiation, обещанный днём 12. У нестрогой функции `let` и
+`const` тела лежат в своём окружении — чтобы eval нашёл такой конфликт. А при коде в параметрах есть ещё
+окружение — для eval в умолчаниях: `var` из него встаёт снаружи параметров, в окружение функции, и не
+смешивается с `var` тела:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function f(a = eval("var z = 'из eval'"), b = () => z) { var z = "тело"; return `${b()} / ${z}`; }
+function g(a = eval("var a = 1")) {}
+console.log(f(), "|", attempt(g));
+```
+
+<ResultBox>
+из eval / тело | SyntaxError: Identifier 'a' has already been declared
+</ResultBox>
+
+Стрелка `b` нашла `z` из eval: он в окружении функции, следующем за окружением параметров
+(схема раздела 3 дня 12). У `g` `var a` из eval упёрся в параметр.
+
+## 15. Хозяин может запретить {#host}
+
+[HostEnsureCanCompileStrings](https://tc39.es/ecma262/2026/#sec-hostensurecancompilestrings) (19.2.1.2)
+по умолчанию ничего не делает. Браузер через неё применяет Content Security Policy: если в
+`script-src` нет `'unsafe-eval'`, `eval` и конструктор `Function`
+(CreateDynamicFunction спрашивает ту же операцию) бросают EvalError. Тот самый, о котором
+[20.5.5.1](https://tc39.es/ecma262/2026/#sec-native-error-types-used-in-this-standard-evalerror) говорит:
+в спецификации не используется. Бросает хозяин.
+
+```html
+<!-- index.html -->
+<meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline'">
+<script>
+  for (const run of [() => eval("1 + 1"), () => new Function("return 2")(), () => JSON.parse("3")]) {
+    try { console.log(run()); } catch (e) { console.log(e.name, e.message.includes("'unsafe-eval'")); }
+  }
+</script>
+```
+
+<ResultBox>
+EvalError true\
+EvalError true\
+3
+</ResultBox>
+
+`JSON.parse` строку не выполняет — ему разрешено. Строка вместо функции в `setTimeout` —
+тоже код из строки: на такой странице Chrome её не выполнит и напишет в консоль «The action has been blocked».
+
+### Chrome против текста: TrustedScript {#trusted}
+
+MDN советует передавать в `eval` не строку, а объект TrustedScript (Trusted Types — курс 4). По
+шагу 1 PerformEval 2026 года объект вернётся как есть. Chrome 156 его выполняет: `eval` от
+TrustedScript с текстом `"1 + 1"` — 2. В тексте ECMA-262 2026 такого правила нет.
+
+## 16. Практика: чем заменить eval {#instead}
+
+Практика плана. MDN: прямой eval медленнее замен — движку приходится искать имена во время выполнения, а
+программы сжатия кода сдаются. И он выполнит чужую строку с правами страницы. Первый совет MDN — хотя бы
+косвенный eval со строгой директивой: строка видит только глобальное. Пример оттуда — «нестрогий JSON» и местный
+класс с именем `Map`:
+
+```js
+function looseParse(text) {
+  class Map {}
+  return [eval(`(${text})`).c instanceof Map, eval?.(`"use strict"; (${text})`).c instanceof Map].join();
+}
+console.log(looseParse("{ a: 4 - 1, c: new Map() }"));
+```
+
+<ResultBox>
+true,false
+</ResultBox>
+
+Прямой нашёл местный `Map`, косвенный — встроенный. Замена лучше eval — своя у каждой задачи:
+
+```js
+const settings = { theme: "dark", size: { font: 16 } };
+const read = (obj, path) => path.split(".").reduce((o, key) => o?.[key], obj);
+console.log(eval("settings.size.font"), read(settings, "size.font"));
+const ops = { "+": (a, b) => a + b, "*": (a, b) => a * b };
+console.log(eval("3 * 4"), ops["*"](3, 4));
+console.log(JSON.parse('{"word": "kitap"}').word);
+const scale = Function("k", '"use strict"; return (x) => x * k;');
+console.log(scale(10)(5));
+const path = "theme; console.log('чужой код')";
+console.log(eval(`settings.${path}`), read(settings, path));
+```
+
+<ResultBox>
+16 16\
+12 12\
+kitap\
+50\
+чужой код\
+undefined undefined
+</ResultBox>
+
+Путь к свойству — квадратные скобки и `split`; действие — таблица функций; данные —
+`JSON.parse`; код с параметрами — конструктор `Function`: тело разбирается в глобальной
+области, местных имён не видит, значения приходят параметрами. Последние две строки — зачем всё это: eval выполнил
+«путь» из чужих данных как код.
+
+## 17. «Карточки 2.0»: порядок модулей {#cards}
+
+Начало `main.js` «Карточек 2.0»:
+
+```js
+// main.js, день 33 курса 2 — импорты
+import decks from "./data/decks.json" with { type: "json" };
+import { save, load } from "./storage.js";
+import { loadDeck } from "./load.js";
+```
+
+`load.js` импортирует `card.js`, `deck.js` и `errors.js`;
+`card.js` и `deck.js` — `errors.js`; `storage.js` — ничего. Пройдём
+InnerModuleEvaluation от `main.js`. `decks.json` — Synthetic Module Record, не циклическая:
+выполняется сразу (EvaluateModuleSync). Потом `storage.js`. `load.js` ведёт в
+`card.js`, тот — в `errors.js`, и он выполняется третьим, за ним `card.js`.
+`deck.js` находит `errors.js` уже evaluated. Затем `load.js` и последним
+`main.js`, через ExecuteAsyncModule: у него `await` наверху (HasTLA).
+
+<Scheme src="scheme-cards.svg">InnerModuleEvaluation от main.js «Карточек 2.0»</Scheme>
+
+Модель — пустые модули с той же сеткой импортов, без `decks.json`:
+
+```js
+// errors.js
+console.log("errors.js");
+```
+
+```js
+// card.js
+import "./errors.js";
+console.log("card.js");
+```
+
+```js
+// deck.js
+import "./errors.js";
+console.log("deck.js");
+```
+
+```js
+// load.js
+import "./card.js";
+import "./deck.js";
+import "./errors.js";
+console.log("load.js");
+```
+
+```js
+// storage.js
+console.log("storage.js");
+```
+
+```js
+// main.js
+import "./storage.js";
+import "./load.js";
+console.log("main.js");
+```
+
+<ResultBox>
+storage.js\
+errors.js\
+card.js\
+deck.js\
+load.js\
+main.js
+</ResultBox>
+
+Все модули выполнены раньше первой строки `main.js`: к `await openDeck()` класс
+`CardsError` уже есть во всех файлах. И порядок задают только RequestedModules: переставьте импорты
+в `load.js` — изменится и порядок вывода.
+
+## 18. Что будет завтра {#next}
+
+Сегодня — скрипты и модули изнутри и `eval`; модуль «Выполнение кода» закончен. Завтра, на дне 14,
+начинается модуль «Объекты изнутри»: внутренние методы обычных объектов и функций — \[\[Get\]\], \[\[Set\]\],
+\[\[DefineOwnProperty\]\], \[\[Call\]\], \[\[Construct\]\] — и FunctionDeclarationInstantiation целиком.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [16 Scripts and Modules](https://tc39.es/ecma262/2026/#sec-ecmascript-language-scripts-and-modules) | глава: два вида исходного текста | <Brief /> |
+| [16.1 Scripts](https://tc39.es/ecma262/2026/#sec-scripts) | разбор, запись и выполнение скрипта | <Full /> |
+| [16.1.1 Early Errors](https://tc39.es/ecma262/2026/#sec-scripts-static-semantics-early-errors) | повторы имён, `super` и `new.target` вне eval | <Brief /> |
+| [16.1.2 ScriptIsStrict](https://tc39.es/ecma262/2026/#sec-scriptisstrict) | директива (день 3 курса 2) | <Brief /> |
+| [16.1.3 Evaluation](https://tc39.es/ecma262/2026/#sec-script-semantics-runtime-semantics-evaluation) | пустой скрипт — `undefined` | <Brief /> |
+| [16.1.4 Script Records](https://tc39.es/ecma262/2026/#sec-script-records) | реалм, дерево, модули, поле хозяина | <Brief /> |
+| [16.1.5 ParseScript](https://tc39.es/ecma262/2026/#sec-parse-script) | ранняя ошибка — ни строки | <Brief /> |
+| [16.1.6 ScriptEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-scriptevaluation) | контекст, имена, текст | <Brief /> |
+| [16.1.7 GlobalDeclarationInstantiation](https://tc39.es/ecma262/2026/#sec-globaldeclarationinstantiation) | сначала проверки, потом имена | <Full /> |
+| [16.2 Modules](https://tc39.es/ecma262/2026/#sec-modules) | грамматика модуля | <Full /> |
+| [16.2.1 Module Semantics](https://tc39.es/ecma262/2026/#sec-module-semantics) | записи, связывание, выполнение (день 30 курса 2) | <Full /> |
+| [16.2.2 Imports](https://tc39.es/ecma262/2026/#sec-imports) | ImportEntry, таблица 54 | <Brief /> |
+| [16.2.3 Exports](https://tc39.es/ecma262/2026/#sec-exports) | ExportEntry, таблица 56; имя `default` | <Brief /> |
+| [19.2.1 eval ( x )](https://tc39.es/ecma262/2026/#sec-eval-x) | PerformEval и EvalDeclarationInstantiation | <Full /> |
+| [MDN: eval()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval) | прямой и косвенный; замены; обещан в дне 3 курса 2 | <Full /> |
+| [MDN: import defer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/defer) | выполнить при первом обращении; в Chrome 156 нет | <Brief /> |
+| [MDN: import.defer()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/defer) | то же, с промисом | <Brief /> |
+| [MDN: import source](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/source) | модуль без выполнения; в Chrome 156 нет | <Brief /> |
+| [MDN: import.source()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import/source) | то же, с промисом | <Brief /> |
+| [MDN: AbstractModuleSource](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AbstractModuleSource) | предок `WebAssembly.Module`; в Chrome 156 нет | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// скрипт: ParseScript — ранняя ошибка, ни строки; ScriptEvaluation — контекст, GDI, текст
+// GDI: проверки (let/let, let/var, неудаляемое свойство окна), потом имена; конфликт — ни одного (Chrome — до конфликта)
+// let, у которого бросил инициализатор, — мёртвая зона до перезагрузки
+// модуль: Link — var undefined, функции готовы, let/const/class без значения; потом Evaluate
+// обход в глубину: запросы по порядку, в цикле первым — самый глубокий; ошибка запоминается
+// export * — без default; имя из двух звёздочек — нет в объекте модуля, по имени — SyntaxError
+// прямой eval — eval(...) и (eval)(...); остальное — косвенный, глобальная область
+// var из eval: прямой нестрогий — в функцию, строгий — внутри, косвенный — глобальный, удаляемый; let — всегда внутри
+// вместо eval: obj[key], таблица функций, JSON.parse, Function с параметрами
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему второй скрипт с `let b = 1; let b = 2;` не печатает ничего, а скрипт с
+   `null.x` в середине печатает строки до неё?
+   <Answer>Первое — ранняя ошибка 16.1.1: ParseScript возвращает список ошибок, и ScriptEvaluation не
+   вызывается. Второе — ошибка при выполнении: текст уже идёт, и он останавливается на ней.</Answer>
+2. Первый скрипт — `var total = 10`, второй — `let total = 20`. Какой шаг 16.1.7 бросит и
+   почему `globalThis.label = 1` перед `let label` не мешает?
+   <Answer>Шаг 1: HasRestrictedGlobalProperty — `var` дал неудаляемое свойство окна. Свойство,
+   созданное присваиванием, удаляемое, и `let` его затеняет (примечание 2).</Answer>
+3. В цикле модулей `second.js` читает импорты из `first.js` до его выполнения. Что
+   он увидит у `var`, функции и `const`?
+   <Answer>InitializeEnvironment уже дал `var` значение `undefined` и создал функцию;
+   `const` без значения — ReferenceError «Cannot access … before initialization».</Answer>
+4. Какие из вызовов прямые: `eval(s)`, `(eval)(s)`, `(0, eval)(s)`,
+   `eval?.(s)`?
+   <Answer>Первые два: ссылка не на свойство с именем `eval` и значением %eval% (скобки ссылку не
+   теряют). Запятая отдаёт значение, `?.` зовёт EvaluateCall без проверки — косвенные.</Answer>
+5. Куда попадёт `var x` из `eval("var x = 1")` в нестрогой функции, в строгой и при
+   косвенном вызове?
+   <Answer>В окружение функции; в новое окружение eval (снаружи не видно); в глобальную запись — свойством окна,
+   которое можно удалить.</Answer>
+6. Чем заменить ``eval(`obj.${path}`)`` и почему?
+   <Answer>`path.split(".").reduce((o, k) => o?.[k], obj)`: путь остаётся данными. eval выполнил бы
+   чужую строку как код и заставил движок держать все местные имена.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval)
+(eval(), import defer, import source, import.defer(), import.source(), AbstractModuleSource, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

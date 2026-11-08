@@ -1,0 +1,125 @@
+---
+title: День 18 — конспект
+css: |
+  h1 { border-bottom-color: #ec4899; }
+  h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+---
+
+# День 18. Глобальный объект и стандартные встроенные объекты
+
+<Subtitle>Выжимка лекции: общие правила встроенных функций (глава 18), глобальный объект и что в нём от стандарта, хозяина и программы, `parseInt` и функции URI по шагам, что реализации нельзя (глава 17).</Subtitle>
+
+## Главное
+
+<Definition>
+Встроенный объект даёт реализация до программы; стандартные описаны в ECMA-262, остальные добавляет хозяин
+(4.4.12). Глава 18 задаёт правила всем встроенным функциям: прототип — %Function.prototype%, `length` —
+число обязательных параметров, лишние аргументы отбрасываются, у не-конструктора нет \[\[Construct\]\] и
+`prototype`, свойства неперечисляемые. Глобальный объект (глава 19) — не функция, прототип ему даёт
+хозяин, а 59 свойств из 19.1–19.4 — лишь малая часть его свойств.
+</Definition>
+
+## Правила встроенных функций
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+console.log(Array.prototype.map.length, Math.max.length, Date.length, Object.getOwnPropertyDescriptor(Map.prototype, "size").get.name);   // 1 2 7 get size — обязательные параметры; у max и Date длина записана особо
+console.log([1, 2].reduce((a, b) => a + b), [1, 2].reduce((a, b) => a + b, undefined), parseInt("10", 2, "лишний"));   // 3 NaN 2 — «not present» отличается от undefined; лишний аргумент отброшен
+console.log(run(() => new Math.max()), typeof Date(), run(() => Map()), Object.keys(Math).length);   // TypeError string TypeError 0 — нет [[Construct]]; NewTarget решает; всё неперечисляемое
+```
+
+| Правило главы 18 | Что из него следует |
+| --- | --- |
+| `length` — обязательные параметры | `[, x]` и `...rest` не считаются; исключения записаны особо |
+| `name` — ключ свойства | геттер — «get size», символ — «\[Symbol.split\]», анонимная — "" |
+| недостающие — «not present» | ведут себя как undefined, но алгоритм может их отличить |
+| лишние — вычислить и отбросить | TypeError только за лишний аргумент запрещён |
+| не конструктор — нет \[\[Construct\]\] | и нет `prototype`; конструктор отличает вызов по NewTarget |
+| свойства глав 19–28 | записываемые, неперечисляемые, удаляемые; у `length` и `name` — незаписываемые |
+
+<Remember>
+Глава 17 разрешает хозяину добавлять объекты и синтаксис, кроме запретов 17.1: своих `caller` и
+`arguments` нет у строгих функций, стрелок, классов, встроенных и связанных; `caller` не
+выдаёт строгую функцию. Ранняя ошибка останавливает весь скрипт, даже если код с ней не выполнится; ошибка
+выполнения — только когда до неё дойдут. Обёртка `new Boolean(false)` — объект, поэтому в условии
+она истинна.
+</Remember>
+
+## Глобальный объект
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+var kitap = 1;
+let galam = 2;
+undefined = 5;
+console.log(globalThis === window, globalThis.kitap, globalThis.galam, undefined, run(() => { "use strict"; undefined = 5; }));   // true 1 undefined undefined TypeError — var на объекте, let нет; undefined неизменяемо
+const where = (k) => { const d = Object.getOwnPropertyDescriptor(globalThis, k); return (d.enumerable ? "e" : "-") + (d.configurable ? "c" : "-"); };
+console.log(where("parseInt"), where("alert"), where("kitap"), Object.getPrototypeOf(window) === Window.prototype);   // -c ec e- true — стандарт, хозяин, программа; прототип от хозяина
+```
+
+| Кто положил | Примеры | Атрибуты |
+| --- | --- | --- |
+| ECMA-262, 19.1–19.4 | `parseInt`, `Math`, `Map` — всего 59 | «-c»; Infinity, NaN, undefined — «--» |
+| ECMA-402 | `Intl` | «-c» |
+| хозяин (HTML) | `alert`, `setTimeout`, `document` | операции «ec», `document` — «e-» |
+| программа | `var` и `function` наверху | «e-» |
+
+<Remember>
+`globalThis` — обычное удаляемое свойство со значением \[\[GlobalThisValue\]\]; в браузере это прокси
+вокруг глобального объекта (MDN). `let undefined` на верхнем уровне — SyntaxError
+(HasRestrictedGlobalProperty), в функции — можно. У каждого реалма свои встроенные: `parseInt` рамки —
+другой объект. Язык берёт %Promise%, %Map% у реалма, а не из глобальных свойств.
+</Remember>
+
+## parseInt и функции URI
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+console.log([1, 2, 3].map(parseInt).join(), parseInt("0x1F", 10), parseInt("  -0x1F"), parseInt(0.0000005), parseInt(Infinity, 19));   // 1,NaN,NaN 0 -31 5 18 — индекс как основание; 0x только при 0 и 16; ToString числа
+console.log(encodeURIComponent("a b&ü_"), encodeURI("a b&ü_"), run(() => encodeURIComponent("\uD83D")), decodeURI("%23%41"));   // a%20b%26%C3%BC_ a%20b&%C3%BC_ URIError %23A — & оставляет только encodeURI; половинка — ошибка; # сохранён
+```
+
+| Шаг 19.2.5 | Что делает |
+| --- | --- |
+| 1–2 | ToString, снять пробелы (и неразрывный, и BOM) |
+| 3–5 | «-» — знак −1; «+» или «-» снять |
+| 6–9 | R = ToInt32(radix): 0 — значит 10, вне 2–36 — NaN |
+| 10 | «0x» снимается только при R = 0 или 16 |
+| 11–13 | цифры до первой чужой; пусто — NaN |
+| 14–16 | число со знаком; ноль с минусом — −0 |
+
+<Remember>
+Encode оставляет как есть буквы, цифры, `_ - . ! ~ * ' ( )`, а `encodeURI` — ещё
+`; / ? : @ & = + $ , #`; остальное — байты UTF-8 по `%XX` заглавными. Одинокая половинка
+пары — URIError. Decode бросает на обрыве «%», плохом шестнадцатеричном и запрещённом UTF-8;
+`decodeURI` не раскрывает escape знаков своего набора. `Number.parseInt` — та же функция
+%parseInt%, а `Number.isNaN` — новая, без ToNumber. «Карточки 2.0»: настройки из ссылки —
+`decodeURIComponent` с перехватом ошибки и `parseInt(x, 10)`.
+</Remember>
+
+<Homework>
+1. Предскажите `length` у `String.prototype.replace`, `Array.prototype.splice`,
+   `Function.prototype.call`, `JSON.parse`, `Array.prototype.indexOf` и
+   `name` геттера `Symbol.prototype.description`. Где правило главы 18 не сработало и
+   почему?
+2. После `var x = 1; let y = 2; globalThis.z = 3;` на верхнем уровне скрипта предскажите
+   `delete globalThis.x`, `delete globalThis.z`, `"y" in globalThis` и
+   `typeof z` после удаления.
+3. Предскажите `parseInt("0.00000008")`, `parseInt(0.00000008)`,
+   `parseInt("  +0x10")`, `parseInt("010")` и `parseInt("1e3", 16)` и назовите
+   шаги 19.2.5, которые решили каждый ответ.
+4. Прочитайте на MDN
+   [encodeURIComponent()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent)
+   раздел «Encoding for RFC3986»: «The more recent RFC3986 reserves !, ', (, ), and \*». Что
+   `encodeURIComponent` делает с этими пятью знаками и каким шагом Encode и примечанием к 19.2.6
+   это объясняется?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/globalThis)
+(globalThis, encodeURIComponent(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

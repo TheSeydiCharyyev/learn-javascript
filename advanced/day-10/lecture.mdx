@@ -1,0 +1,803 @@
+---
+title: День 10 — Выражения по спецификации
+day: День 10 • урок 1
+heading: Выражения по спецификации
+lead: Курс 3, Advanced. Модуль «Выполнение кода» — третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+---
+
+<Goals>
+- отличать приоритет (его задаёт грамматика) от порядка вычисления (его задают шаги);
+- проходить по шагам доступ к свойству, вызов и необязательную цепочку;
+- предсказывать `delete` и `typeof` в обычном и строгом коде;
+- объяснять сложение и `instanceof` шагами 13.15.3 и 13.10.2;
+- видеть, в каком порядке присваивание читает, вычисляет и пишет;
+- находить, где Chrome расходится с текстом 2026.
+</Goals>
+
+<Toc />
+
+## 1. Глава 13 и приоритет {#chapter}
+
+[Глава 13](https://tc39.es/ecma262/2026/#sec-ecmascript-language-expressions) идёт от самых «крепких»
+выражений к самым «слабым»: идентификаторы и литералы, доступ и вызов, `++`, унарные, `**`,
+`* / %`, `+ -`, сдвиги, сравнения, равенство, побитовые, логические, `?:`,
+присваивание, запятая. Это и есть таблица приоритетов: отдельной таблицы в стандарте нет, приоритет задаёт
+грамматика. `*` «сильнее» `+`, потому что правило сложения стоит из умножений:
+`f() + g() * h()` разбирается как `f() + (g() * h())`. Но *порядок вычисления*
+задают шаги Evaluation, и они почти всегда идут слева направо.
+
+<Scheme src="scheme-chapter.svg">Приоритет — форма дерева, порядок вычисления — обход слева направо</Scheme>
+
+## 2. Порядок вычисления {#order}
+
+Практика плана. Сложение и умножение считаются шагами
+[EvaluateStringOrNumericBinaryExpression](https://tc39.es/ecma262/2026/#sec-evaluatestringornumericbinaryexpression)
+(13.15.4): вычислить левый операнд, GetValue, вычислить правый, GetValue, применить операцию. Присваивание
+([13.15.2](https://tc39.es/ecma262/2026/#sec-assignment-operators-runtime-semantics-evaluation)) тоже
+начинает слева: сначала ссылка-цель, потом правая часть. Предскажите четыре строки:
+
+```js
+const log = [];
+const f = () => { log.push("f"); return 1; };
+const g = () => { log.push("g"); return 2; };
+const h = () => { log.push("h"); return 3; };
+console.log(f() + g() * h(), log.join(" "));
+const a = [];
+let i = 0;
+a[i++] = i;
+console.log(JSON.stringify(a), i);
+let x = 1;
+x += (x = 10, 5);
+console.log(x);
+let obj = { name: "старый" };
+const keep = obj;
+obj.v = (obj = { name: "новый" }, 1);
+console.log(keep.v, obj.v);
+```
+
+<ResultBox>
+7 f g h\
+\[1\] 1\
+6\
+1 undefined
+</ResultBox>
+
+Вызовы шли по порядку f, g, h, хотя умножение — раньше сложения. В `a[i++] = i` ключ 0 вычислен до
+правой части, а она видит уже `i` = 1. `x += …` прочитал `x` = 1 до того, как правая
+часть записала 10. Последняя строка: ссылка `obj.v` запомнила старый объект как `[[Base]]` —
+новое значение переменной `obj` её не трогает.
+
+## 3. Доступ к свойству {#access}
+
+Примечание [13.3.2](https://tc39.es/ecma262/2026/#sec-property-accessors): `obj.name` —
+то же, что `obj["name"]`. Шаги обеих форм: вычислить объект, GetValue, и дальше
+[13.3.4](https://tc39.es/ecma262/2026/#sec-evaluate-property-access-with-identifier-key) берёт имя
+как строку, а [13.3.3](https://tc39.es/ecma262/2026/#sec-evaluate-property-access-with-expression-key)
+вычисляет выражение в скобках и кладёт значение в Reference Record *как есть*. ToPropertyKey (день 5) сделает
+позже GetValue или PutValue; примечание к 13.3.3 говорит прямо: в `a[b] = c` — только после
+вычисления `c`. И ссылка с `[[Base]]` `null` создаётся спокойно — бросает уже
+GetValue:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+const key = { toString() { log.push("ключ"); return "k"; } };
+const o = {};
+o[key] = (log.push("правая"), 1);
+console.log(log.join(" "), Object.keys(o).join());
+const calls = [];
+const name = () => { calls.push("имя вычислено"); return "x"; };
+console.log(attempt(() => null[name()]), "|", calls.join());
+```
+
+<ResultBox>
+правая ключ k\
+TypeError: Cannot read properties of null (reading 'x') | имя вычислено
+</ResultBox>
+
+Chrome 156 следует тексту: `toString` ключа — после правой части. А `null[name()]` сначала
+вычислил имя и только потом упал.
+
+## 4. Вызов функции {#calls}
+
+[Вызов](https://tc39.es/ecma262/2026/#sec-function-calls) (13.3.6): вычислить то, что слева от
+скобок, — ссылку `ref`, взять значение `func`, и всё отдать
+[EvaluateCall](https://tc39.es/ecma262/2026/#sec-evaluatecall) (13.3.6.2). Её шаги:
+
+1. `this` из ссылки: свойство — GetThisValue, имя — WithBaseObject окружения (не
+   `undefined` только внутри `with`, день 31); не ссылка — `undefined` (день 4);
+2. вычислить аргументы — ArgumentListEvaluation;
+3. `func` не объект или не вызываемый — TypeError;
+4. хвостовая позиция — PrepareForTailCall (день 12); Call.
+
+Шаг 2 стоит раньше шага 3: аргументы считаются даже для того, что вызвать нельзя. Отдельный случай — прямой
+`eval` (день 13). А что станет с `this` = `undefined` внутри нестрогой функции,
+решает уже её \[\[Call\]\] — OrdinaryCallBindThis дня 9.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+const arg = () => { log.push("аргумент"); return 1; };
+const obj = {};
+console.log(attempt(() => obj.missing(arg())), "|", log.join());
+console.log(attempt(() => obj.a.b()), "|", attempt(() => obj["x" + 1]()));
+```
+
+<ResultBox>
+TypeError: obj.missing is not a function | аргумент\
+TypeError: Cannot read properties of undefined (reading 'b') | TypeError: obj\[("x" + 1)\] is not a function
+</ResultBox>
+
+Вызов в тексте ошибки V8 печатает по разобранному коду, со своими скобками: `obj[("x" + 1)]`. Вторая
+ошибка другая:
+`obj.a.b` упал раньше вызова — на GetValue ссылки с `[[Base]]` `undefined`.
+
+## 5. new и аргументы {#new}
+
+[new](https://tc39.es/ecma262/2026/#sec-new-operator) (13.3.5) идёт шагами EvaluateNew так же, как
+вызов: вычислить конструктор, GetValue, аргументы — и только потом проверить IsConstructor. Аргументы
+([13.3.8](https://tc39.es/ecma262/2026/#sec-argument-lists)) считаются слева направо, а spread берёт
+итератор (день 7) и зовёт `next`, пока не придёт `done`:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+const notCtor = () => {};
+console.log(attempt(() => new notCtor(log.push("аргумент"))), "|", log.join());
+const steps = [];
+const pair = { [Symbol.iterator]() { let i = 0; return { next() { steps.push("next"); return i < 2 ? { value: ++i, done: false } : { done: true }; } }; } };
+console.log(Math.max(...pair, 0), steps.join(" "));
+const order = [];
+const a = (v) => { order.push(v); return v; };
+console.log(Math.max(a(1), ...[a(2), a(3)], a(4)), order.join(" "));
+```
+
+<ResultBox>
+TypeError: notCtor is not a constructor | аргумент\
+2 next next next\
+4 1 2 3 4
+</ResultBox>
+
+У стрелки нет \[\[Construct\]\] (день 4), но ошибка пришла уже после аргумента. Spread трижды позвал
+`next`: два значения и `done`. Литерал внутри spread вычислился на своём месте, и общий
+порядок не нарушен.
+
+## 6. Необязательная цепочка {#optional}
+
+[13.3.9](https://tc39.es/ecma262/2026/#sec-optional-chains): цепочка начинается с `?.` и
+тянется до конца выражения доступа и вызовов. Evaluation цепочки (13.3.9.1): вычислить основу, GetValue; если
+`undefined` или `null` — вернуть `undefined` *за всю цепочку*. Иначе
+ChainEvaluation (13.3.9.2) проходит звенья теми же операциями, что обычный доступ и вызов (13.3.3, 13.3.4,
+EvaluateCall), и передаёт дальше ссылку — поэтому `this` у `obj.m?.()` сохраняется. Практика
+плана — где обрывается `obj?.a.b`:
+
+<Scheme src="scheme-optional.svg">Где обрывается obj?.a.b(f())</Scheme>
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+const f = () => { log.push("f"); return "a"; };
+const obj = { a: null, m() { return this === obj; } };
+console.log(null?.a.b, undefined?.[f()], log.join() || "f не вызвана");
+console.log(attempt(() => obj?.a.b), obj.a?.b, obj?.a?.b);
+console.log(obj.m?.(), (obj?.m)(), obj.nope?.(), delete null?.a);
+const x = null;
+console.log(x?.y.z.w, "|", attempt(() => (x?.y).z));
+```
+
+<ResultBox>
+undefined undefined f не вызвана\
+TypeError: Cannot read properties of null (reading 'b') undefined undefined\
+true true undefined true\
+undefined | TypeError: Cannot read properties of undefined (reading 'z')
+</ResultBox>
+
+`x?.y.z.w` — одна цепочка, и её оборвала первая проверка. В `(x?.y).z` скобки закончили
+цепочку: получилось `undefined`, и `.z` — уже обычный доступ. Скобки вокруг
+`obj?.m` ссылку не теряют (день 4), поэтому `this` сохранился.
+
+### Где ?. нельзя {#optional-limits}
+
+Грамматика 13.3.9 и ранние ошибки не пускают цепочку туда, где она бессмысленна:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const cases = ["a?.b = 1", "a?.b++", "new a?.b()", "a?.b`x`", "delete a?.b"];
+for (const c of cases) console.log(c, "→", parse(c));
+```
+
+<ResultBox>
+a?.b = 1 → SyntaxError: Invalid left-hand side in assignment\
+a?.b++ → SyntaxError: Invalid left-hand side expression in postfix operation\
+new a?.b() → SyntaxError: Invalid optional chain from new expression\
+a?.b\`x\` → SyntaxError: Invalid tagged template on optional chain\
+delete a?.b → ok
+</ResultBox>
+
+Записать в «может быть, нет» нельзя: AssignmentTargetType цепочки — invalid (день 8). `new` и тег
+шаблона цепочку не принимают (ошибка тега — день 20 курса 2). А `delete` — можно: при `null`
+он получит `undefined` вместо ссылки и вернёт `true`.
+
+## 7. ++, унарные операторы и \*\* {#update}
+
+[13.4](https://tc39.es/ecma262/2026/#sec-update-expressions): `x++` — ссылка, GetValue,
+ToNumeric (день 5), запись значения на 1 больше, а результат — старое значение *после* ToNumeric.
+Ранняя ошибка 13.4.1 — только для цели invalid: `f()++` в нестрогом коде браузера разбирается
+(web-compat, день 8) и падает при выполнении. Унарные `+`, `-`, `!` (13.5.4–13.5.7)
+— ToNumber, ToNumeric и ToBoolean. А у `**` (13.6) грамматика запрещает унарный оператор слева без
+скобок: неясно, что имели в виду.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+let s = "5";
+console.log(s++, s, typeof s);
+const c = 1;
+console.log(attempt(() => c++), "|", attempt(() => new Function("-2 ** 2")));
+console.log((-2) ** 2, -(2 ** 2), 2 ** 3 ** 2, +"", -"x", !"");
+```
+
+<ResultBox>
+5 6 number\
+TypeError: Assignment to constant variable. | SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence\
+4 -4 512 0 NaN true
+</ResultBox>
+
+`s++` вернул число 5, а не строку «5»: старое значение уже прошло ToNumeric. `**` —
+правоассоциативный: `2 ** 3 ** 2` = `2 ** 9`. Через геттер и сеттер видно, что
+`++` читает и пишет по одному разу:
+
+```js
+const log = [];
+const o = { get n() { log.push("get"); return "5"; }, set n(v) { log.push(`set ${typeof v} ${v}`); } };
+const old = o.n++;
+console.log(old, typeof old, "|", log.join(", "));
+```
+
+<ResultBox>
+5 number | get, set number 6
+</ResultBox>
+
+Сеттер получил число 6, а не строку «51»: `++` — не `+= 1` со склейкой, а ToNumeric и
+Number::add.
+
+## 8. delete {#delete}
+
+[13.5.1](https://tc39.es/ecma262/2026/#sec-delete-operator), шаги Evaluation:
+
+1. не ссылка (`delete 1`) — `true`;
+2. неразрешимая ссылка — `true` (бывает только в нестрогом коде);
+3. свойство: `super.x` — ReferenceError; иначе ToObject, ToPropertyKey, `[[Delete]]`;
+   `false` в строгом коде — TypeError;
+4. имя в окружении — DeleteBinding записи окружения.
+
+Ранние ошибки 13.5.1.1: в строгом коде `delete имя` — SyntaxError, и правило применяется сквозь
+скобки, `delete ((x))` тоже. Приватное поле удалить нельзя никогда. Практика плана — обычный и строгий
+код:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+var v = 1;
+implicit = 2;
+let l = 3;
+console.log(delete v, delete implicit, typeof implicit, delete l, delete 1, delete "x".length);
+const arr = [1, 2, 3];
+console.log(delete arr[1], JSON.stringify(arr), arr.length);
+console.log(attempt(() => { "use strict"; const o = Object.freeze({ a: 1 }); return delete o.a; }));
+console.log(attempt(() => new Function("'use strict'; delete ((x));")));
+class B { m() {} }
+class C extends B { m() { return attempt(() => delete super.m); } }
+console.log(new C().m());
+```
+
+<ResultBox>
+false true undefined false true false\
+true \[1,null,3\] 3\
+TypeError: Cannot delete property 'a' of #\<Object>\
+SyntaxError: Delete of an unqualified identifier in strict mode.\
+ReferenceError: Unsupported reference to 'super'
+</ResultBox>
+
+`var v` на верхнем уровне — ненастраиваемое свойство окна: `false`. «Утёкшая»
+`implicit` — обычное свойство: удалена. `let l` живёт в декларативной части глобальной
+записи, и её DeleteBinding отвечает `false`. Удалённый элемент массива оставляет дыру, длина та же.
+
+## 9. typeof {#typeof}
+
+[13.5.3](https://tc39.es/ecma262/2026/#sec-typeof-operator): вычислить операнд; неразрешимая ссылка —
+«undefined» (день 4); иначе GetValue и ответ по типу. У объекта два вопроса: есть слот
+`[[IsHTMLDDA]]` — «undefined» (необязательная часть для браузеров, `document.all`, день 6
+курса 2); есть `[[Call]]` — «function»; иначе «object».
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(typeof document.all, typeof class {}, typeof Math.max, typeof Math, typeof null);
+console.log(attempt(() => { typeof tdz; let tdz = 1; }));
+console.log(attempt(() => typeof undeclared?.x));
+```
+
+<ResultBox>
+undefined function function object object\
+ReferenceError: Cannot access 'tdz' before initialization\
+ReferenceError: undeclared is not defined
+</ResultBox>
+
+Класс — «function»: у него есть \[\[Call\]\], хотя без `new` его не вызвать. `Math` — объект без
+\[\[Call\]\]. Две ошибки — из шага GetValue: `tdz` нашлось, но ещё без значения; а в `undeclared?.x` операндом `typeof` служит вся цепочка, и её первый шаг
+— GetValue основы. Защита `typeof` работает, только если операнд — само имя.
+
+## 10. Сложение {#addition}
+
+[13.8.1](https://tc39.es/ecma262/2026/#sec-addition-operator-plus) ведёт в
+[ApplyStringOrNumericBinaryOperator](https://tc39.es/ecma262/2026/#sec-applystringornumericbinaryoperator)
+(13.15.3). Для `+`: ToPrimitive обоих *без подсказки* (день 5: Date тогда выбирает строку); если
+хоть один — строка, склеить строки. Иначе ToNumeric обоих; разные числовые типы — TypeError; дальше операция по
+таблице: Number::add или BigInt::add. Примечание 2: здесь «или», а в IsLessThan — «и» (день 5).
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const d = new Date(0);
+console.log(typeof (d + 1), typeof (d - 1), [1] + [2], 1 + null, "1" + 1n);
+console.log(attempt(() => 1n + 1), "|", attempt(() => Symbol() + ""));
+const log = [];
+const left = { valueOf() { log.push("левый valueOf"); return 1; } };
+const right = { [Symbol.toPrimitive](hint) { log.push(`правый ${hint}`); return "R"; } };
+console.log(left + right, "|", log.join(", "));
+```
+
+<ResultBox>
+string number 12 1 11\
+TypeError: Cannot mix BigInt and other types, use explicit conversions | TypeError: Cannot convert a Symbol value to a string\
+1R | левый valueOf, правый default
+</ResultBox>
+
+`"1" + 1n` — «11»: строка проверяется раньше типов чисел. Отсутствие подсказки
+`Symbol.toPrimitive` видит как «default». Вычитание (13.8.2) идёт той же операцией, но строк не
+склеивает: `d - 1` — число.
+
+## 11. Сравнения: кто первым {#relational}
+
+[13.10.1](https://tc39.es/ecma262/2026/#sec-relational-operators): `<` зовёт
+IsLessThan(левый, правый, LeftFirst = true), а `>` — IsLessThan(правый, левый, LeftFirst = false):
+операнды меняются местами, чтобы хватило одного алгоритма. Флаг LeftFirst (день 5) возвращает порядок: ToPrimitive
+левого операнда всё равно первым. `<=` — «не (правый \< левый)», и `undefined` от
+NaN даёт `false`. `in` требует объект справа, а `#x in obj` — проверка клейма
+приватного поля (день 9 курса 2).
+
+```js
+const log = [];
+const L = { valueOf() { log.push("левый"); return 1; } };
+const R = { valueOf() { log.push("правый"); return 2; } };
+L > R;
+console.log(log.join(" "));
+class Box { #v = 1; static has(o) { return #v in o; } }
+console.log(Box.has(new Box()), Box.has({}), NaN < 1, NaN >= 1, null < 1);
+```
+
+<ResultBox>
+левый правый\
+true false false false true
+</ResultBox>
+
+Без флага `>` первым привёл бы правый операнд. NaN ломает и `<`, и
+`>=`: IsLessThan вернул `undefined`, и оба шага дали `false` — поэтому
+`>=` не то же, что «не `<`». `null < 1`: ToNumber(`null`) — 0.
+
+## 12. InstanceofOperator {#instanceof}
+
+[13.10.2](https://tc39.es/ecma262/2026/#sec-instanceofoperator): правая часть не объект — TypeError;
+есть метод `%Symbol.hasInstance%` — вызвать и привести ответ к Boolean; иначе не вызываемая —
+TypeError; иначе OrdinaryHasInstance (день 7). Статический метод мы видели (день 11 курса 2). Но заметьте: метод
+есть у *каждой* функции — в `Function.prototype`, — и он ненастраиваемый и только для чтения.
+Шаги 4–5, по примечанию, — для совместимости, и дойти до них можно, только убрав прототип:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+function F() {}
+const f = new F();
+F[Symbol.hasInstance] = () => false;
+console.log(f instanceof F, Object.hasOwn(F, Symbol.hasInstance));
+Object.defineProperty(F, Symbol.hasInstance, { value: () => false });
+console.log(f instanceof F);
+function G() {}
+const g = new G();
+Object.setPrototypeOf(G, null);
+console.log(typeof G[Symbol.hasInstance], g instanceof G);
+console.log(attempt(() => f instanceof 1), "|", attempt(() => f instanceof {}));
+```
+
+<ResultBox>
+true false\
+false\
+undefined true\
+TypeError: Right-hand side of 'instanceof' is not an object | TypeError: Right-hand side of 'instanceof' is not callable
+</ResultBox>
+
+Присваивание `F[Symbol.hasInstance]` молча не сработало: унаследованное свойство только для чтения
+запрещает и своё (OrdinarySetWithOwnDescriptor, день 7). `defineProperty` создаёт своё — и оно сработало. У
+`G` без прототипа метода нет, и `instanceof` дошёл до шага 5.
+
+## 13. Логические операторы и ?: {#logical}
+
+[13.13](https://tc39.es/ecma262/2026/#sec-binary-logical-operators): `&&` и
+`||` возвращают не `true`/`false`, а один из операндов, и правую часть считают,
+только если она нужна. `??` смотрит лишь на `null` и `undefined`. Грамматика не
+даёт смешать `??` с `&&` и `||` без скобок: иначе неясно, что раньше.
+`?:` ([13.14](https://tc39.es/ecma262/2026/#sec-conditional-operator)) приводит условие
+ToBoolean и считает одну ветку.
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+const t = (v) => { log.push(JSON.stringify(v)); return v; };
+console.log(t(0) || t("") || t("да"), t(1) && t(null) && t(2), t(0) ?? t(5));
+console.log(log.join(" "));
+console.log(parse("a ?? b || c"), "|", parse("(a ?? b) || c"), "|", document.all ? "есть" : "нет");
+```
+
+<ResultBox>
+да null 0\
+0 "" "да" 1 null 0\
+SyntaxError: Unexpected token '||' | ok | нет
+</ResultBox>
+
+`t(2)` и `t(5)` не вызваны: правая часть не понадобилась. `document.all` в
+условии ложен — ToBoolean тоже знает о \[\[IsHTMLDDA\]\].
+
+## 14. Присваивание {#assignment}
+
+Три формы 13.15.2 — по шагам:
+
+<Scheme src="scheme-assignment.svg">Три формы присваивания по шагам 13.15.2</Scheme>
+
+Шаги видны через геттер и сеттер:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+const obj = { get v() { log.push("get"); return 1; }, set v(x) { log.push(`set ${x}`); } };
+obj.v ||= 5;
+obj.v &&= 6;
+obj.v += 1;
+console.log(log.join(", "));
+const c = 1;
+console.log(attempt(() => { c ||= 2; return c; }), "|", attempt(() => { c &&= 2; }));
+let r;
+console.log((r = 5) + 1, r);
+```
+
+<ResultBox>
+get, get, set 6, get, set 2\
+1 | TypeError: Assignment to constant variable.\
+6 5
+</ResultBox>
+
+`||=` с истинным значением даже не позвал сеттер, и константа `c` пережила
+`c ||= 2` без ошибки: записи не было (замороженный объект дня 6 курса 2 — тот же шаг). Значение
+выражения присваивания — правая часть: `(r = 5) + 1` — 6. Ранние ошибки 13.15.1 у форм разные:
+`f() = 1` и `f() += 1` в нестрогом коде браузера разбираются (web-compat, день 8), а
+`f() ||= 1` — SyntaxError: логическим формам нужна цель simple.
+
+### Ошибки записи в строгом коде {#strict-put}
+
+Примечание к 13.15.2 перечисляет, когда запись в строгом коде бросает: ссылка неразрешима — ReferenceError;
+свойство только для чтения, аксессор без сеттера, новое свойство у нерасширяемого объекта — TypeError. В
+нестрогом коде все четыре записи молча пропадают; первую и последнюю показал день 4, вот остальные:
+
+```js
+"use strict";
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const ro = Object.defineProperty({}, "x", { value: 1, writable: false });
+const getterOnly = { get y() { return 1; } };
+const closed = Object.preventExtensions({});
+console.log(attempt(() => { ro.x = 2; }));
+console.log(attempt(() => { getterOnly.y = 2; }));
+console.log(attempt(() => { closed.z = 3; }));
+console.log(attempt(() => { nowhere = 4; }));
+```
+
+<ResultBox>
+TypeError: Cannot assign to read only property 'x' of object '#\<Object>'\
+TypeError: Cannot set property y of #\<Object> which has only a getter\
+TypeError: Cannot add property z, object is not extensible\
+ReferenceError: nowhere is not defined
+</ResultBox>
+
+### Chrome против текста: ключ дважды {#chrome}
+
+Составное присваивание с вычисляемым ключом-объектом. По шагам: `lRef` держит ключ как есть; GetValue
+(6.2.5.5) приводит его ToPropertyKey и *записывает готовый ключ в ту же ссылку*; PutValue видит уже ключ
+и второй раз не приводит. Значит, `toString` — один раз:
+
+```js
+const log = [];
+const key = { toString() { log.push("ключ"); return "k"; } };
+const o = { k: 1 };
+o[key] += (log.push("правая"), 1);
+console.log(log.join(" "), o.k);
+```
+
+<ResultBox>
+ключ правая ключ 2
+</ResultBox>
+
+Chrome 156 зовёт `toString` второй раз при записи. Результат верный, но лишний вызов виден: ключ с
+побочным действием выполнит его дважды. Ещё одно расхождение реализации с текстом, как `f() = 1` на
+дне 8.
+
+## 15. Деструктурирующее присваивание {#destructuring}
+
+[13.15.5](https://tc39.es/ecma262/2026/#sec-destructuring-assignment): если слева литерал объекта или
+массива, грамматика перечитывает его как шаблон (AssignmentPattern); ранние ошибки 13.15.5.1 требуют, чтобы каждая
+цель была simple. DestructuringAssignmentEvaluation: у объекта — RequireObjectCoercible, у массива — GetIterator
+и IteratorClose, если итератор не кончился (день 7). Для каждого свойства *сначала вычисляется цель*,
+потом читается свойство, потом умолчание (только при `undefined`) и запись.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+const target = { set x(v) { log.push(`запись x=${v}`); } };
+const source = { get a() { log.push("чтение a"); return 1; } };
+const t = () => { log.push("цель"); return target; };
+({ a: t().x } = source);
+console.log(log.join(", "));
+console.log(attempt(() => { ({} = null); }), "|", attempt(() => { [] = {}; }));
+let d1, d2;
+({ d1 = "умолчание", d2 = "умолчание" } = { d1: null, d2: undefined });
+console.log(d1, d2);
+```
+
+<ResultBox>
+цель, чтение a, запись x=1\
+TypeError: Cannot destructure 'null' as it is null. | TypeError: object is not iterable (cannot read property Symbol(Symbol.iterator))\
+null умолчание
+</ResultBox>
+
+Даже пустой шаблон `{}` проверяет `null`, а пустой `[]` берёт итератор.
+
+## 16. Тег шаблона — тоже вызов {#tagged}
+
+[13.3.11](https://tc39.es/ecma262/2026/#sec-tagged-templates): `` tag`…` `` вычисляется как
+вызов — ссылка на тег и EvaluateCall, с тем же `this`, что у `obj.f()`. Первый аргумент —
+массив строк из GetTemplateObject (день 9), за ним подстановки, вычисленные до вызова.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const card = { tag(strings, ...values) { return this === card ? strings.join("_") + values.join() : "this потерян"; } };
+console.log(card.tag`a${1}b`, (0, card.tag)`a${1}b`);
+const log = [];
+const tag = (s, ...v) => { log.push("тег"); return v; };
+tag`${(log.push("подстановка"), 1)}`;
+console.log(log.join(" "), "|", attempt(() => (1)`x`));
+```
+
+<ResultBox>
+a_b1 this потерян\
+подстановка тег | TypeError: 1 is not a function
+</ResultBox>
+
+Запятая потеряла ссылку, как у обычного вызова (день 4). А «1 is not a function» — та же проверка EvaluateCall.
+
+## 17. Остальное кратко {#brief}
+
+Остальные разделы главы — в справочнике, с одной фразой. Несколько опытов на них:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const re = () => /a/g;
+console.log([1, , 3].length, 1 in [1, , 3], re() === re(), Object.getPrototypeOf({ __proto__: null }));
+console.log(7 % -3, -7 % 3, "6" / 2, 0 || "а", 0 ?? "а", (1, 2, 3));
+console.log(attempt(() => new (() => {})()), "|", attempt(() => "x" in "строка"));
+```
+
+<ResultBox>
+3 false false null\
+1 -1 3 а 0 3\
+TypeError: (intermediate value) is not a constructor | TypeError: Cannot use 'in' operator to search for 'x' in строка
+</ResultBox>
+
+Дыра в литерале массива (13.2.4) — не элемент. Литерал регулярного выражения (13.2.7) при каждом вычислении
+создаёт новый объект, а шаблон (13.2.8) — нет (день 9). `__proto__:` в литерале объекта (13.2.5) задаёт
+прототип. Знак остатка — как у делимого. `new` (13.3.5) требует \[\[Construct\]\], `in`
+(13.10.1) — объект справа.
+
+Ещё три раздела знакомы по другим дням. `super.m()` (13.3.7): MakeSuperPropertyReference строит
+ссылку, где `[[Base]]` — прототип `[[HomeObject]]` метода (GetSuperBase), а
+`[[ThisValue]]` — текущий `this` (день 4); метод ищется выше, а работает с нашим объектом.
+Мета-свойства (13.3.12): `new.target` — GetNewTarget (день 9), `import.meta` — сведения о
+модуле (день 31 курса 2). `import()` (13.3.10) отсчитывает адрес от активного скрипта или модуля —
+GetActiveScriptOrModule (день 9).
+
+## 18. Практика: одно выражение по шагам {#practice}
+
+Соберём день в одном составном присваивании. Помощник `v` записывает имя и отдаёт значение;
+предскажите лог:
+
+```js
+const log = [];
+const v = (name, value) => { log.push(name); return value; };
+const obj = { a: [10, 20] };
+v("o", obj)[v("k", "a")][v("i", 1)] += v("r", 5) * v("m", 2);
+console.log(obj.a[1], log.join(" "));
+```
+
+<ResultBox>
+30 o k i r m
+</ResultBox>
+
+| Шаг | Что делается | Лог |
+| --- | --- | --- |
+| 1 | ссылка `obj.a`: основа, ключ (13.3.3); GetValue — массив | o k |
+| 2 | ключ `v("i", 1)` — ссылка на `obj.a[1]`; это `lRef` | i |
+| 3 | GetValue(`lRef`) — прочитать 20 (13.15.2) | — |
+| 4 | правая часть: умножение слева направо (13.15.4) — 10 | r m |
+| 5 | 20 + 10 (13.15.3), PutValue — 30 | — |
+
+Цель целиком — до правой части, даже если в ней самой три вызова. Если правая часть поменяет
+`obj.a`, запись всё равно уйдёт в старый массив — его держит `lRef`, как в разделе 2.
+
+## 19. «Карточки 2.0»: current по шагам {#cards}
+
+Одна строка «Карточек 2.0» (день 34 курса 2) собирает половину дня:
+
+```js
+// main.js, день 34 курса 2 — текущая карточка
+function current() {
+  return opened.get(chosen)?.cardAt(position, today) ?? null;
+}
+```
+
+По шагам: вызов `opened.get(chosen)` (EvaluateCall, `this` = `opened`);
+проверка 13.3.9.1 — колоды нет, и вся цепочка даёт `undefined`, а аргументы `position` и
+`today` даже не вычисляются; колода есть — ChainEvaluation вызывает `cardAt` с
+`this` = колода. Потом `??` (13.13) меняет `undefined` на `null`. Модель:
+
+```js
+const log = [];
+const deck = { name: "дом", cardAt(position, day) { log.push(`cardAt у «${this.name}»`); return { word: "window" }; } };
+const opened = new Map([["home", deck]]);
+const arg = (v) => { log.push(`аргумент ${v}`); return v; };
+const current = (chosen) => opened.get(chosen)?.cardAt(arg(0), arg("сегодня")) ?? null;
+console.log(current("home")?.word, "|", log.join(", "));
+log.length = 0;
+console.log(current("food"), "|", log.join(", ") || "аргументы не вычислялись");
+```
+
+<ResultBox>
+window | аргумент 0, аргумент сегодня, cardAt у «дом»\
+null | аргументы не вычислялись
+</ResultBox>
+
+## 20. Что будет завтра {#next}
+
+Сегодня — выражения: как они вычисляются и в каком порядке. Завтра, на дне 11, — инструкции и объявления по
+спецификации: блок и мёртвая зона (BlockDeclarationInstantiation), циклы и их окружения, `switch`,
+`try` и Completion Record на деле.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [13 Expressions](https://tc39.es/ecma262/2026/#sec-ecmascript-language-expressions) | глава: порядок разделов — приоритет | <Brief /> |
+| [13.1 Identifiers](https://tc39.es/ecma262/2026/#sec-identifiers) | имена; `yield`, `await` как имена | <Brief /> |
+| [13.1.1 Early Errors](https://tc39.es/ecma262/2026/#sec-identifiers-static-semantics-early-errors) | `arguments` и `eval` в строгом коде, слова-ключи (день 2) | <Brief /> |
+| [13.1.2 StringValue](https://tc39.es/ecma262/2026/#sec-static-semantics-stringvalue) | имя как строка, escape раскрыт (день 2) | <Brief /> |
+| [13.1.3 Evaluation](https://tc39.es/ecma262/2026/#sec-identifiers-runtime-semantics-evaluation) | имя — ResolveBinding (день 9) | <Brief /> |
+| [13.2 Primary Expression](https://tc39.es/ecma262/2026/#sec-primary-expression) | первичные выражения | <Brief /> |
+| [13.2.1 this](https://tc39.es/ecma262/2026/#sec-this-keyword) | ResolveThisBinding (день 9) | <Brief /> |
+| [13.2.2 Identifier Reference](https://tc39.es/ecma262/2026/#sec-identifier-reference) | имя в выражении | <Brief /> |
+| [13.2.3 Literals](https://tc39.es/ecma262/2026/#sec-primary-expression-literals) | `null`, логические, числа, строки (день 3) | <Brief /> |
+| [13.2.4 Array Initializer](https://tc39.es/ecma262/2026/#sec-array-initializer) | дыры и spread | <Brief /> |
+| [13.2.5 Object Initializer](https://tc39.es/ecma262/2026/#sec-object-initializer) | `__proto__:`, методы, ключи (день 8) | <Brief /> |
+| [13.2.6 Function Defining Expressions](https://tc39.es/ecma262/2026/#sec-function-defining-expressions) | функции, классы, генераторы как выражения | <Brief /> |
+| [13.2.7 Regular Expression Literals](https://tc39.es/ecma262/2026/#sec-primary-expression-regular-expression-literals) | новый объект при каждом вычислении | <Brief /> |
+| [13.2.8 Template Literals](https://tc39.es/ecma262/2026/#sec-template-literals) | GetTemplateObject и TemplateMap (день 9) | <Brief /> |
+| [13.2.9 Grouping](https://tc39.es/ecma262/2026/#sec-grouping-operator) | скобки не теряют ссылку (день 4) | <Brief /> |
+| [13.3 Left-Hand-Side Expressions](https://tc39.es/ecma262/2026/#sec-left-hand-side-expressions) | доступ, вызов, `new`, цепочки | <Brief /> |
+| [13.3.1 Static Semantics](https://tc39.es/ecma262/2026/#sec-static-semantics) | ранние ошибки этих выражений | <Brief /> |
+| [13.3.2 Property Accessors](https://tc39.es/ecma262/2026/#sec-property-accessors) | точка = скобки; основа, потом ключ | <Full /> |
+| [13.3.3 …WithExpressionKey](https://tc39.es/ecma262/2026/#sec-evaluate-property-access-with-expression-key) | ключ в ссылке как есть, ToPropertyKey позже | <Brief /> |
+| [13.3.4 …WithIdentifierKey](https://tc39.es/ecma262/2026/#sec-evaluate-property-access-with-identifier-key) | ключ — строка имени | <Brief /> |
+| [13.3.5 new](https://tc39.es/ecma262/2026/#sec-new-operator) | аргументы, потом проверка \[\[Construct\]\] | <Brief /> |
+| [13.3.6 Function Calls](https://tc39.es/ecma262/2026/#sec-function-calls) | EvaluateCall: `this`, аргументы, проверка, Call | <Full /> |
+| [13.3.7 super](https://tc39.es/ecma262/2026/#sec-super-keyword) | `super.x` и `super()` (день 10 курса 2) | <Brief /> |
+| [13.3.8 Argument Lists](https://tc39.es/ecma262/2026/#sec-argument-lists) | аргументы слева направо, spread через итератор | <Brief /> |
+| [13.3.9 Optional Chains](https://tc39.es/ecma262/2026/#sec-optional-chains) | одна проверка на всю цепочку | <Full /> |
+| [13.3.10 Import Calls](https://tc39.es/ecma262/2026/#sec-import-calls) | `import()` (день 31 курса 2) | <Brief /> |
+| [13.3.11 Tagged Templates](https://tc39.es/ecma262/2026/#sec-tagged-templates) | тег и массив строк (день 3) | <Brief /> |
+| [13.3.12 Meta Properties](https://tc39.es/ecma262/2026/#sec-meta-properties) | `new.target` (день 9), `import.meta` | <Brief /> |
+| [13.4 Update Expressions](https://tc39.es/ecma262/2026/#sec-update-expressions) | `++` и `--` | <Brief /> |
+| [13.4.1 Early Errors](https://tc39.es/ecma262/2026/#sec-update-expressions-static-semantics-early-errors) | цель не invalid; `f()++` — web-compat (день 8) | <Brief /> |
+| [13.4.2 x++](https://tc39.es/ecma262/2026/#sec-postfix-increment-operator) | старое значение после ToNumeric | <Brief /> |
+| [13.4.3 x--](https://tc39.es/ecma262/2026/#sec-postfix-decrement-operator) | то же с вычитанием | <Brief /> |
+| [13.4.4 ++x](https://tc39.es/ecma262/2026/#sec-prefix-increment-operator) | новое значение | <Brief /> |
+| [13.4.5 --x](https://tc39.es/ecma262/2026/#sec-prefix-decrement-operator) | то же с вычитанием | <Brief /> |
+| [13.5 Unary Operators](https://tc39.es/ecma262/2026/#sec-unary-operators) | унарные; `void` и `~` — день 6 | <Brief /> |
+| [13.5.1 delete](https://tc39.es/ecma262/2026/#sec-delete-operator) | ссылка, `[[Delete]]`, DeleteBinding; строгий код | <Full /> |
+| [13.5.3 typeof](https://tc39.es/ecma262/2026/#sec-typeof-operator) | неразрешимое имя, \[\[IsHTMLDDA\]\], \[\[Call\]\] | <Full /> |
+| [13.5.4 Unary +](https://tc39.es/ecma262/2026/#sec-unary-plus-operator) | ToNumber | <Brief /> |
+| [13.5.5 Unary -](https://tc39.es/ecma262/2026/#sec-unary-minus-operator) | ToNumeric и смена знака | <Brief /> |
+| [13.5.7 !](https://tc39.es/ecma262/2026/#sec-logical-not-operator) | ToBoolean и отрицание | <Brief /> |
+| [13.6 \*\*](https://tc39.es/ecma262/2026/#sec-exp-operator) | унарный оператор слева — ошибка | <Brief /> |
+| [13.6.1 Evaluation](https://tc39.es/ecma262/2026/#sec-exp-operator-runtime-semantics-evaluation) | через 13.15.4 | <Brief /> |
+| [13.7 \* / %](https://tc39.es/ecma262/2026/#sec-multiplicative-operators) | остаток со знаком делимого | <Brief /> |
+| [13.7.1 Evaluation](https://tc39.es/ecma262/2026/#sec-multiplicative-operators-runtime-semantics-evaluation) | через 13.15.4 | <Brief /> |
+| [13.8 Additive Operators](https://tc39.es/ecma262/2026/#sec-additive-operators) | `+` и `-` | <Brief /> |
+| [13.8.1 +](https://tc39.es/ecma262/2026/#sec-addition-operator-plus) | ToPrimitive без подсказки, строка — склейка | <Full /> |
+| [13.8.2 -](https://tc39.es/ecma262/2026/#sec-subtraction-operator-minus) | только числа | <Brief /> |
+| [13.10 Relational Operators](https://tc39.es/ecma262/2026/#sec-relational-operators) | `<`, `in`, `#x in` | <Brief /> |
+| [13.10.1 Evaluation](https://tc39.es/ecma262/2026/#sec-relational-operators-runtime-semantics-evaluation) | IsLessThan (день 5); `in` — объект справа | <Brief /> |
+| [13.10.2 InstanceofOperator](https://tc39.es/ecma262/2026/#sec-instanceofoperator) | `Symbol.hasInstance` раньше цепочки | <Full /> |
+| [13.11 Equality Operators](https://tc39.es/ecma262/2026/#sec-equality-operators) | `==`, `===` | <Brief /> |
+| [13.11.1 Evaluation](https://tc39.es/ecma262/2026/#sec-equality-operators-runtime-semantics-evaluation) | IsLooselyEqual, IsStrictlyEqual (день 5) | <Brief /> |
+| [13.13 Binary Logical Operators](https://tc39.es/ecma262/2026/#sec-binary-logical-operators) | `??` не смешать с `\|\|` без скобок | <Brief /> |
+| [13.13.1 Evaluation](https://tc39.es/ecma262/2026/#sec-binary-logical-operators-runtime-semantics-evaluation) | правая часть — только если нужна | <Brief /> |
+| [13.14 ?:](https://tc39.es/ecma262/2026/#sec-conditional-operator) | условный оператор | <Brief /> |
+| [13.14.1 Evaluation](https://tc39.es/ecma262/2026/#sec-conditional-operator-runtime-semantics-evaluation) | ToBoolean, одна ветка | <Brief /> |
+| [13.15 Assignment Operators](https://tc39.es/ecma262/2026/#sec-assignment-operators) | три формы присваивания | <Brief /> |
+| [13.15.1 Early Errors](https://tc39.es/ecma262/2026/#sec-assignment-operators-static-semantics-early-errors) | `=` и `+=` — цель не invalid; `\|\|=` и соседи — только simple | <Brief /> |
+| [13.15.2 Evaluation](https://tc39.es/ecma262/2026/#sec-assignment-operators-runtime-semantics-evaluation) | ссылка, чтение, правая часть, запись | <Full /> |
+| [13.15.3 ApplyStringOrNumericBinaryOperator](https://tc39.es/ecma262/2026/#sec-applystringornumericbinaryoperator) | склейка или числовая операция по таблице | <Brief /> |
+| [13.15.4 EvaluateStringOrNumericBinaryExpression](https://tc39.es/ecma262/2026/#sec-evaluatestringornumericbinaryexpression) | левый, правый, операция | <Brief /> |
+| [13.15.5 Destructuring Assignment](https://tc39.es/ecma262/2026/#sec-destructuring-assignment) | цель раньше чтения; итератор закрывается | <Full /> |
+| [13.16 Comma Operator](https://tc39.es/ecma262/2026/#sec-comma-operator) | запятая | <Brief /> |
+| [13.16.1 Evaluation](https://tc39.es/ecma262/2026/#sec-comma-operator-runtime-semantics-evaluation) | GetValue обоих, ответ — правый (день 4) | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// приоритет — грамматика (форма дерева); порядок вычисления — шаги: слева направо
+// a[b] = c: основа, ключ, правая часть, ToPropertyKey, запись; null[f()] — f вызвана, потом TypeError
+// вызов: this из ссылки, аргументы, проверка «is not a function», Call
+// ?.: одна проверка null/undefined на всю цепочку; скобки цепочку кончают, но ссылку не теряют
+// ?. нельзя: слева от =, в ++, после new, с тегом шаблона; delete — можно
+// delete: не ссылка и неразрешимое — true; var — false; строгий: имя — SyntaxError, false — TypeError
+// typeof: только само имя защищено; document.all — "undefined"; [[Call]] — "function"
+// +: ToPrimitive без подсказки; строка с любой стороны — склейка; BigInt + Number — TypeError
+// instanceof: Symbol.hasInstance (есть у каждой функции), потом OrdinaryHasInstance
+// new: конструктор, аргументы, потом проверка [[Construct]]; spread зовёт next до done
+// >: IsLessThan(правый, левый, LeftFirst false) — ToPrimitive левого всё равно первым
+// && и || дают один из операндов; ?? — только null/undefined; ?? с || — только в скобках
+// тег шаблона — вызов: this из ссылки, подстановки до вызова
+// =: ссылка, правая, запись; +=: ссылка, чтение, правая, запись; ||=: может не писать вовсе
+// деструктуризация: цель раньше чтения; умолчание — только для undefined; {} = null — TypeError
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `f() + g() * h()` вызывает `f` первой, хотя умножение «главнее»?
+   <Answer>Приоритет задаёт форму дерева: умножение — правый операнд сложения. А шаги сложения (13.15.4)
+   сначала вычисляют левый операнд, потом правый — внутри него g и h.</Answer>
+2. Где обрывается `obj?.a.b`, если `obj` есть, а `obj.a` — `null`?
+   <Answer>Нигде: проверка 13.3.9.1 смотрит только на `obj`. Цепочка пойдёт дальше, и `.b`
+   от `null` бросит TypeError. Защитить звено — `obj?.a?.b`.</Answer>
+3. Что вернёт `delete` для `var`-переменной и для «утёкшей» глобальной в нестрогом коде?
+   <Answer>`false` и `true`: `var` создаёт ненастраиваемое свойство окна,
+   а присваивание необъявленному имени — обычное свойство, которое удаляется.</Answer>
+4. Почему `F[Symbol.hasInstance] = …` не меняет `instanceof`?
+   <Answer>`F` наследует этот метод от `Function.prototype`, а там он только для чтения.
+   Такое унаследованное свойство запрещает присваиванием создать своё; нужен
+   `defineProperty` или статический метод класса.</Answer>
+5. Сколько раз по тексту 2026 вызовется `toString` ключа в `o[key] += 1` и сколько в Chrome 156?
+   <Answer>По тексту — один: GetValue записывает готовый ключ в ту же ссылку, и PutValue его не приводит.
+   Chrome 156 вызывает второй раз при записи.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining)
+(Optional chaining, delete, typeof, instanceof, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

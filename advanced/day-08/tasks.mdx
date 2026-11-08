@@ -1,0 +1,233 @@
+---
+title: День 8 — задания
+---
+
+# День 8. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-08` курса 3. Помощник `parse` — из лекции. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и правила.</Subtitle>
+
+## Разминка
+
+<Task title="1. Ошибка или нет" level="easy" time="7">
+<Goal>предсказывать ранние ошибки по спискам имён 8.2.</Goal>
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+const cases = ["let a; { var a; }", "var b; let c; { let b; }", "function g() { var g; }", "function h(h) { let x; }", "const [k, k] = [];",
+  "if (true) let z = 1;", "{ class C {} var C; }", "for (var i of []) { let i; }", "(function () { let arguments; })"];
+for (const c of cases) console.log(c, "→", parse(c));
+```
+
+<Criteria>
+- предсказаны девять ответов, у каждой ошибки — правило: 14.2.1, 15.2.1 или BoundNames;
+- объяснено, почему имя функции `g` не мешает `var g` внутри неё;
+- для `if (true) let z = 1;` найдено, чем ошибка отличается от остальных.
+</Criteria>
+</Task>
+
+<Task title="2. Подъём по шагам" level="easy" time="7">
+<Goal>отличать `undefined`, мёртвую зону и готовую функцию.</Goal>
+
+```js
+const log = [];
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+log.push(attempt(() => typeof a), attempt(() => typeof b), attempt(() => typeof c), attempt(() => typeof nothing));
+var a = 1;
+function b() { return c; }
+log.push(attempt(b));
+let c = 2;
+log.push(attempt(b));
+console.log(log.join(" "));
+```
+
+<Criteria>
+- предсказаны шесть значений;
+- объяснено, почему `typeof c` бросает, а `typeof nothing` — нет;
+- объяснено, почему один и тот же `b()` сначала бросает, потом возвращает 2.
+</Criteria>
+</Task>
+
+<Task title="3. Как зовут функцию" level="easy" time="6">
+<Goal>находить места, где работает NamedEvaluation.</Goal>
+
+```js
+const a = { b: function () {} }.b;
+const [c = () => {}] = [];
+let d;
+[d = () => {}] = [];
+const e = async () => {};
+const f = function* () {};
+const h = new (class {})().constructor;
+const i = { ["j"]: class {} }.j;
+const k = Object.assign(() => {});
+const l = (() => {}).bind();
+console.log([a, c, d, e, f, h, i, k, l].map((fn) => JSON.stringify(fn.name)).join(" "));
+```
+
+<Criteria>
+- предсказаны девять имён;
+- для `a` объяснено, почему имя «b», а не «a»;
+- найдено, почему имя есть у `d` в присваивании с деструктуризацией, но нет у `k`.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Своя синтаксически управляемая операция" level="medium" time="14">
+<Goal>написать операцию кусками по видам узлов, как в 8.2.</Goal>
+
+Программа — список инструкций-массивов: `["let", имя]`, `["const", имя]`,
+`["var", имя]`, `["function", имя]`, `["block", список]`,
+`["if", список, список]`. Напишите `lexNames(list, top)`, `varNames(list, top)` —
+по одной ветке на вид узла, с правилом верхнего уровня 8.2.8 — и `earlyError(list, top)`: имя из
+первой ошибки 14.2.1 или `null`, вложенные блоки тоже проверить.
+
+<Example>
+```js
+earlyError([["let", "x"], ["let", "x"]], true);                     // "x"
+earlyError([["var", "x"], ["var", "x"]], true);                     // null
+earlyError([["block", [["var", "x"]]], ["let", "x"]], true);        // "x"
+earlyError([["var", "x"], ["block", [["let", "x"]]]], true);        // null
+earlyError([["function", "f"], ["var", "f"]], true);                // null
+earlyError([["block", [["function", "f"], ["var", "f"]]]], true);   // "f"
+varNames([["if", [["var", "a"]], [["block", [["var", "b"], ["let", "c"]]]]]], true);   // ["a", "b"]
+```
+</Example>
+
+<Criteria>
+- все семь строк примера дают то, что в комментариях;
+- для каждой из шести программ ответ совпадает с `parse` того же кода;
+- объяснено, почему у `block` своя ветка в `varNames`, а в `lexNames` её
+  нет.
+</Criteria>
+</Task>
+
+<Task title="5. Свой SetFunctionName" level="medium" time="10">
+<Goal>перенести 10.2.9 в код.</Goal>
+
+Напишите `setFunctionName(fn, name, prefix)`: символ — описание в квадратных скобках или пусто, если
+описания нет; приставка — через пробел; свойство `name` — с атрибутами, как у настоящих функций.
+Функция возвращает `fn`.
+
+<Example>
+```js
+setFunctionName(() => {}, "save").name;              // "save"
+setFunctionName(() => {}, Symbol("tag")).name;        // "[tag]"
+setFunctionName(() => {}, Symbol()).name;             // ""
+setFunctionName(() => {}, "size", "get").name;        // "get size"
+JSON.stringify(Object.getOwnPropertyDescriptor(setFunctionName(() => {}, "x"), "name"));   // '{"value":"x","writable":false,"enumerable":false,"configurable":true}'
+```
+</Example>
+
+<Criteria>
+- все пять строк примера дают то, что в комментариях;
+- ответы совпадают с языком: геттер `size`, ключ `Symbol("tag")` в литерале;
+- объяснено, почему свойство «только для чтения» удалось переопределить.
+</Criteria>
+</Task>
+
+<Task title="6. «Карточки 2.0»: слушатели с именами" level="medium" time="14">
+<Goal>снимать слушателя по имени, а не по ссылке.</Goal>
+
+Безымянного слушателя не снять (раздел 15 лекции). Напишите `listen(element, type, name, handler)` —
+дать слушателю имя (задание 5), повесить и запомнить; `unlisten(element, type, name)` — снять;
+`names(element)` — имена висящих слушателей по порядку. Повторный `listen` с тем же именем
+заменяет старого слушателя.
+
+<Example>
+```js
+const button = document.createElement("button");
+let clicks = 0;
+listen(button, "click", "onKnow", () => clicks++);
+listen(button, "click", "onAgain", () => {});
+button.click();
+names(button);                        // ["onKnow", "onAgain"]
+unlisten(button, "click", "onKnow");
+button.click();
+clicks;                               // 1
+names(button);                        // ["onAgain"]
+```
+</Example>
+
+<Criteria>
+- все три проверяемые строки примера дают то, что в комментариях;
+- у висящего слушателя `name` — данное имя;
+- повторный `listen(button, "click", "onAgain", …)` не удваивает срабатывания.
+</Criteria>
+</Task>
+
+<Task title="7. Метки, super и цели присваивания" level="medium" time="12">
+<Goal>проходить 8.3, 8.5.1 и 8.6.4.</Goal>
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+const cases = ["outer: for (;;) { inner: for (;;) { continue outer; } }", "a: { a: ; }", "x: while (0) { function f() { break x; } }",
+  "class A { static { super.x; } }", "({ m() { super.x; } })", "f()++;", "a + b = 1;"];
+for (const c of cases) console.log(c, "→", parse(c));
+```
+
+<Criteria>
+- предсказаны семь ответов, у каждого — операция и правило;
+- объяснено, почему `super.x` разрешён в методе литерала объекта, а не только класса;
+- для `f()++` назван ответ AssignmentTargetType и что случится при выполнении.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свой Contains" level="hard" time="10">
+<Goal>написать операцию с определением по умолчанию и исключениями 8.5.1.</Goal>
+
+Узел — `{ type, children }`. Напишите `contains(node, symbol)`: по умолчанию — есть ли
+символ среди детей или глубже; `"Function"` — всегда `false`; `"Arrow"` —
+заглядывает внутрь только за `"This"`, `"Super"` и `"NewTarget"`.
+
+<Example>
+```js
+const tree = { type: "Block", children: [{ type: "Arrow", children: [{ type: "This" }] }, { type: "Function", children: [{ type: "Super" }] }] };
+contains(tree, "This");                                                   // true
+contains(tree, "Super");                                                  // false
+contains({ type: "Arrow", children: [{ type: "Yield" }] }, "Yield");      // false
+contains({ type: "Block", children: [{ type: "Yield" }] }, "Yield");      // true
+```
+</Example>
+
+<Criteria>
+- все четыре строки примера дают то, что в комментариях;
+- определение по умолчанию — одна ветка, исключения — две отдельные, как в 8.5.1;
+- объяснено, какую раннюю ошибку из лекции решает каждое исключение.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомые разделы: простой список параметров" level="hard" time="10">
+<Goal>прочитать статические операции параметров, которых не было на лекции.</Goal>
+
+Прочитайте [15.1.3
+IsSimpleParameterList](https://tc39.es/ecma262/2026/#sec-static-semantics-issimpleparameterlist) и [15.1.2
+ContainsExpression](https://tc39.es/ecma262/2026/#sec-static-semantics-containsexpression), найдите, кто их зовёт (ранние ошибки 15.2.1 и FunctionDeclarationInstantiation 10.2.11),
+и предскажите семь строк.
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+for (const c of ["function f(a, b) { 'use strict'; }", "function f(a = 1) { 'use strict'; }", "function f({ a }) { 'use strict'; }",
+  "function f(...a) { 'use strict'; }", "function f(a, a = 1) {}", "(function (a, a) {})"]) console.log(c, "→", parse(c));
+var x = "внешний";
+function f(a = () => x) { var x = "внутренний"; return a(); }
+console.log(f());
+```
+
+<Criteria>
+- предсказаны семь строк, у каждой ошибки — правило 15.2.1 или 15.1.1;
+- объяснено, почему простой список нужен для `"use strict"`;
+- последняя строка объяснена так: у параметров с выражениями своя область, и стрелка в значении по
+  умолчанию не видит `var x` тела (шаги создания — день 12).
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/name)
+(Function: name, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

@@ -1,0 +1,967 @@
+---
+title: "День 19 — Мини-проект: наблюдаемое хранилище на Proxy и Reflect"
+day: День 19 • урок 1
+heading: "Мини-проект: наблюдаемое хранилище на Proxy и Reflect"
+lead: Курс 3, Advanced. Проектный день после модулей A1–A4. 45 минут.
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+  h3 { color: #854d0e; }
+  .step-number { background: #eab308; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- собрать хранилище, которое само сообщает подписчикам о каждом изменении данных;
+- выбирать ловушку по шагам спецификации: куда на самом деле приходит `obj.key = value`;
+- оборачивать вложенные объекты при чтении и держать у объекта один прокси;
+- читать, что делают с прокси `push` и `splice`, и собирать уведомления в одну
+  перерисовку;
+- узнавать четыре ошибки хранилища по симптомам.
+</Goals>
+
+<Toc />
+
+## 1. Проект вместо новой темы {#why}
+
+Новых разделов сегодня нет: модуль «Объекты изнутри» разобрал, как прокси перехватывает внутренние методы,
+и это знание работает на приложение. На дне 29 Essentials и дне 16 курса 2 каждый слушатель сам звал
+`render()`: забыл вызов — страница показывает старое. Сегодня данные лежат в **наблюдаемом
+хранилище**: прокси замечает каждое изменение и сам заказывает перерисовку — так устроена реактивность
+во фреймворках.
+
+Собираем **доску заданий группы**. Группа JS-1 делает «Карточки 2.0», и каждое задание проекта —
+карточка в колонке «Надо», «Делаю» или «Готово».
+
+| Что понадобится | Откуда |
+| --- | --- |
+| ловушки `get`, `defineProperty`, `deleteProperty`; инварианты | день 16 |
+| `Reflect` и `receiver`; журнал всех ловушек | день 17 |
+| \[\[Set\]\] по шагам; индексы и `length` массива | дни 7, 14, 15 |
+| задания и очередь микрозадач | день 9; курс 2, день 28 |
+| `WeakMap`; модули; JSON | курс 2, дни 14, 30, 31 |
+| страница: элементы, делегирование, `localStorage` | Essentials, дни 25–27, 31 |
+
+Первая половина дня — опыты в консоли: какая ловушка на самом деле видит запись. Потом —
+`store.js`, страница и разбор ошибок.
+
+## 2. Что должна уметь доска {#spec}
+
+| № | Возможность | Как проверить |
+| --- | --- | --- |
+| 1 | показать задания в трёх колонках | при загрузке четыре задания |
+| 2 | добавить задание: что и кто делает | форма, Enter — карточка в «Надо» |
+| 3 | не пускать пустые поля | сообщение под формой |
+| 4 | передвинуть задание | кнопки «←» и «→» на карточке |
+| 5 | удалить задание | кнопка «✕» |
+| 6 | фильтр по имени | поле «Фильтр по имени», без учёта регистра |
+| 7 | итоговая строка | сколько заданий и сколько готово |
+| 8 | помнить доску после обновления | `localStorage` |
+
+<Scheme src="scheme-spec.svg">Доска после загрузки: три колонки, у карточки — только возможные переходы</Scheme>
+
+И правило, которого нет в таблице: **ни один слушатель не зовёт `render`**.
+Сортировки нет — это задание.
+
+## 3. Главная схема {#idea}
+
+На дне 16 курса 2 слушатель звал метод класса, а потом `render()`. Теперь слушатель только пишет в
+`state`. Запись проходит через ловушку прокси: ловушка проверяет значение, кладёт его в цель через
+`Reflect` и зовёт `notify()`. Сам `notify` не рисует: он планирует одну
+микрозадачу, и подписчики — `render` и сохранение — работают, когда весь код слушателя закончился.
+
+<Scheme src="scheme-idea.svg">Слушатель → запись → ловушка → `notify` → подписчики; `render` никто не зовёт руками</Scheme>
+
+Какие ловушки для этого нужны — вопрос разделов 4–8, и ответ спецификации неочевиден.
+
+## 4. Первая модель: set и deleteProperty {#first}
+
+Первая мысль: запись — это `set`, удаление — `deleteProperty`. Модель —
+`observe`: зовёт `onChange` после каждой операции и пересылает через `Reflect`
+с `receiver` (день 17):
+
+```js
+"use strict";
+function observe(obj, onChange) {
+  return new Proxy(obj, {
+    set(target, key, value, receiver) {
+      const ok = Reflect.set(target, key, value, receiver);
+      onChange(key);
+      return ok;
+    },
+    deleteProperty(target, key) {
+      const ok = Reflect.deleteProperty(target, key);
+      onChange(key);
+      return ok;
+    },
+  });
+}
+const changes = [];
+const state = observe({ filter: "" }, (key) => changes.push(key));
+state.filter = "Аман";
+state.note = "черновик";
+delete state.note;
+Object.defineProperty(state, "filter", { value: "Мерет" });
+console.log(changes.join(", "), state.filter);
+```
+
+<ResultBox>
+filter, note, note Мерет
+</ResultBox>
+
+Запись, новое свойство и удаление замечены, а `Object.defineProperty` прошёл мимо: «Мерет»
+записан, журнал молчит. Это видел раздел 8 дня 16 — \[\[DefineOwnProperty\]\] идёт мимо \[\[Set\]\] — и сделал вывод:
+«проверка записи — это две ловушки». Проверим его на уведомлениях.
+
+## 5. Одна дверь: defineProperty {#door}
+
+Добавим ловушку `defineProperty` с тем же `onChange` — и одно присваивание даст два
+уведомления: от `defineProperty`, потом от `set`. Почему, покажет журнал дня 17 —
+обработчик-прокси, который записывает имя каждой ловушки и зовёт `Reflect` с тем же именем:
+
+```js
+"use strict";
+const log = [];
+const spy = (obj) => new Proxy(obj, new Proxy({}, {
+  get: (h, trap) => (...args) => { log.push(`${trap} ${String(args[1])}`); return Reflect[trap](...args); },
+}));
+const state = spy({ filter: "" });
+state.filter = "Аман";
+console.log(log.join(", "));
+```
+
+<ResultBox>
+set filter, getOwnPropertyDescriptor filter, defineProperty filter
+</ResultBox>
+
+Одно присваивание — три ловушки. Путь по шагам:
+
+<Scheme src="scheme-door.svg">Присваивание через прокси кончается в его \[\[DefineOwnProperty\]\]</Scheme>
+
+PutValue ([6.2.5.6](https://tc39.es/ecma262/2026/#sec-putvalue), шаг 3.d) зовёт \[\[Set\]\] прокси с
+получателем-прокси. Ловушка `set` журнала отдаёт его в `Reflect.set`
+([28.1.12](https://tc39.es/ecma262/2026/#sec-reflect.set), шаг 4), дальше — OrdinarySet
+([10.1.9.1](https://tc39.es/ecma262/2026/#sec-ordinaryset)) и OrdinarySetWithOwnDescriptor
+([10.1.9.2](https://tc39.es/ecma262/2026/#sec-ordinarysetwithowndescriptor)) у цели. А они работают
+с получателем: шаг 2.c спрашивает его \[\[GetOwnProperty\]\], шаг 2.h (для нового свойства — 2.d.ii,
+CreateDataProperty [7.3.5](https://tc39.es/ecma262/2026/#sec-createdataproperty)) зовёт его
+\[\[DefineOwnProperty\]\]. Получатель — прокси, и оба вызова снова идут через ловушки. День 14 проходил эти шаги на
+обычном объекте.
+
+Вывод: любая запись через прокси с верным получателем кончается в его \[\[DefineOwnProperty\]\]
+([10.5.6](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-defineownproperty-p-desc)),
+туда же идёт `Object.defineProperty`. Это одна дверь на все изменения: уведомлять — только в ней и в
+`deleteProperty`. Ловушка `set` не нужна: без неё
+[10.5.9](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-set-p-v-receiver)
+на шаге 6.a сам зовёт \[\[Set\]\] цели с тем же получателем. Пример на странице MDN
+[handler.defineProperty()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/Proxy/defineProperty)
+это показывает: присваивание `proxy._secret = …` падает в ловушке `defineProperty`, хотя
+в списке перехватов присваивания нет — только «any other operation that invokes the \[\[DefineOwnProperty\]\]
+internal method».
+
+```js
+"use strict";
+function observe(obj, onChange) {
+  return new Proxy(obj, {
+    defineProperty(target, key, desc) {
+      const ok = Reflect.defineProperty(target, key, desc);
+      onChange(key);
+      return ok;
+    },
+    deleteProperty(target, key) {
+      const ok = Reflect.deleteProperty(target, key);
+      onChange(key);
+      return ok;
+    },
+  });
+}
+const changes = [];
+const state = observe({ filter: "" }, (key) => changes.push(key));
+state.filter = "Аман";
+state.note = "черновик";
+delete state.note;
+Object.defineProperty(state, "filter", { value: "Мерет" });
+console.log(changes.join(", "), state.filter);
+```
+
+<ResultBox>
+filter, note, note, filter Мерет
+</ResultBox>
+
+Четыре изменения — четыре уведомления, каждое по разу. Ответ дню 16: для записи хватает одной ловушки,
+если получатель верный.
+
+## 6. Вложенные объекты: обёртка при чтении {#nested}
+
+Запись `state.tasks[0].status = "done"` идёт уже не в прокси: `state.tasks` вернул
+сам массив цели. Значит, всё прочитанное из хранилища надо отдавать обёрнутым — ловушка `get`, как
+`lend` задания 8 дня 16, только без отзыва:
+
+```js
+"use strict";
+const proxies = new WeakMap();
+const changes = [];
+const handler = {
+  get(target, key, receiver) {
+    const value = Reflect.get(target, key, receiver);
+    return typeof value === "object" && value !== null ? wrap(value) : value;
+  },
+  defineProperty(target, key, desc) {
+    changes.push(key);
+    return Reflect.defineProperty(target, key, desc);
+  },
+};
+function wrap(obj) {
+  if (!proxies.has(obj)) proxies.set(obj, new Proxy(obj, handler));
+  return proxies.get(obj);
+}
+const state = wrap({ tasks: [{ title: "Разметка", status: "todo" }] });
+state.tasks[0].status = "done";
+console.log(changes.join(", "), state.tasks === state.tasks, Array.isArray(state.tasks));
+```
+
+<ResultBox>
+status true true
+</ResultBox>
+
+Обёртка нужна только объектам: функции вроде `push` отдаются как есть и вызываются с
+`this` = прокси, так что все записи метода идут через ловушки. `WeakMap` даёт объекту
+один прокси — иначе `state.tasks === state.tasks` было бы `false` (раздел 14 покажет, чем
+это кончается) — и не держит в памяти удалённое задание (курс 2, день 14). А `Array.isArray` видит
+массив сквозь прокси: IsArray ([7.2.2](https://tc39.es/ecma262/2026/#sec-isarray), шаг 3) смотрит в
+цель, и `JSON.stringify` сохранит `tasks` массивом.
+
+## 7. Что делает с прокси push — по шагам {#push}
+
+Добавление задания — `state.tasks.push(…)`. Что именно проходит через прокси, покажет тот же
+журнал:
+
+```js
+"use strict";
+const log = [];
+const spy = (obj) => new Proxy(obj, new Proxy({}, {
+  get: (h, trap) => (...args) => { log.push(`${trap} ${String(args[1])}`); return Reflect[trap](...args); },
+}));
+const tasks = spy(["Разметка", "Модуль", "Тесты"]);
+tasks.push("Сохранение");
+console.log(log.join(", "));
+```
+
+<ResultBox>
+get push, get length, set 3, getOwnPropertyDescriptor 3, defineProperty 3, set length, getOwnPropertyDescriptor length, defineProperty length
+</ResultBox>
+
+| Строка журнала | Что в спецификации |
+| --- | --- |
+| `get push` | чтение метода — \[\[Get\]\] прокси ([10.5.8](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-get-p-receiver)) |
+| `get length` | [23.1.3.23](https://tc39.es/ecma262/2026/#sec-array.prototype.push), шаг 2: LengthOfArrayLike ([7.3.18](https://tc39.es/ecma262/2026/#sec-lengthofarraylike)) → Get |
+| `set 3` | шаг 5.a: Set(O, "3", E, true) ([7.3.4](https://tc39.es/ecma262/2026/#sec-set-o-p-v-throw)) |
+| `getOwnPropertyDescriptor 3`, `defineProperty 3` | 10.1.9.2, шаги 2.c и 2.d.ii: индекса нет — CreateDataProperty |
+| `set length` | шаг 6: Set(O, "length", 4, true) |
+| `getOwnPropertyDescriptor length`, `defineProperty length` | 10.1.9.2, шаги 2.c и 2.h |
+
+Хранилище получит два уведомления: индекс 3 и `length`. Длину поднял уже первый define —
+\[\[DefineOwnProperty\]\] массива при записи за концом
+([10.4.2.1](https://tc39.es/ecma262/2026/#sec-array-exotic-objects-defineownproperty-p-desc),
+шаг 2.k; день 15), — а шаг 6 пишет то же 4: изменилось ли значение, никто не проверяет. Ключи в ловушках —
+строки или символы: `"3"`, а не `3` (ToString
+[7.1.17](https://tc39.es/ecma262/2026/#sec-tostring) в шаге 5.a; у присваивания
+`tasks[3] = …` — ToPropertyKey [7.1.19](https://tc39.es/ecma262/2026/#sec-topropertykey)).
+
+Удаление тяжелее. `splice(0, 1)` у массива из четырёх переносит каждое следующее задание на шаг
+назад ([23.1.3.31](https://tc39.es/ecma262/2026/#sec-array.prototype.splice), шаги 16.b.iii.1–2: Get,
+потом Set), удаляет последний индекс (шаг 16.d.i) и пишет `length` (шаг 20) — пять уведомлений. И
+подвох: Get на шаге 16.b.iii.1 прошёл через нашу `get` и вернул **обёртку**, а Set
+записал её в массив-цель. При следующем чтении прокси обернут ещё раз, и слоёв с каждым удалением больше: в
+Chrome после трёх удалений первого задания запись в последнее проходит четыре ловушки
+`defineProperty` вместо одной. Поэтому `store.js` держит вторую `WeakMap`,
+прокси → цель, и перед записью меняет обёртку на цель.
+
+## 8. Одна перерисовка на пачку изменений {#batch}
+
+«✕» у первого из четырёх заданий — пять уведомлений, а пользователь увидит только последний вариант. Поэтому
+`notify` не зовёт подписчиков сразу, а планирует одну микрозадачу:
+
+```js
+"use strict";
+let notes = 0, renders = 0, planned = false;
+function notify() {
+  notes++;
+  if (planned) return;
+  planned = true;
+  Promise.resolve().then(() => {
+    planned = false;
+    renders++;
+    console.log("перерисовка", renders, "после", notes, "уведомлений");
+  });
+}
+const tasks = new Proxy(["Разметка", "Модуль", "Тесты"], {
+  defineProperty(target, key, desc) { notify(); return Reflect.defineProperty(target, key, desc); },
+  deleteProperty(target, key) { notify(); return Reflect.deleteProperty(target, key); },
+});
+tasks.push("Сохранение");
+tasks.splice(0, 1);
+console.log("код закончился, перерисовок:", renders);
+```
+
+<ResultBox>
+код закончился, перерисовок: 0\
+перерисовка 1 после 7 уведомлений
+</ResultBox>
+
+Флажок `planned` пускает в очередь одну задачу на все уведомления. У выполненного промиса
+`then` сразу отдаёт задание хозяину — PerformPromiseThen
+([27.2.5.4.1](https://tc39.es/ecma262/2026/#sec-performpromisethen)) → HostEnqueuePromiseJob
+([9.5.5](https://tc39.es/ecma262/2026/#sec-hostenqueuepromisejob)), — и браузер выполнит его, когда
+закончится текущий код (день 9; курс 2, день 28). Перерисовка видит итог: новое и удалённое задание — одним
+кадром. Обратная сторона: сразу после записи страница ещё старая.
+
+## 9. store.js целиком {#store}
+
+Выводы разделов 4–8 — в одном модуле; проверка значений — там же, где уведомление, в
+`defineProperty`. У каждого необычного места — номер раздела:
+
+```js
+// store.js — наблюдаемое хранилище: Proxy (10.5) и Reflect (28.1)
+export function createStore(data, allowed = {}) {
+  const proxies = new WeakMap();   // цель → прокси: у объекта один прокси (день 16, задание 8)
+  const targets = new WeakMap();   // прокси → цель: splice пишет назад прочитанное (23.1.3.31, шаг 16.b.iii)
+  const listeners = new Set();
+  let planned = false;
+
+  function notify() {
+    if (planned) return;
+    planned = true;
+    Promise.resolve().then(() => {   // микрозадача (27.2.5.4.1 → 9.5.5): после всего текущего кода
+      planned = false;
+      for (const listener of listeners) listener();
+    });
+  }
+
+  function check(target, key, value) {
+    const name = String(key);   // символ в шаблонной строке — TypeError (7.1.17, шаг 2)
+    if (Object.hasOwn(target, key) && typeof value !== typeof target[key]) {
+      throw new TypeError(`${name}: нужен ${typeof target[key]}, а пришёл ${typeof value}`);
+    }
+    if (Object.hasOwn(allowed, key) && !allowed[key].includes(value)) {
+      throw new RangeError(`${name}: можно только ${allowed[key].join(", ")}`);
+    }
+  }
+
+  const handler = {
+    get(target, key, receiver) {
+      const value = Reflect.get(target, key, receiver);   // receiver станет this геттера (10.1.8.1, шаг 7)
+      return typeof value === "object" && value !== null ? wrap(value) : value;   // функции — как есть
+    },
+    // ловушки set нет: obj.key = value приходит сюда (10.5.9, шаг 6.a → 10.1.9.2, шаги 2.d.ii и 2.h)
+    defineProperty(target, key, desc) {
+      if ("value" in desc) {
+        check(target, key, desc.value);
+        if (targets.has(desc.value)) desc = { ...desc, value: targets.get(desc.value) };   // в цель — без обёртки
+      }
+      const ok = Reflect.defineProperty(target, key, desc);
+      if (ok) notify();
+      return ok;   // false → TypeError в строгом коде (6.2.5.6, шаг 3.e)
+    },
+    deleteProperty(target, key) {
+      const ok = Reflect.deleteProperty(target, key);
+      if (ok) notify();
+      return ok;
+    },
+  };
+
+  function wrap(obj) {
+    if (!proxies.has(obj)) {
+      const proxy = new Proxy(obj, handler);
+      proxies.set(obj, proxy);
+      targets.set(proxy, obj);
+    }
+    return proxies.get(obj);
+  }
+
+  return {
+    state: wrap(data),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+```
+
+Проверка типа — как в настройках дня 16: у существующего свойства новое значение того же
+`typeof`. Для полей с перечнем — у нас статус — второй аргумент `allowed`.
+`TypeError` — не тот тип, `RangeError` — не то значение; так же делит ошибки пример
+Validation на странице MDN
+[Proxy](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy).
+`String(key)` — потому что ключ бывает символом. Чего проверка не видит: объект через
+`push` приходит одной записью индекса, его поля не проверяются. `subscribe` возвращает
+отписку. Проверка шага — временный `main.js`:
+
+```js
+// main.js — проверка шага
+import { createStore } from "./store.js";
+const { state, subscribe } = createStore({ nextId: 1, tasks: [] }, { status: ["todo", "doing", "done"] });
+const stop = subscribe(() => console.log("подписчик:", JSON.stringify(state)));
+state.tasks.push({ id: 1, title: "Разметка", who: "Айна", status: "todo" });
+state.tasks[0].status = "doing";
+state.nextId += 1;
+for (const bad of [() => { state.nextId = "3"; }, () => { state.tasks[0].status = "готово"; }]) {
+  try {
+    bad();
+  } catch (e) {
+    console.log(`${e.name}: ${e.message}`);
+  }
+}
+await null;
+stop();
+state.tasks.length = 0;
+console.log(state.tasks.length, "— подписчик молчит");
+```
+
+<ResultBox>
+TypeError: nextId: нужен number, а пришёл string\
+RangeError: status: можно только todo, doing, done\
+подписчик: \{"nextId":2,"tasks":\[\{"id":1,"title":"Разметка","who":"Айна","status":"doing"\}\]\}\
+0 — подписчик молчит
+</ResultBox>
+
+Четыре уведомления — один вызов подписчика: микрозадача хранилища встала в очередь раньше продолжения после
+`await null`. Отклонённые записи до цели не дошли, после `stop()` подписчик молчит.
+
+## 10. Разметка {#markup}
+
+```html file="index.html"
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Доска заданий</title>
+  <style>
+    #columns { display: flex; gap: 12px; }
+    #columns section { flex: 1; background: #f8fafc; padding: 8px; }
+    #columns li { background: #ffffff; margin: 4px 0; padding: 4px; }
+    .error { color: #b91c1c; }
+  </style>
+  <script type="module" src="main.js"></script>
+</head>
+<body>
+  <h1 id="heading"></h1>
+  <p id="summary"></p>
+  <form id="new-task">
+    <input name="title" placeholder="Задание">
+    <input name="who" placeholder="Кто делает">
+    <button>Добавить</button>
+  </form>
+  <p><input id="filter" placeholder="Фильтр по имени"></p>
+  <p id="error" class="error"></p>
+  <div id="columns">
+    <section data-status="todo"><h2>Надо</h2><ul></ul></section>
+    <section data-status="doing"><h2>Делаю</h2><ul></ul></section>
+    <section data-status="done"><h2>Готово</h2><ul></ul></section>
+  </div>
+</body>
+</html>
+```
+
+Колонки и их заголовки — в разметке, `data-status` связывает колонку со статусом. Скрипт —
+модуль: строгий режим и `store.js` через `import` (курс 2, день 30).
+
+## 11. main.js: данные, показ, подписчики {#main}
+
+```js
+// main.js — доска заданий группы
+import { createStore } from "./store.js";
+
+const SAVED = "board-js-1";
+const STATUSES = ["todo", "doing", "done"];
+const first = {
+  title: "JS-1: Карточки 2.0",
+  filter: "",
+  nextId: 5,
+  tasks: [
+    { id: 1, title: "Разметка страницы", who: "Айна", status: "done" },
+    { id: 2, title: "Модуль card.js", who: "Аман", status: "doing" },
+    { id: 3, title: "Проверки tests.js", who: "Мерет", status: "todo" },
+    { id: 4, title: "Сохранение storage.js", who: "Аман", status: "todo" },
+  ],
+};
+const { state, subscribe } = createStore(JSON.parse(localStorage.getItem(SAVED)) ?? first, { status: STATUSES });
+globalThis.board = state;   // модуль из консоли не виден (курс 2, день 30) — даём ей доску
+```
+
+При первом запуске `JSON.parse(null)` даёт `null`, и `??` берёт первые
+данные. Сохраняется всё состояние, с `nextId`: номер нового задания не повторится.
+`globalThis.board` — окно в хранилище для консоли. Элементы — один раз:
+
+```js
+const heading = document.querySelector("#heading");
+const summary = document.querySelector("#summary");
+const form = document.querySelector("#new-task");
+const filter = document.querySelector("#filter");
+const error = document.querySelector("#error");
+const columns = document.querySelector("#columns");
+```
+
+Показ — как на дне 16 курса 2: `makeCard` строит карточку, `render` — страницу из
+`state`:
+
+```js
+function button(text, action) {
+  const b = document.createElement("button");
+  b.textContent = text;
+  b.dataset.action = action;
+  return b;
+}
+
+function makeCard(task) {
+  const li = document.createElement("li");
+  li.dataset.id = task.id;
+  li.append(`${task.title} — ${task.who} `);
+  const at = STATUSES.indexOf(task.status);
+  if (at > 0) li.append(button("←", "back"));
+  if (at < STATUSES.length - 1) li.append(button("→", "next"));
+  li.append(button("✕", "delete"));
+  return li;
+}
+
+function isVisible(task) {
+  return task.who.toLowerCase().includes(state.filter.toLowerCase());
+}
+
+function render() {
+  heading.textContent = `Доска ${state.title}`;
+  for (const status of STATUSES) {
+    const list = columns.querySelector(`[data-status="${status}"] ul`);
+    list.textContent = "";
+    list.append(...state.tasks.filter((task) => task.status === status && isVisible(task)).map(makeCard));
+  }
+  const done = state.tasks.filter((task) => task.status === "done").length;
+  summary.textContent = `Заданий: ${state.tasks.length} · готово: ${done}`;
+}
+```
+
+`render` только читает — через ловушку `get`, задания приходят обёрнутыми.
+`append` строки ставит текстовый узел: `<b>` в имени останется текстом (день 26
+Essentials). Подписчики и первый показ:
+
+```js
+subscribe(render);
+subscribe(() => localStorage.setItem(SAVED, JSON.stringify(state)));
+
+filter.value = state.filter;
+render();
+```
+
+Подписчики друг о друге не знают: третий добавится одной строкой. `JSON.stringify(state)` идёт
+через ловушки: у объекта — ownKeys и дескрипторы (SerializeJSONObject,
+[25.5.4.5](https://tc39.es/ecma262/2026/#sec-serializejsonobject), шаг 6.a), у массива —
+`length` и индексы (SerializeJSONArray,
+[25.5.4.6](https://tc39.es/ecma262/2026/#sec-serializejsonarray), шаг 6). Поле фильтра берёт
+сохранённый фильтр — иначе поле пустое, а доска отфильтрована. Проверка шага:
+
+```js
+console.log(board.tasks.length, document.querySelectorAll("#columns li").length, document.querySelector("#summary").textContent);
+// 4 4 Заданий: 4 · готово: 1
+board.tasks[2].status = "doing";
+board.tasks.at(-1).who = "Сапар";
+// «Проверки tests.js» — в «Делаю», «Сохранение storage.js — Сапар»
+```
+
+Главный опыт дня: две записи из консоли — и страница перестроилась сама. Доска уже сохранена — обновите
+страницу. Вернуться к первым данным: `localStorage.clear()` и обновить.
+
+## 12. Действия только меняют state {#actions}
+
+```js
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const title = form.elements.title.value.trim();
+  const who = form.elements.who.value.trim();
+  if (title === "" || who === "") {
+    error.textContent = "Напишите задание и кто его делает";
+    return;
+  }
+  error.textContent = "";
+  state.tasks.push({ id: state.nextId, title, who, status: "todo" });
+  state.nextId += 1;
+  form.reset();
+});
+
+filter.addEventListener("input", () => {
+  state.filter = filter.value.trim();
+});
+
+columns.addEventListener("click", (event) => {
+  const b = event.target.closest("button");
+  if (!b) return;
+  const id = Number(b.closest("li").dataset.id);
+  const task = state.tasks.find((t) => t.id === id);
+  const at = STATUSES.indexOf(task.status);
+  if (b.dataset.action === "next") task.status = STATUSES[at + 1];
+  if (b.dataset.action === "back") task.status = STATUSES[at - 1];
+  if (b.dataset.action === "delete") state.tasks.splice(state.tasks.indexOf(task), 1);
+});
+```
+
+Ни одного `render()` — на дне 16 курса 2 его звал каждый слушатель. Форма делает три записи —
+перерисовка одна. Щелчок — делегирование дня 27 Essentials; номер из `dataset` — строка, отсюда
+`Number`. Пустые поля проверяет слушатель: хранилище не видит полей нового объекта.
+
+Проверка шага на чистой доске: задание «&nbsp;&nbsp;Тесты в Chrome&nbsp;», кто — «Сапар», <Kbd>Enter</Kbd>;
+«→» у «Проверки tests.js»; «✕» у «Разметка страницы».
+
+```js
+console.log(board.tasks.length, board.tasks.at(-1).title, board.nextId, board.tasks.map((t) => t.status).join());
+// 4 Тесты в Chrome 6 doing,doing,todo,todo
+```
+
+## 13. Разбор: перенос молчит, удаление работает {#bug-receiver}
+
+Захотели видеть в консоли каждую запись и добавили в `handler` ловушку `set`:
+
+```js
+// store.js — в handler добавили ловушку (с ошибкой)
+set(target, key, value) {
+  console.log("запись", key, value);
+  return Reflect.set(target, key, value);
+},
+```
+
+**Шаг 1. Что не так?** В консоли «запись status doing», а карточка стоит на месте. Не
+появляется и новое задание, молчит фильтр. А «✕» работает — и показывает все пропущенные изменения разом.
+
+**Шаг 2. Почему?** `Reflect.set` без четвёртого аргумента делает получателем цель
+(28.1.12, шаг 3.a), и шаги 2.c и 2.h из 10.1.9.2 идут к обычному объекту-цели, мимо прокси (правая часть схемы
+раздела 5). `defineProperty` записи не видит, `notify` молчит. Удаление идёт своей
+ловушкой `deleteProperty`, она уведомляет, и `render` рисует цель, где уже лежат все
+«тихие» записи. Так же пишет значение пример Validation со страницы MDN Proxy — `obj[prop] = value`
+внутри `set`: для одного объекта это верно, для хранилища — нет.
+
+**Шаг 3. Чиним.** Ловушке — четвёртый параметр `receiver`, и его же — в
+`Reflect.set(target, key, value, receiver)`.
+
+## 14. Разбор: ещё три ошибки {#bugs}
+
+### Удаляю одно задание — пропадает другое
+
+В `get` обошлись без `WeakMap` — каждый раз `new Proxy(value, handler)`:
+
+```js
+"use strict";
+const handler = {
+  get(target, key, receiver) {
+    const value = Reflect.get(target, key, receiver);
+    return typeof value === "object" && value !== null ? new Proxy(value, handler) : value;
+  },
+};
+const state = new Proxy({ tasks: [{ title: "Разметка" }, { title: "Модуль card.js" }, { title: "Тесты" }] }, handler);
+const task = state.tasks.find((t) => t.title === "Разметка");
+console.log(state.tasks === state.tasks, state.tasks.indexOf(task));
+state.tasks.splice(state.tasks.indexOf(task), 1);
+console.log(state.tasks.map((t) => t.title).join(", "));
+```
+
+<ResultBox>
+false -1\
+Разметка, Модуль card.js
+</ResultBox>
+
+Каждое чтение — новый прокси: `task` и элемент массива — разные объекты, и `indexOf`,
+сравнивая строго (IsStrictlyEqual, [7.2.14](https://tc39.es/ecma262/2026/#sec-isstrictlyequal)),
+отвечает −1. `splice(-1, 1)` не ошибка: отрицательное начало считается от конца (23.1.3.31, шаг 5),
+и удаляется последнее задание. Лечит кэш раздела 6.
+
+### TypeError «trap returned falsish», а карточка всё равно переехала
+
+```js
+"use strict";
+const task = new Proxy({ status: "todo" }, {
+  defineProperty(target, key, desc) {
+    Reflect.defineProperty(target, key, desc);   // забыли return
+  },
+});
+try {
+  task.status = "doing";
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}
+console.log(task.status);
+```
+
+<ResultBox>
+TypeError: 'defineProperty' on proxy: trap returned falsish for property 'status'\
+doing
+</ResultBox>
+
+Ловушка вернула `undefined`, ToBoolean дал `false` (10.5.6, шаги 8–9), и строгий код
+бросил `TypeError` (6.2.5.6, шаг 3.e). Но `Reflect.defineProperty` уже записал значение,
+а в хранилище `notify` уже заказал перерисовку — карточка переехала, а в консоли ошибка. У
+`push` она будет и в нестрогом коде: его Set идёт с флажком Throw (7.3.4, шаг 2).
+
+### TypeError «'get' on proxy: … read-only and non-configurable»
+
+```js
+"use strict";
+const handler = {
+  get(target, key, receiver) {
+    const value = Reflect.get(target, key, receiver);
+    return typeof value === "object" && value !== null ? new Proxy(value, handler) : value;
+  },
+};
+const state = new Proxy(Object.freeze({ tasks: [] }), handler);
+try {
+  console.log(state.tasks.length);
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}
+```
+
+<ResultBox>
+TypeError: 'get' on proxy: property 'tasks' is a read-only and non-configurable data property on the proxy target but the proxy did not return its actual value (expected '\[object Array\]' but got '\[object Object\]')
+</ResultBox>
+
+Первые данные заморозили — привычка дня 16 курса 2 (`deepFreeze` настроек). У незаписываемого и
+ненастраиваемого свойства `get` обязан вернуть то же значение (10.5.8, шаг 9.a.i), а обёртка — другой
+объект; это уже было в задании 8 дня 16. Хранилище защищает данные проверками — замораживать нечего.
+
+| Симптом | Причина | Где смотреть |
+| --- | --- | --- |
+| перенос, добавление и фильтр молчат, «✕» показывает всё | `Reflect.set` без `receiver` | ловушка `set` |
+| удалилось другое задание | нет кэша обёрток | `wrap` |
+| `trap returned falsish`, но изменение видно | ловушка без `return` | `defineProperty` |
+| `'get' on proxy … read-only` | замороженные данные | вызов `createStore` |
+
+## 15. Программа целиком {#whole}
+
+`index.html` — раздел 10, `store.js` — раздел 9. `main.js`:
+
+```js
+// main.js — доска заданий группы
+import { createStore } from "./store.js";
+
+// 1. Данные: сохранённые или первые
+const SAVED = "board-js-1";
+const STATUSES = ["todo", "doing", "done"];
+const first = {
+  title: "JS-1: Карточки 2.0",
+  filter: "",
+  nextId: 5,
+  tasks: [
+    { id: 1, title: "Разметка страницы", who: "Айна", status: "done" },
+    { id: 2, title: "Модуль card.js", who: "Аман", status: "doing" },
+    { id: 3, title: "Проверки tests.js", who: "Мерет", status: "todo" },
+    { id: 4, title: "Сохранение storage.js", who: "Аман", status: "todo" },
+  ],
+};
+const { state, subscribe } = createStore(JSON.parse(localStorage.getItem(SAVED)) ?? first, { status: STATUSES });
+globalThis.board = state;   // модуль из консоли не виден (курс 2, день 30) — даём ей доску
+
+// 2. Элементы страницы — один раз
+const heading = document.querySelector("#heading");
+const summary = document.querySelector("#summary");
+const form = document.querySelector("#new-task");
+const filter = document.querySelector("#filter");
+const error = document.querySelector("#error");
+const columns = document.querySelector("#columns");
+
+// 3. Показ: из state — в элементы
+function button(text, action) {
+  const b = document.createElement("button");
+  b.textContent = text;
+  b.dataset.action = action;
+  return b;
+}
+
+function makeCard(task) {
+  const li = document.createElement("li");
+  li.dataset.id = task.id;
+  li.append(`${task.title} — ${task.who} `);
+  const at = STATUSES.indexOf(task.status);
+  if (at > 0) li.append(button("←", "back"));
+  if (at < STATUSES.length - 1) li.append(button("→", "next"));
+  li.append(button("✕", "delete"));
+  return li;
+}
+
+function isVisible(task) {
+  return task.who.toLowerCase().includes(state.filter.toLowerCase());
+}
+
+function render() {
+  heading.textContent = `Доска ${state.title}`;
+  for (const status of STATUSES) {
+    const list = columns.querySelector(`[data-status="${status}"] ul`);
+    list.textContent = "";
+    list.append(...state.tasks.filter((task) => task.status === status && isVisible(task)).map(makeCard));
+  }
+  const done = state.tasks.filter((task) => task.status === "done").length;
+  summary.textContent = `Заданий: ${state.tasks.length} · готово: ${done}`;
+}
+
+// 4. Подписчики: их зовёт хранилище, а не мы
+subscribe(render);
+subscribe(() => localStorage.setItem(SAVED, JSON.stringify(state)));
+
+// 5. Действия: только меняют state
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const title = form.elements.title.value.trim();
+  const who = form.elements.who.value.trim();
+  if (title === "" || who === "") {
+    error.textContent = "Напишите задание и кто его делает";
+    return;
+  }
+  error.textContent = "";
+  state.tasks.push({ id: state.nextId, title, who, status: "todo" });
+  state.nextId += 1;
+  form.reset();
+});
+
+filter.addEventListener("input", () => {
+  state.filter = filter.value.trim();
+});
+
+columns.addEventListener("click", (event) => {
+  const b = event.target.closest("button");
+  if (!b) return;
+  const id = Number(b.closest("li").dataset.id);
+  const task = state.tasks.find((t) => t.id === id);
+  const at = STATUSES.indexOf(task.status);
+  if (b.dataset.action === "next") task.status = STATUSES[at + 1];
+  if (b.dataset.action === "back") task.status = STATUSES[at - 1];
+  if (b.dataset.action === "delete") state.tasks.splice(state.tasks.indexOf(task), 1);
+});
+
+// 6. Первый показ
+filter.value = state.filter;
+render();
+```
+
+Сценарий, в котором каждая ветка программы сработала хотя бы раз, — по шагам, с чистой доски:
+
+<table className="scenario">
+<thead>
+<tr><th>Что сделали</th><th>Что на странице</th></tr>
+</thead>
+<tbody>
+<tr><td>открыли страницу</td><td>Заданий: 4 · готово: 1</td></tr>
+<tr><td>«Добавить» с пустыми полями</td><td>Напишите задание и кто его делает</td></tr>
+<tr><td>«&nbsp;&nbsp;Тесты в Chrome&nbsp;», «Сапар», <Kbd>Enter</Kbd></td><td>Заданий: 5 · готово: 1</td></tr>
+<tr><td>«→» у «Проверки tests.js»</td><td>в «Делаю»: Модуль card.js, Проверки tests.js</td></tr>
+<tr><td>«✕» у «Разметка страницы»</td><td>Заданий: 4 · готово: 0</td></tr>
+<tr><td>фильтр «аман»</td><td>видны: Сохранение storage.js, Модуль card.js</td></tr>
+<tr><td>обновили страницу</td><td>та же доска, в фильтре «аман»</td></tr>
+<tr><td>в консоли `board.tasks[0].status = "done"`</td><td>Заданий: 4 · готово: 1</td></tr>
+</tbody>
+</table>
+
+Крайние случаи — в консоли на открытой доске:
+
+| Что сделали | Что получили | Почему |
+| --- | --- | --- |
+| `board.nextId = "7"` | `TypeError: nextId: нужен number, а пришёл string` | проверка типа |
+| `board.tasks[0].status = "готово"` | `RangeError: status: можно только todo, doing, done` | `allowed` |
+| `board.tasks.push({ id: 9, title: "x", who: "y", status: "готово" })` | принято: «Заданий» +1, карточки нет ни в одной колонке | проверяется запись индекса, а не поля объекта |
+
+<TryIt>
+Два опыта.
+\
+\
+**Первый.** Добавьте третьего подписчика:
+``subscribe(() => { document.title = `Доска: ${state.tasks.length}`; });``. Сколько строк в
+слушателях пришлось поменять?
+\
+\
+**Второй.** Наберите в консоли `board`, раскройте \[\[Target\]\] у
+`board.tasks`: задания там или прокси? Удалите первое задание и посмотрите снова (раздел 7).
+</TryIt>
+
+## 16. Что дальше {#next}
+
+Доска держится на одном правиле: всё, что меняет данные, проходит через \[\[DefineOwnProperty\]\] и \[\[Delete\]\]
+прокси. Слабые места: проверка видит запись, а не данные, а `Map` в состоянии не заработает — её
+методы ищут внутренние слоты у `this`, у прокси их нет (день 16, раздел 5).
+
+С дня 20 начинается модуль «Двоичные данные и модель памяти»: `ArrayBuffer` и типизированные
+массивы.
+
+### Как расширять проект самим
+
+| Идея | Что понадобится |
+| --- | --- |
+| проверять поля нового задания | `check` обходит поля объекта перед записью |
+| отменить последнее действие | подписчик копит снимки `JSON.stringify(state)` |
+| сортировка колонки | `toSorted` в `render` |
+| «Карточки 2.0» на хранилище | колода и прогресс в `state`, `render` — подписчик |
+
+Каждая идея — в ту же схему: правило — в хранилище, показ — в подписчике, действие — запись в
+`state`.
+
+<Ref>
+<p style={{margin: "0 0 8px"}}>Новых разделов нет — проект опирается на разобранные раньше:</p>
+
+| Раздел | Где в проекте | День |
+| --- | --- | --- |
+| [6.2.5.6 PutValue](https://tc39.es/ecma262/2026/#sec-putvalue) | присваивание зовёт \[\[Set\]\] с получателем; TypeError при `false` | 4, 9 |
+| [7.1.17 ToString](https://tc39.es/ecma262/2026/#sec-tostring) | номер индекса — строка; символ — TypeError | 5 |
+| [7.1.19 ToPropertyKey](https://tc39.es/ecma262/2026/#sec-topropertykey) | ключи ловушек — строки и символы | 5 |
+| [7.2.2 IsArray](https://tc39.es/ecma262/2026/#sec-isarray) | массив сквозь прокси | 5, 9 |
+| [7.2.14 IsStrictlyEqual](https://tc39.es/ecma262/2026/#sec-isstrictlyequal) | `indexOf` без кэша обёрток | 5 |
+| [7.3.4 Set](https://tc39.es/ecma262/2026/#sec-set-o-p-v-throw), [7.3.5 CreateDataProperty](https://tc39.es/ecma262/2026/#sec-createdataproperty) | записи `push`; новое свойство | 7 |
+| [9.5.5 HostEnqueuePromiseJob](https://tc39.es/ecma262/2026/#sec-hostenqueuepromisejob) | одна перерисовка на действие | 9 |
+| [10.1.8.1 OrdinaryGet](https://tc39.es/ecma262/2026/#sec-ordinaryget) | `receiver` — `this` геттера | 14 |
+| [10.1.9.1 OrdinarySet](https://tc39.es/ecma262/2026/#sec-ordinaryset), [10.1.9.2](https://tc39.es/ecma262/2026/#sec-ordinarysetwithowndescriptor) | запись кончается в \[\[DefineOwnProperty\]\] получателя | 7, 14 |
+| [10.4.2.1](https://tc39.es/ecma262/2026/#sec-array-exotic-objects-defineownproperty-p-desc) | индекс за концом поднимает `length` | 15 |
+| [10.5.6](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-defineownproperty-p-desc), [10.5.8](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-get-p-receiver), [10.5.9](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-set-p-v-receiver), [10.5.10](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-delete-p) | ловушки хранилища и их инварианты | 16 |
+| [23.1.3.23 push](https://tc39.es/ecma262/2026/#sec-array.prototype.push), [23.1.3.31 splice](https://tc39.es/ecma262/2026/#sec-array.prototype.splice) | что они делают с прокси | — |
+| [25.5.4.5](https://tc39.es/ecma262/2026/#sec-serializejsonobject), [25.5.4.6](https://tc39.es/ecma262/2026/#sec-serializejsonarray) | сохранение через `JSON.stringify` | курс 2, 31 |
+| [27.2.5.4.1 PerformPromiseThen](https://tc39.es/ecma262/2026/#sec-performpromisethen) | `Promise.resolve().then` в `notify` | курс 2, 28 |
+| [28.1.3](https://tc39.es/ecma262/2026/#sec-reflect.defineproperty), [28.1.4](https://tc39.es/ecma262/2026/#sec-reflect.deleteproperty), [28.1.5](https://tc39.es/ecma262/2026/#sec-reflect.get), [28.1.12](https://tc39.es/ecma262/2026/#sec-reflect.set) | пересылка в цель | 17 |
+</Ref>
+
+<Cheatsheet>
+```js
+// СХЕМА: слушатель пишет в state → ловушка проверяет, зовёт notify → микрозадача → подписчики
+
+// ОДНА ДВЕРЬ: obj.key = value через прокси кончается в его defineProperty (10.1.9.2, шаги 2.c, 2.h)
+// ловушки: get (обёртка), defineProperty (проверка + notify), deleteProperty (notify); set не нужна
+// set всё же есть — Reflect.set(target, key, value, receiver), иначе запись мимо ловушек
+
+// get оборачивает объекты: WeakMap цель → прокси (иначе indexOf = -1); перед записью обёртка → цель
+// push — 2 уведомления, splice(0, 1) из четырёх — 5; notify ставит одну микрозадачу
+
+// ловушка возвращает true/false: undefined → TypeError, хотя запись сделана
+// замороженное в хранилище не класть: get обязан вернуть то же значение (10.5.8)
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему хранилищу не нужна ловушка `set`?
+   <Answer>Без неё \[\[Set\]\] прокси зовёт \[\[Set\]\] цели с тем же получателем (10.5.9, шаг 6.a), и
+   OrdinarySetWithOwnDescriptor записывает значение через \[\[DefineOwnProperty\]\] получателя, то есть
+   через ловушку `defineProperty`. Туда же идёт `Object.defineProperty`.</Answer>
+2. Какие ловушки проходит `state.tasks.push(x)` и сколько будет уведомлений?
+   <Answer>`get push`, `get length`, потом для индекса и для `length` —
+   `set`, `getOwnPropertyDescriptor`, `defineProperty`. Уведомлений
+   два: индекс и `length`.</Answer>
+3. Зачем обёртки хранятся в `WeakMap`?
+   <Answer>Чтобы у объекта был один прокси: иначе каждое чтение даёт новый, `indexOf` не находит
+   задание, и `splice(-1, 1)` удаляет последнее. `WeakMap` не держит в памяти
+   удалённые задания.</Answer>
+4. Почему после пяти уведомлений перерисовка одна?
+   <Answer>`notify` только ставит одну микрозадачу (флажок `planned`), а браузер
+   выполняет её, когда текущий код закончился. Подписчики видят уже итоговое состояние.</Answer>
+5. Ловушка `set` пересылает `Reflect.set(target, key, value)`. Что сломается?
+   <Answer>Получателем станет цель (28.1.12, шаг 3.a), и шаги 2.c и 2.h пойдут к цели напрямую. Ловушка
+   `defineProperty` не увидит записи, страница не обновится.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy)
+(Proxy, handler.defineProperty(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

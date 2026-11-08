@@ -1,0 +1,140 @@
+---
+title: День 17 — конспект
+css: |
+  h1 { border-bottom-color: #ec4899; }
+  h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+---
+
+# День 17. Reflect и встроенные символы
+
+<Subtitle>Выжимка лекции: функции Reflect и их отличие от Object, пересылка с Receiver и newTarget, встроенные символы и алгоритмы, которые их спрашивают, объекты Symbol.</Subtitle>
+
+## Главное
+
+<Definition>
+Reflect (28.1) — обычный объект, не функция: 13 функций, по одной на внутренний метод, с теми же именами и
+аргументами, что у ловушек прокси. Каждая проверяет аргументы и отдаёт ответ метода как есть. Встроенный символ —
+ключ, под которым язык сам ищет метод или значение объекта (Get или GetMethod); нет ответа — работает алгоритм по
+умолчанию.
+</Definition>
+
+## Reflect и пересылка
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const frozen = Object.freeze({ word: "kitap" });
+console.log(Reflect.defineProperty(frozen, "x", { value: 1 }), run(() => Object.defineProperty(frozen, "x", { value: 1 })), run(() => Reflect.getPrototypeOf(1)));   // false TypeError TypeError — ответ метода как есть, цель-примитив — ошибка
+const card = { word: "kitap", get title() { return this.word.toUpperCase(); } };
+console.log(Reflect.get(card, "title", { word: "suw" }), Reflect.ownKeys({ b: 1, 1: 2, [Symbol("s")]: 3 }).length);   // SUW 3 — receiver стал this геттера; ownKeys — строки и символы
+const kid = Object.create(new Proxy(card, { get(t, key, receiver) { return Reflect.get(t, key, receiver); } }));
+kid.word = "galam";
+console.log(kid.title);                                   // GALAM — receiver наследника дошёл до геттера
+class Card { constructor(w) { this.w = w; } }
+class Other {}
+console.log(Reflect.construct(Card, ["kitap"], Other) instanceof Other, run(() => Reflect.apply(Math.max, null)));   // true TypeError — прототип от newTarget; аргументы — только объект
+```
+
+| Reflect | Без Reflect | Разница |
+| --- | --- | --- |
+| `defineProperty`, `set`, `deleteProperty`, `setPrototypeOf` | `Object.*`, присваивание, `delete` | false вместо TypeError, и в строгом коде |
+| `getPrototypeOf`, `isExtensible` | `Object.*` | цель-примитив — TypeError, без ToObject |
+| `ownKeys` | `getOwnPropertyNames` и `getOwnPropertySymbols` | одним массивом: индексы, строки, символы |
+| `get`, `set` | `t[k]`, `t[k] = v` | receiver — `this` геттера и сеттера, на нём создают свойство |
+| `apply` | `f.apply` | свой `f.apply` не спрашивают; аргументы — объект |
+| `construct` | `new C(...args)` | newTarget по выбору |
+
+<Remember>
+Ловушка пересылает без потерь, если зовёт функцию Reflect с тем же именем и всеми своими аргументами:
+`return Reflect.get(t, key, receiver)`. Обработчик-прокси может отвечать
+`Reflect[имя]` на любое имя ловушки. Reflect.construct — единственный способ задать
+`new.target`: так ловушка `construct` и модель `bind` не теряют newTarget
+наследника.
+</Remember>
+
+## Встроенные символы
+
+```js
+const price = { [Symbol.toPrimitive](hint) { return hint === "number" ? 12 : hint === "string" ? "12 манат" : "цена"; } };
+console.log(+price, `${price}`, price + "");              // 12 12 манат цена — подсказки number, string, default
+const d = new Date(2026, 10, 3);
+console.log(typeof (d + 1), typeof (d - 1));              // string number — дата считает default строкой
+class Deck extends Array {
+  static get [Symbol.species]() { return Array; }
+  get [Symbol.toStringTag]() { return "Deck"; }
+}
+const deck = Deck.from(["kitap", "galam"]);
+console.log(Object.prototype.toString.call(deck), deck.map((w) => w) instanceof Deck, Deck.of(1) instanceof Deck);   // [object Deck] false true — тег из геттера; map через species, of через this
+console.log([1].concat({ length: 1, 0: "a", [Symbol.isConcatSpreadable]: true }).length);   // 2 — подобие массива раскрыто
+```
+
+| Символ | Кто спрашивает | Без ответа |
+| --- | --- | --- |
+| `toPrimitive` | ToPrimitive | OrdinaryToPrimitive |
+| `toStringTag` | `Object.prototype.toString` | тег по слотам |
+| `species` | `map`, `filter`, `slice`…, `then`, `finally` | конструктор по умолчанию |
+| `hasInstance` | `instanceof` | OrdinaryHasInstance |
+| `isConcatSpreadable` | `concat` | IsArray |
+| `match` | IsRegExp: `RegExp(x)`, `includes`, `replaceAll` | слот \[\[RegExpMatcher\]\] |
+| `unscopables` | `with` (день 31) | все имена видны |
+
+<Remember>
+Метод toPrimitive обязан вернуть примитив; из встроенных объектов свой есть только у Date и Symbol. Тег — любая
+строка, даже у массива, поэтому toString — не проверка типа. `of` и `from` создают через
+`this`, без species. Встроенные символы общие для всех реалмов, а свойства `Symbol.iterator`
+и другие — неизменяемые.
+</Remember>
+
+## hasInstance и объекты Symbol
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+class Even { static [Symbol.hasInstance](n) { return Number.isInteger(n) && n % 2 === 0; } }
+function Plain() {}
+Plain[Symbol.hasInstance] = () => true;
+console.log(4 instanceof Even, {} instanceof Plain, run(() => 1 instanceof {}));   // true false TypeError — static работает, присваивание отклонено, справа не функция
+const s = Symbol("kitap");
+const box = Object(s);
+console.log(typeof box, box == s, box === s, ({ [s]: 1 })[box]);   // object true false 1 — обёртка: == и ключ идут через ToPrimitive
+console.log(run(() => new Symbol()), Symbol.for("kitap") === Symbol.for("kitap"), Symbol.keyFor(s), String(s), run(() => `${s}`));   // TypeError true undefined Symbol(kitap) TypeError — без new; реестр; строкой — только явно
+```
+
+| Что | Откуда | `Symbol.keyFor` |
+| --- | --- | --- |
+| `Symbol("x")` | новый при каждом вызове | undefined |
+| `Symbol.for("x")` | реестр, общий для реалмов | "x" |
+| `Symbol.iterator` и другие | свойства Symbol, неизменяемые | undefined |
+| `Object(sym)` | обёртка со слотом \[\[SymbolData\]\] | TypeError |
+
+<Remember>
+`instanceof` сначала ищет метод Symbol.hasInstance (правому операнду не нужен \[\[Call\]\]), иначе —
+OrdinaryHasInstance. Function.prototype\[Symbol.hasInstance\] незаписываемый: своё свойство — только через
+defineProperty или `static`. «Карточки 2.0»: колода с тегом Deck, toPrimitive для чисел и строк и
+species — `map` отдаёт простые слова.
+</Remember>
+
+<Homework>
+1. Для `const base = { n: 1, get v() { return this.n; } }`, прокси
+   `const p = new Proxy(base, { get(t, k, r) { return Reflect.get(t, k, r); } })` и
+   `const kid = Object.create(p); kid.n = 2;` предскажите `kid.v` и `p.v`.
+   Что изменится, если ловушка позовёт `Reflect.get(t, k)` без третьего аргумента?
+2. Для `class A { static [Symbol.toStringTag] = "Класс"; get [Symbol.toStringTag]() { return "Экземпляр"; } }`
+   предскажите `String(new A())`, `Object.prototype.toString.call(A)` и
+   `Object.prototype.toString.call(A.prototype)`.
+3. У `class D extends Array` статический геттер Symbol.species возвращает undefined. Чему равны
+   `D.from([1, 2]).map((x) => x) instanceof D` и `D.of(1) instanceof D`? Что будет,
+   если геттер вернёт 1? Объясните по шагам ArraySpeciesCreate.
+4. Прочитайте на MDN
+   [Reflect.construct()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/construct)
+   раздел «Reflect.construct() vs. Object.create()»: с `Object.create` и `apply`
+   «the end result is the same», только `new.target` — undefined. Проверьте это на классе
+   `Card` из лекции: что даст `Card.apply(Object.create(Other.prototype), ["kitap"])`
+   и почему?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect)
+(Reflect, Reflect.construct(), Reflect.get(), Symbol.toPrimitive, Symbol.toStringTag, Symbol.species, Symbol.hasInstance, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

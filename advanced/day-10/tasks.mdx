@@ -1,0 +1,262 @@
+---
+title: День 10 — задания
+---
+
+# День 10. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-10` курса 3. Помощники `attempt` и `parse` — из лекции. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага.</Subtitle>
+
+## Разминка
+
+<Task title="1. Порядок лога" level="easy" time="7">
+<Goal>отличать приоритет и ассоциативность от порядка вычисления.</Goal>
+
+```js
+const log = [];
+const v = (name, value) => { log.push(name); return value; };
+const run = (f) => { log.length = 0; const r = f(); return `${log.join("")}=${r}`; };
+const obj = { m(a, b) { return a + b; } };
+console.log(run(() => v("a", 1) - v("b", 2) - v("c", 3)), run(() => v("a", 2) ** v("b", 3) ** v("c", 2)));
+console.log(run(() => v("o", obj)[v("k", "m")](v("a", 1), v("b", 2))), run(() => v("a", null)?.[v("k", "x")]));
+console.log(run(() => (v("a", 1) < v("b", 2) ? v("c", "да") : v("d", "нет"))), run(() => v("a", 0) && v("b", 1)));
+```
+
+<Criteria>
+- предсказаны шесть строк, у каждой — шаг, который решил порядок;
+- объяснено, почему у правоассоциативного `**` лог всё равно «abc»;
+- для `?.[…]` и `&&` найдено, какой шаг не дал вычислить ключ и правую часть.
+</Criteria>
+</Task>
+
+<Task title="2. delete в двух режимах" level="easy" time="7">
+<Goal>проходить шаги 13.5.1.2 и ранние ошибки 13.5.1.1.</Goal>
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+var g = 1;
+const o = Object.defineProperty({ a: 1 }, "fixed", { value: 2 });
+console.log(delete o.a, delete o.fixed, delete o.none, delete g, delete globalThis.g);
+console.log(attempt(() => { "use strict"; return delete o.fixed; }), "|", attempt(() => { "use strict"; return delete o.none; }));
+console.log(parse("'use strict'; delete o;"), "|", parse("'use strict'; delete (o).a;"), "|", parse("delete o;"));
+```
+
+<Criteria>
+- предсказаны три строки, у каждого ответа — шаг 13.5.1.2 или правило 13.5.1.1;
+- объяснено, почему `delete g` и `delete globalThis.g` идут разными шагами, а ответ
+  один;
+- объяснено, почему `delete (o).a` в строгом коде разрешён, а `delete (o)` — нет.
+</Criteria>
+</Task>
+
+<Task title="3. typeof и цепочки" level="easy" time="6">
+<Goal>видеть, когда `typeof` защищает от ошибки, а когда нет.</Goal>
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+let later;
+const box = { inner: null };
+console.log(typeof box?.inner?.x, typeof box.inner, typeof box.nope?.(), typeof later);
+console.log(attempt(() => typeof notDeclared), "|", attempt(() => typeof notDeclared.x), "|", attempt(() => typeof notDeclared?.x));
+console.log(attempt(() => { typeof soon; let soon; }), typeof typeof 1, typeof (() => {}), typeof null);
+```
+
+<Criteria>
+- предсказаны три строки;
+- для каждой ошибки назван шаг GetValue, который её бросил;
+- объяснено, почему `typeof typeof 1` — «string».
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Своё сложение" level="medium" time="12">
+<Goal>перенести ветку `+` раздела 13.15.3 в код.</Goal>
+
+Напишите `add(a, b)` без оператора `+` для строк: ToPrimitive обоих (готовый
+`toPrimitive` ниже), строка с любой стороны — склейка шаблонной строкой (она зовёт ToString и для
+символа бросает); иначе ToNumeric обоих, разные числовые типы — TypeError, и только тогда `+` двух
+чисел одного типа.
+
+```js
+const toPrimitive = (x) => {
+  if (x === null || (typeof x !== "object" && typeof x !== "function")) return x;
+  const exotic = x[Symbol.toPrimitive];
+  if (exotic !== undefined) return exotic.call(x, "default");
+  for (const name of ["valueOf", "toString"]) {
+    const result = typeof x[name] === "function" ? x[name]() : x;
+    if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+  }
+  throw new TypeError("Cannot convert object to primitive value");
+};
+console.log(toPrimitive(new Date(0)) === new Date(0).toString(), toPrimitive([1, 2]));
+```
+
+<Example>
+```js
+const attempt = (f) => { try { return f(); } catch (e) { return e.name; } };
+add(1, 2);                              // 3
+add("1", 2);                            // "12"
+add([1], [2]);                          // "12"
+add(null, true);                        // 1
+Number.isNaN(add(undefined, 1));        // true
+typeof add(1n, 2n);                     // "bigint"
+attempt(() => add(1n, 1));              // "TypeError"
+attempt(() => add(Symbol(), ""));       // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все восемь строк примера дают то, что в комментариях;
+- шаги идут в порядке 13.15.3: 1.a–1.c, потом ToNumeric и SameType;
+- на десяти парах значений ответ совпадает с `a + b` языка, включая `"1" + 1n`.
+</Criteria>
+</Task>
+
+<Task title="5. Своя InstanceofOperator" level="medium" time="12">
+<Goal>пройти 13.10.2 и найти, когда до OrdinaryHasInstance вообще доходит дело.</Goal>
+
+Напишите `instanceOf(v, target)` по шагам 13.10.2: не объект — TypeError; метод
+`Symbol.hasInstance` (как GetMethod: `undefined` и `null` — «нет метода», не
+функция — TypeError) — вызвать и привести к Boolean; не функция — TypeError; иначе своя
+`ordinaryHasInstance`: не объект слева — `false`, `prototype` не объект —
+TypeError, дальше вверх по цепочке прототипов.
+
+<Example>
+```js
+const attempt = (f) => { try { return f(); } catch (e) { return e.name; } };
+class Even { static [Symbol.hasInstance](n) { return n % 2 === 0; } }
+function F() {}
+const f = new F();
+const G = function () {};
+const g = new G();
+Object.setPrototypeOf(G, null);
+instanceOf(f, F);                                   // true
+instanceOf(2, Even);                                // true
+instanceOf(f, { [Symbol.hasInstance]: () => 1 });   // true
+instanceOf(g, G);                                   // true
+attempt(() => instanceOf(f, {}));                   // "TypeError"
+attempt(() => instanceOf(f, 1));                    // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все шесть строк примера дают то, что в комментариях;
+- объяснено, почему для `instanceOf(f, F)` ваша `ordinaryHasInstance` не вызывается вовсе,
+  а для `instanceOf(g, G)` — вызывается;
+- для `{}` и `1` назван шаг, который бросил.
+</Criteria>
+</Task>
+
+<Task title="6. Своя необязательная цепочка" level="medium" time="12">
+<Goal>перенести 13.3.9.1 и ChainEvaluation на модель.</Goal>
+
+Цепочка — основа и список звеньев: `["get", ключ]` или `["call", аргументы]`;
+`?.` стоит только перед первым звеном. Напишите `chain(base, links)`: основа
+`null` или `undefined` — `undefined` за всю цепочку; дальше звенья по очереди,
+как обычный доступ и вызов: доступ к свойству `null` — TypeError, вызов получает `this` —
+объект, у которого взяли функцию.
+
+<Example>
+```js
+const attempt = (f) => { try { return f(); } catch (e) { return e.name; } };
+chain(null, [["get", "a"], ["get", "b"]]);                                   // undefined
+chain({ a: { b: 2 } }, [["get", "a"], ["get", "b"]]);                        // 2
+attempt(() => chain({ a: null }, [["get", "a"], ["get", "b"]]));             // "TypeError"
+chain({ n: 5, m() { return this.n; } }, [["get", "m"], ["call", []]]);      // 5
+attempt(() => chain({}, [["get", "nope"], ["call", []]]));                   // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все пять строк примера дают то, что в комментариях;
+- проверка `null` — одна, перед циклом, как в 13.3.9.1;
+- каждая строка совпадает с тем же выражением языка: `null?.a.b`, `obj?.m()` и другие.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: нет колоды или нет карточки" level="medium" time="10">
+<Goal>различать `undefined` и `null` там, где `??` их склеивает.</Goal>
+
+`current()` дня 34 курса 2 возвращает `null` в двух разных случаях: колода не загрузилась
+(цепочка дала `undefined`) и карточек на сегодня нет (`cardAt` вернул `null`).
+Напишите `currentWord(opened, chosen, position)`: слово карточки, «колода не загружена» или «на
+сегодня всё», — и не зовите `cardAt`, если колоды нет.
+
+<Example>
+```js
+const opened = new Map([["home", { cardAt: (p) => (p < 2 ? { word: "window" } : null) }]]);
+currentWord(opened, "home", 0);     // "window"
+currentWord(opened, "home", 5);     // "на сегодня всё"
+currentWord(opened, "food", 0);     // "колода не загружена"
+```
+</Example>
+
+<Criteria>
+- все три строки примера дают то, что в комментариях;
+- объяснено, почему `?? null` в `current()` склеивает оба случая (13.13.1);
+- в своём `main.js` надпись на экране различает эти случаи.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Своя ссылка: ключ один раз" level="hard" time="10">
+<Goal>повторить GetValue и PutValue и увидеть находку лекции на модели.</Goal>
+
+Ссылка — объект `{ base, name }`. Напишите `ref(base, name)`, `getValue(r)` и
+`putValue(r, value)`: основа `null` или `undefined` — TypeError; имя не строка и
+не символ — `String(name)` и *записать готовый ключ обратно в ссылку*, как 6.2.5.5. И
+`compoundAdd(r, rhs)` по шагам `+=`: прочитать, вызвать `rhs()`, сложить, записать.
+
+<Example>
+```js
+const attempt = (f) => { try { return f(); } catch (e) { return e.name; } };
+let conversions = 0;
+const key = { toString() { conversions++; return "k"; } };
+const o = { k: 1 };
+compoundAdd(ref(o, key), () => 1);
+o.k;                                  // 2
+conversions;                          // 1
+attempt(() => getValue(ref(null, "x")));   // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все три проверяемые строки примера дают то, что в комментариях;
+- тот же код с `o[key] += 1` в Chrome 156 даёт `conversions` 2 — сравнено и объяснено;
+- назван шаг `compoundAdd`, где ссылка уже хранит готовый ключ.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомые разделы: ключ и остаток в шаблоне" level="hard" time="10">
+<Goal>прочитать разделы деструктуризации, которых не было на лекции.</Goal>
+
+Прочитайте [13.15.5.3
+PropertyDestructuringAssignmentEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-propertydestructuringassignmentevaluation) и
+[13.15.5.4
+RestDestructuringAssignmentEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-restdestructuringassignmentevaluation) и предскажите строку.
+
+```js
+const log = [];
+const source = { get a() { log.push("чтение a"); return 1; }, get b() { log.push("чтение b"); return 2; } };
+const key = () => { log.push("ключ"); return "a"; };
+let x, rest;
+({ [key()]: x, ...rest } = source);
+console.log(x, JSON.stringify(rest), log.join(", "));
+```
+
+<Criteria>
+- предсказана строка, у каждого слова лога — операция, которая его записала;
+- найдено, откуда остаток знает, что `a` уже взят (список excludedNames);
+- назван шаг, где остаток читает `b`: CopyDataProperties (день 7).
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining)
+(Optional chaining, delete, typeof, instanceof, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

@@ -1,0 +1,112 @@
+---
+title: День 10 — конспект
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+---
+
+# День 10. Выражения по спецификации
+
+<Subtitle>Выжимка лекции: приоритет и порядок вычисления, доступ и вызов, необязательная цепочка, `delete` и `typeof`, сложение и сравнения, три формы присваивания.</Subtitle>
+
+## Главное
+
+<Definition>
+**Приоритет** задаёт грамматика — форму дерева. **Порядок вычисления** задают шаги
+Evaluation: левый операнд, правый, операция. Цель присваивания — ссылка (Reference Record): её вычисляют первой,
+а приводят ключ (ToPropertyKey) только при чтении или записи.
+</Definition>
+
+## Порядок и ссылка
+
+```js
+const log = [];
+const v = (name, value) => { log.push(name); return value; };
+console.log(v("f", 1) + v("g", 2) * v("h", 3), log.join(" "));   // 7 f g h — слева направо, хотя * раньше +
+const a = [];
+let i = 0;
+a[i++] = i;
+console.log(JSON.stringify(a));                                   // [1] — ключ 0 вычислен до правой части
+log.length = 0;
+const key = { toString() { log.push("ключ"); return "k"; } };
+const o = {};
+o[key] = v("правая", 1);
+console.log(log.join(" "));                                       // правая ключ — ToPropertyKey после правой части
+```
+
+<Remember>
+Вызов и `new`: сначала аргументы, потом проверка «is not a function» или «is not a constructor».
+`null[f()]` вызывает `f` и только потом падает. Скобки ссылку не теряют, запятая и
+присваивание — теряют.
+</Remember>
+
+## ?., delete и typeof
+
+```js
+const obj = { a: null };
+console.log(obj?.a?.b, null?.x.y.z);                      // undefined undefined — одна проверка на всю цепочку
+console.log(delete obj.a, delete obj.nope, "a" in obj);   // true true false — удалить можно и то, чего нет
+var counter = 1;
+console.log(delete counter, typeof undeclaredName);       // false undefined — var не удалить; typeof неразрешимого имени
+console.log(typeof document.all, typeof class {});        // undefined function — [[IsHTMLDDA]] и [[Call]]
+```
+
+<Remember>
+`?.` проверяет только основу, скобки кончают цепочку. Нельзя: слева от `=`, в
+`++`, после `new`, с тегом шаблона. `delete`: не ссылка и неразрешимое имя —
+`true`; в строгом коде имя — SyntaxError, неудача — TypeError; приватное поле — никогда.
+`typeof` защищает только само имя: если имени нет, `typeof имя?.y` бросает.
+</Remember>
+
+## Присваивание
+
+```js
+const log = [];
+const obj = { get v() { log.push("get"); return 1; }, set v(x) { log.push(`set ${x}`); } };
+obj.v ||= 5;
+obj.v += 1;
+console.log(log.join(", "));                    // get, get, set 2 — ||= не записал, += прочитал до записи
+const steps = [];
+const k = { toString() { steps.push("ключ"); return "k"; } };
+const target = { k: 1 };
+target[k] += 1;
+console.log(steps.join(" "), target.k);         // ключ ключ 2 — Chrome 156; по тексту 2026 «ключ» один раз
+let d1, d2;
+({ d1 = "умолчание", d2 = "умолчание" } = { d1: null, d2: undefined });
+console.log(d1, d2);                            // null умолчание — умолчание только для undefined
+```
+
+| Форма | Читает цель | Правая часть | Пишет |
+| --- | --- | --- | --- |
+| `a = b` | нет | да | да |
+| `a += b` | да, до правой части | да | да |
+| `a \|\|= b`, `a` истинно | да | нет | нет |
+| `a ??= b`, `a` не `null` | да | нет | нет |
+
+<Remember>
+`+`: ToPrimitive без подсказки, строка с любой стороны — склейка, BigInt с Number — TypeError.
+`>` меняет операнды местами, но LeftFirst сохраняет порядок. `instanceof` сначала
+спрашивает `Symbol.hasInstance` — он есть у каждой функции и только для чтения. Деструктуризация:
+цель раньше чтения, `{} = null` — TypeError, итератор закрывается.
+</Remember>
+
+<Homework>
+1. Предскажите `log` после `v("o", obj)[v("k", "x")] = v("r", 1) + v("s", 2)` и после
+   `v("o", obj)[v("k", "x")] ||= v("r", 1)` (помощник `v` — из первого блока,
+   `obj = { x: 0 }`). Каким стал `obj.x`?
+2. Что даст `a?.b.c()`, если `a` — `null`, `{}` и
+   `{ b: { c() { return this === a.b; } } }`? Найдите шаг 13.3.9.1 или 13.3.9.2 для каждого ответа.
+3. Прочитайте IteratorDestructuringAssignmentEvaluation (13.15.5.5) и предскажите порядок «цель», «next»,
+   «запись», «return» для `[t().x] = iterable`. Проверьте, как в разделе 15 лекции.
+4. Прочитайте разделы «Short-circuiting» и «Invalid optional chaining» страницы MDN
+   [Optional chaining](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining)
+   и найдите для каждого примера правило спецификации: шаг 13.3.9.1, ранняя ошибка 13.3.1.1 или 8.6.4.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining)
+(Optional chaining, delete, typeof, instanceof, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

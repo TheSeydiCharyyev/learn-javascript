@@ -1,0 +1,842 @@
+---
+title: День 3 — Литералы, автоматическая вставка точки с запятой и висячие запятые
+day: День 3 • урок 1
+heading: Литералы, автоматическая вставка точки с запятой и висячие запятые
+lead: Курс 3, Advanced. Модуль «Как читать спецификацию; лексическая грамматика» — третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #6366f1; }
+  h2 { color: #4338ca; background: #eef2ff; border-left-color: #6366f1; }
+  h3 { color: #3730a3; }
+  .step-number { background: #6366f1; }
+  .toc a { color: #4338ca; }
+  .grammar { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px;
+  font-family: Consolas, monospace; font-size: 0.9rem; overflow-x: auto; }
+  .grammar em { color: #4338ca; }
+---
+
+<Goals>
+- читать числовой литерал по частям и знать, где разрешён разделитель `_`;
+- объяснять, как запись числа становится значением и почему длинное целое теряет точность;
+- знать, что можно написать в строке прямо, а что — только escape-последовательностью;
+- видеть в шаблоне несколько токенов, а не один;
+- применять три правила вставки точки с запятой и предсказывать, где её не будет;
+- знать, где висячая запятая разрешена, где ничего не меняет и где — ошибка.
+</Goals>
+
+<Toc />
+
+## 1. Остальные токены {#rest}
+
+Вчера лексер выдавал имена, знаки пунктуации, пробелы и комментарии. Сегодня — остальное, что
+перечислено в разделе [12.9
+Literals](https://tc39.es/ecma262/2026/#sec-ecmascript-language-lexical-grammar-literals): литералы — записи значений прямо в тексте. Их шесть видов:
+
+| Литерал | Раздел | Пример | Откуда токен |
+| --- | --- | --- | --- |
+| `NullLiteral` | 12.9.1 | `null` | зарезервированное слово |
+| `BooleanLiteral` | 12.9.2 | `true`, `false` | зарезервированные слова |
+| `NumericLiteral` | 12.9.3 | `1_000`, `0xFF`, `5n` | общий токен |
+| `StringLiteral` | 12.9.4 | `"kitap"` | общий токен |
+| `RegularExpressionLiteral` | 12.9.5 | `/a+/g` | по цели лексера (день 2) |
+| `Template` | 12.9.6 | `` `итог ${n}` `` | голова, середина, хвост |
+
+Литерал массива `[1, 2]` и объекта `{ a: 1 }` в этот список не входят: это
+выражения из многих токенов, их строит синтаксическая грамматика. Вторая половина дня — о том,
+как токены складываются в инструкции, когда точек с запятой нет, и о запятой в конце списков.
+
+## 2. null, true, false — и чем не являются undefined и −1 {#null}
+
+Разделы [12.9.1](https://tc39.es/ecma262/2026/#sec-null-literals) и
+[12.9.2](https://tc39.es/ecma262/2026/#sec-boolean-literals) — по одной строке:
+`NullLiteral :: null` и `BooleanLiteral :: true false`. Это зарезервированные
+слова, и имён из них не сделать. А вот `undefined`, `NaN` и `Infinity`
+литералами не являются — это свойства глобального объекта, то есть обычные имена:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("let null = 1;"), parse("let true = 1;"));
+console.log((function () { let undefined = 5; return undefined; })());
+console.log(parse("-2 ** 2"));
+console.log((-2) ** 2);
+```
+
+<ResultBox>
+SyntaxError: Unexpected token 'null' SyntaxError: Unexpected token 'true'\
+5\
+SyntaxError: Unary operator used immediately before exponentiation expression. Parenthesis must be used to disambiguate operator precedence\
+4
+</ResultBox>
+
+Помощник `parse` — вчерашний: `new Function` в `try`. Внутри функции
+имя `undefined` можно занять своей переменной — так никто не пишет, но язык разрешает.
+На верхнем уровне скрипта нельзя: у глобального объекта уже есть свойство `undefined`,
+которое нельзя перенастроить, и скрипт не начнётся:
+
+```js
+console.log("начало");
+let undefined = 5;
+```
+
+<ResultBox>
+Uncaught SyntaxError: Identifier 'undefined' has already been declared
+</ResultBox>
+
+Вторая половина первого блока — про знак. В грамматике числового литерала минуса нет:
+`-2` — это два токена, унарный минус и литерал `2`. Поэтому
+`-2 ** 2` — не «минус два в квадрате», а неясность, которую язык запрещает: минус
+к основанию или ко всему выражению? Скобки снимают вопрос.
+
+## 3. Числа: формы записи {#numbers}
+
+Раздел [12.9.3](https://tc39.es/ecma262/2026/#sec-literals-numeric-literals) перечисляет
+формы числового литерала. Десятичный — с дробной частью и порядком после `e`; три
+недесятичных — с приставкой; и BigInt — целое с буквой `n`:
+
+```js
+console.log(0b101, 0o17, 0xFF, 0XA);
+console.log(5e1, 175e-2, .5, 5., 1E3);
+console.log(123n, 0x1Fn, typeof 1n);
+```
+
+<ResultBox>
+5 15 255 10\
+50 1.75 0.5 5 1000\
+123n 31n bigint
+</ResultBox>
+
+Буквы приставок и порядка — любого регистра: `0X`, `0B`, `0O`,
+`E`. Целую часть можно опустить (`.5`), дробную тоже (`5.`). А суффикс
+`n` по грамматике стоит только после целого: правила `DecimalBigIntegerLiteral`
+не знают ни точки, ни порядка.
+
+В конце раздела — правило, которое объясняет старую загадку: сразу после числового литерала
+не может стоять начало имени или цифра. Пример стандарта — `3in`: это ошибка, а не
+`3` и `in`.
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("3in [1]"), parse("1.toString()"));
+console.log(1..toString(), 1 .toString(), (1).toString());
+console.log(parse("1.5n"), parse("0755n"));
+```
+
+<ResultBox>
+SyntaxError: Invalid or unexpected token SyntaxError: Invalid or unexpected token\
+1 1 1\
+SyntaxError: Invalid or unexpected token SyntaxError: Invalid or unexpected token
+</ResultBox>
+
+В `1.toString()` лексер берёт самый длинный кусок — `1.`, число с пустой
+дробной частью, — и сразу за ним видит букву `t`. В `1..toString()` первая точка
+ушла в число, вторая — обращение к методу. Пробел или скобки тоже разделяют число и точку.
+
+## 4. Разделитель \_ и параметр \[Sep\] {#sep}
+
+Длинное число легче читать с разделителем: `1_000_000`. В грамматике он —
+`NumericLiteralSeparator :: _`, а место ему отводит параметр `[Sep]` — тот
+самый механизм параметров из раздела 5.1.5 (день 2). Правило цифр с разделителем:
+
+```grammar
+*DecimalDigits*[Sep] ::
+    *DecimalDigit*
+    *DecimalDigits*[?Sep] *DecimalDigit*
+    [+Sep] *DecimalDigits*[+Sep] *NumericLiteralSeparator* *DecimalDigit*
+```
+
+Разделитель стоит только *между двумя цифрами*: слева — цифры, справа — одна цифра. Отсюда
+все ограничения сразу: не в начале, не в конце, не два подряд, не рядом с точкой, `e` и
+приставкой. Разрешён он и в недесятичных записях, и в порядке, и в BigInt:
+
+```js
+console.log(1_000_000, 1_050.95, 0b1010_0001, 0xA0_B0_C0, 1e1_0, 1_000n);
+```
+
+<ResultBox>
+1000000 1050.95 161 10531008 10000000000 1000n
+</ResultBox>
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+for (const code of ["100__000", "100_", "0_1", "1_.5", "1._5", "0x_1"]) {
+  console.log(code, parse(code));
+}
+```
+
+<ResultBox>
+100\_\_000 SyntaxError: Only one underscore is allowed as numeric separator\
+100\_ SyntaxError: Numeric separators are not allowed at the end of numeric literals\
+0_1 SyntaxError: Numeric separator can not be used after leading 0.\
+1\_.5 SyntaxError: Numeric separators are not allowed at the end of numeric literals\
+1.\_5 SyntaxError: Invalid or unexpected token\
+0x_1 SyntaxError: Invalid or unexpected token
+</ResultBox>
+
+У `0_1` своя причина: `0`, за которым идут цифры, — старая восьмеричная
+запись (раздел 5), и разделителя в ней нет совсем. А где правило берётся с `[~Sep]`,
+разделитель запрещён. Таких мест два знакомых: грамматика числовых строк (день 2, `:::`)
+и номер кодовой точки в `\u{…}`:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(Number("1_000"), parseInt("1_000"), parse('"\\u{1_F600}"'));
+```
+
+<ResultBox>
+NaN 1 SyntaxError: Invalid Unicode escape sequence
+</ResultBox>
+
+`parseInt` читает цифры, пока они есть, и останавливается на `_` — выходит
+1\. А `_100` в коде — вовсе не число: подчёркивание может начинать имя, и это обычная
+переменная.
+
+<Scheme src="scheme-sep.svg">Числовой литерал глазами грамматики: каждая часть — свой нетерминал</Scheme>
+
+## 5. От записи к значению {#value}
+
+Подраздел 12.9.3.2 определяет **MV** (mathematical value) — точное математическое
+значение записи; разделители при подсчёте пропускаются. Подраздел 12.9.3.3,
+`NumericValue`, превращает его в значение языка. Для BigInt — точно. Для Number —
+в ближайшее 64-битное число, где после `MAX_SAFE_INTEGER` целые «слипаются» (день 21
+курса 2): сначала `RoundMVResult`, которая разрешает реализации отбросить цифры после
+двадцатой значащей, потом `𝔽` — округление до ближайшего Number.
+
+```js
+console.log(9007199254740993, 9007199254740993n);
+console.log(0x20000000000001, 2 ** 53 + 1);
+console.log(1e400, 5e-325);
+```
+
+<ResultBox>
+9007199254740992 9007199254740993n\
+9007199254740992 9007199254740992\
+Infinity 0
+</ResultBox>
+
+Число 2<sup>53</sup> + 1 записано правильно, но такого Number нет: ближайший —
+2<sup>53</sup>. Ошибки при этом нет — литерал всегда что-то значит. Слишком большое становится
+`Infinity`, слишком маленькое — нулём. С BigInt такого не бывает: `n` на конце —
+и все цифры на месте.
+
+### Старая восьмеричная запись
+
+Грамматика 12.9.3 хранит и запись первых редакций: ноль впереди. Если все остальные цифры
+меньше 8 — это восьмеричное число (`LegacyOctalIntegerLiteral`), если есть 8 или 9 —
+десятичное с ведущим нулём. Подраздел 12.9.3.1 делает обе формы ранней ошибкой в строгом коде —
+это мы видели на дне 3 курса 2:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(010, 08, 0777, 0888);
+console.log(parse('"use strict"; 010'));
+console.log(parse('"use strict"; 08'));
+```
+
+<ResultBox>
+8 8 511 888\
+SyntaxError: Octal literals are not allowed in strict mode.\
+SyntaxError: Decimals with leading zeros are not allowed in strict mode.
+</ResultBox>
+
+Одна и та же привычка «дописать ноль для красоты» даёт `0777` = 511 и
+`0888` = 888. Поэтому восьмеричное пишут явно — `0o777`, — а BigInt с нулём
+впереди (`0755n`) грамматика не принимает вовсе.
+
+## 6. Строки: что можно написать прямо {#strings}
+
+Раздел [12.9.4](https://tc39.es/ecma262/2026/#sec-literals-string-literals), примечание 1:
+в строке прямо можно написать любую кодовую точку, кроме закрывающей кавычки, обратной косой
+черты `\`, CR и LF. Любую — значит и неразрывный пробел, и LS с PS. Вчера мы видели,
+что LS — перевод строки, но правило строки впускает его отдельной строкой грамматики
+(`<LS>`, `<PS>`), а LF и CR — нет:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const LS = String.fromCharCode(0x2028), LF = String.fromCharCode(10);
+console.log(parse('"a' + LF + 'b"'));
+console.log(parse('"a' + LS + 'b"'), new Function('return "a' + LS + 'b"')().length);
+console.log("a\
+b");
+```
+
+<ResultBox>
+SyntaxError: Invalid or unexpected token\
+разобрано 3\
+ab
+</ResultBox>
+
+Последняя строка — **продолжение строки** (`LineContinuation`): обратная
+косая и сразу перевод строки. В значение не попадает ни то ни другое — получилось «ab». Пробел
+после `\` всё ломает: это уже escape пробела, а за ним — запрещённый LF. Примечание 2
+раздела советует: нужен перевод строки в значении — пишите `\n`.
+
+Значение строки — UTF-16, как на дне 20 курса 2: кодовая точка из основной плоскости — один
+элемент, остальные — два.
+
+## 7. Escape-последовательности {#escapes}
+
+После обратной косой в строке может стоять:
+
+| Запись | Что даёт | Правило 12.9.4 |
+| --- | --- | --- |
+| `\n \r \t \b \f \v` | LF, CR, TAB, BS, FF, VT | `SingleEscapeCharacter` |
+| `\' \" \\` | сам знак | `SingleEscapeCharacter` |
+| `\0` | U+0000, если дальше не цифра | `0 [lookahead ∉ DecimalDigit]` |
+| `\x41` | точка из двух шестнадцатеричных цифр | `HexEscapeSequence` |
+| `\u0042`, `\u{43}` | точка из четырёх цифр или из скобок, до 10FFFF | `UnicodeEscapeSequence` |
+| `\z`, `\ý` | сам символ, косая пропадает | `NonEscapeCharacter` |
+| `\7`, `\08` | старая восьмеричная запись | `LegacyOctalEscapeSequence` |
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log("a\zb", 'It\'s', "\x41\u0042\u{43}");
+console.log("\u{1F600}".length, "\u{1F600}" === "\uD83D\uDE00");
+console.log(parse('"\\u{110000}"'), parse('"\\x4"'));
+console.log(parse('function invalid () { "\\7" ; "use strict" ; }'));
+```
+
+<ResultBox>
+azb It's ABC\
+2 true\
+SyntaxError: Undefined Unicode code-point SyntaxError: Invalid hexadecimal escape sequence\
+SyntaxError: Octal escape sequences are not allowed in strict mode.
+</ResultBox>
+
+Неизвестная буква после косой — не ошибка: `\z` — это просто «z». Неполная запись —
+ошибка: у `\x4` одна цифра вместо двух. Последняя строка — пример из подраздела
+12.9.4.1. Директива `"use strict"` стоит *после* строки с `\7`, но
+обе — в прологе директив (вчерашнее задание 9), режим строгий с начала тела, и старая
+восьмеричная запись в первой строке становится ранней ошибкой.
+
+## 8. Регулярное выражение: лексер ищет конец {#regexp}
+
+Раздел [12.9.5](https://tc39.es/ecma262/2026/#sec-literals-regular-expression-literals)
+говорит прямо: правила литерала регулярки нужны лексеру, чтобы найти её *конец*. Тело —
+до косой черты, которая не экранирована и не стоит внутри класса `[…]`; флаги — символы
+имени. Что внутри, проверит потом отдельная, строгая грамматика регулярок (22.2.1, день 17 курса 2).
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(/[/]/.test("/"), /a\/b/.test("a/b"));
+const vowels = () => /[aeiou]/g;
+console.log(vowels() === vowels(), /a/ === /a/);
+console.log(parse("/a/xyz"), String(new RegExp("")));
+```
+
+<ResultBox>
+true true\
+false false\
+SyntaxError: Invalid regular expression flags /(?:)/
+</ResultBox>
+
+Каждое вычисление литерала создаёт новый объект — функция `vowels` возвращает разные
+регулярки, и их `lastIndex` не мешают друг другу. `/a/xyz` лексер принял
+(флаги — буквы), а ранняя ошибка отвергла. Пустой регулярки литералом не написать: `//`
+начинает комментарий, и сам `RegExp` печатает пустую как `/(?:)/`.
+
+## 9. Шаблон — несколько токенов {#templates}
+
+Раздел [12.9.6](https://tc39.es/ecma262/2026/#sec-template-literal-lexical-components):
+шаблон без подстановок — один токен `NoSubstitutionTemplate`. С подстановками — несколько:
+`TemplateHead` от `` ` `` до `${`, `TemplateMiddle` от
+`}` до следующего `${` и `TemplateTail` от `}` до
+закрывающей `` ` ``; между ними — обычные токены выражений. Вчерашняя цель
+`InputElementTemplateTail` нужна как раз для того, чтобы `}` после выражения
+прочитать как начало середины или хвоста.
+
+Три отличия шаблона от строки. Переводы строк в нём разрешены, а пара CR LF превращается в один
+LF — и в значении, и в «сыром» тексте. Знак `$` без `{` — обычный символ. И
+неверный escape в *тегированном* шаблоне — не ошибка (`NotEscapeSequence`): готовое
+значение будет `undefined`, а сырой текст сохранится — на этом держится
+`String.raw` дня 20 курса 2.
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const CR = String.fromCharCode(13), LF = String.fromCharCode(10);
+console.log(new Function("return `a" + CR + LF + "b`")().length);
+console.log(`цена: $5, ${2 + 3}`, `a${1}b${2}c`);
+const tag = (strings) => `${strings[0]} | ${strings.raw[0]}`;
+console.log(tag`\unicode`, String.raw`\unicode`.length);
+console.log(parse("`\\unicode`"));
+```
+
+<ResultBox>
+3\
+цена: $5, 5 a1b2c\
+undefined | \\unicode 8\
+SyntaxError: Invalid Unicode escape sequence
+</ResultBox>
+
+В первой строке шаблон из «a», CR, LF и «b» дал строку из трёх элементов: CR LF стал одним LF.
+Файл, сохранённый в Windows, даёт в шаблонах те же строки, что и файл из Linux.
+
+## 10. Вставка точки с запятой: три правила {#asi}
+
+Раздел [12.10](https://tc39.es/ecma262/2026/#sec-automatic-semicolon-insertion):
+большинство инструкций по грамматике кончаются точкой с запятой, но в некоторых случаях её можно
+не писать — язык «вставит» её в поток токенов. Случаи перечислены в
+[12.10.1](https://tc39.es/ecma262/2026/#sec-rules-of-automatic-semicolon-insertion), и их ровно
+три. Важное слово — **offending token**: токен, который не подходит ни одному правилу
+грамматики в этом месте.
+
+<Scheme src="scheme-asi.svg">Правила 12.10.1: где язык ставит точку с запятой сам</Scheme>
+
+Пройдём по примерам раздела [12.10.2](https://tc39.es/ecma262/2026/#sec-examples-of-automatic-semicolon-insertion):
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("{ 1 2 } 3"));
+console.log(parse("{ 1\n2 } 3"));
+console.log(parse("for (a; b) {}"));
+console.log(parse("if (a > b)\nelse c = d"));
+console.log(parse("do {} while (false) let x = 1"));
+```
+
+<ResultBox>
+SyntaxError: Unexpected number\
+разобрано\
+SyntaxError: Unexpected token ')'\
+SyntaxError: Unexpected token 'else'\
+разобрано
+</ResultBox>
+
+В `{ 1 2 } 3` токен `2` не подходит, но перед ним нет перевода строки — ошибка.
+С переводом строки правило 1 ставит `;` перед `2`, ещё одну — перед
+`}`, а правило 2 — в конце: `{ 1 ;2 ;} 3;`. В заголовке `for` вставка
+запрещена. В `if` перед `else` точка с запятой стала бы пустой инструкцией —
+тоже нельзя. А после `)` конца `do-while` её ставят даже на той же строке.
+
+## 11. Когда точку с запятой не вставят {#no-asi}
+
+Правило 1 срабатывает, только если следующий токен *не подходит*. А если подходит —
+две строки склеиваются в одно выражение. Подраздел
+[12.10.3](https://tc39.es/ecma262/2026/#sec-interesting-cases-of-automatic-semicolon-insertion)
+и его первая часть называют пять начал строки, при которых точка с запятой в конце предыдущей
+обязательна (в блоках этого раздела их нет нарочно):
+
+| Строка начинается с | Склеится в |
+| --- | --- |
+| `(` | вызов: предыдущее выражение — функция |
+| `[` | обращение к свойству через квадратные скобки |
+| `` ` `` | тегированный шаблон |
+| `+`, `-` | сложение или вычитание |
+| `/` | деление (вчерашний пример `/hi/g`) |
+
+```js
+const a = 1
+(1).toString()
+```
+
+<ResultBox>
+Uncaught TypeError: 1 is not a function
+</ResultBox>
+
+```js
+const b = 1
+[1, 2, 3].forEach((x) => console.log(x))
+```
+
+<ResultBox>
+Uncaught TypeError: Cannot read properties of undefined (reading 'forEach')
+</ResultBox>
+
+Первое — `1(1)`: число вызвали как функцию. Второе — `1[1, 2, 3]`: в скобках
+оператор запятая (день 7 Essentials), выходит `1[3]`, то есть `undefined`, а у него
+нет `forEach`. Обе программы разобраны без ошибок и упали уже на ходу. Тише всего минус:
+
+```js
+let x = 5
+-1
+console.log(x)
+```
+
+<ResultBox>
+4
+</ResultBox>
+
+Ни ошибки, ни предупреждения: `x = 5 - 1`. MDN добавляет ещё один случай — поле класса
+перед методом-генератором: `a = 1` и на следующей строке `*gen() {}` читаются как
+умножение, и разбор ломается на `{`.
+
+## 12. Перевод строки, который запрещён {#restricted}
+
+Правило 3 работает в обратную сторону: токен подходит, но перед ним перевод строки там, где
+грамматика пишет `[no LineTerminator here]` (день 2, раздел 3). Таких правил немного, их
+список — в примечании к 12.10.1: постфиксные `++` и `--`, `continue`,
+`break`, `return`, `throw`, `yield`, стрелка
+`=>` и `async`. У большинства операнд необязателен — и перевод строки тихо
+отрезает его (12.10.3.2):
+
+```js
+let a, b = 1, c = 1
+a = b
+++c
+console.log(a, b, c)
+```
+
+<ResultBox>
+1 1 2
+</ResultBox>
+
+Пример 12.10.2: `++` на новой строке — уже не постфикс к `b`, а префикс к
+`c`. С `return` то же — это «Мары» с дня 3 Essentials и вчерашний
+`return /*⏎*/ 5`. Генератор ведёт себя так же:
+
+```js
+function* gen() {
+  yield
+  5
+}
+console.log([...gen()])
+```
+
+<ResultBox>
+(1) \[undefined\]
+</ResultBox>
+
+У `continue` и `break` отрезается метка — и становится обычным выражением
+на следующей строке:
+
+```js
+outer: for (let i = 0; i < 3; i++) {
+  for (let j = 0; j < 3; j++) {
+    if (j === 1) continue
+    outer
+  }
+}
+```
+
+<ResultBox>
+Uncaught ReferenceError: outer is not defined
+</ResultBox>
+
+Метка `outer` — не переменная, и на первом же шаге строка `outer` падает. Там,
+где операнд обязателен, вставка даёт ошибку разбора, и это даже лучше — ошибка видна сразу:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(parse("throw\nnew Error('нет карточки')"));
+console.log(parse("const sum = (a, b)\n=> a + b"));
+console.log(parse("class Card { step = 1\n*steps() {} }"));
+```
+
+<ResultBox>
+SyntaxError: Illegal newline after throw\
+SyntaxError: Unexpected token '=>'\
+SyntaxError: Unexpected token '\{'
+</ResultBox>
+
+Последний особый случай — `async`. Это не зарезервированное слово (день 2), поэтому
+после перевода строки оно становится просто именем:
+
+```js
+async
+function load() { return 1; }
+console.log("не дойдёт");
+```
+
+<ResultBox>
+Uncaught ReferenceError: async is not defined
+</ResultBox>
+
+## 13. Висячие запятые {#commas}
+
+Страница MDN [Trailing commas](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Trailing_commas):
+запятая после последнего элемента списка разрешена везде, где список значений может продолжаться, —
+в литералах массивов и объектов, в параметрах и аргументах функций, в деструктуризации, в именованных
+импортах и экспортах и в `import()`. И почти везде она ничего не меняет. Зачем она: строку
+в конец многострочного списка добавляют, не трогая предыдущую, и в истории правок меняется одна строка,
+а не две.
+
+```js
+function f(p,) {}
+console.log([1, 2, 3,].length, [1, 2, 3, , ,].length, f.length);
+console.log(((a, b,) => a + b)(1, 2,), Math.max(10, 20,));
+const { word, step, } = { word: "kitap", step: 2 };
+console.log(word, step, Object.keys([1, , 3]));
+```
+
+<ResultBox>
+3 5 1\
+3 20\
+kitap 2 (2) \['0', '2'\]
+</ResultBox>
+
+Исключение — массив: *одна* висячая запятая ничего не значит, но каждая следующая добавляет
+дырку, и `[1, 2, 3, , ,]` длиной 5. Дырка — не `undefined`, а отсутствие свойства:
+у `[1, , 3]` только ключи «0» и «2». Длина функции от запятой не меняется.
+
+Запрещена запятая там, где после неё ничего быть не может, и в пустом списке:
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "разобрано";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+for (const code of ["f(,)", "function f(...p,) {}", "const [a, ...b,] = [1, 2, 3];", "[1, , ]", "({ a: 1,, })"]) {
+  console.log(code, "→", parse(code));
+}
+```
+
+<ResultBox>
+f(,) → SyntaxError: Unexpected token ','\
+function f(...p,) \{\} → SyntaxError: Rest parameter must be last formal parameter\
+const \[a, ...b,\] = \[1, 2, 3\]; → SyntaxError: Rest element must be last element\
+\[1, , \] → разобрано\
+(\{ a: 1,, \}) → SyntaxError: Unexpected token ','
+</ResultBox>
+
+После остаточного параметра запятая — ошибка (день 14 Essentials): «остаток» по смыслу последний.
+Две запятые подряд в массиве — дырка, в объекте — ошибка. А JSON, который похож на литералы, но
+живёт по своей грамматике, висячих запятых не знает совсем (день 23 Essentials, день 31 курса 2):
+
+```js
+try {
+  JSON.parse("[1, 2, 3, ]");
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}
+console.log(/^x{2}$/.test("xxx"), /^x{2,}$/.test("xxx"));
+```
+
+<ResultBox>
+SyntaxError: Unexpected token '\]', "\[1, 2, 3, \]" is not valid JSON\
+false true
+</ResultBox>
+
+Вторая строка — единственное место, где запятая в конце меняет смысл: в квантификаторе регулярки
+`{2}` — ровно два, а `{2,}` — два и больше. В модулях запятая разрешена в
+`import { a, b, } from "…"` и `export { a, b, }`, а в `import("./x.js",)` —
+потому что у `import()` есть второй аргумент, параметры загрузки (день 31 курса 2).
+
+## 14. «Карточки 2.0»: шаблон и строка без точки с запятой {#cards}
+
+Возьмём строку счётчика из `render` «Карточек 2.0» (день 33 курса 2):
+
+```js
+// main.js, день 33 курса 2 — строки render
+const cards = deck.due(today);
+counter.textContent = `На сегодня: ${cards.length} из ${deck.size}`;
+```
+
+<Scheme src="scheme-cards.svg">Строка счётчика «Карточек 2.0» глазами лексера</Scheme>
+
+Теперь представим, что сосед пишет без точек с запятой, а следом за счётчиком добавил
+асинхронную загрузку колоды — функцию, вызываемую сразу (день 29 курса 2):
+
+```js
+const counter = { textContent: "" }, cards = [1, 2, 3], deck = { size: 8 }
+counter.textContent = `На сегодня: ${cards.length} из ${deck.size}`
+(async () => {
+  console.log("загрузка")
+})()
+```
+
+<ResultBox>
+Uncaught TypeError: cards.lengthdeck.size is not a function
+</ResultBox>
+
+Строка с `(` не дала вставить точку с запятой: шаблон стал функцией, которую вызвали
+со стрелкой в аргументе. Загрузка не началась, счётчик не обновился, а сообщение V8 склеило
+подстановки шаблона и сбивает с толку. Лечится одним знаком — в конце предыдущей строки или,
+как советует MDN для стиля без точек с запятой, в начале опасной:
+
+```js
+const counter = { textContent: "" }, cards = [1, 2, 3], deck = { size: 8 }
+counter.textContent = `На сегодня: ${cards.length} из ${deck.size}`
+;(async () => {
+  console.log("загрузка", counter.textContent)
+})()
+```
+
+<ResultBox>
+загрузка На сегодня: 3 из 8
+</ResultBox>
+
+В «Карточках 2.0» точки с запятой стоят везде, и этот вопрос не возникал. Но чужой код, примеры
+из интернета, склейка файлов — места, где пять опасных начал строки встречаются.
+
+## 15. Приложение A: сводка грамматики {#annex-a}
+
+[Приложение A](https://tc39.es/ecma262/2026/#sec-grammar-summary) собирает все правила
+грамматик в одном месте, без пояснений, — восемь разделов. Это справочник: найти правило, а потом
+по ссылке перейти к его разделу с семантикой.
+
+| Раздел | Что собрано | Где читали |
+| --- | --- | --- |
+| [A.1 Lexical Grammar](https://tc39.es/ecma262/2026/#sec-lexical-grammar) | глава 12: пробелы, имена, литералы | дни 2–3 |
+| [A.2 Expressions](https://tc39.es/ecma262/2026/#sec-expressions) | глава 13 | дальше в курсе |
+| [A.3 Statements](https://tc39.es/ecma262/2026/#sec-statements) | глава 14 | дальше в курсе |
+| [A.4 Functions and Classes](https://tc39.es/ecma262/2026/#sec-functions-and-classes) | глава 15 | дальше в курсе |
+| [A.5 Scripts and Modules](https://tc39.es/ecma262/2026/#sec-scripts-and-modules) | глава 16 | дальше в курсе |
+| [A.6 Number Conversions](https://tc39.es/ecma262/2026/#sec-number-conversions) | числовые строки `:::`, `[~Sep]` | день 2, раздел 4 |
+| [A.7 Time Zone Offset String Format](https://tc39.es/ecma262/2026/#sec-time-zone-offset-string-format) | смещение пояса: `+05:00` | Temporal, день 24 курса 2 |
+| [A.8 Regular Expressions](https://tc39.es/ecma262/2026/#sec-regular-expressions) | грамматика регулярок 22.2.1 | день 17 курса 2 |
+
+Сводка — informative, то есть не нормативна: если она расходится с основным текстом, прав
+основной. В A.6 видно, почему `Number("1_000")` — `NaN`: цифры числовой строки
+взяты как `DecimalDigits[~Sep]`.
+
+## 16. Что будет завтра {#next}
+
+Лексическая грамматика закончена: текст — токены — дерево. Завтра, на дне 4, — то, с чем работают
+алгоритмы: типы языка (глава 6, Undefined, Null, Boolean, String, Symbol, Number, BigInt, Object) и
+типы спецификации, которых в языке нет, — Completion Record, знакомая по дню 1, и Reference Record:
+почему `outer` из раздела 12 дал `ReferenceError`.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [MDN: Trailing commas](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Trailing_commas) | где висячая запятая разрешена и где нет; JSON | <Full /> |
+| [12.9 Literals](https://tc39.es/ecma262/2026/#sec-ecmascript-language-lexical-grammar-literals) | шесть видов литералов | <Brief /> |
+| [12.9.1 Null Literals](https://tc39.es/ecma262/2026/#sec-null-literals) | `null` | <Brief /> |
+| [12.9.2 Boolean Literals](https://tc39.es/ecma262/2026/#sec-boolean-literals) | `true`, `false` | <Brief /> |
+| [12.9.3 Numeric Literals](https://tc39.es/ecma262/2026/#sec-literals-numeric-literals) | формы, `_` и `[Sep]`, BigInt, MV, старая восьмеричная | <Full /> |
+| [12.9.4 String Literals](https://tc39.es/ecma262/2026/#sec-literals-string-literals) | что можно прямо; escape; продолжение строки | <Full /> |
+| [12.9.5 Regular Expression Literals](https://tc39.es/ecma262/2026/#sec-literals-regular-expression-literals) | лексер ищет конец; новый объект каждый раз | <Brief /> |
+| [12.9.6 Template Literal Lexical Components](https://tc39.es/ecma262/2026/#sec-template-literal-lexical-components) | голова, середина, хвост; CR LF; NotEscapeSequence | <Full /> |
+| [12.10 Automatic Semicolon Insertion](https://tc39.es/ecma262/2026/#sec-automatic-semicolon-insertion) | что такое вставка точки с запятой | <Full /> |
+| [12.10.1 Rules](https://tc39.es/ecma262/2026/#sec-rules-of-automatic-semicolon-insertion) | три правила, общий запрет, список ограниченных правил | <Full /> |
+| [12.10.2 Examples](https://tc39.es/ecma262/2026/#sec-examples-of-automatic-semicolon-insertion) | `{ 1 2 } 3`, `for (a; b)`, `a = b⏎++c` | <Brief /> |
+| [12.10.3 Interesting Cases](https://tc39.es/ecma262/2026/#sec-interesting-cases-of-automatic-semicolon-insertion) | пять опасных начал строки; необязательные операнды | <Full /> |
+| [A Grammar Summary](https://tc39.es/ecma262/2026/#sec-grammar-summary) | все правила в одном месте | <Brief /> |
+| [A.1 Lexical Grammar](https://tc39.es/ecma262/2026/#sec-lexical-grammar) | глава 12 | <Brief /> |
+| [A.2 Expressions](https://tc39.es/ecma262/2026/#sec-expressions) | глава 13 | <Brief /> |
+| [A.3 Statements](https://tc39.es/ecma262/2026/#sec-statements) | глава 14 | <Brief /> |
+| [A.4 Functions and Classes](https://tc39.es/ecma262/2026/#sec-functions-and-classes) | глава 15 | <Brief /> |
+| [A.5 Scripts and Modules](https://tc39.es/ecma262/2026/#sec-scripts-and-modules) | глава 16 | <Brief /> |
+| [A.6 Number Conversions](https://tc39.es/ecma262/2026/#sec-number-conversions) | числовые строки | <Brief /> |
+| [A.7 Time Zone Offset String Format](https://tc39.es/ecma262/2026/#sec-time-zone-offset-string-format) | смещение часового пояса | <Brief /> |
+| [A.8 Regular Expressions](https://tc39.es/ecma262/2026/#sec-regular-expressions) | грамматика регулярок | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// литералы: null true false — слова; undefined NaN Infinity — имена; -2 — два токена
+// числа: 0b 0o 0x, .5 5. 1e3, n — только у целых; после числа не буква и не цифра: 1..toString()
+// _ — только между цифрами: 1_000, 0xA0_B0; в Number("1_000") и \u{…} нельзя ([~Sep])
+// значение: точное MV → ближайший Number; 9007199254740993 → 9007199254740992, с n — точно
+// 010 — 8, 08 — 8, в строгом коде — SyntaxError; пишите 0o10
+
+// строка: нельзя прямо — своя кавычка, \, CR, LF; LS и PS можно; \ в конце строки — продолжение
+// escape: \n \t \0 \x41 B \u{1F600}; \z — просто z; \7 — старое, в строгом коде ошибка
+// регулярка: лексер ищет конец; каждое вычисление — новый объект; пустая — /(?:)/
+// шаблон с ${} — голова, середина, хвост; CR LF → LF; в тегированном неверный escape — undefined
+
+// ; вставляется: 1) токен не подходит и перед ним перевод строки, или это }, или ) конца do-while
+//                2) конец текста; 3) перевод строки на [no LineTerminator here]: return⏎ ++ => async
+// не вставляется: пустой инструкцией и в заголовке for; перед строкой с ( [ ` + - /
+// висячая запятая: массивы, объекты, параметры, аргументы, деструктуризация, import/export
+// нельзя: f(,), после ...rest, в JSON; [1, , ,] — дырки; x{2,} — уже другой квантификатор
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `1.toString()` — ошибка, а `1..toString()` — нет?
+   <Answer>Лексер берёт самый длинный кусок: `1.` — число, и сразу за ним буква, а после
+   числового литерала не может стоять начало имени (12.9.3). Во втором случае первая точка
+   ушла в число, вторая — обращение к методу.</Answer>
+2. Где можно поставить `_` в `0xA0B0n` и где нельзя?
+   <Answer>Только между двумя шестнадцатеричными цифрами: `0xA0_B0n`,
+   `0xA_0_B_0n`. Нельзя после `0x`, перед `n` и два подряд.</Answer>
+3. Почему `9007199254740993` печатается как `9007199254740992`?
+   <Answer>Точное значение записи (MV) превращается в ближайший Number, а 2<sup>53</sup> + 1 в 64 битах
+   не помещается. С суффиксом `n` значение точное.</Answer>
+4. Строка программы начинается с `[`, а предыдущая кончается без точки с запятой. Что
+   будет?
+   <Answer>Точку с запятой не вставят: `[` подходит грамматике как обращение к свойству
+   предыдущего выражения. Две строки склеятся, а внутри скобок запятые станут оператором
+   запятая.</Answer>
+5. Где висячая запятая — ошибка, а где меняет смысл?
+   <Answer>Ошибка — в пустом списке (`f(,)`), после остаточного параметра или элемента и в
+   JSON. Меняет смысл — в массиве каждая запятая после первой (дырка) и в квантификаторе
+   регулярки: `{2,}` — «два и больше».</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Trailing_commas)
+(Trailing commas и [Lexical grammar](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Lexical_grammar), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

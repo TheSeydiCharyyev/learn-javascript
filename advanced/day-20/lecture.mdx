@@ -1,0 +1,630 @@
+---
+title: День 20 — ArrayBuffer и типизированные массивы
+day: День 20 • урок 1
+heading: ArrayBuffer и типизированные массивы
+lead: Курс 3, Advanced. Модуль «Двоичные данные и модель памяти» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+---
+
+<Goals>
+- отличать буфер — байты — от вида, который читает их как числа, и читать один буфер тремя видами;
+- предсказывать, что запишется в каждый вид, по операциям преобразования главы 7;
+- объяснять по 10.4.5, почему индекс за концом молчит, а `delete` и `freeze` бросают;
+- менять размер буфера, переносить его через `transfer` и узнавать вид, который остался без
+  байтов.
+</Goals>
+
+<Toc />
+
+## 1. Буфер и вид {#buffer-view}
+
+Файл, картинка, пакет из сети — это байты, а не числа и строки. Для них в языке два слоя, и учебник MDN
+[JavaScript typed arrays](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Typed_arrays)
+называет их буфером и видом. **Буфер** — `ArrayBuffer`: кусок памяти заданной длины, у
+которого нет доступа к байтам. **Вид** — типизированный массив: он смотрит на байты буфера и читает их
+как числа нужного размера. На один буфер можно смотреть разными видами сразу.
+
+В спецификации буферы — глава [25](https://tc39.es/ecma262/2026/#sec-structured-data) (Structured
+Data), виды — глава [23](https://tc39.es/ecma262/2026/#sec-indexed-collections) (Indexed Collections),
+рядом с обычными массивами. Память буфера — Data Block из раздела 6.2.9, который день 4 обещал этому дню.
+
+<Scheme src="scheme-buffer-view.svg">Один буфер, три вида: элемент вида — один, два или четыре байта</Scheme>
+
+## 2. ArrayBuffer: байты без доступа {#arraybuffer}
+
+Конструктор `ArrayBuffer(length, options)`
+([25.1.4.1](https://tc39.es/ecma262/2026/#sec-arraybuffer-length)) — четыре шага. Шаг 1: без
+`new` — `TypeError`. Шаг 2: длина проходит ToIndex дня 5 — целое от 0 до
+2<sup>53</sup>&nbsp;−&nbsp;1, иначе `RangeError`. Шаг 3 читает `maxByteLength` из
+`options` (раздел 13). Шаг 4 — AllocateArrayBuffer
+([25.1.3.1](https://tc39.es/ecma262/2026/#sec-allocatearraybuffer)): новый Data Block, все байты — нули.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const buf = new ArrayBuffer(8);
+console.log(buf.byteLength, buf[0], Object.keys(buf).length, buf.resizable, buf.maxByteLength, buf.detached);
+console.log(run(() => ArrayBuffer(8)), "|", run(() => new ArrayBuffer(-1)), "|", run(() => new ArrayBuffer(2 ** 53)));
+console.log(new ArrayBuffer("3").byteLength, new ArrayBuffer(2.9).byteLength, new ArrayBuffer().byteLength, Object.prototype.toString.call(buf));
+```
+
+<ResultBox>
+8 undefined 0 false 8 false\
+TypeError: Constructor ArrayBuffer requires 'new' | RangeError: Invalid array buffer length | RangeError: Invalid array buffer length\
+3 2 0 \[object ArrayBuffer\]
+</ResultBox>
+
+`buf[0]` — `undefined`: буфер — обычный объект без свойств-индексов, байты лежат во
+внутреннем слоте \[\[ArrayBufferData\]\]. ToIndex срезает дробь и превращает строку в число, поэтому
+`"3"` и `2.9` проходят. У фиксированного буфера `maxByteLength` равна
+`byteLength`.
+
+## 3. Один буфер — три вида {#views}
+
+Вид создаётся над буфером: `new Uint16Array(buffer)` — на весь буфер,
+`new Uint32Array(buffer, 4, 1)` — со смещения 4 байта, один элемент. Схема раздела 1 — в коде:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const buf = new ArrayBuffer(8);
+const bytes = new Uint8Array(buf);
+const words = new Uint16Array(buf);
+const tail = new Uint32Array(buf, 4, 1);
+bytes[0] = 1;
+bytes[1] = 2;
+bytes[4] = 255;
+console.log(words[0], words.length, tail[0], tail.byteOffset, tail.length);
+words[3] = 0xABCD;
+console.log(bytes.join(" "), tail[0]);
+console.log(run(() => new Uint16Array(buf, 1)), "|", run(() => new Uint32Array(buf, 4, 2)), "|", run(() => new Uint16Array(new ArrayBuffer(3))));
+```
+
+<ResultBox>
+513 4 255 4 1\
+1 2 0 0 255 0 205 171 2882339071\
+RangeError: start offset of Uint16Array should be a multiple of 2 | RangeError: Invalid typed array length: 2 | RangeError: byte length of Uint16Array should be a multiple of 2
+</ResultBox>
+
+`words[0]` собран из байтов 1 и 2 как 1 + 2 × 256 = 513: младший байт лежит первым. Это порядок байтов
+машины, и стандарт его не задаёт — день 21 научится выбирать его явно. Запись 0xABCD через `words[3]`
+легла в байты 6 и 7 — 205 и 171, — и `tail` её увидел. Три `RangeError` — шаги 3, 9.b.ii и
+9.a.i раздела InitializeTypedArrayFromArrayBuffer
+([23.2.5.1.3](https://tc39.es/ecma262/2026/#sec-initializetypedarrayfromarraybuffer)): смещение кратно
+размеру элемента, вид не длиннее буфера, буфер без длины делится на размер элемента.
+
+## 4. Двенадцать видов {#kinds}
+
+Таблица 70 раздела [23.2](https://tc39.es/ecma262/2026/#sec-typedarray-objects) перечисляет виды:
+тип элемента, размер и операцию преобразования из главы 7 — ту, что режет записанное число:
+
+| Вид | Байт | Преобразование | Значения |
+| --- | --- | --- | --- |
+| `Int8Array` | 1 | ToInt8 | −128…127 |
+| `Uint8Array` | 1 | ToUint8 | 0…255 |
+| `Uint8ClampedArray` | 1 | ToUint8Clamp | 0…255 с насыщением |
+| `Int16Array` / `Uint16Array` | 2 | ToInt16 / ToUint16 | −32768…32767 / 0…65535 |
+| `Int32Array` / `Uint32Array` | 4 | ToInt32 / ToUint32 | −2<sup>31</sup>…2<sup>31</sup> − 1 / 0…2<sup>32</sup> − 1 |
+| `BigInt64Array` / `BigUint64Array` | 8 | ToBigInt64 / ToBigUint64 | только BigInt, 64 бита |
+| `Float32Array` | 4 | — | IEEE 754, около 7 значащих цифр |
+| `Float64Array` | 8 | — | как Number |
+| `Float16Array` | 2 | — | день 21 |
+
+Операции целых видов — те, что день 6 показал в таблице «ToInt8 … ToBigUint64» и обещал этому дню. Запишем
+в каждый вид одни и те же 300, −5, 2.5 и 0.1:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+for (const Kind of [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array]) {
+  const a = new Kind(4);
+  a[0] = 300; a[1] = -5; a[2] = 2.5; a[3] = 0.1;
+  console.log(Kind.name, Kind.BYTES_PER_ELEMENT, a.join(" "));
+}
+const big = new BigInt64Array(2);
+big[0] = 2n ** 63n; big[1] = -1n;
+const ubig = new BigUint64Array(1);
+ubig[0] = -1n;
+console.log(big.join(" "), ubig[0], BigInt64Array.BYTES_PER_ELEMENT, run(() => { big[0] = 1; }));
+```
+
+<ResultBox>
+Int8Array 1 44 -5 2 0\
+Uint8Array 1 44 251 2 0\
+Uint8ClampedArray 1 255 0 2 0\
+Int16Array 2 300 -5 2 0\
+Uint16Array 2 300 65531 2 0\
+Int32Array 4 300 -5 2 0\
+Uint32Array 4 300 4294967291 2 0\
+Float32Array 4 300 -5 2.5 0.10000000149011612\
+Float64Array 8 300 -5 2.5 0.1\
+-9223372036854775808 -1 18446744073709551615n 8 TypeError: Cannot convert 1 to a BigInt
+</ResultBox>
+
+Целые виды берут остаток от деления на 2<sup>8</sup>, 2<sup>16</sup> или 2<sup>32</sup> (300 → 44, −5 → 251 в
+байте без знака), дробь отбрасывают. Знаковые читают старший бит как минус. `Float32Array` хранит
+ближайшее число из 32 бит — 0.1 возвращается с хвостом. Виды BigInt принимают только BigInt: число 1 —
+`TypeError`, а 2<sup>63</sup> в знаковом виде становится наименьшим отрицательным.
+
+## 5. ToUint8 и ToUint8Clamp по шагам {#clamp}
+
+ToUint8 ([7.1.11](https://tc39.es/ecma262/2026/#sec-touint8)): шаг 2 — бесконечность и NaN дают 0,
+шаг 3 отбрасывает дробь, шаг 4 берёт остаток от деления на 2<sup>8</sup>. ToUint8Clamp
+([7.1.12](https://tc39.es/ecma262/2026/#sec-touint8clamp)) — иначе: шаг 2 NaN → 0, шаг 4 зажимает
+значение между 0 и 255, а шаги 5–9 округляют, причём ровно половину — к чётному:
+
+```js
+console.log(Uint8ClampedArray.of(0.5, 1.5, 2.5, 3.5, 254.5, 255.5, 300, -5, NaN, Infinity).join(" "));
+console.log(Uint8Array.of(0.5, 1.5, 2.5, 255.9, 256, -1, NaN, Infinity).join(" "));
+```
+
+<ResultBox>
+0 2 2 4 254 255 255 0 0 255\
+0 1 2 255 0 255 0 0
+</ResultBox>
+
+0.5 → 0, 1.5 → 2, 2.5 → 2, 3.5 → 4: `Math.round` дал бы 1, 2, 3, 4. У
+`Uint8Array` 255.9 → 255, 256 → 0, а бесконечность — 0, у `Uint8ClampedArray` — 255. Насыщение
+придумано для цвета: яркость 300 должна стать 255, а не 44. Пиксели картинок в браузере приходят именно в этом
+виде — курс 4.
+
+## 6. Индексы по 10.4.5 {#exotic}
+
+День 15 разобрал массив — экзотический объект, у которого особый \[\[DefineOwnProperty\]\]. Типизированный массив
+([10.4.5](https://tc39.es/ecma262/2026/#sec-typedarray-exotic-objects)) экзотичнее: у него восемь своих
+внутренних методов, и шесть из них, получив ключ, начинают одинаково. Если ключ — строка, CanonicalNumericIndexString
+([7.1.21](https://tc39.es/ecma262/2026/#sec-canonicalnumericindexstring)) спрашивает: число ли это в
+своей обычной записи? `"-0"` — да (−0), `"1.5"` — да, `"01"` — нет. Числовой
+ключ никогда не становится обычным свойством: IsValidIntegerIndex
+([10.4.5.16](https://tc39.es/ecma262/2026/#sec-isvalidintegerindex)) пропускает только целое, не −0 и
+меньше длины, а остальное просто не существует.
+
+```js
+"use strict";
+const ta = new Uint8Array(2);
+ta[5] = 7; ta["-0"] = 7; ta["1.5"] = 7; ta["01"] = 7; ta.foo = 7;
+console.log(ta[5], ta["-0"], ta["1.5"], ta["01"], Object.keys(ta).join(), 5 in ta, "-0" in ta, "01" in ta);
+let calls = 0;
+ta[10] = { valueOf() { calls++; return 1; } };
+console.log(calls, ta.length, Object.getOwnPropertyDescriptor(ta, 0));
+```
+
+<ResultBox>
+undefined undefined undefined 7 0,1,01,foo false false true\
+1 2 \{value: 0, writable: true, enumerable: true, configurable: true\}
+</ResultBox>
+
+Четыре записи молча пропали даже в строгом режиме, а `"01"` и `foo` стали обычными
+свойствами. Интереснее `calls`: запись за концом ничего не записала, но `valueOf` вызвала.
+\[\[Set\]\] ([10.4.5.6](https://tc39.es/ecma262/2026/#sec-typedarray-set), шаг 1.b.i.1) отдаёт значение
+TypedArraySetElement ([10.4.5.18](https://tc39.es/ecma262/2026/#sec-typedarraysetelement)), а тот
+сначала превращает его в число (шаги 1–2) и только потом проверяет индекс (шаг 3).
+
+<Scheme src="scheme-exotic.svg">Запись по индексу: сначала значение превращается в число, потом проверяется индекс</Scheme>
+
+## 7. Что вид не разрешает {#forbidden}
+
+Свойство-индекс всегда записываемое, перечисляемое и настраиваемое — дескриптор из шага 1.b.iii
+\[\[GetOwnProperty\]\]. Но удалить его или закрепить нельзя:
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const ta = new Uint8Array(2);
+console.log(run(() => { delete ta[0]; }), "|", run(() => { delete ta[5]; }), "|", run(() => Object.defineProperty(ta, 0, { value: 9, configurable: false })));
+console.log(run(() => Object.freeze(ta)), "|", run(() => Object.freeze(new Uint8Array(0))), "|", run(() => Object.defineProperty(ta, 1, { value: 300 })), ta[1]);
+```
+
+<ResultBox>
+TypeError: Cannot delete property '0' of \[object Uint8Array\] | ok | TypeError: Cannot redefine property: 0\
+TypeError: Cannot freeze array buffer views with elements | ok | ok 44
+</ResultBox>
+
+\[\[Delete\]\] ([10.4.5.7](https://tc39.es/ecma262/2026/#sec-typedarray-delete)): существующий индекс —
+`false` (шаг 1.b.ii), и строгий режим бросает; несуществующий — `true`. \[\[DefineOwnProperty\]\]
+([10.4.5.4](https://tc39.es/ecma262/2026/#sec-typedarray-defineownproperty)) отвечает
+`false` на `configurable: false` (шаг 1.b.ii) и на `writable: false` (шаг 1.b.v) —
+поэтому `freeze` падает на первом же индексе, а пустой вид замораживается. Значение
+`defineProperty` идёт через тот же TypedArraySetElement: 300 → 44.
+
+## 8. %TypedArray% — общий родитель {#intrinsic}
+
+Двенадцать конструкторов наследуют одной функции — %TypedArray%
+(<a href="https://tc39.es/ecma262/2026/#sec-%typedarray%-intrinsic-object">23.2.1</a>). Глобального имени у неё
+нет, а вызов бросает всегда — это единственный шаг её алгоритма. Методы живут на её прототипе (23.2.3), а у
+прототипа каждого вида — только `constructor` и `BYTES_PER_ELEMENT` (23.2.7):
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const TA = Object.getPrototypeOf(Int8Array);
+console.log(TA.name, TA === Object.getPrototypeOf(Float64Array), typeof TypedArray, run(() => new TA()));
+console.log(Object.getOwnPropertyNames(Int16Array.prototype).join(), Object.getOwnPropertyNames(TA).join(), Uint8Array.prototype.toString === Array.prototype.toString);
+const arr = Object.getOwnPropertyNames(Array.prototype).filter((k) => typeof Array.prototype[k] === "function");
+const tam = Object.getOwnPropertyNames(TA.prototype);
+console.log(arr.filter((k) => !tam.includes(k)).join(", "));
+console.log(tam.filter((k) => !arr.includes(k)).join(", "), tam.length);
+```
+
+<ResultBox>
+TypedArray true undefined TypeError: Abstract class TypedArray not directly constructable\
+constructor,BYTES_PER_ELEMENT length,name,prototype,of,from true\
+concat, pop, push, shift, unshift, splice, flat, flatMap, toSpliced\
+buffer, byteLength, byteOffset, length, set, subarray 36
+</ResultBox>
+
+Девяти методов массива у вида нет — все они меняют длину или склеивают массивы, а длина вида задана буфером.
+Взамен — четыре геттера и два метода. `toString` — та же функция, что у массива (23.2.3.34): она
+зовёт `join`.
+
+## 9. Конструктор: пять форм {#ctor}
+
+TypedArray(...args) ([23.2.5.1](https://tc39.es/ecma262/2026/#sec-typedarray)) смотрит на первый
+аргумент: нет аргументов — длина 0 (шаг 5); другой вид — копия с преобразованием (7.b); буфер — вид над ним
+(7.c); итерируемое — список (7.d.iii), иначе «похожее на массив» (7.d.iv); число — длина через ToIndex (шаг 9).
+Плюс статические `from(source, mapper)` и `of(...items)` (23.2.2):
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(new Int16Array().length, new Int16Array(3).join(), new Int16Array([1, 2, 70000]).join(), new Int16Array(new Uint8Array([200, 255])).join(), new Int16Array(new Set([5, 6])).join(), new Int16Array({ length: 2, 0: 9 }).join());
+console.log(Uint8Array.from("123").join(), Uint8Array.from([1, 2, 3], (x) => x * 100).join(), Int8Array.of(127, 128, -129).join(), run(() => new Uint8Array(-1)), "|", run(() => Uint8Array(2)));
+```
+
+<ResultBox>
+0 0,0,0 1,2,4464 200,255 5,6 9,0\
+1,2,3 100,200,44 127,-128,127 RangeError: Invalid typed array length: -1 | TypeError: Constructor Uint8Array requires 'new'
+</ResultBox>
+
+70000 в `Int16Array` — 4464: остаток от 65536. Копия `Uint8Array` в
+`Int16Array` переводит значения, а не байты: 200 и 255 так и остались. `from` со строкой
+перебирает символы, и каждый проходит ToNumber. `mapper` работает до записи, поэтому 300 стало 44.
+
+## 10. Методы: как у массива и не совсем {#methods}
+
+Большинство из 36 свойств прототипа повторяют методы массива (Essentials, дни 19–20). Отличия:
+
+| Что | Массив | Типизированный массив |
+| --- | --- | --- |
+| `sort()` без функции | как строки | как числа; NaN в конце, −0 перед +0 (23.2.4.7) |
+| `map`, `filter`, `slice` | массив | тот же вид через species, значения режутся |
+| `toSorted`, `toReversed`, `with` | массив | тот же вид, но без species |
+| `with` за концом | `RangeError` | `RangeError` |
+| `JSON.stringify` | `[…]` | объект с ключами «0», «1»… |
+| `Array.isArray` | `true` | `false` |
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const a = Uint8Array.of(10, 9, 100, 1);
+console.log(a.toSorted().join(), [10, 9, 100, 1].toSorted().join(), a.map((x) => x * 3).join(), Array.from(a, (x) => x * 3).join());
+console.log(Array.isArray(a), JSON.stringify(a), run(() => a.with(4, 0)), a.with(-1, 300).join(), a.filter((x) => x > 5).constructor.name);
+console.log(Float64Array.of(3, NaN, -0, 0, -1).sort().join(), Float32Array.of(NaN).includes(NaN), Float32Array.of(NaN).indexOf(NaN), Float32Array.of(16777217)[0]);
+```
+
+<ResultBox>
+1,9,10,100 1,10,100,9 30,27,44,3 30,27,300,3\
+false \{"0":10,"1":9,"2":100,"3":1\} RangeError: Invalid typed array index 10,9,100,44 Uint8Array\
+-1,0,0,3,NaN true -1 16777216
+</ResultBox>
+
+`map` пишет 300 в `Uint8Array` и получает 44; нужен обычный массив —
+`Array.from(a, f)`. Сравнение по умолчанию CompareTypedArrayElements
+([23.2.4.7](https://tc39.es/ecma262/2026/#sec-comparetypedarrayelements)) числовое: шаги 3–5 ставят NaN
+в конец, шаг 8 — −0 перед +0. 16777217 в `Float32Array` — 16777216: 32 бит хватает на 24 двоичных
+разряда, и следующее целое уже не помещается.
+
+## 11. set: копия с преобразованием {#set}
+
+`set(source, offset)` (<a href="https://tc39.es/ecma262/2026/#sec-%typedarray%.prototype.set">23.2.3.26</a>)
+кладёт массив или другой вид в этот вид с позиции `offset`:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const t = new Uint8Array(6);
+t.set([1, 2, 300], 1);
+console.log(t.join(), "|", run(() => t.set([1, 2], 5)));
+const same = Uint8Array.of(1, 2, 3, 4, 5, 6);
+same.set(same.subarray(0, 4), 2);
+console.log(same.join());
+const w = new Uint16Array(2);
+w.set(Uint8Array.of(255, 1));
+console.log(w.join(), new Uint8Array(w.buffer).join(), run(() => new Int8Array(1).set(BigInt64Array.of(1n))));
+```
+
+<ResultBox>
+0,1,2,44,0,0 | RangeError: offset is out of bounds\
+1,2,1,2,3,4\
+255,1 255,0,1,0 TypeError: Cannot mix BigInt and other types, use explicit conversions
+</ResultBox>
+
+Не влезло — `RangeError` раньше любой записи. Источник и цель на одном буфере перекрываются, и
+SetTypedArrayFromTypedArray ([23.2.3.26.2](https://tc39.es/ecma262/2026/#sec-settypedarrayfromtypedarray))
+на шаге 19 сначала копирует источник, поэтому вышло 1,2,1,2,3,4, а не 1,2,1,2,1,2. Разные виды
+копируются значениями (шаг 24), одинаковые — байтами (шаг 23). Числа и BigInt смешать нельзя (шаг 17).
+
+## 12. subarray против slice {#subarray}
+
+```js
+const src = Uint8Array.of(1, 2, 3, 4, 5);
+const sub = src.subarray(1, 3);
+const sl = src.slice(1, 3);
+sub[0] = 20;
+sl[1] = 30;
+console.log(src.join(), sub.join(), sl.join(), sub.buffer === src.buffer, sl.buffer === src.buffer, sub.byteOffset);
+const ab = src.buffer.slice(1, 3);
+console.log(ab.byteLength, new Uint8Array(ab).join(), ArrayBuffer.isView(sub), ArrayBuffer.isView(ab), Object.hasOwn(sub, "length"));
+```
+
+<ResultBox>
+1,20,3,4,5 20,3 2,30 true false 1\
+2 20,3 true false false
+</ResultBox>
+
+`subarray` (<a href="https://tc39.es/ecma262/2026/#sec-%typedarray%.prototype.subarray">23.2.3.30</a>)
+ничего не копирует: шаги 14–17 строят новый вид на **тот же** буфер со смещением, и запись через
+`sub` видна в `src`. `slice` выделяет новый буфер и копирует, так же как
+`ArrayBuffer.prototype.slice` ([25.1.6.7](https://tc39.es/ecma262/2026/#sec-arraybuffer.prototype.slice))
+копирует байты. `buffer`, `byteOffset`, `byteLength` и `length` — не
+свойства вида, а геттеры прототипа: они читают внутренние слоты. `ArrayBuffer.isView`
+([25.1.5.1](https://tc39.es/ecma262/2026/#sec-arraybuffer.isview)) спрашивает ровно об одном — есть ли у
+объекта слот \[\[ViewedArrayBuffer\]\].
+
+Species работает и у буфера, и у видов: `slice` наследника `ArrayBuffer` отдаёт
+наследника, `map`, `filter`, `slice` и `subarray` наследника
+`Uint8Array` — тоже. А `toSorted`, `toReversed` и `with` берут
+конструктор прямо из таблицы 70 (TypedArrayCreateSameType,
+[23.2.4.2](https://tc39.es/ecma262/2026/#sec-typedarray-create-same-type)) и отдают
+`Uint8Array`.
+
+## 13. Изменяемый буфер {#resizable}
+
+Раздел [25.1.2](https://tc39.es/ecma262/2026/#sec-fixed-length-and-resizable-arraybuffer-objects)
+делит буферы на фиксированные и изменяемые; изменяемый получается, если передать `maxByteLength`.
+`resize` ([25.1.6.6](https://tc39.es/ecma262/2026/#sec-arraybuffer.prototype.resize))
+создаёт новый блок и копирует, сколько влезет (шаги 10–15); больше максимума — `RangeError` (шаг 6).
+Вид без длины на изменяемом буфере следит за длиной (23.2.5.1.3, шаг 8), вид с длиной — нет:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const rab = new ArrayBuffer(4, { maxByteLength: 8 });
+const track = new Uint8Array(rab);
+const fixed = new Uint8Array(rab, 0, 4);
+const tail = new Uint8Array(rab, 2, 2);
+rab.resize(8);
+track[7] = 9;
+tail[0] = 5;
+console.log(rab.byteLength, track.length, fixed.length, track.join());
+rab.resize(3);
+console.log(track.length, fixed.length, fixed[0], tail.length, run(() => fixed.fill(1)));
+rab.resize(4);
+console.log(fixed.length, tail.join(), track.join());
+console.log(run(() => rab.resize(9)), "|", run(() => new ArrayBuffer(4).resize(2)), "|", run(() => Object.preventExtensions(track)));
+```
+
+<ResultBox>
+8 8 4 0,0,5,0,0,0,0,9\
+3 0 undefined 0 TypeError: Cannot perform %TypedArray%.prototype.fill on a detached or out-of-bounds ArrayBuffer\
+4 5,0 0,0,5,0\
+RangeError: ArrayBuffer.prototype.resize: Invalid length parameter | TypeError: Method ArrayBuffer.prototype.resize called on incompatible receiver #\<ArrayBuffer> | TypeError: Cannot prevent extensions
+</ResultBox>
+
+<Scheme src="scheme-resizable.svg">Вид без длины следит за буфером, вид с длиной то в границах, то за ними</Scheme>
+
+IsTypedArrayOutOfBounds ([10.4.5.14](https://tc39.es/ecma262/2026/#sec-istypedarrayoutofbounds),
+шаг 9): вид кончается дальше буфера — он за границей. Такой вид не исчез: длина 0, чтение —
+`undefined`, методы бросают (ValidateTypedArray, шаг 4), а после роста буфера всё возвращается.
+`resize` у фиксированного буфера — `TypeError`: шаг 2 ищет слот \[\[ArrayBufferMaxByteLength\]\].
+Вид, который может вырасти, нельзя сделать нерасширяемым: \[\[PreventExtensions\]\]
+([10.4.5.1](https://tc39.es/ecma262/2026/#sec-typedarray-preventextensions), шаг 2). Раздел 25.1.8
+советует брать `maxByteLength` поменьше и не больше 1 ГиБ: удачный конструктор не обещает, что
+удастся каждый `resize`.
+
+## 14. transfer и отсоединённый буфер {#transfer}
+
+`transfer(newLength)` переносит байты в новый буфер, а старый **отсоединяет**.
+ArrayBufferCopyAndDetach ([25.1.3.3](https://tc39.es/ecma262/2026/#sec-arraybuffercopyanddetach)):
+шаг 5 — уже отсоединённый бросает; шаги 6–7 — `transfer` сохраняет изменяемость,
+`transferToFixedLength` — нет; шаг 13 копирует; шаг 15 — DetachArrayBuffer:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const buf = new ArrayBuffer(4);
+const view = new Uint8Array(buf);
+view[0] = 42;
+const moved = buf.transfer();
+console.log(buf.detached, buf.byteLength, view.length, view[0], moved.byteLength, new Uint8Array(moved)[0]);
+view[0] = 1;
+console.log(view[0], run(() => view.fill(1)), "|", run(() => new Uint8Array(buf)), "|", run(() => buf.transfer()));
+const bigger = moved.transfer(8);
+console.log(bigger.byteLength, new Uint8Array(bigger).join(), moved.detached);
+console.log(new ArrayBuffer(2, { maxByteLength: 4 }).transfer().resizable, new ArrayBuffer(2, { maxByteLength: 4 }).transferToFixedLength().resizable);
+```
+
+<ResultBox>
+true 0 0 undefined 4 42\
+undefined TypeError: Cannot perform %TypedArray%.prototype.fill on a detached or out-of-bounds ArrayBuffer | TypeError: Cannot perform Construct on a detached ArrayBuffer | TypeError: Cannot perform ArrayBuffer.prototype.transfer on a detached ArrayBuffer\
+8 42,0,0,0,0,0,0,0 true\
+true false
+</ResultBox>
+
+Отсоединённый буфер — пустая оболочка: длина 0, а у вида IsValidIntegerIndex отвечает «нет» уже на шаге 1, так что
+чтение даёт `undefined`, запись пропадает. Зачем отдавать буфер? Чтобы у байтов был один владелец:
+передал — больше не трогаешь. Браузер так передаёт буферы в потоки-исполнители (курс 4), а память перенос может
+вообще не копировать — примечание шага 14 разрешает «zero-copy move».
+
+## 15. «Карточки 2.0»: счётчики в байтах {#cards}
+
+Сколько раз ученик знал каждое слово — по байту на карточку. Какой вид взять?
+
+```js
+const words = ["kitap", "galam", "suw"];
+const known = new Uint8Array(words.length);
+const streak = new Uint8ClampedArray(words.length);
+for (let i = 0; i < 300; i++) { known[0]++; streak[0]++; }
+console.log(known[0], streak[0]);
+const saved = JSON.stringify(Array.from(known));
+const back = Uint8Array.from(JSON.parse(saved));
+console.log(saved, back instanceof Uint8Array, back.join(), JSON.stringify(known));
+```
+
+<ResultBox>
+44 255\
+\[44,0,0\] true 44,0,0 \{"0":44,"1":0,"2":0\}
+</ResultBox>
+
+После 300 ответов `Uint8Array` перешёл через 255 и показывает 44 — ученик «разучился». Для счётчика
+нужен `Uint8ClampedArray`: он остановится на 255. Сохранять — через `Array.from`: сам вид
+`JSON.stringify` превращает в объект с ключами.
+
+## 16. Что будет завтра {#next}
+
+День 21 — `DataView`: чтение чисел любого размера с любого байта и с явным порядком байтов, вид
+`Float16Array` и перевод байтов в base64 и шестнадцатеричную строку.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [10.4.5 TypedArray Exotic Objects](https://tc39.es/ecma262/2026/#sec-typedarray-exotic-objects) | восемь своих методов по индексам; день 15 — массив; разделы 6–7 | <Full /> |
+| [23 Indexed Collections](https://tc39.es/ecma262/2026/#sec-indexed-collections) | массивы (день 15) и виды | <Brief /> |
+| [23.2 TypedArray Objects](https://tc39.es/ecma262/2026/#sec-typedarray-objects) | таблица 70: двенадцать видов; раздел 4 | <Full /> |
+| <a href="https://tc39.es/ecma262/2026/#sec-%typedarray%-intrinsic-object">23.2.1 The %TypedArray% Intrinsic Object</a> | общий родитель; вызов бросает | <Brief /> |
+| <a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-%typedarray%-intrinsic-object">23.2.2 Properties of the %TypedArray% Intrinsic Object</a> | `from`, `of`, `prototype`, species | <Brief /> |
+| <a href="https://tc39.es/ecma262/2026/#sec-properties-of-the-%typedarrayprototype%-object">23.2.3 Properties of the %TypedArray% Prototype Object</a> | 36 свойств: методы и четыре геттера | <Brief /> |
+| [23.2.4 Abstract Operations for TypedArray Objects](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-typedarray-objects) | проверка вида, species, числовое сравнение | <Brief /> |
+| [23.2.5 The TypedArray Constructors](https://tc39.es/ecma262/2026/#sec-typedarray-constructors) | пять форм; раздел 9 | <Brief /> |
+| [23.2.6 Properties of the TypedArray Constructors](https://tc39.es/ecma262/2026/#sec-properties-of-the-typedarray-constructors) | `BYTES_PER_ELEMENT`, наследник %TypedArray% | <Brief /> |
+| [23.2.7 Properties of the TypedArray Prototype Objects](https://tc39.es/ecma262/2026/#sec-properties-of-typedarray-prototype-objects) | только `constructor` и `BYTES_PER_ELEMENT` | <Brief /> |
+| [23.2.8 Properties of TypedArray Instances](https://tc39.es/ecma262/2026/#sec-properties-of-typedarray-instances) | всё во внутренних слотах | <Brief /> |
+| [25 Structured Data](https://tc39.es/ecma262/2026/#sec-structured-data) | буферы; `DataView` — день 21 | <Brief /> |
+| [25.1 ArrayBuffer Objects](https://tc39.es/ecma262/2026/#sec-arraybuffer-objects) | буфер байтов; разделы 2, 13, 14 | <Full /> |
+| [25.1.1 Notation](https://tc39.es/ecma262/2026/#sec-arraybuffer-notation) | функции read-modify-write для `Atomics` — день 22 | <Brief /> |
+| [25.1.2 Fixed-length and Resizable ArrayBuffer Objects](https://tc39.es/ecma262/2026/#sec-fixed-length-and-resizable-arraybuffer-objects) | фиксированный и изменяемый; раздел 13 | <Full /> |
+| [25.1.3 Abstract Operations For ArrayBuffer Objects](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-arraybuffer-objects) | AllocateArrayBuffer, ArrayBufferCopyAndDetach | <Brief /> |
+| [25.1.4 The ArrayBuffer Constructor](https://tc39.es/ecma262/2026/#sec-arraybuffer-constructor) | NewTarget, ToIndex (день 5), `maxByteLength` | <Brief /> |
+| [25.1.5 Properties of the ArrayBuffer Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-arraybuffer-constructor) | `isView`, species | <Brief /> |
+| [25.1.6 Properties of the ArrayBuffer Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-arraybuffer-prototype-object) | геттеры, `resize`, `slice`, `transfer` | <Brief /> |
+| [25.1.7 Properties of ArrayBuffer Instances](https://tc39.es/ecma262/2026/#sec-properties-of-the-arraybuffer-instances) | слоты \[\[ArrayBufferData\]\] и длины | <Brief /> |
+| [25.1.8 Resizable ArrayBuffer Guidelines](https://tc39.es/ecma262/2026/#sec-resizable-arraybuffer-guidelines) | `maxByteLength` поменьше, до 1 ГиБ | <Brief /> |
+| [MDN: JavaScript typed arrays](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Typed_arrays) | буфер и вид; разделы 1–3 | <Full /> |
+| [MDN: ArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer) | буфер байтов без доступа к ним | <Full /> |
+| [MDN: ArrayBuffer() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/ArrayBuffer) | длина через ToIndex, `maxByteLength` | <Full /> |
+| [MDN: ArrayBuffer.prototype.byteLength](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/byteLength) | длина в байтах; 0 после `transfer` | <Brief /> |
+| [MDN: ArrayBuffer.prototype.detached](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/detached) | отсоединён ли буфер | <Brief /> |
+| [MDN: ArrayBuffer.isView()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView) | есть ли слот \[\[ViewedArrayBuffer\]\] | <Brief /> |
+| [MDN: ArrayBuffer.prototype.maxByteLength](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/maxByteLength) | у фиксированного равна `byteLength` | <Brief /> |
+| [MDN: ArrayBuffer.prototype.resizable](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/resizable) | изменяемый ли буфер | <Brief /> |
+| [MDN: ArrayBuffer.prototype.resize()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/resize) | новая длина до максимума; раздел 13 | <Full /> |
+| [MDN: ArrayBuffer.prototype.slice()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/slice) | копия байтов в новый буфер | <Full /> |
+| [MDN: ArrayBuffer\[Symbol.species\]](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/Symbol.species) | чей буфер вернёт `slice` | <Brief /> |
+| [MDN: ArrayBuffer.prototype.transfer()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/transfer) | перенос с отсоединением; раздел 14 | <Full /> |
+| [MDN: ArrayBuffer.prototype.transferToFixedLength()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/transferToFixedLength) | перенос в фиксированный буфер | <Brief /> |
+| [MDN: BigInt64Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt64Array) | только BigInt, 8 байт | <Brief /> |
+| [MDN: BigInt64Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt64Array/BigInt64Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: BigUint64Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigUint64Array) | только BigInt без знака | <Brief /> |
+| [MDN: BigUint64Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigUint64Array/BigUint64Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: Float32Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array) | около 7 значащих цифр | <Brief /> |
+| [MDN: Float32Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array/Float32Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: Float64Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float64Array) | как Number | <Brief /> |
+| [MDN: Float64Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float64Array/Float64Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: Int16Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int16Array) | ToInt16 | <Brief /> |
+| [MDN: Int16Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int16Array/Int16Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: Int32Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int32Array) | ToInt32 (день 6) | <Brief /> |
+| [MDN: Int32Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int32Array/Int32Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: Int8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array) | ToInt8: −128…127 | <Brief /> |
+| [MDN: Int8Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array/Int8Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: TypedArray](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray) | %TypedArray% — общий родитель видов | <Full /> |
+| [MDN: TypedArray.prototype.at()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/at) | отрицательный индекс от конца | <Brief /> |
+| [MDN: TypedArray.prototype.buffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/buffer) | буфер, на который смотрит вид | <Full /> |
+| [MDN: TypedArray.prototype.byteLength](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/byteLength) | длина вида в байтах | <Brief /> |
+| [MDN: TypedArray.prototype.byteOffset](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/byteOffset) | смещение в буфере | <Brief /> |
+| [MDN: TypedArray.BYTES_PER_ELEMENT](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/BYTES_PER_ELEMENT) | размер элемента: 1, 2, 4 или 8 | <Brief /> |
+| [MDN: TypedArray.prototype.copyWithin()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/copyWithin) | копия внутри вида | <Brief /> |
+| [MDN: TypedArray.prototype.entries()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/entries) | пары индекс — значение | <Brief /> |
+| [MDN: TypedArray.prototype.every()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/every) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.fill()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/fill) | значение с преобразованием | <Brief /> |
+| [MDN: TypedArray.prototype.filter()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/filter) | тот же вид через species | <Brief /> |
+| [MDN: TypedArray.prototype.find()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/find) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.findIndex()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/findIndex) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.findLast()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/findLast) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.findLastIndex()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/findLastIndex) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.forEach()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/forEach) | как у массива | <Brief /> |
+| [MDN: TypedArray.from()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/from) | из итерируемого или похожего на массив, с `mapper` | <Full /> |
+| [MDN: TypedArray.prototype.includes()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/includes) | NaN находит | <Brief /> |
+| [MDN: TypedArray.prototype.indexOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/indexOf) | NaN не находит | <Brief /> |
+| [MDN: TypedArray.prototype.join()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/join) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.keys()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/keys) | индексы | <Brief /> |
+| [MDN: TypedArray.prototype.lastIndexOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/lastIndexOf) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.length](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/length) | геттер; 0 за границей и у отсоединённого | <Brief /> |
+| [MDN: TypedArray.prototype.map()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/map) | тот же вид; 300 → 44 | <Brief /> |
+| [MDN: TypedArray.of()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/of) | из аргументов | <Brief /> |
+| [MDN: TypedArray.prototype.reduce()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/reduce) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.reduceRight()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/reduceRight) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.reverse()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/reverse) | на месте | <Brief /> |
+| [MDN: TypedArray.prototype.set()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/set) | копия с преобразованием, перекрытие; раздел 11 | <Full /> |
+| [MDN: TypedArray.prototype.slice()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/slice) | копия в новом буфере | <Brief /> |
+| [MDN: TypedArray.prototype.some()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/some) | как у массива | <Brief /> |
+| [MDN: TypedArray.prototype.sort()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/sort) | числами; NaN в конце | <Brief /> |
+| [MDN: TypedArray.prototype.subarray()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/subarray) | вид на тот же буфер; раздел 12 | <Full /> |
+| [MDN: TypedArray.prototype\[Symbol.iterator\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/Symbol.iterator) | та же функция, что `values` | <Brief /> |
+| [MDN: TypedArray\[Symbol.species\]](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/Symbol.species) | для `map`, `filter`, `slice`, `subarray` | <Brief /> |
+| [MDN: TypedArray.prototype.toLocaleString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/toLocaleString) | элементы через запятую | <Brief /> |
+| [MDN: TypedArray.prototype.toReversed()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/toReversed) | тот же вид без species | <Brief /> |
+| [MDN: TypedArray.prototype.toSorted()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/toSorted) | числами, тот же вид без species | <Brief /> |
+| [MDN: TypedArray.prototype.toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/toString) | та же функция, что у массива | <Brief /> |
+| [MDN: TypedArray.prototype.values()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/values) | значения | <Brief /> |
+| [MDN: TypedArray.prototype.with()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/with) | `RangeError` за концом | <Brief /> |
+| [MDN: Uint16Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array) | ToUint16 | <Brief /> |
+| [MDN: Uint16Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array/Uint16Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: Uint32Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array) | ToUint32 (день 6) | <Brief /> |
+| [MDN: Uint32Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array/Uint32Array) | пять форм; раздел 9 | <Brief /> |
+| [MDN: Uint8Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array) | ToUint8: 0…255 | <Full /> |
+| [MDN: Uint8Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/Uint8Array) | пять форм; раздел 9 | <Full /> |
+| [MDN: Uint8ClampedArray](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8ClampedArray) | ToUint8Clamp: насыщение, половина к чётному | <Brief /> |
+| [MDN: Uint8ClampedArray() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8ClampedArray/Uint8ClampedArray) | пять форм; раздел 9 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// БУФЕР — байты, ВИД — как их читать
+// new ArrayBuffer(8)            // нули; длина — ToIndex; без new — TypeError
+// new Uint16Array(buf, 2, 3)    // смещение кратно размеру элемента, иначе RangeError
+// new Uint8Array(4) / ([1, 2]) / (otherView) / (iterable) / (buffer, offset, length)
+
+// ЗАПИСЬ режет: Uint8 300 → 44, -5 → 251; Clamped 300 → 255, 2.5 → 2 (к чётному)
+// индекс за концом, "-0", "1.5" — молча нет; valueOf всё равно вызван
+// delete ta[0], freeze, configurable: false — TypeError
+
+// МЕТОДЫ: нет push/pop/splice/concat/flat; sort — числами; map — тот же вид
+// subarray — тот же буфер; slice — копия; set(src, offset) — с преобразованием
+
+// new ArrayBuffer(4, { maxByteLength: 8 }).resize(8) — вид без длины следит
+// buf.transfer() — старый отсоединён: byteLength 0, вид пуст, методы бросают
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Что окажется в `Uint8Array` и `Uint8ClampedArray` после записи 300, −5 и 2.5?
+   <Answer>`Uint8Array` — 44, 251, 2: ToUint8 отбрасывает дробь и берёт остаток от 256.
+   `Uint8ClampedArray` — 255, 0, 2: ToUint8Clamp зажимает и округляет половину к чётному.</Answer>
+2. Почему `ta[10] = obj` у вида длины 2 вызывает `obj.valueOf`, хотя ничего не пишет?
+   <Answer>TypedArraySetElement (10.4.5.18) сначала превращает значение в число (шаги 1–2) и только потом
+   проверяет индекс (шаг 3).</Answer>
+3. Чем `subarray` отличается от `slice`?
+   <Answer>`subarray` — новый вид на тот же буфер, запись видна в обоих; `slice` —
+   копия в новом буфере.</Answer>
+4. Что видит вид `new Uint8Array(rab, 0, 4)`, когда изменяемый буфер сжали до 3 байтов?
+   <Answer>Он за границей (10.4.5.14): длина 0, чтение — `undefined`, методы бросают
+   `TypeError`. После роста буфера до 4 байтов вид снова работает.</Answer>
+5. Что остаётся от буфера после `transfer()`?
+   <Answer>Отсоединённая оболочка: `detached` — `true`, `byteLength` — 0,
+   виды на нём пусты, а `slice`, `transfer` и конструктор вида бросают.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Typed_arrays)
+(учебник JavaScript typed arrays, ArrayBuffer, TypedArray и страницы видов, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

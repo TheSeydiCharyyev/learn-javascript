@@ -1,0 +1,846 @@
+---
+title: День 11 — Инструкции и объявления по спецификации
+day: День 11 • урок 1
+heading: Инструкции и объявления по спецификации
+lead: Курс 3, Advanced. Модуль «Выполнение кода» — четвёртый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+---
+
+<Goals>
+- объяснять мёртвую зону шагами BlockDeclarationInstantiation;
+- отличать вычисление `let`, `const` и `var`;
+- проходить цикл `for` по шагам и предсказывать замыкания в нём;
+- знать, в каком порядке `for-in` отдаёт ключи и когда `for-of` закрывает итератор;
+- читать `switch` с `default` посередине и метки в двух циклах;
+- предсказывать `try`, `catch` и `finally` по трём записям B, C, F.
+</Goals>
+
+<Toc />
+
+## 1. Глава 14 {#chapter}
+
+[Глава 14](https://tc39.es/ecma262/2026/#sec-ecmascript-language-statements-and-declarations) —
+инструкции и объявления. Каждая инструкция возвращает Completion Record (день 4): обычную запись со значением
+или внезапную — `break`, `continue`, `return`, `throw`. Значения
+завершения в консоли мы уже видели на дне 4, ранние ошибки блока и метки — на дне 8, а `with` (14.11)
+отложен до дня 31. Сегодня — шаги: что делает каждая инструкция с окружениями и с записями. Раздел
+[14.1](https://tc39.es/ecma262/2026/#sec-statement-semantics) задаёт общее правило: объявление
+функции при выполнении ничего не делает — функцию создали заранее; а класс создаётся только на своей строке
+(день 12).
+
+## 2. Блок и BlockDeclarationInstantiation {#block}
+
+Evaluation блока (14.2.2, день 8) при каждом входе создаёт окружение и зовёт
+[BlockDeclarationInstantiation](https://tc39.es/ecma262/2026/#sec-blockdeclarationinstantiation)
+(14.2.3). Её шаги для каждого имени из LexicallyScopedDeclarations:
+
+1. `const` — CreateImmutableBinding; остальное — CreateMutableBinding. Обе создают привязку
+   *без значения*: это и есть мёртвая зона;
+2. объявление функции — сразу InstantiateFunctionObject и InitializeBinding: функция готова до первой
+   строки блока;
+3. `let`, `const` и `class` получат значение, только когда выполнение дойдёт до
+   их строки.
+
+В шагах есть две вставки «Normative Optional» — часть правил приложения B для функций в блоке (B.3.2, день
+31). По этим правилам в нестрогом коде браузера функция из блока видна и снаружи.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+let x = "внешний";
+{
+  console.log(attempt(() => x), inner());
+  function inner() { return "функция готова"; }
+  let x = "внутренний";
+  console.log(x);
+}
+{ function sloppyBlock() {} }
+console.log(typeof sloppyBlock);
+(function () { "use strict"; { function strictBlock() {} } console.log(typeof strictBlock); })();
+```
+
+<ResultBox>
+ReferenceError: Cannot access 'x' before initialization функция готова\
+внутренний\
+function\
+undefined
+</ResultBox>
+
+Внутренний `x` уже есть в окружении блока, но без значения, и он закрывает внешний: поиск имени
+(GetIdentifierReference, день 1 курса 2) находит его первым и не идёт дальше. Функция `inner` вызвана
+до своей строки. Последние две строки — вставка для браузеров: в нестрогом коде функция из блока видна снаружи, в
+строгом — нет.
+
+Класс в блоке — не функция: его привязка тоже без значения до своей строки. Но функция, которая на него
+ссылается, создана заранее и может быть вызвана позже, когда класс уже готов:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+{
+  console.log(attempt(() => new Card()), typeof make);
+  function make() { return new Card(); }
+  class Card {}
+  console.log(make() instanceof Card);
+}
+```
+
+<ResultBox>
+ReferenceError: Cannot access 'Card' before initialization function\
+true
+</ResultBox>
+
+## 3. let и const {#letconst}
+
+[14.3.1](https://tc39.es/ecma262/2026/#sec-let-and-const-declarations). Ранние ошибки: имя
+`let` запрещено, повтор имён — тоже (день 8), `const` без значения — ошибка. Evaluation:
+`let x;` — InitializeReferencedBinding со значением `undefined`; с инициализатором — сначала
+вычислить его (NamedEvaluation, если это безымянная функция, день 8), потом инициализировать привязку. Шаблон
+([14.3.3](https://tc39.es/ecma262/2026/#sec-destructuring-binding-patterns)) — BindingInitialization,
+по элементам слева направо. Значит, пока правая часть считается, имя ещё в мёртвой зоне:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(attempt(() => { let y = y; }), "|", attempt(() => { let [a = b, b = 1] = []; }));
+const later = () => z;
+let z = "готово";
+console.log(later());
+const c = 1;
+console.log(attempt(() => { c = 2; }), "|", attempt(() => new Function("let let = 1;")));
+```
+
+<ResultBox>
+ReferenceError: Cannot access 'y' before initialization | ReferenceError: Cannot access 'b' before initialization\
+готово\
+TypeError: Assignment to constant variable. | SyntaxError: let is disallowed as a lexically bound name
+</ResultBox>
+
+Умолчание `a` вычисляется, когда `b` ещё не инициализирован. Стрелка
+`later` создана раньше `z`, но вызвана позже — мёртвая зона определяется временем
+*обращения*, а не местом в тексте. Запись в `const` бросает и в нестрогом коде: привязку
+создали с флагом strict = true.
+
+Шаблоны (14.3.3) идут по ключам слева направо; умолчание вычисляется только для `undefined` и только
+когда до него дошла очередь; остаток собирает не взятые ключи. Тот же шаблон работает в голове
+`for-of` — заново на каждой итерации:
+
+```js
+const log = [];
+const d = (name, v) => { log.push(name); return v; };
+const { a = d("умолчание a", 1), b = d("умолчание b", 2), ...rest } = { b: 20, c: 30, e: 50 };
+console.log(a, b, JSON.stringify(rest), log.join(", "));
+const pairs = new Map([["дом", "house"], ["кот", "cat"]]);
+const words = [];
+for (const [ru, en] of pairs) words.push(`${ru}=${en}`);
+console.log(words.join(" "));
+log.length = 0;
+for (const { n = d("умолчание n", 0) } of [{ n: 1 }, {}, { n: undefined }]) log.push(n);
+console.log(log.join(", "));
+```
+
+<ResultBox>
+1 20 \{"c":30,"e":50\} умолчание a\
+дом=house кот=cat\
+1, умолчание n, 0, умолчание n, 0
+</ResultBox>
+
+Умолчание `b` не вычислялось: значение 20 есть. В последнем цикле умолчание сработало дважды — для
+отсутствующего ключа и для явного `undefined`.
+
+## 4. var {#var}
+
+[14.3.2](https://tc39.es/ecma262/2026/#sec-variable-statement). Привязку `var` создают
+заранее, при входе в функцию или скрипт, со значением `undefined` (день 8). Поэтому сама инструкция
+почти ничего не делает: `var x;` возвращает пустое значение и не трогает привязку, а
+`var x = v` — это ResolveBinding и PutValue, обычная запись, а не инициализация. Примечание 14.3.2.1
+говорит, к чему это ведёт внутри `with`:
+
+```js
+var a = 1;
+var a;
+console.log(a);
+const box = { b: "в объекте" };
+with (box) { var b = "присвоено"; }   // день 31
+console.log(box.b, b);
+var n = (function () { return typeof n; })();
+console.log(n);
+```
+
+<ResultBox>
+1\
+присвоено undefined\
+undefined
+</ResultBox>
+
+Повторный `var a;` не сбросил 1. Внутри `with` имя `b` нашлось в объекте
+`box`, и запись ушла туда, а глобальная `b` осталась `undefined`. В последней
+строке функция видит `n` уже созданной, но ещё без своего значения. По той же причине
+`var` в заголовке цикла — одна привязка функции на все итерации: ForLoopEvaluation для
+`var` не создаёт окружений вовсе (раздел 7).
+
+## 5. Пустая, выражение, if {#simple}
+
+Пустая инструкция (14.4) возвращает пустое значение. Инструкция-выражение
+([14.5](https://tc39.es/ecma262/2026/#sec-expression-statement)) не может начинаться с
+`{`, `function`, `class` и `let [`: такие начала грамматика
+отдаёт блоку и объявлениям. `if` ([14.6](https://tc39.es/ecma262/2026/#sec-if-statement)):
+ранняя ошибка 14.6.1 запрещает телу быть помеченной функцией (IsLabelledFunction, 14.13.2).
+
+```js
+const parse = (code) => {
+  try {
+    new Function(code);
+    return "ok";
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const cases = ["{ a: 1 }", "{ a: 1, b: 2 }", "function () {}", "if (x) function f() {}", "'use strict'; if (x) function f() {}", "if (x) l: function f() {}"];
+for (const c of cases) console.log(c, "→", parse(c));
+```
+
+<ResultBox>
+\{ a: 1 \} → ok\
+\{ a: 1, b: 2 \} → SyntaxError: Unexpected token ':'\
+function () \{\} → SyntaxError: Function statements require a function name\
+if (x) function f() \{\} → ok\
+'use strict'; if (x) function f() \{\} → SyntaxError: In strict mode code, functions can only be declared at top level or inside a block.\
+if (x) l: function f() \{\} → SyntaxError: In non-strict mode code, functions can only be declared at top level, inside a block, or as the body of an if statement.
+</ResultBox>
+
+`{ a: 1 }` — не объект, а блок с меткой `a` и выражением 1; с запятой такой блок уже не
+разбирается. Функция телом `if` в нестрогом коде разрешена приложением B, а помеченная функция там —
+ошибка всегда.
+
+Ограничение `let [` в 14.5 нужно потому, что `let` — не зарезервированное слово: в
+нестрогом коде это может быть просто имя переменной. Грамматике приходится решать по следующему знаку:
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(parse("let = 1;"), "|", parse("'use strict'; let = 1;"));
+var let = "имя";
+console.log(let);
+```
+
+<ResultBox>
+ok | SyntaxError: Unexpected strict mode reserved word\
+имя
+</ResultBox>
+
+## 6. while и do-while {#while}
+
+Раздел [14.7.1](https://tc39.es/ecma262/2026/#sec-iteration-statements-semantics) даёт циклам
+общих помощников: LoopContinues (продолжать ли после тела) и LoopEvaluation. `while`
+([14.7.3](https://tc39.es/ecma262/2026/#sec-while-statement)) проверяет условие до тела,
+`do-while` ([14.7.2](https://tc39.es/ecma262/2026/#sec-do-while-statement)) — после. Из
+шагов следует, что `continue` в `do-while` ведёт к условию, а не мимо него. А у правил
+вставки точки с запятой (12.10.1, день 3) есть пункт только для `do-while`: после его `)`
+точка с запятой вставляется даже без перевода строки.
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+let n = 0;
+let tests = 0;
+do { n++; if (n < 3) continue; } while ((tests++, n < 3));
+let once = 0;
+do once++; while (false);
+console.log(n, tests, once);
+console.log(parse("do x++; while (x < 3) y++"), "|", parse("while (x < 3) x++ y++"));
+```
+
+<ResultBox>
+3 3 1\
+ok | SyntaxError: Unexpected identifier 'y'
+</ResultBox>
+
+Условие проверено трижды, хотя дважды тело закончилось `continue`. Тело `do-while`
+выполнилось один раз и при ложном условии.
+
+## 7. Цикл for по шагам {#for}
+
+[14.7.4](https://tc39.es/ecma262/2026/#sec-for-statement). ForLoopEvaluation для
+`for (let …)` создаёт окружение заголовка, объявляет и вычисляет его переменные, а дальше —
+ForBodyEvaluation с шагами:
+
+1. CreatePerIterationEnvironment — новое окружение-копия: те же имена, значения из прошлого;
+2. условие; ложно — конец;
+3. тело; `break` или `return` — конец (LoopContinues, 14.7.1.1);
+4. снова CreatePerIterationEnvironment, и в новой копии — шаг (`i++`); дальше — к пункту 2.
+
+Копия делается *до* шага, поэтому замыкание, созданное в теле, видит значение своей итерации. У
+`var` копий нет — одна привязка на всех. У `const` список копируемых имён пуст: окружение
+одно, и шаг `i++` бросает.
+
+<Scheme src="scheme-for.svg">Окружения цикла for с let, var и const</Scheme>
+
+Практика плана — замыкания по шагам. Предскажите пять строк:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const lets = [];
+let init;
+for (let i = 0, f = () => i; i < 3; i++) { lets.push(() => i); init = f; }
+console.log(lets.map((g) => g()).join(), init());
+const bodyMut = [];
+for (let i = 0; i < 6; i++) { bodyMut.push(() => i); i++; }
+console.log(bodyMut.map((g) => g()).join());
+const vars = [];
+for (var j = 0; j < 3; j++) vars.push(() => j);
+console.log(vars.map((g) => g()).join());
+const ran = [];
+console.log(attempt(() => { for (const k = 0; k < 3; k++) ran.push(k); }), ran.join());
+const tests = [];
+for (let i = 0; (tests.push(() => i), i < 2); i++) {}
+console.log(tests.map((g) => g()).join());
+```
+
+<ResultBox>
+0,1,2 0\
+1,3,5\
+3,3,3\
+TypeError: Assignment to constant variable. 0\
+0,1,2
+</ResultBox>
+
+`f` из заголовка осталась в окружении заголовка: копии его не меняют, всегда 0. Во втором цикле
+тело само делает `i++` в своей копии — замыкание видит уже 1, 3, 5. Последняя строка: условие
+вычисляется в свежей копии, поэтому три замыкания условия видят 0, 1 и 2.
+
+Порядок частей заголовка удобно увидеть, вписав запись в условие и шаг:
+
+```js
+const trace = [];
+for (let i = 0; (trace.push(`проверка i=${i}`), i < 2); trace.push(`шаг i=${i}`), i++) {
+  trace.push(`тело i=${i}`);
+}
+console.log(trace.join(" | "));
+```
+
+<ResultBox>
+проверка i=0 | тело i=0 | шаг i=0 | проверка i=1 | тело i=1 | шаг i=1 | проверка i=2
+</ResultBox>
+
+| Шаг ForBodyEvaluation | Окружение | i |
+| --- | --- | --- |
+| объявление `let i = 0` | заголовок | 0 |
+| копия, проверка, тело | копия 1 | 0 |
+| копия, шаг `i++`, проверка, тело | копия 2 | 0 → 1 |
+| копия, шаг `i++`, проверка — ложь | копия 3 | 1 → 2 |
+
+Окружений получилось четыре, хотя тело выполнилось дважды: последняя копия нужна только для шага и последней
+проверки.
+
+## 8. Голова for-in и for-of {#forin}
+
+[14.7.5](https://tc39.es/ecma262/2026/#sec-for-in-and-for-of-statements). ForIn/OfHeadEvaluation
+(14.7.5.6) вычисляет выражение справа в отдельном окружении, где имена слева уже есть, но без значений, — мёртвая
+зона и здесь. Дальше развилка: для `for-in` `null` и `undefined` дают запись
+`break` — ни одной итерации, без ошибки; для `for-of` — GetIterator, и он бросает.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const x = [1, 2];
+console.log(attempt(() => { for (const x of x) {} }));
+let count = 0;
+for (const k in null) count++;
+console.log(count, "|", attempt(() => { for (const v of null) {} }), "|", attempt(() => { for (const v of {}) {} }));
+```
+
+<ResultBox>
+ReferenceError: Cannot access 'x' before initialization\
+0 | TypeError: null is not iterable | TypeError: \{\} is not iterable
+</ResultBox>
+
+Внешний массив `x` не помог: справа от `of` имя `x` уже означает переменную
+цикла.
+
+## 9. Порядок for-in {#enumerate}
+
+[EnumerateObjectProperties](https://tc39.es/ecma262/2026/#sec-enumerate-object-properties)
+(14.7.5.9) порядок задаёт не до конца, зато даёт правила: только строковые ключи, без символов; свои ключи — через
+\[\[OwnPropertyKeys\]\] (целые по возрастанию, потом строки в порядке создания, день 11 курса 2); потом ключи прототипов, если
+такого имени ещё не было. И тонкость: «было» считается без учёта `[[Enumerable]]` — своё
+неперечисляемое свойство прячет перечисляемое свойство прототипа. Удалённый до своей очереди ключ не придёт, а
+добавленный по ходу прийти не обязан.
+
+```js
+const proto = { p: 1, shadow: "прототип" };
+const obj = Object.create(proto);
+obj.b = 1; obj[2] = 1; obj.a = 1; obj[1] = 1; obj[Symbol("s")] = 1;
+Object.defineProperty(obj, "shadow", { value: "свой", enumerable: false });
+const keys = [];
+for (const k in obj) keys.push(k);
+console.log(keys.join(" "));
+const seen = [];
+const live = { a: 1, b: 2, c: 3 };
+for (const k in live) { seen.push(k); delete live.c; live.d = 4; }
+console.log(seen.join(" "));
+```
+
+<ResultBox>
+1 2 b a p\
+a b
+</ResultBox>
+
+`shadow` нет ни своего (неперечисляемый), ни прототипа (спрятан своим). Удалённый `c` не
+пришёл, добавленный `d` Chrome тоже не показал — текст это разрешает.
+
+Отсюда старое правило «массив — не через `for-in`»: он идёт и по прототипу, а ключи отдаёт
+строками. Стоит кому-то дописать метод в `Array.prototype`:
+
+```js
+Array.prototype.extra = function () {};
+const keys = [];
+for (const i in ["а", "б"]) keys.push(i);
+console.log(keys.join(" "), typeof keys[0]);
+delete Array.prototype.extra;
+```
+
+<ResultBox>
+0 1 extra string
+</ResultBox>
+
+Голова `for-in` делает ToObject (день 5): строка становится объектом String, и цикл идёт по его
+индексам. Сами символы строки отдаёт только `for-of`, через итератор строки:
+
+```js
+const indexes = [];
+for (const i in "кот") indexes.push(i);
+const letters = [];
+for (const ch of "кот") letters.push(ch);
+console.log(indexes.join(" "), "|", letters.join(" "));
+```
+
+<ResultBox>
+0 1 2 | к о т
+</ResultBox>
+
+## 10. Тело for-of и закрытие итератора {#forof}
+
+ForIn/OfBodyEvaluation (14.7.5.7) на каждом шаге зовёт `next`, для `let` и
+`const` создаёт *новое* окружение итерации — поэтому `const` в
+`for-of` законен, — и выполняет тело. Если LoopContinues ответил «нет» (`break`,
+`return`, `throw`), — IteratorClose (день 7): у генератора сработает его
+`finally`. Если итератор кончился сам, `return` не зовут. `for await` (день 29
+курса 2) идёт теми же шагами с Await и AsyncIteratorClose.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+const log = [];
+function* gen() { try { yield 1; yield 2; yield 3; } finally { log.push("finally генератора"); } }
+for (const v of gen()) { log.push(v); if (v === 2) break; }
+console.log(log.join(", "));
+const steps = [];
+const iterable = { [Symbol.iterator]() { let i = 0; return { next() { steps.push("next"); return i < 2 ? { value: i++, done: false } : { done: true }; }, return() { steps.push("return"); return {}; } }; } };
+for (const v of iterable) {}
+console.log(steps.join(" "));
+steps.length = 0;
+console.log(attempt(() => { for (const v of iterable) throw new Error("в теле"); }), "|", steps.join(" "));
+```
+
+<ResultBox>
+1, 2, finally генератора\
+next next next\
+Error: в теле | next return
+</ResultBox>
+
+`for await` берёт итератор асинхронно (GetIterator с видом async): у обычного массива асинхронного
+итератора нет, и его оборачивают так, что каждое значение проходит через Await. Поэтому промисы в массиве
+приходят готовыми значениями:
+
+```js
+const list = [Promise.resolve("раз"), "два"];
+const plain = [];
+for (const v of list) plain.push(typeof v);
+(async () => {
+  const awaited = [];
+  for await (const v of list) awaited.push(v);
+  console.log(plain.join(" "), "|", awaited.join(" "));
+})();
+```
+
+<ResultBox>
+object string | раз два
+</ResultBox>
+
+## 11. break, continue и метки {#labels}
+
+`continue` и `break` ([14.8](https://tc39.es/ecma262/2026/#sec-continue-statement),
+[14.9](https://tc39.es/ecma262/2026/#sec-break-statement)) только создают запись с типом и меткой в
+`[[Target]]`. Решают те, кто выше. LabelledEvaluation (14.13.4) собирает метки в labelSet и превращает
+`break` со своей меткой в обычную запись. Цикл спрашивает LoopContinues: обычная запись или
+`continue` без метки или с меткой из своего набора — продолжать. Практика плана — метка и
+`continue` в двух циклах:
+
+```js
+const pairs = [];
+outer: for (let i = 0; i < 3; i++) {
+  for (let j = 0; j < 3; j++) {
+    if (j === 1) continue outer;
+    if (i === 2) break outer;
+    pairs.push(`${i}${j}`);
+  }
+}
+console.log(pairs.join(" "));
+const log = [];
+block: { log.push("до"); if (log.length) break block; log.push("после"); }
+console.log(log.join(" "));
+```
+
+<ResultBox>
+00 10\
+до
+</ResultBox>
+
+Внутренний цикл получил `continue` с меткой «outer» — её нет в его наборе, и он отдал запись
+наверх. Внешний цикл с меткой «outer» в наборе продолжил свою итерацию. `break block` вышел из обычного
+блока: метки работают не только на циклах.
+
+Практический приём — метка вместо флага, когда нужно выйти сразу из двух циклов:
+
+```js
+const grid = [[1, 2], [3, 4], [5, 6]];
+let found = null;
+search: for (const [row, line] of grid.entries()) {
+  for (const [col, value] of line.entries()) {
+    if (value === 4) { found = [row, col]; break search; }
+  }
+}
+console.log(JSON.stringify(found));
+```
+
+<ResultBox>
+\[1,1\]
+</ResultBox>
+
+Без метки пришлось бы заводить флаг и проверять его во внешнем цикле. Оба итератора `entries()`
+закрылись по дороге: `break search` — внезапная запись для каждого из циклов.
+
+`switch` внутри цикла показывает разницу двух записей. LabelledEvaluation для `switch`
+превращает в обычную только `break` без метки, а `continue` ей не принадлежит — он
+проходит `switch` насквозь и достаётся циклу:
+
+```js
+const log = [];
+for (const x of [1, 2, 3]) {
+  switch (x) {
+    case 1: log.push("один"); continue;
+    case 2: log.push("два"); break;
+  }
+  log.push(`после switch ${x}`);
+}
+console.log(log.join(", "));
+```
+
+<ResultBox>
+один, два, после switch 2, после switch 3
+</ResultBox>
+
+## 12. switch и место default {#switch}
+
+[14.12](https://tc39.es/ecma262/2026/#sec-switch-statement): все ветки — один блок (день 8).
+CaseBlockEvaluation (14.12.2) делит ветки на A — до `default` и B — после. Селекторы `case`
+вычисляются по очереди, только пока совпадения нет, и сравниваются IsStrictlyEqual (CaseClauseIsSelected, 14.12.3,
+день 5). Совпало — дальше выполняются все тела подряд, пока не будет `break`.
+
+<Scheme src="scheme-switch.svg">switch с default посередине</Scheme>
+
+Практика плана — `switch` без `break` и место `default`. Помощник
+`sel` записывает, какой селектор вычислен:
+
+```js
+const log = [];
+const sel = (name, v) => { log.push(name); return v; };
+function run(input) {
+  log.length = 0;
+  switch (input) {
+    case sel("a", 1): log.push("тело a");
+    default: log.push("тело default");
+    case sel("b", 2): log.push("тело b"); break;
+    case sel("c", 3): log.push("тело c");
+  }
+  return log.join(", ");
+}
+console.log(run(1));
+console.log(run(2));
+console.log(run(9));
+switch ("1") { case 1: console.log("== не годится"); break; default: console.log("=== строгое"); }
+```
+
+<ResultBox>
+a, тело a, тело default, тело b\
+a, b, тело b\
+a, b, c, тело default, тело b\
+\=== строгое
+</ResultBox>
+
+Для 9 вычислены все три селектора — и `b`, и `c` стоят после `default`, — потом
+выполнен `default`, и выполнение «провалилось» в тело `b` без новой проверки. Строка «1» не
+совпала с числом 1: сравнение строгое.
+
+Одно окружение на все ветки (14.12.4 зовёт BlockDeclarationInstantiation для всего блока) даёт ловушку:
+`let` из одной ветки виден в соседней, но значение получает, только если выполнилась его строка.
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(attempt(() => { switch (1) { case 0: let x = 1; break; case 1: x = 2; return x; } }));
+console.log(attempt(() => { switch (1) { case 0: let y; case 1: y = 2; return y; } }));
+```
+
+<ResultBox>
+ReferenceError: Cannot access 'x' before initialization\
+ReferenceError: Cannot access 'y' before initialization
+</ResultBox>
+
+Даже `let y;` без значения не помог: строку `case 0` не выполняли, и
+InitializeReferencedBinding не случился. Если веткам нужны свои переменные — каждой свои фигурные скобки.
+
+## 13. return, throw, debugger {#return}
+
+`return` ([14.10](https://tc39.es/ecma262/2026/#sec-return-statement)) вычисляет выражение
+(или берёт `undefined`) и создаёт запись `return`; `throw`
+([14.14](https://tc39.es/ecma262/2026/#sec-throw-statement)) — запись `throw` с любым
+значением, не только ошибкой. `debugger`
+([14.16](https://tc39.es/ecma262/2026/#sec-debugger-statement)) — остановка, если хозяин её поддерживает
+(отладчик дня 9), иначе пустое значение.
+
+Раз `throw` несёт любое значение, стек вызовов в нём есть, только если это ошибка: стек записывает
+конструктор `Error` (свойство V8, день 9), а не сама инструкция.
+
+```js
+try { throw "строка"; } catch (e) { console.log(typeof e, e.stack, typeof new Error("x").stack); }
+```
+
+<ResultBox>
+string undefined string
+</ResultBox>
+
+Отсюда правило: бросать объекты `Error` — иначе при разборе неясно, откуда прилетело.
+
+## 14. try: записи B, C, F {#try}
+
+[14.15](https://tc39.es/ecma262/2026/#sec-try-statement). Ранние ошибки 14.15.1: имена параметра
+`catch` не повторяются и не совпадают с лексическими именами блока (день 8). CatchClauseEvaluation
+(14.15.2) создаёт окружение для параметра и кладёт в него значение — через BindingInitialization, поэтому параметр
+может быть шаблоном; без параметра — просто блок. Evaluation (14.15.3) — на трёх записях:
+
+<Scheme src="scheme-try.svg">try, catch и finally как три записи</Scheme>
+
+```js
+try { throw { code: 7, text: "семь" }; } catch ({ code, text }) { console.log(code, text); }
+try { JSON.parse("{"); } catch { console.log("без параметра"); }
+const e = "внешнее";
+try { throw "внутреннее"; } catch (e) { console.log(e); }
+console.log(e);
+```
+
+<ResultBox>
+7 семь\
+без параметра\
+внутреннее\
+внешнее
+</ResultBox>
+
+Бросили простой объект — и разобрали его прямо в параметре. Параметр `e` жил в своём окружении
+`catch` и закрывал внешнюю константу только внутри.
+
+## 15. Практика: return из finally {#finally}
+
+День 4 показал главное: внезапный `finally` побеждает `return` и ошибку. Теперь три
+следствия тех же шагов. Предскажите:
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+let x = 1;
+function f() { try { return x; } finally { x = 2; } }
+console.log(f(), x);
+function g() { for (const i of [1, 2]) { try { return `из try ${i}`; } finally { if (i === 1) continue; } } return "после цикла"; }
+console.log(g());
+function h() { try { throw new Error("исходная"); } catch { throw new Error("из catch"); } finally { console.log("finally всё равно"); } }
+console.log(attempt(h));
+```
+
+<ResultBox>
+1 2\
+из try 2\
+finally всё равно\
+Error: из catch
+</ResultBox>
+
+Первое: запись B — `return 1` — готова раньше `finally`; поменять `x` он может,
+а ответ — нет. Второе: `continue` в `finally` дал внезапную F, и она съела
+`return` первой итерации — цикл пошёл дальше. Третье: `catch` бросил, C — throw;
+`finally` выполнен, F обычная, и наружу ушла C. Обратный случай — ошибка в самом
+`finally`: F внезапная и побеждает, а исходная ошибка из B или C пропадает бесследно. Поэтому код уборки
+в `finally` держат простым. Объявление `using` (день 25) в таком случае поступает иначе — не
+теряет, а склеивает обе ошибки в `SuppressedError`.
+
+## 16. «Карточки 2.0»: openDeck без finally {#cards}
+
+`openDeck` «Карточек 2.0» (день 34 курса 2) прячет индикатор загрузки строкой *после*
+`try`:
+
+```js
+// main.js, день 34 курса 2 — openDeck
+async function openDeck() {
+  try {
+    if (!opened.has(chosen)) opened.set(chosen, await loadDeck(decks.find((d) => d.id === chosen), progress));
+  } catch (err) {
+    error.textContent = `${err.message}: ${err.cause.message}`;
+  }
+  loading.hidden = true;
+  if (opened.has(chosen)) render();
+}
+```
+
+Пока все ошибки загрузки — CardsError с `cause`, это работает. Но если когда-нибудь прилетит ошибка
+без `cause` (опечатка в коде `loadDeck`), `catch` сам бросит: C — throw,
+и строка с `loading.hidden` не выполнится. Модель:
+
+```js
+const ui = { loading: false };
+async function openDeck(load) {
+  ui.loading = true;
+  try { await load(); } catch (err) { ui.error = `${err.message}: ${err.cause.message}`; }
+  ui.loading = false;
+}
+async function openDeckFinally(load) {
+  ui.loading = true;
+  try {
+    try { await load(); } catch (err) { ui.error = `${err.message}: ${err.cause.message}`; }
+  } finally {
+    ui.loading = false;
+  }
+}
+const withoutCause = async () => { throw new TypeError("опечатка в коде"); };
+(async () => {
+  await openDeck(withoutCause).catch((e) => console.log("наружу:", e.message));
+  console.log("без finally — загрузка висит:", ui.loading);
+  await openDeckFinally(withoutCause).catch((e) => console.log("наружу:", e.message));
+  console.log("с finally — загрузка висит:", ui.loading);
+})();
+```
+
+<ResultBox>
+наружу: Cannot read properties of undefined (reading 'message')\
+без finally — загрузка висит: true\
+наружу: Cannot read properties of undefined (reading 'message')\
+с finally — загрузка висит: false
+</ResultBox>
+
+Ошибка в обоих случаях ушла наружу — так и надо, её увидят в консоли. Но только `finally`
+гарантирует, что индикатор спрячется. Правило: уборку — в `finally`.
+
+## 17. Что будет завтра {#next}
+
+Сегодня — инструкции: окружения блоков и циклов, порядок `for-in`, `switch` и записи
+`try`. Завтра, на дне 12, — функции и классы по спецификации: окружение параметров,
+FunctionDeclarationInstantiation, вызов и `this` (OrdinaryCallBindThis), хвостовые вызовы и шаги
+создания класса.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [14 Statements and Declarations](https://tc39.es/ecma262/2026/#sec-ecmascript-language-statements-and-declarations) | глава; `with` (14.11) — день 31 | <Brief /> |
+| [14.1 Statement Semantics](https://tc39.es/ecma262/2026/#sec-statement-semantics) | общие правила инструкций | <Brief /> |
+| [14.1.1 Evaluation](https://tc39.es/ecma262/2026/#sec-statement-semantics-runtime-semantics-evaluation) | объявление функции при выполнении — ничего | <Brief /> |
+| [14.2 Block](https://tc39.es/ecma262/2026/#sec-block) | блок | <Brief /> |
+| [14.2.1 Early Errors](https://tc39.es/ecma262/2026/#sec-block-static-semantics-early-errors) | повторы имён (день 8) | <Brief /> |
+| [14.2.2 Evaluation](https://tc39.es/ecma262/2026/#sec-block-runtime-semantics-evaluation) | новое окружение на каждый вход (день 8) | <Brief /> |
+| [14.2.3 BlockDeclarationInstantiation](https://tc39.es/ecma262/2026/#sec-blockdeclarationinstantiation) | привязки без значения — мёртвая зона; функции сразу | <Full /> |
+| [14.3 Declarations](https://tc39.es/ecma262/2026/#sec-declarations-and-the-variable-statement) | объявления и `var` | <Brief /> |
+| [14.3.1 let и const](https://tc39.es/ecma262/2026/#sec-let-and-const-declarations) | инициализация на своей строке; `const` — неизменяемая | <Full /> |
+| [14.3.2 var](https://tc39.es/ecma262/2026/#sec-variable-statement) | привязка заранее; `var x = v` — PutValue | <Full /> |
+| [14.3.3 Binding Patterns](https://tc39.es/ecma262/2026/#sec-destructuring-binding-patterns) | шаблоны в объявлениях, слева направо | <Brief /> |
+| [14.4 Empty Statement](https://tc39.es/ecma262/2026/#sec-empty-statement) | пустая `;` | <Brief /> |
+| [14.4.1 Evaluation](https://tc39.es/ecma262/2026/#sec-empty-statement-runtime-semantics-evaluation) | пустое значение (день 4) | <Brief /> |
+| [14.5 Expression Statement](https://tc39.es/ecma262/2026/#sec-expression-statement) | не начинается с `{`, `function`, `class`, `let [` | <Brief /> |
+| [14.5.1 Evaluation](https://tc39.es/ecma262/2026/#sec-expression-statement-runtime-semantics-evaluation) | GetValue выражения | <Brief /> |
+| [14.6 if](https://tc39.es/ecma262/2026/#sec-if-statement) | условие и ветки | <Brief /> |
+| [14.6.1 Early Errors](https://tc39.es/ecma262/2026/#sec-if-statement-static-semantics-early-errors) | помеченная функция телом — ошибка | <Brief /> |
+| [14.6.2 Evaluation](https://tc39.es/ecma262/2026/#sec-if-statement-runtime-semantics-evaluation) | ветка не выполнилась — `undefined` (день 4) | <Brief /> |
+| [14.7 Iteration Statements](https://tc39.es/ecma262/2026/#sec-iteration-statements) | циклы | <Brief /> |
+| [14.7.1 Semantics](https://tc39.es/ecma262/2026/#sec-iteration-statements-semantics) | LoopContinues, LoopEvaluation | <Brief /> |
+| [14.7.2 do-while](https://tc39.es/ecma262/2026/#sec-do-while-statement) | тело, потом условие | <Brief /> |
+| [14.7.3 while](https://tc39.es/ecma262/2026/#sec-while-statement) | условие, потом тело | <Brief /> |
+| [14.7.4 for](https://tc39.es/ecma262/2026/#sec-for-statement) | копия окружения перед условием и шагом | <Full /> |
+| [14.7.5 for-in, for-of, for-await-of](https://tc39.es/ecma262/2026/#sec-for-in-and-for-of-statements) | голова в мёртвой зоне; порядок ключей; IteratorClose | <Full /> |
+| [14.8 continue](https://tc39.es/ecma262/2026/#sec-continue-statement) | запись `continue` с меткой | <Brief /> |
+| [14.8.1 Early Errors](https://tc39.es/ecma262/2026/#sec-continue-statement-static-semantics-early-errors) | только внутри цикла (день 8) | <Brief /> |
+| [14.8.2 Evaluation](https://tc39.es/ecma262/2026/#sec-continue-statement-runtime-semantics-evaluation) | `[[Target]]` — метка или empty | <Brief /> |
+| [14.9 break](https://tc39.es/ecma262/2026/#sec-break-statement) | запись `break` | <Brief /> |
+| [14.9.1 Early Errors](https://tc39.es/ecma262/2026/#sec-break-statement-static-semantics-early-errors) | без метки — только в цикле или `switch` | <Brief /> |
+| [14.9.2 Evaluation](https://tc39.es/ecma262/2026/#sec-break-statement-runtime-semantics-evaluation) | метка в `[[Target]]` | <Brief /> |
+| [14.10 return](https://tc39.es/ecma262/2026/#sec-return-statement) | запись `return` | <Brief /> |
+| [14.10.1 Evaluation](https://tc39.es/ecma262/2026/#sec-return-statement-runtime-semantics-evaluation) | без выражения — `undefined` | <Brief /> |
+| [14.12 switch](https://tc39.es/ecma262/2026/#sec-switch-statement) | одно окружение на все ветки | <Brief /> |
+| [14.12.1 Early Errors](https://tc39.es/ecma262/2026/#sec-switch-statement-static-semantics-early-errors) | повторы имён в ветках (день 8) | <Brief /> |
+| [14.12.2 CaseBlockEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-caseblockevaluation) | A, B, default и проход насквозь | <Brief /> |
+| [14.12.3 CaseClauseIsSelected](https://tc39.es/ecma262/2026/#sec-runtime-semantics-caseclauseisselected) | селектор и IsStrictlyEqual | <Brief /> |
+| [14.12.4 Evaluation](https://tc39.es/ecma262/2026/#sec-switch-statement-runtime-semantics-evaluation) | окружение и BlockDeclarationInstantiation | <Brief /> |
+| [14.13 Labelled Statements](https://tc39.es/ecma262/2026/#sec-labelled-statements) | метки | <Brief /> |
+| [14.13.1 Early Errors](https://tc39.es/ecma262/2026/#sec-labelled-statements-static-semantics-early-errors) | помеченная функция в строгом коде | <Brief /> |
+| [14.13.2 IsLabelledFunction](https://tc39.es/ecma262/2026/#sec-islabelledfunction) | метка над функцией, сквозь метки | <Brief /> |
+| [14.13.3 Evaluation](https://tc39.es/ecma262/2026/#sec-labelled-statements-runtime-semantics-evaluation) | LabelledEvaluation с пустым набором | <Brief /> |
+| [14.13.4 LabelledEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-labelledevaluation) | labelSet; `break` своей метки — обычная запись | <Brief /> |
+| [14.14 throw](https://tc39.es/ecma262/2026/#sec-throw-statement) | запись `throw` | <Brief /> |
+| [14.14.1 Evaluation](https://tc39.es/ecma262/2026/#sec-throw-statement-runtime-semantics-evaluation) | любое значение, не только ошибка | <Brief /> |
+| [14.15 try](https://tc39.es/ecma262/2026/#sec-try-statement) | три записи B, C, F | <Full /> |
+| [14.15.1 Early Errors](https://tc39.es/ecma262/2026/#sec-try-statement-static-semantics-early-errors) | параметр `catch` и имена блока (день 8) | <Brief /> |
+| [14.15.2 CatchClauseEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-catchclauseevaluation) | своё окружение; параметр-шаблон | <Brief /> |
+| [14.15.3 Evaluation](https://tc39.es/ecma262/2026/#sec-try-statement-runtime-semantics-evaluation) | F обычная — C, иначе F (день 4, день 26 курса 2) | <Full /> |
+| [14.16 debugger](https://tc39.es/ecma262/2026/#sec-debugger-statement) | остановка в отладчике (день 9) | <Brief /> |
+| [14.16.1 Evaluation](https://tc39.es/ecma262/2026/#sec-debugger-statement-runtime-semantics-evaluation) | без отладчика — пустое значение | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// блок: новое окружение; let/const/class — без значения (мёртвая зона), функции — сразу готовы
+// мёртвая зона — по времени обращения: let y = y и умолчание раньше соседа бросают
+// var: привязка заранее (undefined); var x; ничего не делает; var x = v — PutValue (в with — в объект)
+// for (let…): копия окружения перед условием и шагом; замыкание заголовка видит первое значение
+// for (var…) — одна привязка; for (const…) — шаг бросает
+// for-in/of: голова в мёртвой зоне; for-in null — без итераций, for-of null — TypeError
+// for-in: целые, строки по порядку, прототип; без символов; своё неперечисляемое прячет прототип
+// for-of: новое окружение на итерацию; break/return/throw — IteratorClose (finally генератора)
+// метки: break метки — обычная запись у LabelledEvaluation; continue метки — LoopContinues своего цикла
+// switch: селекторы по очереди до совпадения (===), после — тела насквозь; default посередине — после B
+// switch: одно окружение на все ветки — let чужой ветки в мёртвой зоне; continue проходит насквозь к циклу
+// do-while: continue ведёт к условию; после ) точка с запятой вставляется и без перевода строки
+// for await: значения проходят Await — промисы массива приходят готовыми
+// try: B, C (если B — throw), F; F обычная — C, иначе F; уборка — в finally; бросать Error, а не строки
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `x` внутри блока бросает ReferenceError, хотя снаружи есть свой `x`?
+   <Answer>BlockDeclarationInstantiation уже создала внутренний `x` без значения. Поиск имени находит
+   его в окружении блока первым и не идёт наружу; GetValue неинициализированной привязки бросает.</Answer>
+2. Что вернёт `f()` из `for (let i = 0, f = () => i; …)` после цикла и почему?
+   <Answer>0\. `f` замкнула окружение заголовка, а итерации идут в копиях (CreatePerIterationEnvironment);
+   `i` в окружении заголовка никто не меняет.</Answer>
+3. Почему `for (const x of x)` бросает, если снаружи есть массив `x`?
+   <Answer>ForIn/OfHeadEvaluation вычисляет выражение справа в окружении, где `x` цикла уже есть, но
+   без значения. Оно закрывает внешний `x`, и обращение — мёртвая зона.</Answer>
+4. В каком порядке вычисляются селекторы, если `default` стоит посередине и ничего не совпало?
+   <Answer>Все селекторы до `default`, потом все после него, потом выполняется `default` и
+   дальше тела веток после него — уже без проверки.</Answer>
+5. Куда уходит `continue`, написанный в ветке `switch` внутри цикла, и куда — `break`?
+   <Answer>LabelledEvaluation для `switch` превращает в обычную запись только `break` без
+   метки — он заканчивает `switch`. `continue` проходит `switch` насквозь,
+   и его забирает LoopContinues цикла: начинается следующая итерация.</Answer>
+6. Почему `try { return x; } finally { x = 2; }` возвращает старое значение `x`?
+   <Answer>Запись B — `return` со значением — готова до `finally`. F обычная, поэтому
+   результат — B, а значение в ней уже вычислено.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for)
+(for, for...in, for...of, switch, try...catch, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

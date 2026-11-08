@@ -1,0 +1,226 @@
+---
+title: День 4 — задания
+---
+
+# День 4. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-04` курса 3, задание 2 — прямо в консоли. Каждое «почему» — с номером раздела и шага.</Subtitle>
+
+## Разминка
+
+<Task title="1. Какой это тип" level="easy" time="7">
+<Goal>отличать тип языка от ответа `typeof`.</Goal>
+
+Для каждого значения назовите тип по разделу 6.1, потом предскажите строку вывода.
+
+```js
+const items = [null, () => {}, class {}, new Map(), Symbol.iterator, -0, NaN, 10n ** 20n, "", Object(1)];
+console.log(items.map((v) => typeof v).join(" "));
+```
+
+<Criteria>
+- для всех десяти значений записан тип из восьми;
+- отмечены места, где `typeof` говорит не то, что тип, и для каждого — шаг 13.5.3.1;
+- объяснено, почему у `Object(1)` тип Object, хотя внутри — число 1.
+</Criteria>
+</Task>
+
+<Task title="2. Что напечатает консоль" level="easy" time="7">
+<Goal>предсказывать значение завершения по Completion Record.</Goal>
+
+Вводите строки в консоль по одной. Предскажите каждый ответ до ввода.
+
+```js
+// в консоли: вводите по одной строке
+1; 2; 3
+if (false) { 1 } else { 2 }
+for (const n of [1, 2, 3]) { if (n === 2) break; n * 10; }
+while (true) { 4; break; }
+x: { 5; if (true) break x; 6; }
+"kitap"; const y = 1;
+```
+
+<Criteria>
+- шесть предсказаний записаны до ввода;
+- для цикла объяснено, почему он дал не 10: какое значение получил пустой `break`, пройдя
+  через `if` (14.6.2);
+- помеченный блок сравнён с `l: { 3; break l; }` из лекции: записана запись `break` с её
+  `[[Target]]` и объяснено, почему там 3, а здесь нет.
+</Criteria>
+</Task>
+
+<Task title="3. Number на границах" level="easy" time="6">
+<Goal>применять «the Number value for x» к краям.</Goal>
+
+```js
+console.log(2 ** 53 === 2 ** 53 + 1, 2 ** 53 + 3, 0.1 + 0.2 === 0.3);
+console.log(Object.is(-0, 0 * -1), 1 / (0 * -1), Number.MAX_VALUE * 2, -Number.MIN_VALUE / 2);
+console.log(Number(2n ** 53n + 1n), BigInt(2 ** 53) + 1n);
+```
+
+<Criteria>
+- предсказаны девять значений;
+- для `2 ** 53 + 3` объяснено, почему не …995, словами «even significand»;
+- объяснено, почему последняя пара разная, хотя оба выражения «про одно число».
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Девять способов позвать метод" level="medium" time="12">
+<Goal>видеть, где вызов получает Reference Record, а где — голое значение.</Goal>
+
+Предскажите девять строк: где метод увидит свою колоду, а где нет.
+
+```js
+const deck = { cards: ["kitap", "suw"], size() { return this === deck ? this.cards.length : "без колоды"; } };
+const calls = [
+  () => deck.size(),
+  () => (deck.size)(),
+  () => (deck.size || null)(),
+  () => (0, deck.size)(),
+  () => (deck.size = deck.size)(),
+  () => deck["si" + "ze"](),
+  () => (true ? deck.size : null)(),
+  () => deck?.size(),
+  () => (deck?.size)(),
+];
+calls.forEach((call, i) => console.log(i + 1, call()));
+```
+
+<Criteria>
+- для каждого вызова записано, что вернуло выражение перед `()`: Reference Record или значение;
+- для «без колоды» назван оператор, который вызвал GetValue (раздел 13 с номером);
+- для вызова 9 найдено в 13.2.9.2, почему скобки вокруг цепочки не мешают.
+</Criteria>
+</Task>
+
+<Task title="5. typeof и delete необъявленного" level="medium" time="12">
+<Goal>предсказывать `typeof`, `delete` и GetValue по полю `[[Base]]`.</Goal>
+
+```js
+const tryIt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(tryIt(() => typeof nope), tryIt(() => typeof (nope)), tryIt(() => typeof nope.x));
+console.log(tryIt(() => delete nope), tryIt(() => delete nope.x));
+console.log(tryIt(() => { var kept = 1; return delete kept; }), tryIt(() => { globalThis.gone = 1; return delete gone; }));
+console.log(tryIt(() => { typeof later; let later = 1; }));
+```
+
+<Criteria>
+- для каждого выражения записан `[[Base]]` ссылки: значение, Environment Record или `unresolvable`;
+- объяснено, почему `typeof nope.x` бросает, хотя `typeof nope` — нет;
+- объяснено, почему последняя строка — ошибка: имя `later` нашлось, но его привязка ещё не
+  готова, и `typeof` спасает только от `unresolvable`.
+</Criteria>
+</Task>
+
+<Task title="6. «Карточки 2.0»: методы, которые не теряют колоду" level="medium" time="14">
+<Goal>применить Reference Record и атрибуты свойств к коду проекта.</Goal>
+
+Напишите `bound(obj)`: объект с теми же методами, что у `obj` по цепочке прототипов, но
+привязанными к `obj` через `bind`, — их можно отдавать в `forEach` и
+`addEventListener`. Конструктор и аксессоры не брать.
+
+<Example>
+```js
+class Deck {
+  #seen = 0;
+  know() { this.#seen++; return this.#seen; }
+  get seen() { return this.#seen; }
+}
+const deck = new Deck();
+const { know } = bound(deck);
+[1, 2, 3].forEach(know);
+deck.seen;                              // 3
+Object.keys(bound(deck)).join(" ");     // "know"
+typeof bound(deck).seen;                // "undefined"
+```
+</Example>
+
+<Criteria>
+- все три строки примера дают то, что в комментариях;
+- методы найдены через `Object.getPrototypeOf`, а аксессор отсеян по дескриптору — у него нет `value`;
+- объяснено через Reference Record, почему `[1, 2, 3].forEach(deck.know)` без `bound` бросает.
+</Criteria>
+</Task>
+
+<Task title="7. Кто победил в finally" level="medium" time="12">
+<Goal>проходить алгоритм 14.15.3 по записям B, C и F.</Goal>
+
+```js
+const log = [];
+function a() { try { log.push("try"); return "a"; } finally { log.push("finally"); } }
+function b() { try { throw new Error("b"); } catch (e) { return e.message; } finally { log.push("b-finally"); } }
+function c() { for (;;) { try { break; } finally { log.push("c-finally"); } } return "c"; }
+function d() { try { return "try"; } finally { try { throw new Error("внутри"); } catch {} } }
+function e() { label: try { return "e"; } finally { break label; } return "после метки"; }
+console.log(a(), b(), c(), d(), e());
+console.log(log.join(" "));
+```
+
+<Criteria>
+- для каждой функции выписаны записи B, C (если есть) и F и та, что стала итогом;
+- для `d` объяснено, почему ошибка внутри `finally` не изменила итог;
+- для `e` найдено, где запись `break` с меткой превратилась в обычную.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Список инструкций по записям" level="hard" time="10">
+<Goal>перенести UpdateEmpty и правило списка инструкций в код.</Goal>
+
+Запись — объект `{ type, value, target }`, пустое значение — символ `EMPTY`. Напишите
+`updateEmpty(record, value)` по 6.2.4.4 и `evaluateList(records)`: свернуть записи
+инструкций, как список инструкций (14.2.2), — каждая следующая через `UpdateEmpty` с прежним
+значением, на первой внезапной остановиться.
+
+<Example>
+```js
+const EMPTY = Symbol("empty");
+const n = (value) => ({ type: "normal", value, target: EMPTY });
+evaluateList([n(1), n(EMPTY), n(2)]).value;                                 // 2
+evaluateList([n(1), n(EMPTY)]).value;                                       // 1
+evaluateList([n(1), { type: "break", value: EMPTY, target: "x" }]).value;   // 1
+evaluateList([n(1), { type: "throw", value: "ошибка", target: EMPTY }, n(3)]).type;   // "throw"
+evaluateList([]).value === EMPTY;                                           // true
+```
+</Example>
+
+<Criteria>
+- все пять строк примера дают то, что в комментариях;
+- ответы задания 2 повторены записями: `1; 2; 3` и помеченный блок;
+- объяснено, почему третья строка вернула 1, а не пусто, хотя `break` пуст.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: FromPropertyDescriptor" level="hard" time="10">
+<Goal>прочитать алгоритм, которого не было на лекции.</Goal>
+
+Прочитайте подраздел [6.2.6.4
+FromPropertyDescriptor](https://tc39.es/ecma262/2026/#sec-frompropertydescriptor) — он делает из записи Property Descriptor обычный объект для
+`Object.getOwnPropertyDescriptor`. Предскажите четыре строки.
+
+```js
+const o = { word: "kitap", get size() { return 2; } };
+Object.defineProperty(o, "id", { value: 7, enumerable: false });
+for (const key of ["word", "size", "id", "nope"]) {
+  const d = Object.getOwnPropertyDescriptor(o, key);
+  console.log(key, d === undefined ? "нет свойства" : Object.keys(d).join(" "));
+}
+```
+
+<Criteria>
+- предсказаны порядок ключей и их набор, у каждой строки — шаги 6.2.6.4, которые их дали;
+- объяснено, почему у `size` есть ключ `set`, хотя сеттера нет;
+- найдено, какой шаг возвращает `undefined` для `nope`.
+</Criteria>
+</Task>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures" />

@@ -1,0 +1,103 @@
+---
+title: День 7 — конспект
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+---
+
+# День 7. Операции над объектами и итераторами
+
+<Subtitle>Выжимка лекции: Get и Set, запись против определения, Call и Construct, GroupBy, записи итераторов.</Subtitle>
+
+## Главное
+
+<Definition>
+**Операции 7.3 и 7.4** — обёртки внутренних методов (день 4) с проверкой: «функция ли»,
+«удалось ли», «объект ли». На них написаны все встроенные функции.
+</Definition>
+
+<KeyPoint>
+**Запись** (Set, `[[Set]]`) идёт по прототипам: зовёт сеттеры, в том числе
+`__proto__`, отказывает перед свойством «только чтение». **Определение**
+(CreateDataProperty) создаёт своё свойство-значение. Запись — присваивание и `Object.assign`;
+определение — литерал, spread, поле класса, `Object.defineProperty`.
+</KeyPoint>
+
+## Set и определение
+
+```js
+const a = Object.freeze([1, 2]);
+a[0] = 9;
+console.log(a[0], Object.isFrozen(a));                           // 1 true — нестрогое присваивание молчит
+const data = JSON.parse('{"__proto__": {"admin": true}}');
+console.log(Object.assign({}, data).admin, { ...data }.admin);   // true undefined — Set против определения
+```
+
+<Remember>
+Встроенные функции зовут Set с `Throw = true`: `push`, `pop`,
+`Object.assign` на замороженном бросают и в нестрогом коде. Семейство «…OrThrow» превращает ответ
+`false` в `TypeError`. Копируя чужие данные, берите spread.
+</Remember>
+
+## Call, Construct и поля
+
+```js
+const log = [];
+class Base { set word(v) { log.push(v); } }
+class Field extends Base { word = "kitap"; }
+class Assign extends Base { constructor() { super(); this.word = "galam"; } }
+console.log(Object.hasOwn(new Field(), "word"), Object.hasOwn(new Assign(), "word"), log.join());   // true false galam — поле определяет
+class Words extends Array {}
+console.log(Words.from(["a"]) instanceof Words, Words.from(["a"]).map((x) => x) instanceof Words);   // true true — Construct от наследника
+```
+
+| Операция | Что делает | Где видно |
+| --- | --- | --- |
+| Get / GetV | `[[Get]]` с получателем — `this` геттера | геттер в прототипе |
+| Set | `[[Set]]`, при `false` и Throw — `TypeError` | `push`, `Object.assign` |
+| CopyDataProperties | свои перечисляемые, Get и определение | `{ ...o }`, `{ a, ...rest }` |
+| Call | IsCallable, потом `[[Call]]` | любой колбэк |
+| Construct | `[[Construct]]` с newTarget | `super()`, `Words.from` |
+| GroupBy | итератор, колбэк, ключ, группа по SameValue | `Object.groupBy`, `Map.groupBy` |
+| IteratorClose | зовёт `return` при досрочном выходе | `break`, деструктуризация |
+
+## Итераторы
+
+```js
+const log = [];
+const it = { [Symbol.iterator]() { return { next: () => ({ value: 1, done: false }), return: () => { log.push("return"); return {}; } }; } };
+for (const x of it) break;
+const [first] = it;
+console.log(first, log.join());   // 1 return,return — досрочный выход закрывает
+console.log(Object.keys(Object.groupBy([1, "1", 2], (x) => x)).join(), Map.groupBy([1, "1", 2], (x) => x).size);   // 1,2 3 — ключи объекта и Map
+```
+
+<Remember>
+**Iterator Record**: `[[Iterator]]`, `[[NextMethod]]` (читается один раз),
+`[[Done]]`. Шаг `for...of` (14.7.5.7): `next()` → объект? → ToBoolean
+`done` → `value`. Досрочный выход — IteratorClose: `return()`, и ошибка тела
+важнее его ошибок.
+</Remember>
+
+<Homework>
+1. Прочитайте шаги `Array.prototype.push` (23.1.3.23): найдите оба вызова Set и флажок у
+   них. Объясните сообщение `Object.freeze([]).push(1)`.
+2. Предскажите по шагам TestIntegrityLevel (7.3.16) и проверьте:
+   `Object.isFrozen(Object.freeze({ get x() { return 1; } }))`,
+   `Object.isFrozen(Object.seal({ a: 1 }))`, `Object.isSealed(Object.freeze({ a: 1 }))`,
+   `Object.isFrozen(Object.seal({}))`.
+3. Найдите в своих «Карточках 2.0», где данные из JSON копируются в объект, и проверьте: `Object.assign`
+   там или spread, и что будет с ключом `"__proto__"`.
+4. Прочитайте на MDN раздел «Errors during iteration» страницы
+   [Iteration protocols](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols)
+   и проверьте в Chrome: зовёт ли `for...of` метод `return`, если ошибку бросил сам
+   `next()`?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols)
+(Iteration protocols, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

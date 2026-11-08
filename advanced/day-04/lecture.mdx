@@ -1,0 +1,666 @@
+---
+title: "День 4 — Типы языка и типы спецификации: Completion Record и Reference Record"
+day: День 4 • урок 1
+heading: "Типы языка и типы спецификации: Completion Record и Reference Record"
+lead: Курс 3, Advanced. Модуль «Типы и абстрактные операции» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #6d28d9; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #7c3aed; }
+---
+
+<Goals>
+- называть восемь типов языка и отличать тип от ответа `typeof`;
+- объяснять, сколько значений у Number, откуда −0 и почему BigInt не смешивается с Number;
+- читать атрибуты свойства и таблицу внутренних методов объекта;
+- отличать типы языка от типов спецификации, которых в программе не увидеть;
+- предсказывать значение завершения и исход `try...finally` по Completion Record;
+- объяснять через Reference Record `typeof`, `delete`, присваивание и `this` при вызове.
+</Goals>
+
+<Toc />
+
+## 1. Два вида типов {#types}
+
+Модуль A2 начинается с главы 6 — [ECMAScript
+Data Types and Values](https://tc39.es/ecma262/2026/#sec-ecmascript-data-types-and-values). Первая её фраза: у каждого значения, с которым работают алгоритмы, есть тип, и других
+типов, кроме описанных в главе, нет. Типы делятся на два вида. **Типы языка** (раздел
+[6.1](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types)) — значения, которыми программист
+пользуется прямо: их восемь — Undefined, Null, Boolean, String, Symbol, Number, BigInt и Object.
+**Типы спецификации** (6.2) — служебные значения алгоритмов; в переменную их не положить.
+
+На дне 5 Essentials мы читали страницу MDN [JavaScript
+data types and data structures](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures) — это пересказ раздела 6.1. Знакомый оператор `typeof` отвечает на
+вопрос о типе, но не совсем словами главы 6:
+
+```js
+const values = [undefined, null, true, "kitap", Symbol("id"), 2026, 2026n, {}, () => {}];
+console.log(values.map((v) => typeof v).join(" "));
+```
+
+<ResultBox>
+undefined object boolean string symbol number bigint object function
+</ResultBox>
+
+Расхождений два. Для `null` — «object», хотя тип Null отдельный: алгоритм
+[typeof](https://tc39.es/ecma262/2026/#sec-typeof-operator-runtime-semantics-evaluation) так и
+записан — «если val — null, вернуть "object"». И «function» — не тип: функция по главе 6 — это Object, у которого
+есть внутренний метод `[[Call]]` (раздел 7). Оператор смотрит на этот метод.
+
+## 2. Undefined, Null, Boolean, String, Symbol {#simple}
+
+Разделы 6.1.1–6.1.5 короткие. У [Undefined](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-undefined-type)
+и [Null](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-null-type) ровно по одному
+значению, у [Boolean](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-boolean-type) — два.
+[String](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-string-type) — не «текст», а
+последовательность 16-битных элементов длиной до 2<sup>53</sup> − 1; что это UTF-16, предполагают только
+операции, которые текст толкуют (день 20 курса 2). Одинокая половинка пары — тоже законная строка.
+[Symbol](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-symbol-type) — значения, которые
+годятся в ключи свойств, но не строки; каждый символ уникален, а описание хранит внутренний слот
+`[[Description]]`.
+
+```js
+console.log("😀".length, [..."😀"].length, "\uD800".length, "\uD800".isWellFormed());
+console.log(Symbol("id") === Symbol("id"), Symbol("id").description, Symbol().description);
+console.log(Symbol.for("id") === Symbol.for("id"), typeof Symbol.iterator);
+```
+
+<ResultBox>
+2 1 1 false\
+false id undefined\
+true symbol
+</ResultBox>
+
+Эмодзи — один символ на экране, но два элемента строки; «😀» по кодовым точкам — один. Предел длины
+2<sup>53</sup> − 1 — это то, что разрешает стандарт; реализация ставит свой, намного меньше: в Chrome
+`"x".repeat(2 ** 30)` бросает `RangeError: Invalid string length`. Различие «стандарт /
+реализация» с дня 1 работает и здесь.
+
+Два одинаковых описания — два разных символа. `Symbol.for` не нарушает правила: он берёт символ
+из общего реестра, и второй вызов возвращает тот же. `Symbol.iterator` — один из
+[встроенных символов](https://tc39.es/ecma262/2026/#sec-well-known-symbols) (6.1.5.1), которыми
+алгоритмы находят протоколы, — их мы видели на дне 11 курса 2.
+
+## 3. Number: 2⁶⁴ − 2⁵³ + 3 значения {#number}
+
+Раздел [6.1.6](https://tc39.es/ecma262/2026/#sec-numeric-types) вводит два числовых типа, а
+подраздел 6.1.6.1 считает значения Number точно: 2<sup>64</sup> − 2<sup>53</sup> + 3. Это числа двойной
+точности IEEE 754, только все 2<sup>53</sup> − 2 разных NaN стандарта IEEE язык видит как *один* NaN.
+Кроме NaN — две бесконечности и конечные числа, среди которых два нуля, +0 и −0. Все целые по модулю до
+2<sup>53</sup> представимы точно.
+
+```js
+console.log(2n ** 64n - 2n ** 53n + 3n);
+console.log(Object.is(NaN, 0 / 0), Object.is(0, -0), 0 === -0, 1 / -0);
+console.log(9007199254740993, 9007199254740995, 2 ** 53 + 2);
+console.log(1.7976931348623158e308, 1.7976931348623159e308);
+```
+
+<ResultBox>
+18437736874454810627n\
+true false true -Infinity\
+9007199254740992 9007199254740996 9007199254740994\
+1.7976931348623157e+308 Infinity
+</ResultBox>
+
+Число посчитано BigInt'ом — Number столько цифр точно не удержит. `Object.is` (день 6 курса 2)
+различает нули и не различает NaN — это операция `Number::sameValue`. Последняя строка показывает
+фразу, которой спецификация пользуется сотни раз: «the Number value for *x*» — ближайший Number, а при
+равенстве — тот, у которого *чётная мантисса*. Поэтому 2<sup>53</sup> + 1 уходит вниз, к …992, а
+2<sup>53</sup> + 3 — вверх, к …996: оба соседа на одном расстоянии, побеждает чётный.
+
+У правила есть край. В набор, из которого выбирается ближайший, раздел добавляет два значения, которых в
+Number нет, — ±2<sup>1024</sup>; если ближе всего оказалось одно из них, результат — бесконечность. Поэтому
+запись чуть больше `Number.MAX_VALUE` ещё округляется к нему, а следующая по величине — уже
+`Infinity`: ошибки «переполнения» в языке нет.
+
+## 4. BigInt и таблица числовых операций {#bigint}
+
+Подраздел 6.1.6.2: BigInt — целое любого размера, для побитовых операций — дополнительный код, где у
+отрицательного числа слева бесконечно много единиц. Таблица 2 раздела 6.1.6 перечисляет операции: каждый
+оператор вызывает пару `Number::…` или `BigInt::…` — `Number::add` для
+`x + y`, `BigInt::divide` для `x / y` и так далее. Столбец «Result» говорит,
+какие из них могут вернуть внезапную запись (день 1): у Number — ни одна, у BigInt — деление, остаток, степень
+и беззнаковый сдвиг.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() => 1n + 1));
+console.log(attempt(() => 2n ** -1n));
+console.log(attempt(() => 1n / 0n));
+console.log(5n / 2n, -5n / 2n, -5n % 3n, Number(2n ** 64n));
+```
+
+<ResultBox>
+TypeError: Cannot mix BigInt and other types, use explicit conversions\
+RangeError: Exponent must be positive\
+RangeError: Division by zero\
+2n -2n -2n 18446744073709552000
+</ResultBox>
+
+Под таблицей — объяснение первой ошибки: типы не переводятся друг в друга без потерь, поэтому
+*неявного* перевода между Number и BigInt нет. Number теряет точность, BigInt — дробную часть; переводить
+нужно явно, `Number(…)` или `BigInt(…)`. Отрицательная степень дала бы дробь — поэтому
+`RangeError`; V8 пишет «must be positive», хотя ноль разрешён: `2n ** 0n` — `1n`.
+Деление и остаток отбрасывают дробь к нулю, и знак остатка — как у делимого. Беззнакового сдвига у BigInt нет
+вовсе: при бесконечных единицах слева «беззнакового» результата не бывает — о сдвигах день 6.
+
+## 5. Object: свойства и ключи {#object}
+
+Раздел [6.1.7](https://tc39.es/ecma262/2026/#sec-object-type): объект — набор свойств. Свойство
+бывает **данных** (ключ, значение и атрибуты) или **аксессором** (ключ, одна или две
+функции и атрибуты). Ключ свойства — строка или символ, других нет; пустая строка — тоже ключ. Среди строк
+раздел выделяет **целочисленный индекс** (от 0 до 2<sup>53</sup> − 1) и **индекс
+массива** — до 2<sup>32</sup> − 2. Только индексы массива двигают его `length`:
+
+```js
+console.log(Object.keys({ 1: "a", [Symbol("s")]: 2, "": 3 }));
+const a = [], b = [], c = [];
+a[4294967294] = 1;
+b[4294967295] = 1;
+c["-0"] = 1;
+console.log(a.length, b.length, c.length, Object.keys(c));
+```
+
+<ResultBox>
+(2) \['1', ''\]\
+4294967295 0 0 (1) \['-0'\]
+</ResultBox>
+
+Числовой ключ `1` стал строкой «1», символ в `Object.keys` не попал (день 11 курса 2),
+пустая строка — попала. 4294967294 = 2<sup>32</sup> − 2 — последний индекс массива, длина стала
+2<sup>32</sup> − 1. На единицу больше — уже обычное свойство, длина 0. Примечание раздела отдельно оговаривает
+«-0»: это не индекс вовсе, просто строка из двух символов.
+
+## 6. Атрибуты свойства {#attributes}
+
+Подраздел [6.1.7.1](https://tc39.es/ecma262/2026/#sec-property-attributes), таблица 3 —
+шесть атрибутов, знакомых по дню 5 курса 2:
+
+| Атрибут | У какого свойства | По умолчанию | Что значит |
+| --- | --- | --- | --- |
+| `[[Value]]` | данных | `undefined` | значение при чтении |
+| `[[Writable]]` | данных | `false` | можно ли менять `[[Value]]` через `[[Set]]` |
+| `[[Get]]` | аксессор | `undefined` | функция для чтения |
+| `[[Set]]` | аксессор | `undefined` | функция для записи |
+| `[[Enumerable]]` | оба | `false` | виден ли в `for...in` |
+| `[[Configurable]]` | оба | `false` | можно ли удалить и перенастроить |
+
+```js
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor({ word: "kitap" }, "word")));
+const card = Object.defineProperty({}, "word", { value: "kitap" });
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor(card, "word")));
+const timer = { get left() { return 5; } };
+console.log(Object.keys(Object.getOwnPropertyDescriptor(timer, "left")).join(" "));
+```
+
+<ResultBox>
+\{"value":"kitap","writable":true,"enumerable":true,"configurable":true\}\
+\{"value":"kitap","writable":false,"enumerable":false,"configurable":false\}\
+get set enumerable configurable
+</ResultBox>
+
+Литерал объекта ставит атрибутам `true`, а `defineProperty` берёт значения по
+умолчанию из таблицы — `false`. У аксессора нет ни `value`, ни `writable`: это
+атрибуты только свойства данных.
+
+## 7. Внутренние методы и слоты {#internal}
+
+Подраздел [6.1.7.2](https://tc39.es/ecma262/2026/#sec-object-internal-methods-and-internal-slots)
+объясняет, как спецификация описывает поведение объектов: **внутренними методами** в двойных
+квадратных скобках. Таблица 4 — одиннадцать обязательных методов любого объекта:
+`[[GetPrototypeOf]]`, `[[SetPrototypeOf]]`, `[[IsExtensible]]`,
+`[[PreventExtensions]]`, `[[GetOwnProperty]]`, `[[DefineOwnProperty]]`,
+`[[HasProperty]]`, `[[Get]]`, `[[Set]]`, `[[Delete]]`,
+`[[OwnPropertyKeys]]`. Таблица 5 добавляет функциям `[[Call]]` и конструкторам —
+`[[Construct]]`. За знакомым кодом стоят именно они:
+
+| В коде | Внутренний метод |
+| --- | --- |
+| `obj.x`, `obj[k]` | `[[Get]]` |
+| `obj.x = v` | `[[Set]]` |
+| `"x" in obj` | `[[HasProperty]]` |
+| `delete obj.x` | `[[Delete]]` |
+| `Object.keys(obj)`, `for...in` | `[[OwnPropertyKeys]]` и `[[GetOwnProperty]]` |
+| `Object.defineProperty` | `[[DefineOwnProperty]]` |
+| `Object.getPrototypeOf`, `Object.setPrototypeOf` | `[[GetPrototypeOf]]`, `[[SetPrototypeOf]]` |
+| `Object.preventExtensions`, `Object.isExtensible` | `[[PreventExtensions]]`, `[[IsExtensible]]` |
+| `f()`, `new F()` | `[[Call]]`, `[[Construct]]` |
+
+Как работает каждый у обычного объекта — день 14; Proxy перехватывает ровно эти вызовы — день 16.
+
+Объект, у которого все методы — стандартные из главы 10, называется **обычным**; остальные —
+**экзотические**: массив, у которого `[[DefineOwnProperty]]` следит за
+`length`, или Proxy (день 16). Если алгоритм зовёт метод, которого у объекта нет, — `TypeError`.
+А **внутренние слоты** — скрытое состояние: это не свойства, их не прочитать из кода.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() => new (() => {})()));
+console.log(Object.getOwnPropertyNames(new Map([[1, "kitap"]])).length);
+console.log(attempt(() => Map.prototype.get.call({}, 1)));
+```
+
+<ResultBox>
+TypeError: (intermediate value) is not a constructor\
+0\
+TypeError: Method Map.prototype.get called on incompatible receiver #\<Object>
+</ResultBox>
+
+У стрелочной функции нет `[[Construct]]` — `new` падает. У `Map` нет ни одного
+собственного свойства: его пары лежат во внутреннем слоте `[[MapData]]`. А `Map.prototype.get`
+первым делом проверяет, есть ли у `this` такой слот, и у простого объекта его нет.
+
+Подраздел 6.1.7.3 — **инварианты**: правила, которые обязан соблюдать любой объект (например,
+ненастраиваемое свойство не может «исчезнуть»); Proxy проверяет их на ходу — день 16. Подраздел 6.1.7.4 —
+**встроенные объекты** вроде `%Array.prototype%`: в знаках процента — объект текущего
+реалма (день 9), а не то, что сейчас лежит в глобальной переменной `Array`.
+
+## 8. Типы спецификации: Enum, List, Record {#spec-types}
+
+Раздел [6.2](https://tc39.es/ecma262/2026/#sec-ecmascript-specification-types): типы спецификации —
+мета-значения, которые описывают работу языка. Раздел прямо говорит: они не обязаны соответствовать чему-то в
+движке, и их нельзя сохранить в свойство или переменную.
+
+<Scheme src="scheme-spec-types.svg">Два мира типов главы 6</Scheme>
+
+[Enum](https://tc39.es/ecma262/2026/#sec-enum-specification-type) (6.2.1) — имена вроде
+`normal`, `return`, `throw`: ничего, кроме имени, у них нет.
+[List](https://tc39.es/ecma262/2026/#sec-list-and-record-specification-type) (6.2.2) — упорядоченный
+список, пишется в угловых кавычках: `«1, 2»`, пустой — `«»`; так передаются, например,
+аргументы вызова: `Function.prototype.apply`, проверив функцию, строит из похожего на массив
+объекта List операцией `CreateListFromArrayLike` и только потом вызывает. **Record** — набор именованных полей, похожий на литерал объекта:
+`{ [[Field1]]: 42, [[Field2]]: false }`. [Set
+и Relation](https://tc39.es/ecma262/2026/#sec-set-and-relation-specification-type) (6.2.3) нужны модели памяти (день 23) и не имеют отношения к объекту `Set`.
+
+## 9. Completion Record {#completion}
+
+На дне 1 мы разворачивали знаки `?` и `!` и уже пользовались записями. Раздел
+[6.2.4](https://tc39.es/ecma262/2026/#sec-completion-record-specification-type) даёт им определение:
+Completion Record объясняет, как значения и управление проходят через программу, — особенно
+`break`, `continue`, `return` и `throw`, которые уводят выполнение
+в другое место. Таблица 7 — три поля:
+
+| Поле | Значение | Смысл |
+| --- | --- | --- |
+| `[[Type]]` | `normal`, `break`, `continue`, `return`, `throw` | как завершилось |
+| `[[Value]]` | любое значение, кроме самой записи | что получилось |
+| `[[Target]]` | строка или `empty` | метка для `break` и `continue` |
+
+Запись типа `normal` — **обычная**, любая другая — **внезапная**
+(abrupt). Подразделы 6.2.4.1–6.2.4.3 — сокращения: `NormalCompletion(v)`,
+`ThrowCompletion(e)`, `ReturnCompletion(v)`. Вот какие записи дают знакомые инструкции:
+
+| Инструкция | `[[Type]]` | `[[Value]]` | `[[Target]]` |
+| --- | --- | --- | --- |
+| `x + 1;` | `normal` | значение `x + 1` | `empty` |
+| `var x = 3;` | `normal` | `empty` | `empty` |
+| `return 5;` | `return` | 5 | `empty` |
+| `throw err;` | `throw` | объект `err` | `empty` |
+| `break outer;` | `break` | `empty` | «outer» |
+| `continue;` | `continue` | `empty` | `empty` |
+
+Вызываемые объекты спецификации возвращают
+только обычную запись или throw — `return` до вызывающего не доходит, он превращается в обычное
+значение. А `[[Value]]` бывает пустым, `empty`: так завершаются инструкции без значения
+— `var x = 3;`, пустая `;`. Подраздел
+[6.2.4.4 UpdateEmpty](https://tc39.es/ecma262/2026/#sec-updateempty) заполняет пустое значение,
+если оно пустое, и не трогает, если нет.
+
+## 10. Значение завершения в консоли {#console}
+
+Обычно значения завершения не видны, но консоль DevTools их показывает: после ввода она печатает
+`[[Value]]` записи, которой закончился весь ввод. Введите строки по одной:
+
+```js
+// в консоли: каждая строка — отдельный ввод
+if (true) { 5 }
+{ 7 }
+for (let i = 0; i < 3; i++) { i * 10; }
+2; var x = 3;
+1; if (false) {}
+try { 1 } finally { 2 }
+l: { 3; break l; }
+"a"; ;
+switch (1) { case 1: "один"; }
+try { throw 1 } catch { 8 }
+```
+
+<ResultBox>
+5\
+7\
+20\
+2\
+undefined\
+1\
+3\
+'a'\
+'один'\
+8
+</ResultBox>
+
+Инструкции `if` и блок отдают значение последней инструкции внутри. Цикл — значение последнего
+шага: 20. `var x = 3;` завершается пустым значением, и список инструкций сохраняет предыдущее, 2.
+А `if (false) {}` возвращает не пустое, а `undefined`: ветка не выполнилась, и алгоритм
+[`if`](https://tc39.es/ecma262/2026/#sec-if-statement-runtime-semantics-evaluation) (14.6.2)
+прямо возвращает `undefined` — 1 затирается. Если ветка выполнилась, но дала пусто, как
+`if (true) {}`, пустое значение заменит на `undefined` последний шаг —
+`UpdateEmpty(…, undefined)`. `finally` со своим обычным
+завершением значение `try` не меняет. `break l` несёт метку в `[[Target]]`,
+помеченный блок её узнаёт и превращает запись в обычную с последним значением, 3. Пустая инструкция
+`;` завершается пустым значением, как `var`, и строка «a» остаётся. `switch`
+отдаёт значение последней выполненной инструкции ветки, а `catch` — значение своего блока: запись
+`throw` из `try` он превратил в обычную. Консоль печатает строки в кавычках — так она
+отличает их от чисел.
+
+## 11. return и finally {#finally}
+
+Алгоритм [try...finally](https://tc39.es/ecma262/2026/#sec-try-statement-runtime-semantics-evaluation)
+(14.15.3) в три шага: вычислить блок — запись B; вычислить `finally` — запись F; если F обычная,
+вернуть B, иначе — F. Значит, внезапное завершение `finally` побеждает всё, что было в
+`try`, — и `return`, и даже ошибку:
+
+```js
+function f() { try { return "из try"; } finally { return "из finally"; } }
+function g() { try { throw new Error("пропала"); } finally { return "ошибки нет"; } }
+function h() { for (const n of [1, 2, 3]) { try { return n; } finally { continue; } } return "дошли"; }
+function k() { try { return "из try"; } finally { console.log("finally выполнен"); } }
+console.log(f(), "|", g(), "|", h());
+console.log(k());
+```
+
+<ResultBox>
+из finally | ошибки нет | дошли\
+finally выполнен\
+из try
+</ResultBox>
+
+<Scheme src="scheme-finally.svg">Функция g глазами Completion Record</Scheme>
+
+Это та «странность», о которой предупреждал день 11 Essentials: `return` в `finally`
+побеждает. Теперь видно, что это не исключение из правила, а само правило — три шага алгоритма. В
+`h` запись `continue` из `finally` отменила `return`, цикл дошёл до
+конца, и функция вернула «дошли». А `k` — обычный случай: `finally` выполнился
+(строка напечатана раньше результата), завершился обычной записью, и итогом осталась запись
+`return` из `try`. Поэтому `finally` годится для уборки — закрыть, остановить,
+напечатать, — а `return`, `break` и `continue` в нём не пишут.
+
+## 12. Reference Record {#reference}
+
+Раздел [6.2.5](https://tc39.es/ecma262/2026/#sec-reference-record-specification-type): Reference
+Record — это «ссылка» на имя или свойство, ещё не превращённая в значение. Её получает левая часть присваивания,
+аргумент `typeof` и `delete`, имя функции при вызове. Поля по таблице 8:
+
+| Поле | Что там |
+| --- | --- |
+| `[[Base]]` | значение (для свойства), Environment Record (для переменной) или `unresolvable` — имя не нашлось |
+| `[[ReferencedName]]` | имя: строка, символ, Private Name — или пока любое значение, до `ToPropertyKey` |
+| `[[Strict]]` | создана ли ссылка в строгом коде |
+| `[[ThisValue]]` | для `super.x` — `this` на момент создания, иначе `empty` |
+
+<Scheme src="scheme-reference.svg">Три Reference Record и операция GetValue</Scheme>
+
+Две главные операции — [GetValue](https://tc39.es/ecma262/2026/#sec-getvalue) (прочитать) и
+[PutValue](https://tc39.es/ecma262/2026/#sec-putvalue) (записать). Их шаги объясняют вещи, которые
+раньше приходилось запоминать:
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(typeof nope, attempt(() => nope));
+function leak() { leaked = 1; }
+leak();
+console.log(globalThis.leaked, attempt(() => { "use strict"; strictLeak = 1; }));
+console.log(attempt(() => { "use strict"; Math.PI = 3; }));
+console.log(attempt(() => { "use strict"; "kitap".x = 1; }));
+console.log(delete nope, delete Math.PI);
+```
+
+<ResultBox>
+undefined ReferenceError: nope is not defined\
+1 ReferenceError: strictLeak is not defined\
+TypeError: Cannot assign to read only property 'PI' of object '#\<Object>'\
+TypeError: Cannot create property 'x' on string 'kitap'\
+true false
+</ResultBox>
+
+`typeof` сначала проверяет: ссылка не разрешилась — «undefined» (день 5 Essentials называл это
+«особой добротой»). Простое `nope` идёт через GetValue, а её шаг 2 — `ReferenceError`: так
+вчерашний `continue⏎outer` упал на имени `outer`. PutValue в нестрогом коде записывает
+ненайденное имя в глобальный объект — отсюда «утечка» `leaked` (день 3 курса 2), а в строгом
+бросает. Поле `[[Strict]]` решает и судьбу неудачной записи: `[[Set]]` вернул
+`false`, и только строгий код превращает это в `TypeError`. То же со свойством строки:
+`[[Base]]` — примитив, PutValue делает из него временный объект (`ToObject`), пишет в него
+и выбрасывает. Примечание к PutValue оговаривает, что этот объект снаружи не виден, — в нестрогом коде запись
+просто пропадает. `delete` для ненайденного имени возвращает `true`, а для ненастраиваемого
+свойства — `false`.
+
+## 13. Откуда берётся this при вызове {#this}
+
+Вызов `f()` вычисляет `f` и смотрит, что получилось
+([EvaluateCall](https://tc39.es/ecma262/2026/#sec-evaluatecall), 13.3.6.2). Если это Reference
+Record на свойство, `this` берётся из него операцией
+[GetThisValue](https://tc39.es/ecma262/2026/#sec-getthisvalue) — то есть из `[[Base]]`.
+Если ссылку уже превратили в значение, `this` взять неоткуда:
+
+```js
+const card = { word: "kitap", show() { return this === card; } };
+console.log(card.show(), (card.show)(), card["show"](), card?.show());
+console.log((0, card.show)(), (card.show = card.show)(), [card.show][0]());
+const { show } = card;
+console.log(show());
+```
+
+<ResultBox>
+true true true true\
+false false false\
+false
+</ResultBox>
+
+Скобки [( … )](https://tc39.es/ecma262/2026/#sec-grouping-operator-runtime-semantics-evaluation)
+возвращают то, что вернуло выражение внутри, — ссылку, и `this` сохраняется. Оператор
+[запятая](https://tc39.es/ecma262/2026/#sec-comma-operator-runtime-semantics-evaluation) и
+присваивание вызывают GetValue — остаётся голая функция; этот приём `(0, card.show)()` мы видели на
+дне 2 курса 2. `[card.show][0]` — тоже ссылка, но на свойство «0» массива, и `this` — массив.
+Деструктуризация кладёт в `show` значение. И ещё одно следствие раздела 7: метод, записанный
+коротко, — функция без `[[Construct]]`, и `new card.show()` бросает
+`TypeError: card.show is not a constructor`.
+
+Четвёртое поле, `[[ThisValue]]`, нужно для `super`: метод родителя ищется в прототипе,
+а `this` должен остаться нашим объектом:
+
+```js
+class Card { label() { return this.word; } }
+class TurkmenCard extends Card { word = "kitap"; label() { return "tk: " + super.label(); } }
+console.log(new TurkmenCard().label());
+```
+
+<ResultBox>
+tk: kitap
+</ResultBox>
+
+## 14. Остальные типы спецификации {#others}
+
+| Раздел | Тип | Зачем |
+| --- | --- | --- |
+| [6.2.6](https://tc39.es/ecma262/2026/#sec-property-descriptor-specification-type) | Property Descriptor | запись с атрибутами из таблицы 3; данных или аксессора, но не то и другое |
+| [6.2.7](https://tc39.es/ecma262/2026/#sec-lexical-environment-and-environment-record-specification-types) | Environment Record | области видимости (день 1 курса 2), подробно — глава 9, день 9 |
+| [6.2.8](https://tc39.es/ecma262/2026/#sec-abstract-closure) | Abstract Closure | шаги алгоритма вместе с «захваченными» значениями — замыкание спецификации |
+| [6.2.9](https://tc39.es/ecma262/2026/#sec-data-blocks) | Data Block | последовательность байтов — память `ArrayBuffer` (день 20) |
+| [6.2.10](https://tc39.es/ecma262/2026/#sec-privateelement-specification-type) | PrivateElement | приватное поле, метод или аксессор объекта |
+| [6.2.11](https://tc39.es/ecma262/2026/#sec-classfielddefinition-record-specification-type) | ClassFieldDefinition | имя поля класса и его инициализатор |
+| [6.2.12](https://tc39.es/ecma262/2026/#sec-private-names) | Private Name | ключ `#имени`: уникален, даже если описание то же |
+| [6.2.13](https://tc39.es/ecma262/2026/#sec-classstaticblockdefinition-record-specification-type) | ClassStaticBlockDefinition | тело блока `static { … }` как функция |
+
+Два из них можно увидеть по следам. Property Descriptor с полями обоих видов отвергает
+`ToPropertyDescriptor`. А Private Name создаётся при каждом вычислении класса — два класса из одной
+фабрики получают разные `#step`, хоть и написаны одинаково:
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() => Object.defineProperty({}, "x", { get() { return 1; }, value: 1 })));
+const make = () => class { #step = 1; static has(o) { return #step in o; } };
+const A = make(), B = make();
+console.log(A.has(new A()), A.has(new B()));
+```
+
+<ResultBox>
+TypeError: Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #\<Object>\
+true false
+</ResultBox>
+
+## 15. «Карточки 2.0»: метод know без колоды {#cards}
+
+Кнопка «Знаю» в «Карточках 2.0» (день 34 курса 2) зовёт метод колоды так:
+
+```js
+// main.js, день 34 курса 2 — кнопка «Знаю»
+const word = current();
+if (word === null) return;
+opened.get(chosen).know(word.id, today);
+```
+
+Выражение `opened.get(chosen).know` даёт Reference Record: `[[Base]]` — колода,
+которую вернул `get`, `[[ReferencedName]]` — «know», `[[Strict]]` —
+`true`, ведь модули строгие. Вызов берёт `this` из `[[Base]]`. Попробуем
+«упростить» код — сохранить метод в переменную или отдать его прямо в `forEach`:
+
+```js
+class Deck {
+  #cards = new Map([[1, "kitap"]]);
+  #progress = new Map();
+  know(id) {
+    if (!this.#cards.has(id)) throw new Error(`в колоде нет карточки ${id}`);
+    this.#progress.set(id, 2);
+    return this.#progress.size;
+  }
+}
+const deck = new Deck();
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(deck.know(1));
+const know = deck.know;
+console.log(attempt(() => know(1)));
+console.log(attempt(() => [1].forEach(deck.know)));
+console.log(know.call(deck, 1), deck.know.bind(deck)(1), [1].map((id) => deck.know(id)).length);
+```
+
+<ResultBox>
+1\
+TypeError: Cannot read properties of undefined (reading '#cards')\
+TypeError: Cannot read properties of undefined (reading '#cards')\
+1 1 1
+</ResultBox>
+
+В `know` лежит значение — функция, ссылки на колоду в нём нет. Код класса строгий, и
+`this` без объекта — `undefined`, а у него не прочитать `#cards`.
+`forEach` тоже получил голую функцию. Лечат тремя способами из последней строки: передать
+`this` явно (`call`), привязать (`bind`, день 2 курса 2) или обернуть в стрелку,
+где вызов снова идёт через ссылку `deck.know`. В «Карточках 2.0» выбран третий: обработчик кнопки —
+стрелка, и метод вызывается прямо на колоде.
+
+## 16. Что будет завтра {#next}
+
+Сегодня мы видели типы. Завтра, на дне 5, — как значения одного типа становятся значениями другого:
+`ToPrimitive`, `ToNumber`, `ToString`, `ToPropertyKey` (почему ключ
+`1` стал «1») и сравнения — `IsStrictlyEqual`, `IsLooselyEqual`,
+`SameValue` и `SameValueZero` из таблицы 2.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [6 Data Types and Values](https://tc39.es/ecma262/2026/#sec-ecmascript-data-types-and-values) | два вида типов | <Full /> |
+| [6.1 Language Types](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types) | восемь типов языка | <Full /> |
+| [6.1.1 Undefined](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-undefined-type) | одно значение | <Brief /> |
+| [6.1.2 Null](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-null-type) | одно значение | <Brief /> |
+| [6.1.3 Boolean](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-boolean-type) | два значения | <Brief /> |
+| [6.1.4 String](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-string-type) | 16-битные элементы, до 2<sup>53</sup> − 1 | <Brief /> |
+| [6.1.5 Symbol](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-symbol-type) | уникальные ключи, `[[Description]]` | <Brief /> |
+| [6.1.6 Numeric Types](https://tc39.es/ecma262/2026/#sec-numeric-types) | Number и BigInt, таблица 2 операций | <Full /> |
+| [6.1.7 Object](https://tc39.es/ecma262/2026/#sec-object-type) | свойства, ключи, атрибуты, внутренние методы и слоты | <Full /> |
+| [6.2 Specification Types](https://tc39.es/ecma262/2026/#sec-ecmascript-specification-types) | мета-значения алгоритмов | <Full /> |
+| [6.2.1 Enum](https://tc39.es/ecma262/2026/#sec-enum-specification-type) | имена вроде `normal`, `throw` | <Brief /> |
+| [6.2.2 List and Record](https://tc39.es/ecma262/2026/#sec-list-and-record-specification-type) | `«1, 2»` и `{ [[Field]]: … }` | <Full /> |
+| [6.2.3 Set and Relation](https://tc39.es/ecma262/2026/#sec-set-and-relation-specification-type) | для модели памяти | <Brief /> |
+| [6.2.4 Completion Record](https://tc39.es/ecma262/2026/#sec-completion-record-specification-type) | три поля, UpdateEmpty, значение завершения, finally | <Full /> |
+| [6.2.5 Reference Record](https://tc39.es/ecma262/2026/#sec-reference-record-specification-type) | четыре поля, GetValue, PutValue, GetThisValue | <Full /> |
+| [6.2.6 Property Descriptor](https://tc39.es/ecma262/2026/#sec-property-descriptor-specification-type) | атрибуты как запись | <Brief /> |
+| [6.2.7 Environment Record](https://tc39.es/ecma262/2026/#sec-lexical-environment-and-environment-record-specification-types) | области видимости — глава 9 | <Brief /> |
+| [6.2.8 Abstract Closure](https://tc39.es/ecma262/2026/#sec-abstract-closure) | шаги и захваченные значения | <Brief /> |
+| [6.2.9 Data Blocks](https://tc39.es/ecma262/2026/#sec-data-blocks) | байты | <Brief /> |
+| [6.2.10 PrivateElement](https://tc39.es/ecma262/2026/#sec-privateelement-specification-type) | приватные элементы | <Brief /> |
+| [6.2.11 ClassFieldDefinition](https://tc39.es/ecma262/2026/#sec-classfielddefinition-record-specification-type) | поле класса | <Brief /> |
+| [6.2.12 Private Names](https://tc39.es/ecma262/2026/#sec-private-names) | ключи `#имён` | <Brief /> |
+| [6.2.13 ClassStaticBlockDefinition](https://tc39.es/ecma262/2026/#sec-classstaticblockdefinition-record-specification-type) | блок `static` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// типы языка: Undefined Null Boolean String Symbol Number BigInt Object; функция — Object с [[Call]]
+// typeof null — "object", typeof функции — "function": так записан алгоритм typeof
+// Number: 2^64 − 2^53 + 3 значения, один NaN, +0 и −0; ничья при округлении — к чётной мантиссе
+// BigInt: точно, без неявного смешивания с Number; / % ** у BigInt могут бросить; ближайшее ±2^1024 — это ±Infinity
+// ключ — строка или символ; индекс массива — до 2^32 − 2; "-0" — не индекс
+// атрибуты: [[Value]] [[Writable]] [[Get]] [[Set]] [[Enumerable]] [[Configurable]], по умолчанию false
+// 11 внутренних методов + [[Call]] и [[Construct]]; слоты — не свойства ([[MapData]])
+
+// Completion Record: [[Type]] normal | break | continue | return | throw, [[Value]], [[Target]]
+// консоль печатает [[Value]] итоговой записи: if (true) { 5 } → 5; var — пусто, if — undefined
+// try...finally: обычная F — итог B; внезапная F (return, break, continue, throw) — итог F
+// Reference Record: [[Base]] (значение | Environment Record | unresolvable), [[ReferencedName]], [[Strict]], [[ThisValue]]
+// typeof ненайденного — "undefined"; GetValue ненайденного — ReferenceError; PutValue — глобальное свойство или ошибка
+// this при вызове — из [[Base]] ссылки; (0, obj.m)(), const m = obj.m — ссылки нет
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `typeof null` — «object», хотя тип Null отдельный?
+   <Answer>Так записан алгоритм `typeof` (13.5.3.1): «если val — null, вернуть "object"». Ответ
+   оператора — это его таблица, а не название типа из главы 6.</Answer>
+2. Почему `2 ** 53 + 1 === 2 ** 53`, а `2n ** 53n + 1n` — нет?
+   <Answer>2<sup>53</sup> + 1 не представимо в Number, и «the Number value for x» выбирает соседа с чётной
+   мантиссой — 2<sup>53</sup>. BigInt хранит целые любого размера точно.</Answer>
+3. Что напечатает консоль на ввод `1; if (false) {}` и почему не 1?
+   <Answer>`undefined`: ветка не выполнилась, и алгоритм `if` (14.6.2) прямо возвращает
+   `undefined`. Значение не пустое, поэтому оно заменяет 1. С `var x = 3;` было
+   бы 1 — у неё значение пустое.</Answer>
+4. Почему `return` в `finally` отменяет ошибку из `try`?
+   <Answer>Алгоритм `try...finally` возвращает запись блока, только если `finally`
+   завершился обычно. Запись `return` внезапная — она и становится итогом, а запись
+   `throw` из блока отбрасывается.</Answer>
+5. Почему `(card.show)()` сохраняет `this`, а `(0, card.show)()` — нет?
+   <Answer>Скобки возвращают Reference Record, и вызов берёт `this` из её `[[Base]]`.
+   Оператор запятая вызывает GetValue: остаётся функция без ссылки на объект.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures" />

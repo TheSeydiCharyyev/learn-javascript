@@ -1,0 +1,891 @@
+---
+title: День 9 — Контексты выполнения, реалмы, задания и агенты
+day: День 9 • урок 1
+heading: Контексты выполнения, реалмы, задания и агенты
+lead: Курс 3, Advanced. Модуль «Выполнение кода» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+---
+
+<Goals>
+- описывать модель выполнения: агент, его стек, очередь и куча;
+- объяснять, что такое реалм, и предсказывать, где `instanceof` ошибётся между окнами;
+- находить текущий реалм: в каком окне создаётся массив, ошибка, глобальная переменная;
+- читать стек контекстов в отладчике Chrome;
+- выводить `this` и `new.target` шагами GetThisEnvironment;
+- объяснять порядок заданий по разделу 9.5 и отличать, что задаёт язык, а что — хозяин;
+- знать, что такое агенты и кластеры агентов и откуда ошибка доступа к чужому окну.
+</Goals>
+
+<Toc />
+
+## 1. Модель выполнения {#model}
+
+Вчера — что спецификация знает о коде до запуска. Сегодня — в чём код выполняется. Курс 2 (день 28) показал
+«один поток и две очереди» и оставил на потом страницу MDN
+[JavaScript execution model](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model).
+Она — главный материал дня вместе с
+[главой 9](https://tc39.es/ecma262/2026/#sec-executable-code-and-execution-contexts) спецификации.
+
+Выполнение — работа двух программ: движка (в Chrome — V8) и хозяина — браузера со стандартом HTML (день 1).
+Каждого самостоятельного исполнителя JavaScript стандарт зовёт **агентом**. У агента три структуры
+данных: **куча** объектов, **очередь** заданий (в HTML — цикл событий) и
+**стек** контекстов выполнения — тот самый стек вызовов. Агент похож на поток; внутри него живёт
+один или несколько **реалмов** — по одному на глобальный объект.
+
+<Scheme src="scheme-model.svg">Агент окна с двумя реалмами и соседний агент</Scheme>
+
+Глава 9 устроена так:
+
+| Раздел | О чём | Где |
+| --- | --- | --- |
+| [9.1](https://tc39.es/ecma262/2026/#sec-environment-records) | записи окружения, `[[OuterEnv]]`, GetIdentifierReference | день 1 курса 2; сегодня — их `this` |
+| [9.2](https://tc39.es/ecma262/2026/#sec-privateenvironment-records) | окружения приватных имён `#x` | день 9 курса 2 |
+| 9.3–9.8 | реалмы, контексты выполнения, задания, агенты, кластеры, прогресс | сегодня |
+| [9.9–9.11](https://tc39.es/ecma262/2026/#sec-weakref-processing-model) | когда сборщик может забрать цель WeakRef | день 24 |
+
+## 2. Реалм {#realm}
+
+Раздел [9.3](https://tc39.es/ecma262/2026/#sec-code-realms): прежде чем выполниться, всякий код
+связан с реалмом. Реалм — набор встроенных объектов, глобальное окружение и весь код, загруженный в нём. В
+спецификации это Realm Record с полями таблицы 19:
+
+| Поле | Что хранит |
+| --- | --- |
+| `[[AgentSignifier]]` | какой агент владеет реалмом |
+| `[[Intrinsics]]` | встроенные объекты: `%Array%`, `%Object.prototype%` — те, что в знаках процента (день 4) |
+| `[[GlobalObject]]` и `[[GlobalEnv]]` | глобальный объект и глобальная запись окружения (день 3 курса 2) |
+| `[[TemplateMap]]` | массивы строк тегированных шаблонов — раздел 6 |
+| `[[LoadedModules]]` | модули, которые загрузил `import()`, когда нет активного скрипта |
+| `[[HostDefined]]` | место для данных хозяина |
+
+В вебе реалм и глобальный объект — один к одному: у каждого окна, рамки `iframe` и фонового потока
+свой. Рамка без адреса открывает пустую страницу того же источника, что и наша, и к её глобальному объекту есть
+доступ — `contentWindow`:
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+console.log(other === window, other.Array === Array, other.Object.prototype === Object.prototype);
+console.log(typeof other.Array, typeof other.document, other.globalThis === other);
+```
+
+<ResultBox>
+false false false\
+function object true
+</ResultBox>
+
+Всё встроенное в рамке — своё: другой `Array`, другой `Object.prototype`, свой
+`globalThis`. Курс 2 уже встречал это мельком: на дне 26 ошибка из рамки не прошла
+`instanceof Error`. Теперь видно почему.
+
+## 3. Два реалма: instanceof и Array.isArray {#isarray}
+
+Практика плана. Массив создан конструктором рамки и попал на страницу:
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const list = other.Array.of(1, 2, 3);
+const fake = Object.create(Array.prototype);
+console.log(list instanceof Array, list instanceof other.Array, Array.isArray(list));
+console.log(fake instanceof Array, Array.isArray(fake), Object.prototype.toString.call(list));
+const error = new other.Error("из рамки");
+console.log(error instanceof Error, Error.isError(error));
+```
+
+<ResultBox>
+false true true\
+true false \[object Array\]\
+false true
+</ResultBox>
+
+`instanceof` ведёт в [OrdinaryHasInstance](https://tc39.es/ecma262/2026/#sec-ordinaryhasinstance)
+(день 7): ищет в цепочке `list` объект `Array.prototype` *нашего* реалма, а цепочка
+ведёт к `Array.prototype` рамки. `Array.isArray` зовёт
+[IsArray](https://tc39.es/ecma262/2026/#sec-isarray) (7.2.2), а та спрашивает сам объект: экзотический ли
+это массив (день 15), — реалм тут ни при чём. Поэтому подделка с чужим прототипом проходит `instanceof`
+и не проходит `isArray`. Так же устроен `Error.isError`: клеймо `[[ErrorData]]`
+вместо цепочки (день 26 курса 2). Вывод: данные, которые могли прийти из другого окна, проверяют
+`Array.isArray` и `Error.isError`, а не `instanceof`.
+
+## 4. Текущий реалм {#current}
+
+Реалм выполняемого контекста называется **текущим** (current Realm Record, раздел 9.4). Каждая
+функция помнит реалм, где создана, — поле `[[Realm]]`, — и её вызов создаёт контекст с этим реалмом,
+кто бы её ни вызвал. Встроенные функции тоже: шаги [BuiltinCallOrConstruct](https://tc39.es/ecma262/2026/#sec-builtincallorconstruct)
+(10.3.3) берут `F.[[Realm]]`. Значит, объекты и ошибки создаёт реалм той функции, что работает
+сейчас:
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const makeList = other.Function("return [1, 2];");
+const whoIsThis = other.Function("return this;");
+console.log(makeList() instanceof Array, makeList() instanceof other.Array, whoIsThis() === other);
+try {
+  other.Function("null.x;")();
+} catch (e) {
+  console.log(e instanceof TypeError, e instanceof other.TypeError);
+}
+try {
+  other.Array.prototype.map.call(null);
+} catch (e) {
+  console.log(e instanceof TypeError, e instanceof other.TypeError);
+}
+```
+
+<ResultBox>
+false true true\
+false true\
+false true
+</ResultBox>
+
+`other.Function` — конструктор рамки, и функции из него принадлежат рамке. Литерал
+`[1, 2]` внутри берёт `%Array.prototype%` текущего реалма — рамки. `this`
+нестрогой функции, вызванной без объекта, —
+[OrdinaryCallBindThis](https://tc39.es/ecma262/2026/#sec-ordinarycallbindthis) (10.2.1.2): глобальное
+`this` реалма *функции*, а не того, кто звал. Обе ошибки `TypeError` — рамки: и
+брошенная её кодом, и брошенная её встроенным `map`. Вот и обещанный ответ дня 4: `%Array%`
+— объект текущего реалма, а не то, что лежит в переменной `Array`.
+
+## 5. Чей массив вернёт map {#species}
+
+На дне 7 была операция [GetFunctionRealm](https://tc39.es/ecma262/2026/#sec-getfunctionrealm)
+(7.3.24) — реалм функции (у привязанной — её цели). Главное её место —
+[ArraySpeciesCreate](https://tc39.es/ecma262/2026/#sec-arrayspeciescreate) (10.4.2.3). Её зовут
+`map`, `filter`, `slice`, `splice`, `concat`,
+`flat` и `flatMap`: результат делается конструктором исходного массива. Но с исключением:
+если этот конструктор — `%Array%` *другого* реалма, он отбрасывается, и массив создаётся в
+текущем реалме.
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const list = other.Array.of(1, 2, 3);
+const own = list.map((x) => x * 2);
+const borrowed = Array.prototype.map.call(list, (x) => x * 2);
+console.log(own instanceof Array, own instanceof other.Array);
+console.log(borrowed instanceof Array, borrowed instanceof other.Array);
+console.log([...list] instanceof Array, Array.from(list) instanceof Array);
+```
+
+<ResultBox>
+false true\
+true false\
+true true
+</ResultBox>
+
+`list.map` — метод рамки (он из цепочки `list`): текущий реалм — рамка, конструктор
+— её же `Array`, реалмы совпали — массив рамки. `Array.prototype.map.call` — метод страницы:
+текущий реалм — страница, а конструктор — `%Array%` рамки, и шаг 4 подменяет его обычным массивом
+страницы. Примечание к 10.4.2.3 объясняет зачем: так браузеры вели себя исторически, и стандарт сохранил это ради
+совместимости. Spread и `Array.from` конструктор исходного массива не спрашивают вовсе.
+
+## 6. Как рождается реалм {#birth}
+
+Новый реалм создаёт хозяин — как правило, для каждого окна, рамки и новой страницы в них — операцией
+[InitializeHostDefinedRealm](https://tc39.es/ecma262/2026/#sec-initializehostdefinedrealm) (9.3.1):
+
+1. новая Realm Record и [CreateIntrinsics](https://tc39.es/ecma262/2026/#sec-createintrinsics)
+   (9.3.2) — все встроенные объекты заново, по таблице 6;
+2. метка агента и пустой `[[TemplateMap]]`;
+3. новый контекст выполнения (Function и ScriptOrModule — `null`) — на стек;
+4. глобальный объект и значение `this` верхнего уровня: свои даёт хозяин (браузер —
+   `Window`), иначе — обычный объект;
+5. глобальное окружение и [SetDefaultGlobalBindings](https://tc39.es/ecma262/2026/#sec-setdefaultglobalbindings)
+   (9.3.3) — свойства главы 19 на глобальном объекте; потом — свойства хозяина (`document`,
+   `setTimeout`).
+
+Шаг 4 браузер использует так: глобальный объект — `Window`, а `this` и
+`contentWindow` — посредник WindowProxy (стандарт HTML), который переживает переход рамки на другую
+страницу. Проверим:
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const w = frame.contentWindow;
+const OldArray = w.Array;
+w.mark = "старый";
+frame.addEventListener("load", () => {
+  console.log(w === frame.contentWindow, w.Array === OldArray, w.mark, w.document.body.textContent);
+});
+frame.srcdoc = "<p>новая страница</p>";
+```
+
+<ResultBox>
+true false undefined новая страница
+</ResultBox>
+
+Ссылка `w` та же, но за ней уже другой реалм: новый `Array`, нет свойства
+`mark`. Атрибуты свойств из шага 5 тоже заданы текстом главы 19:
+
+```js
+const attrs = (name) => {
+  const d = Object.getOwnPropertyDescriptor(globalThis, name);
+  return `${name}: ${d.writable} ${d.enumerable} ${d.configurable}`;
+};
+console.log(attrs("NaN"), "|", attrs("globalThis"), "|", attrs("Array"));
+NaN = 1;
+console.log(NaN);
+```
+
+<ResultBox>
+NaN: false false false | globalThis: true false true | Array: true false true\
+NaN
+</ResultBox>
+
+`NaN`, `Infinity` и `undefined` заперты: запись в нестрогом коде молча не
+срабатывает. А `Array` и `globalThis` переписать можно — поэтому алгоритмы и говорят о
+`%Array%` реалма, а не о том, что сейчас лежит в переменной.
+
+Последнее поле реалма — `[[TemplateMap]]`. Тегированный шаблон (день 3) передаёт тегу массив строк,
+и [GetTemplateObject](https://tc39.es/ecma262/2026/#sec-gettemplateobject) (13.2.8.4, день 10) хранит
+его по месту в коде: одно место — один и тот же замороженный массив при каждом вычислении.
+
+```js
+const tag = (strings) => strings;
+const first = () => tag`a${1}b`;
+const second = () => tag`a${1}b`;
+console.log(first() === first(), first() === second(), Object.isFrozen(first()));
+```
+
+<ResultBox>
+true false true
+</ResultBox>
+
+Одинаковый текст в двух местах — два разных массива. Поэтому тег может запоминать разобранный шаблон в
+`WeakMap` по массиву строк (день 14 курса 2). А у каждого реалма такие массивы свои.
+
+## 7. Контекст выполнения {#context}
+
+[Контекст выполнения](https://tc39.es/ecma262/2026/#sec-execution-contexts) (9.4) — устройство
+спецификации, которым она следит за выполнением кода. В агенте в каждый момент выполняется не больше одного
+контекста — **выполняемый** (running execution context), он всегда на вершине **стека
+контекстов**. Новый контекст создаётся, когда управление уходит в код, не связанный с текущим: вызов
+функции, запуск скрипта или модуля. Что в нём лежит:
+
+| Компонент | Что это |
+| --- | --- |
+| code evaluation state | всё, чтобы приостановить и продолжить код |
+| Function | выполняемая функция; у скрипта и модуля — `null` |
+| Realm | реалм кода — текущий реалм |
+| ScriptOrModule | скрипт или модуль, откуда код |
+| LexicalEnvironment, VariableEnvironment | где искать имена и где лежат `var` (только у кода ECMAScript) |
+| PrivateEnvironment | приватные имена ближайшего класса (день 9 курса 2) |
+| Generator | генератор — только у контекста генератора |
+
+Раздел заканчивается важной фразой: код не может напрямую ни получить контекст, ни увидеть его. Видны только
+следствия. Пример MDN — три контекста друг на друге:
+
+<Scheme src="scheme-context.svg">Стек контекстов в момент, когда работает foo</Scheme>
+
+Увидеть похожее можно через стек вызовов ошибки: свойство `stack` не входит в стандарт, это строка
+V8, но кадры в ней — те же вызовы. Помощник `stack` оставляет от неё имена функций, а кадр
+верхнего уровня (у него вместо имени адрес) называет «скрипт»:
+
+```js
+const stack = () => new Error().stack.split("\n").slice(2)
+  .map((line) => line.trim().slice(3).split(" (")[0])
+  .map((name) => (name.includes("://") ? "скрипт" : name)).join(" ← ");
+function foo(b) {
+  const a = 10;
+  console.log(stack());
+  return a + b + 11;
+}
+function bar(x) {
+  const y = 3;
+  return foo(x * y);
+}
+const baz = bar(7);
+console.log(baz);
+```
+
+<ResultBox>
+foo ← bar ← скрипт\
+42
+</ResultBox>
+
+Шаги MDN: контекст скрипта, над ним `bar(7)` с `x` и `y`, над ним
+`foo(21)`. Каждый `return` снимает верхний контекст; кончился скрипт — стек пуст.
+
+## 8. Стек в отладчике {#debugger}
+
+Вторая практика плана — тот же стек в отладчике Chrome. Поставьте в `foo` инструкцию
+`debugger`, откройте DevTools (F12) и перезагрузите страницу: выполнение остановится на этой строке.
+Без открытых DevTools `debugger` ничего не делает.
+
+```js
+function foo(b) {
+  const a = 10;
+  debugger;
+  return a + b + 11;
+}
+function bar(x) {
+  const y = 3;
+  return foo(x * y);
+}
+const baz = bar(7);
+console.log(baz);
+```
+
+<ResultBox>
+42
+</ResultBox>
+
+Названия панелей — по английскому интерфейсу DevTools. На вкладке Sources справа панель **Call
+Stack** показывает три строки: `foo`, `bar` и `(anonymous)` — так
+отладчик называет кадр верхнего уровня скрипта, у которого Function — `null`. Верхняя строка —
+выполняемый контекст. Панель **Scope** — окружения выбранного кадра: раскрыт Local
+(`this: Window`, `a: 10`, `b: 21`), ниже свёрнуты Script и Global. Script —
+имена `let`, `const` и `class` верхнего уровня (здесь `baz`), Global —
+глобальный объект `Window`: две половины глобальной записи окружения (день 3 курса 2). Щёлкните в Call
+Stack по `bar` — Scope покажет его `x` и `y`. Помните: это кадры движка, а не
+сами контексты спецификации, но устроены они по ним.
+
+## 9. Генераторы и хвостовые вызовы {#reentry}
+
+Обычно контексты ходят по стеку «последним пришёл — первым ушёл». Раздел 9.4 оговаривает исключения, и первое —
+генераторы (день 12 курса 2). Вызов `gen()` создаёт контекст и сразу его приостанавливает; генератор
+хранит его у себя (компонент Generator). Каждый `next()` кладёт этот контекст на стек поверх того, кто
+позвал, а `yield` снимает:
+
+```js
+const stack = () => new Error().stack.split("\n").slice(2)
+  .map((line) => line.trim().slice(3).split(" (")[0])
+  .map((name) => (name.includes("://") ? "скрипт" : name)).join(" ← ");
+function* gen() {
+  console.log("1:", stack());
+  yield;
+  console.log("2:", stack());
+}
+const g = gen();
+function first() { g.next(); }
+function second() { g.next(); }
+first();
+second();
+```
+
+<ResultBox>
+1: gen ← gen.next ← first ← скрипт\
+2: gen ← gen.next ← second ← скрипт
+</ResultBox>
+
+Один и тот же контекст `gen` оба раза лежит на вершине, но под ним разные вызовы. Между ними
+видна и встроенная функция `next`: у неё тоже свой контекст (10.3.3). `async`-функция
+устроена так же: `await` снимает её контекст, а продолжение возвращает его на стек в новом задании
+(день 28 курса 2).
+
+Второе исключение MDN — хвостовые вызовы ([15.10](https://tc39.es/ecma262/2026/#sec-tail-position-calls),
+день 12). Если функция только возвращает результат вызова, стандарт требует *заменить* её контекст, а не
+положить новый сверху. Требование — лишь для строгого кода
+([IsInTailPosition](https://tc39.es/ecma262/2026/#sec-isintailposition)), а пример MDN нестрогий. V8 не
+выполняет его и в строгом — по MDN, хвостовые вызовы есть только в Safari:
+
+```js
+"use strict";
+function sum(n, total) {
+  if (n === 0) return total;
+  return sum(n - 1, total + n);
+}
+console.log(sum(1000, 0));
+try {
+  sum(100000, 0);
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}
+```
+
+<ResultBox>
+500500\
+RangeError: Maximum call stack size exceeded
+</ResultBox>
+
+Третий сюжет MDN — замыкания: функция при создании запоминает окружение выполняемого контекста, и привязки
+живут дольше самого контекста (день 1 курса 2).
+
+## 10. ResolveBinding: имя ищется от контекста {#binding}
+
+[ResolveBinding](https://tc39.es/ecma262/2026/#sec-resolvebinding) (9.4.2) — первый шаг каждого
+имени в коде: его зовут вычисление идентификатора, объявления `let`, `const`,
+`var`, деструктуризация и заголовки `for`. Шаги короткие: взять LexicalEnvironment
+выполняемого контекста, узнать, строгий ли код, и вернуть
+[GetIdentifierReference](https://tc39.es/ecma262/2026/#sec-getidentifierreference) — поиск по цепочке
+`[[OuterEnv]]` (день 1 курса 2). Результат — Reference Record (день 4). Значит, имя ищется от того
+места, где написан код, и в его реалме, а не там, откуда вызвали.
+
+Если имя не нашлось, ссылка «неразрешимая». Чтение даёт ReferenceError, а запись решает
+[PutValue](https://tc39.es/ecma262/2026/#sec-putvalue) (6.2.5.6): в строгом коде — ReferenceError, в
+нестрогом — свойство глобального объекта, которого вернёт
+[GetGlobalObject](https://tc39.es/ecma262/2026/#sec-getglobalobject) (9.4.6), то есть объект
+*текущего* реалма. PutValue — единственное место, откуда её зовут.
+
+```js
+var label = "страница";
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const script = other.document.createElement("script");
+script.textContent = 'var label = "рамка"; function who() { return label; }';
+other.document.body.append(script);
+console.log(other.who(), other.who.call({ label: "объект" }), label);
+other.Function("leak = 1;")();
+console.log(typeof window.leak, other.leak);
+try {
+  other.Function("'use strict'; strictLeak = 1;")();
+} catch (e) {
+  console.log(`${e.name}: ${e.message}`);
+}
+```
+
+<ResultBox>
+рамка рамка страница\
+undefined 1\
+ReferenceError: strictLeak is not defined
+</ResultBox>
+
+`who` объявлена скриптом рамки, и `label` для неё — переменная рамки, хоть зови её со
+страницы, хоть с другим `this`: имя — не свойство. Забытый `let` в функции рамки
+создал свойство у окна рамки, а не у нашего.
+
+## 11. Откуда this и new.target {#this}
+
+[GetThisEnvironment](https://tc39.es/ecma262/2026/#sec-getthisenvironment) (9.4.3) идёт от
+LexicalEnvironment выполняемого контекста по `[[OuterEnv]]` и останавливается на первой записи
+окружения, у которой HasThisBinding отвечает «да». Отвечают по-разному сами записи раздела 9.1: у записи блока —
+нет; у записи функции — да, кроме стрелки (её `this` «лексический», день 2 курса 2); у глобальной — да,
+поэтому цикл всегда кончается (примечание к 9.4.3); у записи модуля — да, и там `this` —
+`undefined`.
+
+<Scheme src="scheme-this.svg">GetThisEnvironment: где кончается поиск this</Scheme>
+
+[ResolveThisBinding](https://tc39.es/ecma262/2026/#sec-resolvethisbinding) (9.4.4) — найти запись
+и спросить у неё GetThisBinding; её зовёт только вычисление слова `this`. Знак `?` в её шаге
+не случаен: запись функции бросает ReferenceError, пока `this` не связан, — в конструкторе наследника до
+`super()` ([9.1.1.3.3](https://tc39.es/ecma262/2026/#sec-function-environment-records-getthisbinding)).
+[GetNewTarget](https://tc39.es/ecma262/2026/#sec-getnewtarget) (9.4.5) идёт тем же путём и берёт поле
+`[[NewTarget]]` — поэтому `new.target` в стрелке означает `new.target` внешней
+функции. Тот же обход нужен `super`.
+
+```js
+class Base {}
+class Child extends Base {
+  constructor() {
+    const peek = () => this;
+    try {
+      peek();
+    } catch (e) {
+      console.log(`${e.name}: ${e.message}`);
+    }
+    super();
+    const target = () => new.target.name;
+    console.log(peek() === this, target());
+  }
+}
+new Child();
+const obj = {
+  name: "obj",
+  method() {
+    const arrow = () => {
+      {
+        return this.name;
+      }
+    };
+    return arrow();
+  },
+};
+console.log(obj.method(), (() => this)() === window);
+import("data:text/javascript,console.log('модуль:', this);");
+```
+
+<ResultBox>
+ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor\
+true Child\
+obj true\
+модуль: undefined
+</ResultBox>
+
+Стрелка `peek` до `super()` дошла до записи конструктора, а там `this` ещё не
+связан. После `super()` та же стрелка получает объект. Стрелка верхнего уровня скрипта дошла до
+глобальной записи — `window`; код модуля — до записи модуля.
+
+## 12. Задания {#jobs}
+
+Раздел [9.5](https://tc39.es/ecma262/2026/#sec-jobs). **Задание** (Job) — Abstract
+Closure без параметров (день 4), которое начинает вычисление, когда никакого другого нет. Ставит задания хозяин, и
+стандарт требует от него немногого:
+
+- задание запускается, только когда в агенте нет выполняемого контекста и стек пуст; хозяин может сделать
+  подготовку и уборку, но после неё стек снова пуст;
+- в агенте выполняется одно задание за раз, и начатое доходит до конца раньше, чем начнётся другое, — MDN
+  зовёт это «run-to-completion»;
+- задание само разбирается со своими ошибками и всегда кончается нормально; поэтому ошибка в
+  `then` становится отказом промиса, а не обрывает очередь.
+
+Ставят задания четыре хука хозяина. [HostEnqueuePromiseJob](https://tc39.es/ecma262/2026/#sec-hostenqueuepromisejob)
+(9.5.5) — для промисов: его зовут PerformPromiseThen, TriggerPromiseReactions и resolve с thenable (день 28 курса
+2). Задания идут в порядке постановки; хуку передают реалм — по примечанию, обычно реалм обработчика через
+GetFunctionRealm, — и хозяин запоминает активный скрипт или модуль, чтобы восстановить их к началу задания.
+[HostEnqueueGenericJob](https://tc39.es/ecma262/2026/#sec-hostenqueuegenericjob) (9.5.4) — без
+ограничений по порядку, [HostEnqueueTimeoutJob](https://tc39.es/ecma262/2026/#sec-hostenqueuetimeoutjob)
+(9.5.6) — «не раньше чем через столько-то миллисекунд»; обоих в стандарте зовёт только
+`Atomics.waitAsync` (день 22). Четвёртый хук — для FinalizationRegistry (день 24).
+
+Заметьте: `setTimeout` в ECMAScript нет вовсе — таймеры, события и загрузку описывает HTML. А
+примечание 1 к 9.5 разрешает хозяину ставить задания промисов выше прочих — браузер так и делает, отсюда
+микрозадачи и задачи HTML (страница MDN «Microtask guide»). Пример MDN с двумя `then` и долгим
+циклом:
+
+```js
+const promise = Promise.resolve();
+let i = 0;
+promise.then(() => {
+  i += 1;
+  console.log(i);
+});
+promise.then(() => {
+  i += 1;
+  console.log(i);
+});
+const start = Date.now();
+setTimeout(() => console.log("таймер:", Date.now() - start >= 200 ? "не раньше 200 мс" : "раньше"), 0);
+while (Date.now() - start < 200) {}
+console.log("цикл кончился");
+```
+
+<ResultBox>
+цикл кончился\
+1\
+2\
+таймер: не раньше 200 мс
+</ResultBox>
+
+Гонки между `then` нет: каждое задание выполняется целиком, и вывод всегда 1 и 2. Таймер с нулём
+ждал 200 мс — скрипт не отдавал поток. Обратная сторона — долгое задание замораживает страницу; совет MDN —
+резать работу на короткие задания.
+
+`then` сразу, а не при постановке задания, заворачивает функцию в
+[JobCallback Record](https://tc39.es/ecma262/2026/#sec-jobcallback-records) (9.5.1) —
+[HostMakeJobCallback](https://tc39.es/ecma262/2026/#sec-hostmakejobcallback) (9.5.2); браузер кладёт туда
+служебные данные HTML. Вызывает её [HostCallJobCallback](https://tc39.es/ecma262/2026/#sec-hostcalljobcallback)
+(9.5.3) — обязательно обычным Call.
+
+## 13. Практика: что лежит под заданием {#order}
+
+Порядок «скрипт — микрозадачи — таймер» (день 28 курса 2) теперь проверим глазами 9.5: что лежит на стеке под
+функцией, когда она начинает работу. Предскажите, прежде чем читать вывод:
+
+```js
+const stack = () => new Error().stack.split("\n").slice(2)
+  .map((line) => line.trim().slice(3).split(" (")[0])
+  .map((name) => (name.includes("://") ? "скрипт" : name)).join(" ← ");
+function fromScript() { console.log("вызов:", stack()); }
+fromScript();
+setTimeout(function onTimer() { console.log("таймер:", stack()); }, 0);
+Promise.resolve().then(function onThen() { console.log("then:", stack()); });
+queueMicrotask(function onMicro() { console.log("queueMicrotask:", stack()); });
+document.addEventListener("ping", function onPing() { console.log("событие:", stack()); });
+document.dispatchEvent(new Event("ping"));
+console.log("конец скрипта:", stack());
+```
+
+<ResultBox>
+вызов: fromScript ← скрипт\
+событие: HTMLDocument.onPing ← скрипт\
+конец скрипта: скрипт\
+then: onThen\
+queueMicrotask: onMicro\
+таймер: onTimer
+</ResultBox>
+
+Под `onThen`, `onMicro` и `onTimer` нет ничего — ни скрипта, ни того, кто их
+поставил: каждое задание начинается с пустого стека. А событие, которое код отправил сам через
+`dispatchEvent`, — не задание: обработчик выполнен сразу, внутри скрипта, поверх его кадра (V8
+подписывает кадр классом получателя — `HTMLDocument`). Щелчок человека — другое дело: его хозяин ставит
+задачей, и под обработчиком снова будет пусто.
+
+| Что в коде | Кто ставит задание | Очередь браузера |
+| --- | --- | --- |
+| `then`, `await` | язык — HostEnqueuePromiseJob | микрозадачи |
+| `queueMicrotask` | HTML | микрозадачи |
+| `setTimeout`, щелчок, ответ сети | HTML | задачи |
+| `Atomics.waitAsync` | язык — HostEnqueueGenericJob, HostEnqueueTimeoutJob | день 22 |
+| `dispatchEvent` из кода | никто — вызов внутри текущего задания | — |
+
+## 14. Агенты {#agents}
+
+Раздел [9.6](https://tc39.es/ecma262/2026/#sec-agents): агент — набор контекстов выполнения, их
+стек, выполняемый контекст, запись агента (Agent Record) и исполняющий поток. Всё, кроме потока, — только его.
+Поток могут делить агенты, которые не умеют блокироваться (браузеры порой ведут так несвязанные вкладки). Поля
+записи агента:
+
+| Поле | Смысл | Где увидим |
+| --- | --- | --- |
+| `[[LittleEndian]]` | порядок байтов по умолчанию | день 21 |
+| `[[CanBlock]]` | может ли агент заблокироваться | день 22 |
+| `[[Signifier]]` | уникальная метка агента в кластере | её получает каждый его реалм |
+| `[[IsLockFree1]]`, `2`, `8` | атомарные операции без блокировок (для 4 байт — всегда) | день 22 |
+| `[[CandidateExecution]]` | запись для модели памяти | день 23 |
+| `[[KeptAlive]]` | что держать живым до конца задания | день 24 |
+| `[[ModuleAsyncEvaluationCount]]` | счётчик порядка асинхронных модулей | день 13 |
+
+Три операции читают эту запись. [AgentSignifier](https://tc39.es/ecma262/2026/#sec-agentsignifier)
+(9.6.1) отдаёт метку. [AgentCanSuspend](https://tc39.es/ecma262/2026/#sec-agentcansuspend) (9.6.2) —
+`[[CanBlock]]`; примечание: главному потоку окна разумно запретить блокироваться, а потокам worker —
+разрешить. [IncrementModuleAsyncEvaluationCount](https://tc39.es/ecma262/2026/#sec-IncrementModuleAsyncEvaluationCount)
+(9.6.3) выдаёт модулям с `await` верхнего уровня номера по порядку.
+
+Агенты веба (MDN): окна, способные достать друг друга, — обычно страница и её рамки того же источника, — один
+агент; у каждого worker, service worker и worklet — свой (курс 4). Значит, наша рамка — в агенте страницы. Одна
+ли у них очередь и один ли поток?
+
+```js
+const frame = document.createElement("iframe");
+document.body.append(frame);
+const other = frame.contentWindow;
+const start = Date.now();
+other.setTimeout(() => console.log("таймер рамки:", Date.now() - start >= 200 ? "ждал страницу" : "не ждал"), 0);
+other.Promise.resolve().then(() => console.log("1: then рамки"));
+Promise.resolve().then(() => console.log("2: then страницы"));
+other.queueMicrotask(() => console.log("3: queueMicrotask рамки"));
+while (Date.now() - start < 200) {}
+console.log("страница освободила поток");
+```
+
+<ResultBox>
+страница освободила поток\
+1: then рамки\
+2: then страницы\
+3: queueMicrotask рамки\
+таймер рамки: ждал страницу
+</ResultBox>
+
+Микрозадачи двух реалмов идут одной очередью, строго в порядке постановки, а таймер рамки ждал, пока страница
+закончит своё задание: поток у них общий.
+
+## 15. Кластеры, прогресс и чужое окно {#clusters}
+
+[Кластер агентов](https://tc39.es/ecma262/2026/#sec-agent-clusters) (9.7) — наибольшее множество
+агентов, которые могут общаться через общую память (`SharedArrayBuffer`, дни 22–23). Каждый агент — ровно
+в одном кластере. У всех агентов кластера одинаковые `[[LittleEndian]]` и
+`[[IsLockFree…]]` и разные `[[Signifier]]`. Остановить надолго часть кластера нельзя: кто-то
+застрянет на блокировке, которую держит спящий. Агента убили снаружи — гибнет весь кластер (так в вебе, по MDN).
+Окно и его выделенный worker — один кластер; окно и service worker, окно и рамка чужого источника — разные.
+
+[9.8 Forward Progress](https://tc39.es/ecma262/2026/#sec-forward-progress): агент «продвигается», когда
+делает шаг вычисления, и «заблокирован», когда синхронно и бесконечно ждёт внешнего события, — а заблокироваться
+может только агент с `[[CanBlock]]`. Гарантии: незаблокированный агент со своим потоком когда-нибудь
+продвинется; из агентов с общим потоком продвинется хотя бы один; агент блокирует другого только явным API
+(`Atomics.wait`, день 22). `await` — не блокировка: он отдаёт поток.
+
+Чужое окно бывает и в нашей вкладке. Рамка с атрибутом `sandbox` без `allow-same-origin`
+получает непрозрачный источник — для страницы она как сайт другого домена:
+
+```js
+const frame = document.createElement("iframe");
+frame.sandbox = "allow-scripts";
+frame.srcdoc = "<p>чужая страница</p>";
+document.body.append(frame);
+frame.addEventListener("load", () => {
+  const other = frame.contentWindow;
+  console.log(typeof other.postMessage, other.closed, other.length);
+  try {
+    other.document;
+  } catch (e) {
+    console.log(e.name, e instanceof DOMException);
+    console.log(e.message.replace(/"[^"]*"/, '"…"'));
+  }
+});
+```
+
+<ResultBox>
+function false 0\
+SecurityError true\
+Failed to read a named property 'document' from 'Window': Blocked a frame with origin "…" from accessing a cross-origin frame.
+</ResultBox>
+
+Это ошибка [«Permission
+denied to access property»](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Property_access_denied). Бросает её не движок, а хозяин: чужое окно по стандарту HTML пускает лишь к
+короткому списку — `postMessage`, `closed`, `length`, `frames`,
+`location` и немногим другим. Тип — `DOMException` SecurityError. Заголовок MDN — текст
+Firefox, а текст Chrome там без начала: в Chrome 156 перед «Blocked a frame…» стоит ещё «Failed to read a named
+property 'document' from 'Window': ». Источник страницы заменён на «…»: у вас он свой.
+
+## 16. «Карточки 2.0»: две буквы подряд {#cards}
+
+Поиск «Карточек 2.0» (день 35 курса 2) открывает все колоды при каждом вводе:
+
+```js
+// main.js, день 35 курса 2 — поиск по всем колодам
+async function openAll() {
+  const closed = decks.filter((d) => !opened.has(d.id));
+  const reports = await Promise.allSettled(closed.map((d) => loadDeck(d, progress)));
+  reports.forEach((r, i) => {
+    if (r.status === "fulfilled") opened.set(closed[i].id, r.value);
+  });
+}
+search.addEventListener("input", async () => {
+  await openAll();
+```
+
+Прочитаем глазами раздела 9.5. Каждое событие `input` — отдельная задача. Слушатель выполняется до
+первого `await`, и задание кончается; продолжение — новое задание. Если между ними пришла вторая
+буква, второй `openAll` видит те же «закрытые» колоды и грузит их снова. Модель:
+
+```js
+const decks = [{ id: "home" }, { id: "food" }, { id: "school" }];
+const opened = new Map();
+let loads = 0;
+const loadDeck = async (deck) => {
+  loads++;
+  await null;
+  return ["карточки " + deck.id];
+};
+async function openAll() {
+  const closed = decks.filter((d) => !opened.has(d.id));
+  const reports = await Promise.allSettled(closed.map((d) => loadDeck(d)));
+  reports.forEach((r, i) => {
+    if (r.status === "fulfilled") opened.set(closed[i].id, r.value);
+  });
+}
+openAll();
+openAll();
+setTimeout(() => console.log("загрузок:", loads, "| колод:", opened.size), 0);
+```
+
+<ResultBox>
+загрузок: 6 | колод: 3
+</ResultBox>
+
+Это не гонка потоков — поток один, и задание не прерывается, — а гонка *заданий*. Файл второй раз не
+скачается: `import()` того же адреса отдаёт тот же модуль (день 31 курса 2), — но колоду соберут
+дважды. Лекарство — общий промис: прежнее тело становится `openClosed`, а новый `openAll`
+отдаёт идущую загрузку всем, кто позовёт, пока она не кончится.
+
+```js
+const decks = [{ id: "home" }, { id: "food" }, { id: "school" }];
+const opened = new Map();
+let loads = 0;
+const loadDeck = async (deck) => {
+  loads++;
+  await null;
+  return ["карточки " + deck.id];
+};
+async function openClosed() {
+  const closed = decks.filter((d) => !opened.has(d.id));
+  const reports = await Promise.allSettled(closed.map((d) => loadDeck(d)));
+  reports.forEach((r, i) => {
+    if (r.status === "fulfilled") opened.set(closed[i].id, r.value);
+  });
+}
+let pending = null;
+function openAll() {
+  pending ??= openClosed().finally(() => {
+    pending = null;
+  });
+  return pending;
+}
+openAll();
+openAll();
+setTimeout(() => console.log("загрузок:", loads, "| колод:", opened.size), 0);
+```
+
+<ResultBox>
+загрузок: 3 | колод: 3
+</ResultBox>
+
+## 17. Что будет завтра {#next}
+
+Сегодня — где и в каком порядке выполняется код: агент, реалмы, стек контекстов и задания. Завтра, на дне 10, —
+выражения по спецификации: доступ к свойству, вызов функции (откуда берётся `this` — сегодня мелькнул
+OrdinaryCallBindThis), `?.`, `delete`, `typeof`, сложение, `instanceof`
+и присваивание по шагам.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [MDN: Execution model](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model) | агент, стек, очередь, куча, реалмы; обещана в дне 28 курса 2 | <Full /> |
+| [MDN: Permission denied to access property](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Property_access_denied) | SecurityError при доступе к чужому окну | <Brief /> |
+| [9 Executable Code and Execution Contexts](https://tc39.es/ecma262/2026/#sec-executable-code-and-execution-contexts) | глава; 9.1–9.2 — курс 2, 9.9–9.11 — день 24 | <Brief /> |
+| [9.3 Realms](https://tc39.es/ecma262/2026/#sec-code-realms) | встроенные объекты, глобальный объект и окружение; у каждой рамки свой | <Full /> |
+| [9.3.1 InitializeHostDefinedRealm](https://tc39.es/ecma262/2026/#sec-initializehostdefinedrealm) | хозяин создаёт реалм; свой глобальный объект и `this` | <Brief /> |
+| [9.3.2 CreateIntrinsics](https://tc39.es/ecma262/2026/#sec-createintrinsics) | все встроенные объекты заново | <Brief /> |
+| [9.3.3 SetDefaultGlobalBindings](https://tc39.es/ecma262/2026/#sec-setdefaultglobalbindings) | свойства главы 19 на глобальном объекте | <Brief /> |
+| [9.4 Execution Contexts](https://tc39.es/ecma262/2026/#sec-execution-contexts) | стек контекстов; Function, Realm, окружения | <Full /> |
+| [9.4.1 GetActiveScriptOrModule](https://tc39.es/ecma262/2026/#sec-getactivescriptormodule) | верхний скрипт или модуль на стеке; нужен `import()` и `import.meta` (день 31 курса 2) | <Brief /> |
+| [9.4.2 ResolveBinding](https://tc39.es/ecma262/2026/#sec-resolvebinding) | имя — от LexicalEnvironment выполняемого контекста | <Full /> |
+| [9.4.3 GetThisEnvironment](https://tc39.es/ecma262/2026/#sec-getthisenvironment) | первая запись окружения с `this` | <Brief /> |
+| [9.4.4 ResolveThisBinding](https://tc39.es/ecma262/2026/#sec-resolvethisbinding) | значение `this`; ошибка до `super()` | <Full /> |
+| [9.4.5 GetNewTarget](https://tc39.es/ecma262/2026/#sec-getnewtarget) | `new.target` тем же обходом | <Brief /> |
+| [9.4.6 GetGlobalObject](https://tc39.es/ecma262/2026/#sec-getglobalobject) | глобальный объект текущего реалма; запись в необъявленное имя | <Brief /> |
+| [9.5 Jobs](https://tc39.es/ecma262/2026/#sec-jobs) | задание: пустой стек, по одному, до конца; микрозадачи (день 28 курса 2) | <Full /> |
+| [9.5.1 JobCallback Records](https://tc39.es/ecma262/2026/#sec-jobcallback-records) | функция задания и данные хозяина | <Brief /> |
+| [9.5.2 HostMakeJobCallback](https://tc39.es/ecma262/2026/#sec-hostmakejobcallback) | заворачивает функцию в момент `then` | <Brief /> |
+| [9.5.3 HostCallJobCallback](https://tc39.es/ecma262/2026/#sec-hostcalljobcallback) | вызывает её — обычным Call | <Brief /> |
+| [9.5.4 HostEnqueueGenericJob](https://tc39.es/ecma262/2026/#sec-hostenqueuegenericjob) | задание без ограничений; `Atomics.waitAsync` (день 22) | <Brief /> |
+| [9.5.5 HostEnqueuePromiseJob](https://tc39.es/ecma262/2026/#sec-hostenqueuepromisejob) | задания промисов по порядку; реалм обработчика | <Brief /> |
+| [9.5.6 HostEnqueueTimeoutJob](https://tc39.es/ecma262/2026/#sec-hostenqueuetimeoutjob) | «не раньше чем через»; не `setTimeout`, а `Atomics.waitAsync` | <Brief /> |
+| [9.6 Agents](https://tc39.es/ecma262/2026/#sec-agents) | агент: контексты, стек, запись агента, поток | <Full /> |
+| [9.6.1 AgentSignifier](https://tc39.es/ecma262/2026/#sec-agentsignifier) | метка агента | <Brief /> |
+| [9.6.2 AgentCanSuspend](https://tc39.es/ecma262/2026/#sec-agentcansuspend) | может ли блокироваться; окно — нет (день 22) | <Brief /> |
+| [9.6.3 IncrementModuleAsyncEvaluationCount](https://tc39.es/ecma262/2026/#sec-IncrementModuleAsyncEvaluationCount) | порядок асинхронных модулей (день 13) | <Brief /> |
+| [9.7 Agent Clusters](https://tc39.es/ecma262/2026/#sec-agent-clusters) | агенты с общей памятью; останавливаются и гибнут вместе | <Brief /> |
+| [9.8 Forward Progress](https://tc39.es/ecma262/2026/#sec-forward-progress) | кто и когда может заблокироваться | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// агент: поток + стек контекстов + очередь заданий + куча; реалмов в нём сколько угодно
+// реалм: встроенные объекты (%Array%…), глобальный объект и окружение, TemplateMap; в вебе — один на окно и рамку
+// чужой массив: instanceof Array — false, Array.isArray — true; ошибка — Error.isError
+// текущий реалм — у выполняемой функции: её литералы, ошибки, this без объекта, необъявленные глобальные
+// map чужого массива методом нашего реалма — массив нашего реалма (ArraySpeciesCreate)
+
+// контекст: Function, Realm, ScriptOrModule, окружения; вызов кладёт, return снимает, yield и await — тоже
+// отладчик: Call Stack — кадры, Scope — Local, Script (let/const наверху), Global (window)
+// ResolveBinding: имя — от места, где написан код; запись в необъявленное — глобальный объект текущего реалма
+// this и new.target: вверх по [[OuterEnv]] до записи с this; блок и стрелка — мимо
+
+// задание: начинается с пустого стека, одно за раз, до конца; промисы — HostEnqueuePromiseJob по порядку
+// setTimeout — HTML, не язык; dispatchEvent из кода — не задание
+// рамка того же источника — тот же агент: одна очередь микрозадач, один поток
+// чужое окно: SecurityError, доступны postMessage, closed, length, frames, location
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `instanceof Array` для массива из рамки — `false`, а `Array.isArray` — `true`?
+   <Answer>`instanceof` ищет в цепочке прототипов `Array.prototype` нашего реалма, а у массива
+   рамки в цепочке `Array.prototype` рамки. IsArray смотрит, экзотический ли это массив, — от
+   реалма это не зависит.</Answer>
+2. В каком реалме окажется результат `Array.prototype.map.call(listFromFrame, f)` и почему?
+   <Answer>В реалме страницы. `map` страницы работает в её реалме; ArraySpeciesCreate видит, что
+   `constructor` — `%Array%` другого реалма, отбрасывает его и создаёт обычный
+   массив текущего реалма.</Answer>
+3. Почему `this` в стрелке внутри конструктора наследника бросает ReferenceError до `super()`?
+   <Answer>GetThisEnvironment проходит запись стрелки (у неё нет `this`) и останавливается на записи
+   конструктора. GetThisBinding этой записи бросает ReferenceError, пока `this` не связан, а
+   связывает его только `super()`.</Answer>
+4. Что лежит на стеке под обработчиком `then`, когда он начинает работу?
+   <Answer>Ничего: по разделу 9.5 задание начинается, только когда стек пуст. Тот, кто вызвал
+   `then`, давно закончил своё задание.</Answer>
+5. Где в ECMAScript определён `setTimeout` и кто зовёт HostEnqueueTimeoutJob?
+   <Answer>Нигде: таймеры описывает стандарт HTML. HostEnqueueTimeoutJob в тексте 2026 зовёт только
+   `Atomics.waitAsync` — для своего таймаута.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Execution_model)
+(JavaScript execution model и Permission denied to access property, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

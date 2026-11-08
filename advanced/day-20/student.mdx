@@ -1,0 +1,131 @@
+---
+title: День 20 — конспект
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+---
+
+# День 20. ArrayBuffer и типизированные массивы
+
+<Subtitle>Выжимка лекции: буфер и виды, что делает запись с числом, индексы по 10.4.5, изменяемый и отсоединённый буфер.</Subtitle>
+
+## Главное
+
+<Definition>
+`ArrayBuffer` — байты без доступа к ним (глава 25); вид — типизированный массив, который читает байты
+как числа одного размера (глава 23). Видов двенадцать (таблица 70), у всех общий родитель %TypedArray%, и каждый
+режет записанное число своей операцией главы 7. Типизированный массив — экзотический объект (10.4.5): его
+индексы живут в буфере, а не в свойствах.
+</Definition>
+
+## Буфер, виды и запись
+
+```js
+const buf = new ArrayBuffer(4);
+const bytes = new Uint8Array(buf), words = new Uint16Array(buf);
+bytes[0] = 1; bytes[1] = 1;
+console.log(buf.byteLength, buf[0], words[0], words.length);   // 4 undefined 257 2 — у буфера нет индексов; младший байт первым
+console.log(Uint8Array.of(300, -5, 2.5).join(), Uint8ClampedArray.of(300, -5, 2.5).join(), Int8Array.of(200).join());   // 44,251,2 255,0,2 -56 — остаток от 256; насыщение и половина к чётному; знаковый байт
+console.log(Float32Array.of(0.1)[0], Uint8Array.BYTES_PER_ELEMENT, Float64Array.BYTES_PER_ELEMENT, new Uint8Array([1, 2, 3]).subarray(1).byteOffset);   // 0.10000000149011612 1 8 1 — 32 бита не держат 0.1; размеры; subarray смотрит со сдвигом
+```
+
+| Вид | Байт | 300 и −5 становятся |
+| --- | --- | --- |
+| `Int8Array` / `Uint8Array` | 1 | 44 и −5 / 44 и 251 |
+| `Uint8ClampedArray` | 1 | 255 и 0 |
+| `Int16Array` / `Uint16Array` | 2 | 300 и −5 / 300 и 65531 |
+| `Int32Array` / `Uint32Array` | 4 | 300 и −5 / 300 и 4294967291 |
+| `Float32Array` / `Float64Array` | 4 / 8 | 300 и −5; дробь 32 бит — с хвостом |
+| `BigInt64Array` / `BigUint64Array` | 8 | только BigInt: `300n`, число — `TypeError` |
+
+<Remember>
+Конструктор вида: пусто, длина, другой вид (копия значений), итерируемое или «похожее на массив», буфер со
+смещением и длиной; смещение кратно размеру элемента. Порядок байтов — машинный: «Typed arrays always use the
+platform's native byte order», а свой порядок даёт `DataView` (MDN
+[TypedArray](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray);
+день 21). `subarray` — тот же буфер, `slice` — копия.
+</Remember>
+
+## Индексы по 10.4.5
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const ta = new Uint8Array(2);
+ta[2] = 9; ta["-0"] = 9; ta["01"] = 9;
+console.log(ta[2], ta["-0"], ta["01"], Object.keys(ta).join());   // undefined undefined 9 0,1,01 — числовой ключ вне длины не существует; "01" — обычное свойство
+console.log(run(() => { delete ta[0]; }), run(() => Object.freeze(ta)), run(() => Object.defineProperty(ta, 0, { value: 1, writable: false })));   // TypeError TypeError TypeError — [[Delete]] и [[DefineOwnProperty]] отвечают false
+console.log(Object.getPrototypeOf(Uint8Array).name, Array.isArray(ta), typeof ta.push, Uint8Array.of(10, 9, 1).sort().join());   // TypedArray false undefined 1,9,10 — общий родитель; длина неизменна; сортировка числами
+```
+
+| Внутренний метод | Что делает с числовым ключом |
+| --- | --- |
+| \[\[Get\]\], \[\[GetOwnProperty\]\] | элемент из буфера или `undefined` |
+| \[\[Set\]\] | сначала ToNumber значения (`valueOf`), потом запись или тишина |
+| \[\[HasProperty\]\] | IsValidIntegerIndex: целое, не −0, меньше длины |
+| \[\[Delete\]\] | существующий индекс — `false`, остальные — `true` |
+| \[\[DefineOwnProperty\]\] | только записываемое, перечисляемое, настраиваемое значение |
+| \[\[OwnPropertyKeys\]\] | индексы по порядку, потом обычные ключи |
+
+<Remember>
+Числовой ключ — тот, что CanonicalNumericIndexString (7.1.21) узнаёт как число в обычной записи: «2», «-0»,
+«1.5» — да, «01» и «2.0» — нет. У вида нет девяти методов массива, меняющих длину; `map`,
+`filter`, `slice` отдают тот же вид, и значения снова режутся. `JSON.stringify`
+делает из вида объект с ключами — сохранять через `Array.from`.
+</Remember>
+
+## Буфер меняется
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const rab = new ArrayBuffer(2, { maxByteLength: 4 });
+const all = new Uint8Array(rab), first = new Uint8Array(rab, 0, 2);
+rab.resize(4);
+console.log(all.length, first.length, rab.resizable);   // 4 2 true — вид без длины следит, с длиной — нет
+rab.resize(1);
+console.log(all.length, first.length, run(() => first.fill(1)));   // 1 0 TypeError — first за границей буфера
+const moved = rab.transfer();
+console.log(rab.detached, rab.byteLength, all.length, moved.byteLength, moved.resizable);   // true 0 0 1 true — старый отсоединён; transfer сохранил изменяемость
+```
+
+| С буфером | Вид без длины | Вид с длиной |
+| --- | --- | --- |
+| `resize` больше | растёт | не меняется |
+| `resize` меньше конца вида | сжимается | за границей: длина 0, методы бросают |
+| `resize` обратно | растёт | снова в границах |
+| `transfer` | длина 0 | длина 0 |
+
+<Remember>
+Изменяемый буфер — только с `maxByteLength`; `resize` фиксированного — `TypeError`,
+больше максимума — `RangeError`; максимум брать поменьше, не больше 1 ГиБ (25.1.8).
+`transfer` сохраняет изменяемость, `transferToFixedLength` — нет; повторный перенос,
+`slice` и новый вид на отсоединённом буфере бросают. «Карточки 2.0»: счётчик в
+`Uint8Array` после 255 сбрасывается, в `Uint8ClampedArray` — останавливается.
+</Remember>
+
+<Homework>
+1. Предскажите, что окажется в `Int8Array`, `Uint16Array` и
+   `Uint8ClampedArray` после записи 200, −200, 70000 и 127.5. Назовите операцию главы 7 для
+   каждого вида и шаг, который решил ответ.
+2. Для `const ta = new Uint8Array(4)` предскажите `ta["2"]`, `ta["2.0"]`,
+   `ta[-1]`, `ta.at(-1)`, `"-1" in ta`, а после `ta["2.0"] = 5` —
+   `Object.keys(ta)`. Какие ответы решил CanonicalNumericIndexString?
+3. В буфере из 8 байтов `u32 = new Uint32Array(buf, 4)` и
+   `u16 = new Uint16Array(buf, 2, 2)`. Какие байты видит каждый вид? Что покажет
+   `u32[0]` после `u16[1] = 0x0102` и почему именно так?
+4. Прочитайте на MDN
+   [TypedArray](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)
+   раздел «Behavior when viewing a resizable buffer»: «This is the only case where a non-length-tracking typed
+   array's length may change». В последнем примере вид `new Float32Array(buffer, 4)` следит за
+   длиной. Предскажите его `length` после `resize(3)`, `resize(8)` и
+   `resize(12)` и назовите шаги IsTypedArrayOutOfBounds и TypedArrayLength, которые это решают.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray)
+(TypedArray, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

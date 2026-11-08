@@ -16,7 +16,8 @@
 // Syntax the course adds to MDX, each turned into what the HTML pages had:
 //   ## 1. Что такое JavaScript {#what}     a heading with its id (MDX itself would read {#what} as an expression)
 //   ```js file="config.json"               a code block: <pre class="code js" data-file="config.json">, highlighted
-//                                          at build time (lang js, html, plain-out, grammar; file, page)
+//                                          at build time (lang js, html, plain-out, grammar; file, page); in a
+//                                          grammar block *WhileStatement* is a nonterminal, in italics
 //   <Toc />                                the table of contents, made from the page's ## headings (the number in
 //                                          front dropped); <Toc> with its own list where the two differ
 import { evaluate } from "@mdx-js/mdx";

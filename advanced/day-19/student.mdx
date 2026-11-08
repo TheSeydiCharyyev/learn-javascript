@@ -1,0 +1,103 @@
+---
+title: День 19 — конспект
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+---
+
+# День 19. Мини-проект: наблюдаемое хранилище на Proxy и Reflect
+
+<Subtitle>Выжимка лекции: куда приходит запись через прокси, как устроены хранилище и доска и как проверить, что проект готов.</Subtitle>
+
+## Части программы
+
+```js
+// store.js    createStore(data, allowed) → { state, subscribe }; subscribe возвращает отписку
+//             get — обёртка вложенного объекта; WeakMap цель → прокси: у объекта один прокси
+//             defineProperty — проверка typeof и allowed, обёртка → цель, Reflect.defineProperty, notify()
+//             deleteProperty — Reflect.deleteProperty, notify(); ловушки set нет
+//             notify — флажок planned и Promise.resolve().then: подписчики один раз на всё действие
+// index.html  три колонки section[data-status] со списками, форма, фильтр, #error
+// main.js     данные из localStorage или first; globalThis.board = state — окно для консоли
+//             makeCard и render только читают state; subscribe(render), subscribe(сохранение)
+//             слушатели только пишут: push, task.status = …, splice, state.filter = …
+```
+
+<KeyPoint>
+Слушатель пишет в `state`, ловушка проверяет запись и уведомляет, подписчики рисуют и сохраняют.
+`render()` руками не зовут никогда: если страница не обновилась, виновато хранилище, а не забытый
+вызов.
+</KeyPoint>
+
+## Куда приходит запись
+
+| Что сделали | Что проходит через прокси | Уведомлений |
+| --- | --- | --- |
+| `obj.key = value` | \[\[Set\]\] цели с получателем-прокси ([10.5.9](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-set-p-v-receiver), шаг 6.a), затем \[\[DefineOwnProperty\]\] получателя ([10.1.9.2](https://tc39.es/ecma262/2026/#sec-ordinarysetwithowndescriptor), шаги 2.d.ii и 2.h) | 1 |
+| `Object.defineProperty` | сразу \[\[DefineOwnProperty\]\] | 1 |
+| `delete obj.key` | \[\[Delete\]\] | 1 |
+| `tasks.push(x)` | `get push`, `get length`, потом Set индекса и Set `length` ([23.1.3.23](https://tc39.es/ecma262/2026/#sec-array.prototype.push), шаги 5.a и 6) | 2 |
+| `tasks.splice(0, 1)` из четырёх | три переноса назад, удаление последнего индекса, `length` | 5 |
+| `JSON.stringify(state)` | объект — ownKeys, дескрипторы, get; массив — `length` и индексы | 0 |
+
+<Remember>
+Ловушка обязана вернуть булево. `undefined` — `TypeError` в строгом коде, хотя запись
+уже сделана; страница MDN
+[handler.defineProperty()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/Proxy/defineProperty)
+так и пишет: метод «must return a Boolean». Если ловушка `set` всё же нужна —
+`Reflect.set(target, key, value, receiver)`: без `receiver` получатель — цель
+([28.1.12](https://tc39.es/ecma262/2026/#sec-reflect.set), шаг 3.a), и запись идёт мимо
+`defineProperty`.
+</Remember>
+
+<Remember>
+Обёртка — только объектам; функции вроде `push` отдаются как есть. Один прокси на объект —
+`WeakMap`, иначе `indexOf` даёт −1, а `splice(-1, 1)` удаляет последнее.
+`splice` пишет назад прочитанные обёртки — перед записью обёртку меняют на цель. Замороженное в
+хранилище не кладут: `get` замороженного свойства обязан вернуть то же значение
+([10.5.8](https://tc39.es/ecma262/2026/#sec-proxy-object-internal-methods-and-internal-slots-get-p-receiver)).
+</Remember>
+
+<NoteBox>
+Консоль: `board` — то же хранилище, что у страницы. `board.tasks[0].status = "done"`
+перерисует доску сама, когда команда закончится. Сколько раз сработал `render`, покажет
+`console.count("render")` первой строкой функции. Вернуть первые данные —
+`localStorage.clear()` и обновить страницу.
+</NoteBox>
+
+## Ошибки по симптомам
+
+| Симптом | Причина |
+| --- | --- |
+| перенос, добавление и фильтр молчат, «✕» показывает всё разом | ловушка `set` с `Reflect.set` без `receiver` |
+| «✕» удаляет другое задание | нет кэша обёрток в `WeakMap` |
+| `trap returned falsish`, но изменение на странице | ловушка без `return` |
+| `'get' on proxy … read-only and non-configurable` | в хранилище замороженные данные |
+
+## Чек-лист готовности
+
+| Что проверить | Как |
+| --- | --- |
+| первый показ | четыре задания в трёх колонках; «Заданий: 4 · готово: 1»; на карточке только возможные стрелки |
+| форма | пустое поле — «Напишите задание и кто его делает»; пробелы по краям обрезаны, новое задание — в «Надо» |
+| переходы и удаление | «←», «→», «✕»: `console.count` растёт на 1 за щелчок |
+| фильтр | «аман» — только задания Амана, регистр не важен |
+| сохранение | после обновления — та же доска и тот же фильтр |
+| консоль | `board.nextId = "7"` — `TypeError`, статус «готово» — `RangeError`; при работе со страницей — ни одной ошибки |
+
+<Homework>
+1. Доведите доску до конца и пройдите чек-лист строка за строкой.
+2. Оберните массив из пяти заданий журналом ловушек дня 17 и проверьте таблицу «Куда приходит запись»:
+   сколько уведомлений даст «✕» у второго задания и какие ключи придут?
+3. Подпишите в `store.js` у каждой ловушки, какой шаг спецификации её зовёт.
+4. Сделайте одну доработку из заданий, которую не успели на уроке.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/Proxy/defineProperty)
+(handler.defineProperty(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

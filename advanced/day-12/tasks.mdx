@@ -1,0 +1,251 @@
+---
+title: День 12 — задания
+---
+
+# День 12. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-12` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага.</Subtitle>
+
+## Разминка
+
+<Task title="1. Что видят умолчания" level="easy" time="7">
+<Goal>проходить окружения FunctionDeclarationInstantiation.</Goal>
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+var tag = "снаружи";
+function a(x = tag, y = x + "!") { var tag = "тело"; return [x, y].join(" "); }
+function b(x = () => tag) { let tag = "let тела"; return x(); }
+function c(x = inner()) { function inner() { return "внутри"; } return x; }
+console.log(a(), "|", b(), "|", attempt(c));
+function d(first, second = first.length, { third = second * 2 } = {}) { return [second, third].join(); }
+console.log(d("abc"), "|", d("abc", null), "|", d("abc", undefined, { third: 0 }));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для `b` и `c` названо окружение, куда легли `let tag` и
+  `inner`, и почему умолчание его не видит;
+- объяснено, откуда пустое место во втором ответе `d`.
+</Criteria>
+</Task>
+
+<Task title="2. Имя, длина и prototype" level="easy" time="7">
+<Goal>различать добавки к OrdinaryFunctionCreate у восьми функций.</Goal>
+
+```js
+const obj = { m(a, b) {}, get word() { return ""; }, *gen(x = 1) {}, arrow: (...args) => {} };
+const show = (f) => [f.name, f.length, "prototype" in f].join(" ");
+console.log(show(obj.m), "|", show(Object.getOwnPropertyDescriptor(obj, "word").get), "|", show(obj.gen), "|", show(obj.arrow));
+class Box { constructor(a, b = 2) {} static make() {} }
+console.log(show(Box), "|", show(Box.make), "|", show(async function named(x) {}), "|", show(function* g(a, ...r) {}));
+```
+
+<Criteria>
+- предсказаны две строки;
+- у каждой функции с `prototype` назван шаг, который его создал (MakeConstructor или
+  DefinePropertyOrThrow генератора), у каждой без — почему его нет;
+- объяснено, откуда имя `arrow` у стрелки, записанной в свойство.
+</Criteria>
+</Task>
+
+<Task title="3. Класс с наследником по шагам" level="easy" time="6">
+<Goal>соединять ClassDefinitionEvaluation и создание объекта наследником.</Goal>
+
+```js
+const log = [];
+const say = (t, v) => { log.push(t); return v; };
+class Base {
+  base = say("поле Base", 1);
+  constructor() { say("тело Base"); }
+}
+class Child extends Base {
+  static [say("ключ static", "s")] = say("значение static", 1);
+  [say("ключ поля", "x")] = say("поле Child", 2);
+  static { say("блок"); }
+  constructor() { say("до super"); super(); say("после super"); }
+}
+console.log(log.join(", "));
+log.length = 0;
+new Child();
+console.log(log.join(", "));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- каждой записи первой строки сопоставлен шаг 15.7.14;
+- объяснено, почему «ключ поля» стоит раньше «значения static», хотя в тексте — ниже.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Свой разбор списка параметров" level="medium" time="12">
+<Goal>перенести 15.1.2–15.1.5 в код.</Goal>
+
+Список — массив строк, как их пишут в скобках, шаблоны без вложений. Напишите
+`paramInfo(list)` → `{ length, simple, code }`: `length` — параметры до первого
+умолчания *верхнего уровня* или остатка (ExpectedArgumentCount), `simple` — только имена
+(IsSimpleParameterList), `code` — есть `=` где угодно или вычисляемый ключ `[`
+внутри `{ }` (ContainsExpression). Подсказка: перед поиском `=` замените каждое
+`{…}` и `[…]` одним символом.
+
+<Example>
+```js
+paramInfo(["a", "b"]);                 // { length: 2, simple: true, code: false }
+paramInfo(["a", "b = 1", "c"]);        // { length: 1, simple: false, code: true }
+paramInfo(["{ a = 1 }", "[b]"]);       // { length: 2, simple: false, code: true }
+paramInfo(["{ a }", "...rest"]);       // { length: 1, simple: false, code: false }
+paramInfo(["{ [key]: a }"]);           // { length: 1, simple: false, code: true }
+```
+</Example>
+
+<Criteria>
+- все пять строк примера дают то, что в комментариях;
+- для каждого списка `length` совпал с `new Function(...list, "").length`, а
+  `simple` — с тем, принимает ли `new Function(...list, '"use strict"')`;
+- объяснено, почему `{ a = 1 }` идёт в `length`: HasInitializer у шаблона.
+</Criteria>
+</Task>
+
+<Task title="5. Своя FunctionDeclarationInstantiation" level="medium" time="14">
+<Goal>построить окружения параметров и тела на модели.</Goal>
+
+Окружение — объект, внешнее — его прототип (`Object.create(outer)`): поиск по цепочке прототипов
+играет роль \[\[OuterEnv\]\]. Параметр — `[имя, умолчание]`, умолчание — функция от окружения
+параметров; тело — `{ vars, run }`. Напишите `instantiate(outer, params, args, body)` по
+шагам раздела 3 лекции: окружение параметров и значения слева направо (умолчание — для `undefined`);
+есть хоть одно умолчание — для `vars` новое окружение с копией значения одноимённого параметра, нет —
+`vars` в том же окружении; ответ — `body.run(окружение тела)`.
+
+<Example>
+```js
+const outer = { x: "внешний" };
+instantiate(outer, [["a", (s) => () => s.x]], [], { vars: ["x"], run: (s) => { s.x = "тело"; return s.a(); } });   // "внешний"
+instantiate(outer, [["a", (s) => () => s.x], ["x", () => "параметр"]], [], { vars: ["x"], run: (s) => { s.x = "тело"; return [s.a(), s.x].join(" / "); } });   // "параметр / тело"
+instantiate(outer, [["x"]], ["аргумент"], { vars: ["x"], run: (s) => s.x });   // "аргумент"
+instantiate(outer, [["x", () => "умолчание"]], [], { vars: ["x"], run: (s) => s.x });   // "умолчание"
+```
+</Example>
+
+<Criteria>
+- все четыре строки примера дают то, что в комментариях;
+- те же четыре случая, записанные настоящими функциями `one`…`four` лекции, дают
+  те же ответы;
+- объяснено, почему стрелка из умолчания читает окружение параметров, а не тела.
+</Criteria>
+</Task>
+
+<Task title="6. Хвостовая рекурсия без стека" level="medium" time="12">
+<Goal>получить хвостовой вызов там, где движок его не делает.</Goal>
+
+Хвостовой вызов можно заменить возвратом «отложенного вызова» — стрелки `() => f(…)`. Напишите
+`trampoline(f)`: функцию, которая вызывает `f` и, пока результат — функция, вызывает его.
+Каждый вызов кончается раньше следующего, и стек не растёт.
+
+<Example>
+```js
+function sumTo(n, acc = 0) { return n === 0 ? acc : () => sumTo(n - 1, acc + n); }
+const sum = trampoline(sumTo);
+sum(3);       // 6
+sum(1e6);     // 500000500000
+```
+</Example>
+
+<Criteria>
+- обе строки примера дают то, что в комментариях;
+- та же сумма строгой рекурсией `sumRec(n, acc)` даёт RangeError на 10⁶, а циклом — тот же
+  ответ; объяснено, почему у `sumRec` нельзя `acc = 0`;
+- названо, какую функцию `trampoline` не сможет вернуть как значение.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: Card.fromList" level="medium" time="12">
+<Goal>сторожить аргумент до разбора и сообщать, какая карточка сломана.</Goal>
+
+Перепишите `Card` из раздела 17 лекции: `constructor(data)` сначала проверяет, что
+`data` — объект (иначе CardsError «не объект: …»), потом разбирает его и проверяет поля, как в дне 33
+курса 2. Добавьте статический метод `fromList(list)`: карточки через `new this(item)`, а
+ошибку карточки — в CardsError «карточка N из M: …» с `cause`.
+
+<Example>
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+class CardsError extends Error { constructor(message, options) { super(message, options); this.name = "CardsError"; } }
+const two = Card.fromList([{ id: 1, word: "kitap", translation: "книга" }, { id: 2, word: "galam", translation: "ручка" }]);
+two.map((c) => c.word).join();                                                          // "kitap,galam"
+attempt(() => Card.fromList([{ id: 1, word: "kitap", translation: "книга" }, null]));   // "CardsError: карточка 2 из 2: не объект: null"
+Card.length;                                                                             // 1
+```
+</Example>
+
+<Criteria>
+- все три строки примера дают то, что в комментариях;
+- у ошибки списка `cause` — CardsError самой карточки;
+- `class BigCard extends Card {}`: `BigCard.fromList` создаёт BigCard —
+  объяснено, чему равен `this` в статическом методе.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свой ClassDefinitionEvaluation" level="hard" time="12">
+<Goal>повторить порядок 15.7.14 без слова `class`.</Goal>
+
+Элемент — `{ kind, isStatic, key, value }`: `kind` — `"method"`,
+`"field"` или `"block"`, `key()` вычисляет ключ, `value` — метод,
+функция значения поля или тело блока. Напишите `createClass(elements)` по шагам 5–10 раздела 11
+лекции: функция F (без `new` — TypeError, при `new` — поля экземпляра по порядку);
+элементы по порядку — метод сразу в `F.prototype` или в F, у поля только ключ; потом статические поля и
+блоки по порядку с `this` = F.
+
+<Example>
+```js
+const log = [];
+const say = (t, v) => { log.push(t); return v; };
+const Card = createClass([
+  { kind: "method", key: () => say("ключ метода", "show"), value() { return "метод"; } },
+  { kind: "field", key: () => say("ключ поля", "word"), value: () => say("поле", "kitap") },
+  { kind: "field", isStatic: true, key: () => say("ключ static", "count"), value: () => say("значение static", 0) },
+  { kind: "block", value() { say("блок"); this.ready = true; } },
+]);
+log.join(", ");     // "ключ метода, ключ поля, ключ static, значение static, блок"
+new Card().word;    // "kitap"
+Card.ready;         // true
+```
+</Example>
+
+<Criteria>
+- все три строки примера дают то, что в комментариях;
+- настоящий `class` с теми же четырьмя элементами пишет тот же журнал;
+- названы шаги 15.7.14, которых в модели нет, и видимое отличие: `Object.keys(Card.prototype)`.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: arguments в поле" level="hard" time="8">
+<Goal>прочитать раздел, который на лекции был одной строкой справочника.</Goal>
+
+Прочитайте [15.7.9
+ContainsArguments](https://tc39.es/ecma262/2026/#sec-static-semantics-containsarguments) и предскажите пять ответов разбора.
+
+```js
+const parse = (code) => { try { new Function(code); return "ok"; } catch (e) { return e.name; } };
+console.log(["class A { x = function () { return arguments; }; }", "class A { x = () => arguments; }", "class A { x = { m() { return arguments; } }; }",
+  "class A { static { (function () { arguments; })(); } }", "class A { x = arguments.length; }"].map(parse).join(" "));
+```
+
+<Criteria>
+- предсказана строка;
+- названы виды узлов, на которых ContainsArguments перестаёт искать, и почему среди них нет стрелки
+  (примечание 15.3.4);
+- найдено правило 15.7.1, которое зовёт ContainsArguments для статического блока.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions)
+(Functions, Default parameters, Arrow function expressions, Classes, Static initialization blocks, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

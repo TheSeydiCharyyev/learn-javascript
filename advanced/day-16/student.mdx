@@ -1,0 +1,139 @@
+---
+title: День 16 — конспект
+css: |
+  h1 { border-bottom-color: #ec4899; }
+  h2 { color: #be185d; background: #fdf2f8; border-left-color: #ec4899; }
+---
+
+# День 16. Proxy: ловушки и инварианты
+
+<Subtitle>Выжимка лекции: цель, обработчик и ловушки, пересылка и Receiver, инварианты, `apply` и `construct`, отзыв прокси.</Subtitle>
+
+## Главное
+
+<Definition>
+Прокси — экзотический объект, у которого все внутренние методы свои, со слотами \[\[ProxyTarget\]\] и
+\[\[ProxyHandler\]\]. Схема каждого метода: не отозван ли прокси → GetMethod(обработчик, имя ловушки) → ловушки нет —
+тот же метод у цели, есть — Call(ловушка, обработчик, «цель, …») → сверка ответа с неудаляемыми свойствами и
+нерасширяемостью цели. \[\[Call\]\] и \[\[Construct\]\] у прокси есть, только если они есть у цели.
+</Definition>
+
+## Ловушки и пересылка
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const target = { word: "kitap", get who() { return this.word; } };
+const empty = new Proxy(target, {});
+empty.level = 1;
+console.log(target.level, empty === target);              // 1 false — без ловушек всё уходит к цели, но прокси — другой объект
+const counts = new Proxy({}, { get(t, key) { return typeof key === "symbol" || key in t ? t[key] : 0; } });
+counts.kitap += 1;
+console.log(counts.kitap, counts.suw, String(counts));    // 1 0 [object Object] — символы отданы цели
+const child = Object.create(new Proxy(target, { get(t, key) { return t[key]; } }));
+child.word = "suw";
+console.log(child.who);                                   // kitap — t[key] потерял Receiver наследника
+class Secret { #code = "123"; get code() { return this.#code; } }
+console.log(run(() => new Proxy(new Secret(), {}).code), new Set([target]).has(empty));   // TypeError false — приватных полей и тождества цели у прокси нет
+```
+
+| Код | Ловушки |
+| --- | --- |
+| `p.x`, `p.x = v` | `get`, `set`; Receiver — последний аргумент |
+| `"x" in p`, `delete p.x` | `has`, `deleteProperty` |
+| `Object.keys(p)` | `ownKeys`, потом `getOwnPropertyDescriptor` каждого ключа |
+| `JSON.stringify(p)` | `get` (`toJSON`), `ownKeys`, `getOwnPropertyDescriptor` |
+| `instanceof`, `Object.getPrototypeOf` | `getPrototypeOf` |
+| `p()`, `new p()` | `apply`, `construct` |
+
+<Remember>
+Ловушку ищут при каждой операции заново; `this` ловушки — обработчик. Пересылка `t[key]`
+теряет Receiver, а пустой обработчик даёт геттеру цели `this` = прокси — без приватных полей и слотов
+`Map`. Ловушка `get` отвечает и самому языку: `Symbol.toPrimitive`,
+`toJSON`, `then` — символы и служебные имена отдавать цели.
+</Remember>
+
+## Инварианты
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const target = { soft: 1 };
+Object.defineProperty(target, "fixed", { value: 1, writable: false, configurable: false });
+const liar = new Proxy(target, { get() { return 2; }, has() { return false; } });
+console.log(liar.soft, run(() => liar.fixed), "soft" in liar, run(() => "fixed" in liar));   // 2 TypeError false TypeError — неудаляемое не подменить и не спрятать
+const virtual = new Proxy({}, { ownKeys() { return ["a"]; } });
+console.log(Object.getOwnPropertyNames(virtual).join(), Object.keys(virtual).length);   // a 0 — у ключа нет дескриптора
+const scores = new Proxy({}, { set(t, key, value) { if (value < 1 || value > 5) return false; t[key] = value; return true; } });
+console.log(run(() => { scores.Aýna = 7; }), run(() => Object.defineProperty(scores, "Aýna", { value: 7 })));   // TypeError ok — defineProperty идёт мимо set
+```
+
+| Ловушка | Чего ей нельзя |
+| --- | --- |
+| `get` | другое значение у неудаляемых незаписываемых данных; не undefined у аксессора без геттера |
+| `set` | true при другом значении там же и у аксессора без сеттера |
+| `has`, `deleteProperty` | спрятать или «удалить» неудаляемое свойство и любое свойство нерасширяемой цели |
+| `ownKeys` | повторы, пропуск неудаляемого ключа; у нерасширяемой цели — не ровно её ключи |
+| `getOwnPropertyDescriptor`, `defineProperty` | назвать неудаляемым то, чего у цели нет или что удаляемо |
+| `getPrototypeOf`, `isExtensible` | расходиться с нерасширяемой целью; `isExtensible` — с любой |
+
+<Remember>
+Сверяется только расхождение с неудаляемыми свойствами и нерасширяемостью цели: на этих обещаниях 6.1.7.3 стоят
+`freeze` и `seal`. Удаляемое ловушка вправе подменять. false от `set` и
+`deleteProperty`: строгий код — TypeError, нестрогий молчит. Проверка записи — две ловушки,
+`set` и `defineProperty`; виртуальным ключам нужен `getOwnPropertyDescriptor`.
+</Remember>
+
+## apply, construct и отзыв
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const objProxy = new Proxy({}, { apply() { return 1; } });
+console.log(typeof objProxy, run(() => objProxy()));     // object TypeError — [[Call]] ставится по цели
+const add = new Proxy((a, b) => a + b, { apply(target, thisArg, args) { return target(...args) * 10; } });
+console.log(add(1, 2), add.call(null, 1, 2), run(() => new add(1, 2)));   // 30 30 TypeError — у стрелки нет [[Construct]]
+class Card { constructor(word) { this.word = word; } }
+const Watched = new Proxy(Card, { construct(target, args) { return new target(...args); } });
+class BigCard extends Watched {}
+console.log(new BigCard("suw") instanceof BigCard);      // false — new target(...) потерял newTarget
+const { proxy, revoke } = Proxy.revocable(function () {}, {});
+revoke();
+console.log(typeof proxy, run(() => proxy()));            // function TypeError — typeof смотрит на [[Call]]
+```
+
+| Что | Аргументы | Правило |
+| --- | --- | --- |
+| `apply` | `target, thisArg, args` | только у вызываемой цели |
+| `construct` | `target, args, newTarget` | только у конструктора; ответ — объект |
+| `revoke()` | — | цель и обработчик — null; второй вызов ничего не делает |
+
+<Remember>
+Отзыв даёт чужому коду доступ на время, не трогая сам объект. Передать цели Receiver и newTarget умеет
+`Reflect` — день 17. «Карточки 2.0»: страж опечаток в настройках бросает на неизвестное имя — и
+ломает `JSON.stringify`, который спрашивает `toJSON`.
+</Remember>
+
+<Homework>
+1. Цель `t` со свойством `Object.defineProperty(t, "id", { value: 7, configurable: false, writable: true })`
+   и прокси `const p = new Proxy(t, { get() { return 0; }, has() { return false; } });`
+   Что дадут `p.id` и `"id" in p`? Почему одной ловушке ложь разрешена, а другой нет?
+2. Для `const k = new Proxy({ x: 1 }, { ownKeys() { return ["x", "y"]; } });` предскажите
+   `Object.keys(k)` и `Object.getOwnPropertyNames(k)`. Что станет с
+   `Object.keys(k)` после `Object.preventExtensions(k)` и почему сам
+   `preventExtensions` прошёл?
+3. Для `const twice = new Proxy(function (x) { return x; }, { apply(t, self, args) { return t(...args) * 2; } });`
+   предскажите `twice(2)`, `twice.call(null, 3)`, `[1, 2].map(twice)` и
+   `new twice(1)`. Почему `new` не удвоил?
+4. Прочитайте на MDN
+   [handler.set()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/Proxy/set)
+   раздел «Return value»: «Many operations, including using property accessors in strict mode, throw a
+   TypeError», если \[\[Set\]\] вернул false. Назовите по лекции операцию, которая бросает и в нестрогом коде,
+   и объясните почему.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy)
+(Proxy, handler.get(), handler.set(), handler.ownKeys(), handler.construct(), Proxy.revocable(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

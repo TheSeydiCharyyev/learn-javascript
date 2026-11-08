@@ -1,0 +1,697 @@
+---
+title: "День 5 — Преобразования и сравнения: ToPrimitive, ToNumber, IsLooselyEqual"
+day: День 5 • урок 1
+heading: "Преобразования и сравнения: ToPrimitive, ToNumber, IsLooselyEqual"
+lead: Курс 3, Advanced. Модуль «Типы и абстрактные операции» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #7c3aed; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #6d28d9; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #7c3aed; }
+---
+
+<Goals>
+- предсказывать, какой метод объекта вызовет преобразование и с какой подсказкой;
+- считать `!!x`, `+x` и `String(x)` по таблицам главы 7, а не по памяти;
+- объяснять, как значение становится ключом свойства;
+- различать SameValue, SameValueZero и `===` на NaN и нулях;
+- сравнивать строки и числа по алгоритму IsLessThan;
+- проходить лестницу IsLooselyEqual для любого `==`.
+</Goals>
+
+<Toc />
+
+## 1. Абстрактные операции {#operations}
+
+Глава [7](https://tc39.es/ecma262/2026/#sec-abstract-operations) начинается честно: эти операции
+— не часть языка, их нельзя вызвать из кода, они нужны, чтобы описать язык. Увидеть их можно только по следам —
+через операторы и встроенные функции, которые их зовут. Раздел
+[7.1](https://tc39.es/ecma262/2026/#sec-type-conversion) добавляет: язык сам переводит значения из
+типа в тип, когда нужно, а для BigInt неявных переводов нет — только явный вызов `BigInt` (день 4).
+
+Вчера мы видели типы. Сегодня — как значение одного типа становится значением другого, и как значения
+сравниваются. Страница MDN [Equality
+comparisons and sameness](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness) (день 6 курса 2) дала таблицы; теперь — алгоритмы, из которых они получаются.
+
+Почти все преобразования устроены одинаково: перебрать типы по очереди и для каждого вернуть готовый ответ, а
+для объекта — сначала ToPrimitive с подходящей подсказкой и затем ту же операцию ещё раз, уже для примитива.
+Поэтому ключ ко всей главе — ToPrimitive: разобравшись с ним, остальные таблицы читаются за минуту.
+
+## 2. ToPrimitive и подсказка {#toprimitive}
+
+[ToPrimitive](https://tc39.es/ecma262/2026/#sec-toprimitive) (7.1.1) делает из объекта примитив.
+Второй аргумент — **подсказка**, какой примитив желателен: `string` или
+`number`; её может и не быть. Если на вход пришёл не объект — он возвращается как есть.
+
+<Scheme src="scheme-toprimitive.svg">ToPrimitive по шагам 7.1.1</Scheme>
+
+Подсмотрим, кто кого зовёт. Объект с методами, которые записывают свой вызов, — практика дня:
+
+```js
+const log = [];
+const mark = {
+  valueOf() { log.push("valueOf"); return 5; },
+  toString() { log.push("toString"); return "пять"; },
+};
+const run = (name, f) => {
+  log.length = 0;
+  const result = f();
+  console.log(name, String(result), log.join(" "));
+};
+run("+mark", () => +mark);
+run("`${mark}`", () => `${mark}`);
+run('mark + ""', () => mark + "");
+run("String(mark)", () => String(mark));
+run("mark == 5", () => mark == 5);
+run("mark < 6", () => mark < 6);
+run("[mark].join()", () => [mark].join());
+run("{ [mark]: 1 }", () => Object.keys({ [mark]: 1 })[0]);
+```
+
+<ResultBox>
+\+mark 5 valueOf\
+\`$\{mark\}\` пять toString\
+mark + "" 5 valueOf\
+String(mark) пять toString\
+mark == 5 true valueOf\
+mark \< 6 true valueOf\
+\[mark\].join() пять toString\
+\{ \[mark\]: 1 \} пять toString
+</ResultBox>
+
+Главная неожиданность — `mark + ""`: хотя справа строка, сложение зовёт ToPrimitive *без
+подсказки*, а это значит «как number» — `valueOf`, 5, и только потом склейка в «5». Шаблон,
+`String`, `join` и ключ свойства просят строку — работает `toString`.
+
+Подсказка — пожелание, а не приказ. OrdinaryToPrimitive возвращает первый примитив, какого бы типа он ни был,
+а довести его до нужного типа — дело следующей операции:
+
+```js
+console.log(+{ valueOf() { return "12"; } });
+console.log({ toString() { return 5; } } + "", typeof `${{ toString() { return 5; } }}`);
+```
+
+<ResultBox>
+12\
+5 string
+</ResultBox>
+
+`valueOf` вернул строку «12», и ToNumber уже после ToPrimitive сделал из неё 12. `toString`
+вернул число 5 — шаблон перевёл его в строку сам.
+
+## 3. OrdinaryToPrimitive: valueOf или toString {#ordinary}
+
+[OrdinaryToPrimitive](https://tc39.es/ecma262/2026/#sec-ordinarytoprimitive) (7.1.1.1) — короткий
+цикл: взять два имени в порядке подсказки, для каждого прочитать метод, если он вызываемый — вызвать, и если
+результат не объект — вернуть его. Метод, который вернул объект, просто пропускается. Не помог ни один —
+`TypeError`.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(+{ valueOf() { return {}; }, toString() { return "7"; } });
+console.log(attempt(() => +{ valueOf() { return {}; }, toString() { return {}; } }));
+console.log(attempt(() => `${Object.create(null)}`));
+console.log(typeof (new Date(0) + 1), new Date(0) - 1);
+```
+
+<ResultBox>
+7\
+TypeError: Cannot convert object to primitive value\
+TypeError: Cannot convert object to primitive value\
+string -1
+</ResultBox>
+
+Первый объект прошёл: `valueOf` вернул объект, он пропущен, и `toString` дал «7». Второй
+упал — оба метода вернули объекты. У объекта без прототипа нет ни `toString`, ни `valueOf` —
+нечем стать строкой. У обычного объекта оба метода есть всегда: `valueOf` из
+`Object.prototype` возвращает сам объект (поэтому его пропускают), а `toString` — строку
+«\[object Object\]»; у массива `toString` свой — он зовёт `join`. Последняя
+строка — исключение, о котором говорит примечание к ToPrimitive: из встроенных объектов только у дат и
+символов есть свой метод `Symbol.toPrimitive`, и дата без подсказки выбирает строку. Поэтому
+`new Date(0) + 1` — склейка текста даты с «1», а вычитание просит число — −1 (день 21 курса 2).
+
+## 4. ToBoolean {#toboolean}
+
+[ToBoolean](https://tc39.es/ecma262/2026/#sec-toboolean) (7.1.2) — самая короткая операция главы:
+`false` дают `undefined`, `null`, оба нуля, NaN, `0n` и пустая строка;
+всё остальное — `true`. Объекты не преобразуются через методы — они просто истинны. Практика: `!!x`
+для дюжины значений.
+
+```js
+const values = [0, -0, NaN, "", "0", " ", [], {}, null, undefined, 0n, Symbol(), new Boolean(false), document.all];
+console.log(values.map((v) => !!v).join(" "));
+```
+
+<ResultBox>
+false false false false true true true true false false false true true false
+</ResultBox>
+
+Строка «0» и строка из пробела истинны — правило смотрит на длину, а не на смысл. Пустой массив истинен,
+объект-обёртка `new Boolean(false)` — тоже: это объект. И одно исключение, которое стандарт
+разрешает браузерам: у `document.all` есть слот `[[IsHTMLDDA]]`, и такой объект ложен.
+Это наследие старых страниц, подробно — день 31.
+
+ToBoolean зовут `if`, `while`, `?:`, `!`, `&&` и
+`||`. А `??` (день 6 курса 2) её не зовёт: он смотрит только на `null` и
+`undefined`, поэтому 0 и пустая строка проходят через него как есть:
+
+```js
+console.log(0 || "x", "" || "x", 0 ?? "x", JSON.stringify("" ?? "x"));
+```
+
+<ResultBox>
+x x 0 ""
+</ResultBox>
+
+## 5. ToNumber и ToNumeric {#tonumber}
+
+[ToNumber](https://tc39.es/ecma262/2026/#sec-tonumber) (7.1.4) по типам: `undefined` —
+NaN; `null` и `false` — +0; `true` — 1; строка — по грамматике числовых строк
+(день 2, `:::`); Symbol и BigInt — `TypeError`; объект — ToPrimitive с подсказкой number и
+снова ToNumber. [ToNumeric](https://tc39.es/ecma262/2026/#sec-tonumeric) (7.1.3) — то же, но BigInt
+оставляет как есть: ею пользуются арифметические операторы.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const values = [undefined, null, true, "", " 12 ", "0x1F", "1e3", "1_000", "Infinity", "-0", [], [5], [1, 2], {}];
+console.log(values.map((v) => +v).join(" "));
+console.log(attempt(() => +Symbol()));
+console.log(attempt(() => +1n), Number(1n));
+```
+
+<ResultBox>
+NaN 0 1 0 12 31 1000 NaN Infinity 0 0 5 NaN NaN\
+TypeError: Cannot convert a Symbol value to a number\
+TypeError: Cannot convert a BigInt value to a number 1
+</ResultBox>
+
+Пустая строка — 0: грамматика числовых строк разрешает строку из одних пробелов. Массивы проходят через
+`toString`: `[]` — «», то есть 0; `[5]` — «5»; `[1, 2]` — «1,2», NaN.
+Унарный плюс зовёт ToNumber и падает на BigInt, а функция `Number` зовёт ToNumeric и переводит BigInt
+сама — явный перевод разрешён. «-0» стал −0 — `join` напечатал его как «0».
+
+Строки разбирает `StringToNumber` (7.1.4.1) по грамматике приложения A.6. В ней знак разрешён только
+у десятичного числа, приставки `0b`, `0o`, `0x` — без знака, а
+«Infinity» — только целым словом:
+
+```js
+const strings = ["0b101", "0o17", "0X1f", "-0x1F", "+1e3", ".5", "5.", "1e", "Infinityx", "-Infinity"];
+console.log(strings.map((s) => +s).join(" "));
+console.log(parseInt("-0x1F"));
+```
+
+<ResultBox>
+5 15 31 NaN 1000 0.5 5 NaN NaN -Infinity\
+-31
+</ResultBox>
+
+`parseInt` — не ToNumber, а свой алгоритм: он берёт знак, потом приставку, потом цифры, пока они
+есть. Поэтому `"-0x1F"` для плюса — NaN, а для `parseInt` — −31.
+
+## 6. ToString {#tostring}
+
+[ToString](https://tc39.es/ecma262/2026/#sec-tostring) (7.1.17): строка остаётся, Symbol —
+`TypeError`, `undefined`, `null` и булевы — их имена, числа —
+`Number::toString`, BigInt — цифры без `n`, объект — ToPrimitive с подсказкой string.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const values = [-0, 1e21, 1e-7, 0.000001, [1, [2, 3]], [null, undefined], {}, 123n, true];
+console.log(values.map((v) => String(v)).join(" | "));
+console.log(String(Symbol("id")), attempt(() => `${Symbol("id")}`));
+console.log(String(123e18), String(1234e18), String(0.0000012), String(0.00000012));
+```
+
+<ResultBox>
+0 | 1e+21 | 1e-7 | 0.000001 | 1,2,3 | , | \[object Object\] | 123 | true\
+Symbol(id) TypeError: Cannot convert a Symbol value to a string\
+123000000000000000000 1.234e+21 0.0000012 1.2e-7
+</ResultBox>
+
+−0 печатается как «0» — так записан `Number::toString`. Он же решает, когда нужен порядок:
+если до точки получается больше 21 цифры (10<sup>21</sup>) или после точки перед первой значащей цифрой шесть
+нулей и больше (10<sup>−7</sup> — это «0.0000001»). 123 · 10<sup>18</sup> — ровно 21 цифра, ещё без порядка; 1234 · 10<sup>18</sup> —
+уже 22, и появляется «e+21». `null` и `undefined` внутри массива дают пустые места —
+это правило `join`, а не ToString. И главное про символы: ToString бросает, поэтому шаблон и
+склейка ломаются, а функция `String` проверяет символ раньше, чем зовёт ToString, и печатает описание.
+
+## 7. ToObject и RequireObjectCoercible {#toobject}
+
+[ToObject](https://tc39.es/ecma262/2026/#sec-toobject) (7.1.18) заворачивает примитив в объект-обёртку
+со слотом `[[StringData]]`, `[[NumberData]]` и т. д., а для `undefined` и
+`null` бросает. [RequireObjectCoercible](https://tc39.es/ecma262/2026/#sec-requireobjectcoercible)
+(7.2.1) — та же проверка без заворачивания: ею начинаются методы строк.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(Object.keys("ab"), attempt(() => Object.keys(null)));
+console.log(JSON.stringify(Object(null)), typeof Object(1n), Object("ab") instanceof String);
+console.log(attempt(() => String.prototype.trim.call(undefined)));
+console.log(new String("a") == "a", new String("a") === "a", !!new String(""));
+```
+
+<ResultBox>
+(2) \['0', '1'\] TypeError: Cannot convert undefined or null to object\
+\{\} object true\
+TypeError: String.prototype.trim called on null or undefined\
+true false true
+</ResultBox>
+
+`Object.keys` зовёт ToObject, и у строки «ab» появляются ключи «0» и «1». Функция `Object` —
+не то же самое: для `null` она не бросает, а создаёт пустой объект. Это частая путаница: имя функции
+и операции похожи, но шаги разные. Обёртка — полноценный объект: `==` разворачивает её через
+ToPrimitive, `===` видит разные типы, а ToBoolean считает истинной даже обёртку пустой строки.
+
+## 8. ToPropertyKey {#topropertykey}
+
+[ToPropertyKey](https://tc39.es/ecma262/2026/#sec-topropertykey) (7.1.19) — два шага: ToPrimitive с
+подсказкой string; символ оставить, остальное — ToString. Вот почему вчера ключ `1` стал «1»:
+
+```js
+const o = {};
+const sym = Symbol("s");
+for (const key of [1, {}, [1, 2], null, 1.5, -0, 1e21, sym, "1"]) o[key] = true;
+console.log(Object.keys(o), Object.getOwnPropertySymbols(o).length);
+```
+
+<ResultBox>
+(7) \['0', '1', '\[object Object\]', '1,2', 'null', '1.5', '1e+21'\] 1
+</ResultBox>
+
+Девять записей — семь строковых ключей и один символ: `1` и «1» — один ключ, −0 стал «0». Любой
+объект без своего `toString` становится «\[object Object\]» — поэтому объекты в ключи обычного объекта
+не годятся, для этого есть `Map`. Числовые ключи в списке впереди — это порядок
+`[[OwnPropertyKeys]]`, день 14.
+
+## 9. Целые: ToIntegerOrInfinity, ToLength, ToIndex {#integers}
+
+Четыре операции для номеров. [ToIntegerOrInfinity](https://tc39.es/ecma262/2026/#sec-tointegerorinfinity)
+(7.1.5) мы проходили на дне 1: NaN — 0, бесконечности остаются, остальное — отбросить дробь.
+[ToLength](https://tc39.es/ecma262/2026/#sec-tolength) (7.1.20) зажимает длину похожего на массив
+объекта между 0 и 2<sup>53</sup> − 1. [ToIndex](https://tc39.es/ecma262/2026/#sec-toindex) (7.1.22)
+строже: вне этого промежутка — `RangeError`; ею пользуются двоичные данные (день 20).
+[CanonicalNumericIndexString](https://tc39.es/ecma262/2026/#sec-canonicalnumericindexstring) (7.1.21)
+отвечает, похожа ли строка на число «по-настоящему»: «1» — да, «1.0» — нет, «-0» — да.
+
+```js
+console.log(Array.from({ length: 2.7 }).length, Array.from({ length: -3 }).length);
+console.log(Array.prototype.join.call({ length: "2", 0: "a", 1: "b" }), "abc".at(-1.5), "abc".at("1"));
+```
+
+<ResultBox>
+2 0\
+a,b c b
+</ResultBox>
+
+## 10. ToBigInt и StringToBigInt {#tobigint}
+
+[ToBigInt](https://tc39.es/ecma262/2026/#sec-tobigint) (7.1.13), таблица 12: булево — `1n`
+или `0n`, строка — [StringToBigInt](https://tc39.es/ecma262/2026/#sec-stringtobigint)
+(7.1.14), а `undefined`, `null`, Number и Symbol — ошибка. Number здесь бросает нарочно:
+неявного перевода в BigInt нет. Функция `BigInt` принимает числа сама, своей операцией
+`NumberToBigInt`, — но только целые.
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(BigInt("0x1F"), BigInt(" 12 "), BigInt(""), BigInt(true));
+console.log(attempt(() => BigInt("1.5")), "|", attempt(() => BigInt(1.5)));
+console.log(attempt(() => BigInt(undefined)));
+```
+
+<ResultBox>
+31n 12n 0n 1n\
+SyntaxError: Cannot convert 1.5 to a BigInt | RangeError: The number 1.5 cannot be converted to a BigInt because it is not an integer\
+TypeError: Cannot convert undefined to a BigInt
+</ResultBox>
+
+Пустая строка — `0n`, как и в ToNumber. Строка «1.5» не проходит грамматику целых —
+`SyntaxError`, а число 1.5 не целое — `RangeError`: одна и та же «полторашка» даёт две разные
+ошибки, потому что идёт двумя разными путями.
+
+## 11. Проверки: IsArray, IsCallable, IsRegExp… {#checks}
+
+Раздел [7.2](https://tc39.es/ecma262/2026/#sec-testing-and-comparison-operations) открывают короткие
+проверки. Они отвечают `true` или `false`, и встроенные функции принимают по ним решения:
+
+| Проверка | Что смотрит | Где видно |
+| --- | --- | --- |
+| [IsArray](https://tc39.es/ecma262/2026/#sec-isarray) | экзотический объект-массив (или Proxy над ним) | `Array.isArray` |
+| [IsCallable](https://tc39.es/ecma262/2026/#sec-iscallable) | есть `[[Call]]` | `typeof` «function» |
+| [IsConstructor](https://tc39.es/ecma262/2026/#sec-isconstructor) | есть `[[Construct]]` | `new` |
+| [IsExtensible](https://tc39.es/ecma262/2026/#sec-isextensible-o) | `[[IsExtensible]]` | `Object.isExtensible` |
+| [IsRegExp](https://tc39.es/ecma262/2026/#sec-isregexp) | `Symbol.match` или слот `[[RegExpMatcher]]` | `startsWith`, `includes` |
+| [IsStringWellFormedUnicode](https://tc39.es/ecma262/2026/#sec-isstringwellformedunicode) | нет одиноких половинок | `isWellFormed` |
+| [SameType](https://tc39.es/ecma262/2026/#sec-sametype) | один ли тип у двух значений | начало всех сравнений |
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+console.log(attempt(() => "kitap".startsWith(/k/)));
+console.log(attempt(() => new Math.max()));
+console.log(Array.isArray([]), Array.isArray({ length: 0 }), "\uD800".isWellFormed(), Object.isExtensible(Object.freeze({})));
+```
+
+<ResultBox>
+TypeError: First argument to String.prototype.startsWith must not be a regular expression\
+TypeError: Math.max is not a constructor\
+true false false false
+</ResultBox>
+
+`startsWith` нарочно отказывается от регулярки: иначе непонятно, искать её текст или совпадение.
+Распознаёт он её через IsRegExp — по слоту, а не по имени конструктора.
+
+## 12. SameValue и его родня {#samevalue}
+
+Три операции равенства «без преобразований» отличаются только двумя случаями — NaN и нулями:
+
+| Операция | `NaN` и `NaN` | `+0` и `−0` | Где работает |
+| --- | --- | --- | --- |
+| [SameValue](https://tc39.es/ecma262/2026/#sec-samevalue) (7.2.9) | равны | разные | `Object.is`, проверки свойств |
+| [SameValueZero](https://tc39.es/ecma262/2026/#sec-samevaluezero) (7.2.10) | равны | равны | `includes`; так же ведут себя `Map` и `Set` |
+| IsStrictlyEqual (7.2.14) | разные | равны | `===`, `indexOf` |
+
+Для всех остальных значений все три зовут [SameValueNonNumber](https://tc39.es/ecma262/2026/#sec-samevaluenonnumber)
+(7.2.11): строки — по элементам, BigInt — по значению, булевы — по значению, объекты и символы — «это тот же
+самый».
+
+```js
+console.log(Object.is(NaN, NaN), Object.is(0, -0), NaN === NaN, 0 === -0);
+console.log([NaN].includes(NaN), [NaN].indexOf(NaN), [-0].includes(0));
+console.log(new Set([0, -0, NaN, NaN]).size, Object.is([...new Map([[-0, "a"]]).keys()][0], -0));
+```
+
+<ResultBox>
+true false false true\
+true -1 true\
+2 false
+</ResultBox>
+
+В множестве четыре значения стали двумя: нули — одно, NaN — одно. Таблица 2 (день 4) так и пишет: SameValueZero
+— «как в методах Array, Map и Set». Но сами алгоритмы `Map` и `Set` в редакции 2026 устроены
+иначе: сначала [CanonicalizeKeyedCollectionKey](https://tc39.es/ecma262/2026/#sec-canonicalizekeyedcollectionkey)
+(24.5.1) заменяет ключ −0 на +0, а потом ключи сравниваются SameValue. Итог тот же, что у SameValueZero, — и
+заодно ключ −0 хранится как +0, что и показала последняя проверка.
+
+SameValue работает и там, где его не видно, — в проверках свойств. Замороженному объекту можно
+«переопределить» свойство тем же самым значением, и «тем же» считается по SameValue:
+
+```js
+const attempt = (f) => {
+  try {
+    return String(f());
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+};
+const frozen = Object.freeze({ x: -0, y: NaN });
+console.log(attempt(() => Object.defineProperty(frozen, "x", { value: 0 })));
+console.log(attempt(() => Object.defineProperty(frozen, "x", { value: -0 }) === frozen));
+console.log(attempt(() => Object.defineProperty(frozen, "y", { value: NaN }) === frozen));
+```
+
+<ResultBox>
+TypeError: Cannot redefine property: x\
+true\
+true
+</ResultBox>
+
+0 вместо −0 — другое значение, и свойство защищено. NaN вместо NaN — то же самое, хотя `===` сказал
+бы «разные». Сама проверка — ValidateAndApplyPropertyDescriptor, день 14.
+
+## 13. IsLessThan: «10» меньше «9» {#islessthan}
+
+[IsLessThan](https://tc39.es/ecma262/2026/#sec-islessthan) (7.2.12) — основа `<`,
+`>`, `<=` и `>=` (день 1). Сначала оба операнда — ToPrimitive с подсказкой
+number. Если оба получились строками — сравнить *по 16-битным элементам*, слева направо. Если строка и
+BigInt — StringToBigInt. Иначе — оба в числа через ToNumeric; NaN даёт `undefined`, «не сравнимо», и
+оператор превращает его в `false`.
+
+```js
+console.log("10" < "9", "10" < 9, "a" < "B", "ä" < "z");
+console.log(null < 1, undefined < 1, undefined >= 1, [2] < [10]);
+console.log(1n < "2", "x" < 1n, "x" >= 1n, "😀" < "\uFFFF");
+```
+
+<ResultBox>
+true false false false\
+true false false false\
+true false false true
+</ResultBox>
+
+«10» \< «9»: две строки, первый элемент «1» меньше «9» — дальше не смотрят. Стоит одной стороне стать
+числом — сравнение числовое. Большие буквы латиницы идут раньше маленьких, «ä» — позже «z»: это коды, а не
+алфавит (для алфавита — `localeCompare` и `Intl.Collator`, день 27). `[2]` и
+`[10]` стали строками «2» и «10» — и «2» больше. `undefined` с числом даёт
+`undefined`, поэтому и `<`, и `>=` — `false`. Эмодзи — пара
+половинок, первая из них 0xD83D, меньше 0xFFFF, хотя кодовая точка больше: примечание 2 раздела.
+
+То же сравнение строк стоит за `sort` без аргумента: элементы переводятся в строки и
+сравниваются по кодам. Числа так сортировать нельзя — нужна своя функция сравнения:
+
+```js
+console.log([10, 9, 1].sort(), [10, 9, 1].sort((a, b) => a - b));
+console.log(["b", "B", "a", "ä"].sort());
+```
+
+<ResultBox>
+(3) \[1, 10, 9\] (3) \[1, 9, 10\]\
+(4) \['B', 'a', 'b', 'ä'\]
+</ResultBox>
+
+Третий аргумент, `LeftFirst`, хранит порядок вычисления. Для `a > b` язык считает
+`b < a`, но ToPrimitive левого операнда всё равно идёт первым:
+
+```js
+const log = [];
+const a = { valueOf() { log.push("a"); return 1; } };
+const b = { valueOf() { log.push("b"); return 2; } };
+console.log(a < b, a > b, a <= b, log.join(" "));
+```
+
+<ResultBox>
+true false true a b a b a b
+</ResultBox>
+
+## 14. IsLooselyEqual и IsStrictlyEqual {#loose}
+
+[IsLooselyEqual](https://tc39.es/ecma262/2026/#sec-islooselyequal) (7.2.13) — алгоритм
+`==`. Он не «приводит всё к числу», а идёт по лестнице, и на каждой ступени либо отвечает, либо
+переводит один операнд и начинает заново:
+
+<Scheme src="scheme-loose.svg">IsLooselyEqual по шагам 7.2.13</Scheme>
+
+```js
+const rows = [
+  ["" == 0, "0" == false, "" == false, " \n" == 0],
+  [null == undefined, null == 0, undefined == 0, null == false],
+  [NaN == NaN, [] == ![], [0] == false, "1" == [1]],
+  [1n == 1, 1n == "1", 1n == "x", 1n == 1.5],
+  [({}) == "[object Object]", Symbol.iterator == Symbol.iterator, document.all == null],
+];
+rows.forEach((row) => console.log(row.join(" ")));
+```
+
+<ResultBox>
+true true true true\
+true false false false\
+false true true true\
+true true false false\
+true true true
+</ResultBox>
+
+Пройдём знаменитый `[] == ![]`. Справа `![]` — `false` (массив истинен).
+Ступень 5: `false` → 0, теперь `[] == 0`. Ступень 6: `[]` → ToPrimitive → «»,
+теперь `"" == 0`. Ступень 3: «» → 0, и `0 == 0` — `true`. Никакой магии — четыре
+шага. `null == 0` ложно: `null` на ступени 2 равен только `undefined`, а до числа
+его никто не доводит. `document.all == null` — та же поблажка `[[IsHTMLDDA]]`.
+
+Отсюда и единственная привычка, ради которой `==` пишут нарочно: `x == null` истинно
+ровно для `null` и `undefined`. А два объекта с обеих сторон — один тип, ступень 1, и
+сравниваются они как `===`, по тождеству:
+
+```js
+console.log([] == [], null == undefined, 0 == null, "" == null, false == null);
+```
+
+<ResultBox>
+false true false false false
+</ResultBox>
+
+[IsStrictlyEqual](https://tc39.es/ecma262/2026/#sec-isstrictlyequal) (7.2.14) — без лестницы:
+разные типы — `false`, числа — `Number::equal` (NaN не равен себе, нули равны), остальное —
+SameValueNonNumber.
+
+```js
+console.log(NaN === NaN, 0 === -0, 1n === 1, "a" === "a", {} === {});
+```
+
+<ResultBox>
+false true false true false
+</ResultBox>
+
+## 15. «Карточки 2.0»: ключ из dataset {#cards}
+
+Кнопки колод «Карточек 2.0» (день 34 курса 2) хранят номер колоды в атрибуте и читают его обратно:
+
+```js
+// main.js, день 34 курса 2 — кнопки колод
+button.dataset.deck = info.id;
+chosen = button.dataset.deck;
+```
+
+Номера колод в `decks.json` — строки («school», «food»), и всё работает. Но у карточек номера —
+числа (`"id": 1`), а `dataset` хранит только строки: запись проходит через ToString.
+Представим, что номер карточки положили в кнопку так же и ищем по нему прогресс:
+
+```js
+const progress = new Map([[1, { step: 2 }]]);
+const plain = { 1: { step: 2 } };
+const button = document.createElement("button");
+button.dataset.card = 1;
+console.log(typeof button.dataset.card, progress.get(button.dataset.card));
+console.log(JSON.stringify(progress.get(Number(button.dataset.card))), JSON.stringify(plain[button.dataset.card]));
+console.log(button.dataset.card === 1, button.dataset.card == 1);
+```
+
+<ResultBox>
+string undefined\
+\{"step":2\} \{"step":2\}\
+false true
+</ResultBox>
+
+<Scheme src="scheme-cards.svg">Один и тот же номер в двух хранилищах</Scheme>
+
+Обычный объект нашёл прогресс, потому что ключ свойства — всегда строка или символ. `Map` хранит
+ключи любых типов и сравнивает их SameValue (после замены −0 на +0), поэтому «1» и 1 для неё разные. Ошибка тихая: никакого
+исключения, просто `undefined` — и колода «забывает» шаги. Поэтому в «Карточках 2.0» номера колод
+строковые с самого начала, а номер карточки из разметки нужно переводить в число явно.
+
+Та же развилка ждёт в `localStorage`. Ключи объекта в JSON — всегда строки, а элементы массива
+сохраняют тип:
+
+```js
+console.log(Object.keys(JSON.parse('{"1": 2}')), JSON.parse("[[1, 2]]")[0][0] === 1);
+```
+
+<ResultBox>
+(1) \['1'\] true
+</ResultBox>
+
+Поэтому `save` «Карточек 2.0» (день 33) записывает прогресс не объектом, а списком пар:
+`{"$map":[[1, …]]}`. Номер карточки возвращается из хранилища числом, и `Map` находит его.
+
+## 16. Что будет завтра {#next}
+
+Сегодня числа преобразовывались целиком. Завтра, на дне 6, — числа как биты: побитовые операторы,
+`ToInt32`, `ToUint32`, сдвиги и оператор `void` — почему `~~x` отбрасывает
+дробь и где у числа «32-битная» жизнь.
+
+<Ref>
+| Раздел | Что там | Как разбираем |
+| --- | --- | --- |
+| [7 Abstract Operations](https://tc39.es/ecma262/2026/#sec-abstract-operations) | операции не из языка | <Brief /> |
+| [7.1 Type Conversion](https://tc39.es/ecma262/2026/#sec-type-conversion) | неявные преобразования; у BigInt их нет | <Full /> |
+| [7.1.1 ToPrimitive](https://tc39.es/ecma262/2026/#sec-toprimitive) | подсказка, Symbol.toPrimitive, OrdinaryToPrimitive | <Full /> |
+| [7.1.2 ToBoolean](https://tc39.es/ecma262/2026/#sec-toboolean) | семь ложных значений и `[[IsHTMLDDA]]` | <Full /> |
+| [7.1.3 ToNumeric](https://tc39.es/ecma262/2026/#sec-tonumeric) | как ToNumber, но BigInt остаётся | <Brief /> |
+| [7.1.4 ToNumber](https://tc39.es/ecma262/2026/#sec-tonumber) | таблица по типам, строки по грамматике | <Full /> |
+| [7.1.5 ToIntegerOrInfinity](https://tc39.es/ecma262/2026/#sec-tointegerorinfinity) | NaN — 0, дробь — прочь | <Brief /> |
+| [7.1.13 ToBigInt](https://tc39.es/ecma262/2026/#sec-tobigint) | таблица 12; Number — ошибка | <Brief /> |
+| [7.1.14 StringToBigInt](https://tc39.es/ecma262/2026/#sec-stringtobigint) | строка по грамматике целых | <Brief /> |
+| [7.1.17 ToString](https://tc39.es/ecma262/2026/#sec-tostring) | таблица по типам; Symbol — ошибка | <Full /> |
+| [7.1.18 ToObject](https://tc39.es/ecma262/2026/#sec-toobject) | объекты-обёртки; `null` — ошибка | <Full /> |
+| [7.1.19 ToPropertyKey](https://tc39.es/ecma262/2026/#sec-topropertykey) | строка или символ | <Full /> |
+| [7.1.20 ToLength](https://tc39.es/ecma262/2026/#sec-tolength) | длина от 0 до 2<sup>53</sup> − 1 | <Brief /> |
+| [7.1.21 CanonicalNumericIndexString](https://tc39.es/ecma262/2026/#sec-canonicalnumericindexstring) | «1» — число, «1.0» — нет | <Brief /> |
+| [7.1.22 ToIndex](https://tc39.es/ecma262/2026/#sec-toindex) | номер или RangeError | <Brief /> |
+| [7.2 Testing and Comparison](https://tc39.es/ecma262/2026/#sec-testing-and-comparison-operations) | проверки и сравнения | <Full /> |
+| [7.2.1 RequireObjectCoercible](https://tc39.es/ecma262/2026/#sec-requireobjectcoercible) | `null` и `undefined` — ошибка | <Brief /> |
+| [7.2.2 IsArray](https://tc39.es/ecma262/2026/#sec-isarray) | массив или Proxy над ним | <Brief /> |
+| [7.2.3 IsCallable](https://tc39.es/ecma262/2026/#sec-iscallable) | `[[Call]]` | <Brief /> |
+| [7.2.4 IsConstructor](https://tc39.es/ecma262/2026/#sec-isconstructor) | `[[Construct]]` | <Brief /> |
+| [7.2.5 IsExtensible](https://tc39.es/ecma262/2026/#sec-isextensible-o) | `[[IsExtensible]]` | <Brief /> |
+| [7.2.6 IsRegExp](https://tc39.es/ecma262/2026/#sec-isregexp) | `Symbol.match` или слот | <Brief /> |
+| [7.2.7 IsStringWellFormedUnicode](https://tc39.es/ecma262/2026/#sec-isstringwellformedunicode) | одинокие половинки | <Brief /> |
+| [7.2.8 SameType](https://tc39.es/ecma262/2026/#sec-sametype) | один ли тип | <Brief /> |
+| [7.2.9 SameValue](https://tc39.es/ecma262/2026/#sec-samevalue) | NaN равен NaN, нули разные | <Full /> |
+| [7.2.10 SameValueZero](https://tc39.es/ecma262/2026/#sec-samevaluezero) | нули равны | <Brief /> |
+| [7.2.11 SameValueNonNumber](https://tc39.es/ecma262/2026/#sec-samevaluenonnumber) | всё, кроме чисел | <Brief /> |
+| [7.2.12 IsLessThan](https://tc39.es/ecma262/2026/#sec-islessthan) | строки по элементам, LeftFirst | <Full /> |
+| [7.2.13 IsLooselyEqual](https://tc39.es/ecma262/2026/#sec-islooselyequal) | лестница `==` | <Full /> |
+| [7.2.14 IsStrictlyEqual](https://tc39.es/ecma262/2026/#sec-isstrictlyequal) | `===` | <Full /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// ToPrimitive(x, hint): не объект — как есть; Symbol.toPrimitive (Date, Symbol) — день 17;
+//   иначе string: toString → valueOf, number и без подсказки: valueOf → toString; оба объекты — TypeError
+// подсказка number: +x, x * 1, x < y; string: String(x), `${x}`, obj[x]; без: x + y, x == y
+// ToBoolean false: undefined null +0 −0 NaN 0n "" (и document.all); всё прочее, даже [] и "0", — true
+// ToNumber: undefined NaN, null 0, "" 0, " 12 " 12, "0x1F" 31, "1_000" NaN, [] 0, [5] 5, {} NaN; Symbol, BigInt — TypeError
+// ToString: −0 "0", 1e21 "1e+21", [1,[2,3]] "1,2,3", {} "[object Object]"; Symbol — TypeError, но String(sym) работает
+// ToObject: null, undefined — TypeError; ToPropertyKey: символ или ToString — 1 и "1" один ключ
+// ToBigInt: "" 0n, "1.5" SyntaxError; BigInt(1.5) — RangeError (другой путь)
+
+// SameValue: NaN = NaN, +0 ≠ −0 (Object.is) · SameValueZero: и нули равны (includes) · === : NaN ≠ NaN
+// Map и Set: ключ −0 → +0 (CanonicalizeKeyedCollectionKey), потом SameValue — итог как у SameValueZero
+// x < y: две строки — по кодам ("10" < "9"), иначе числа; NaN — undefined → false
+// x == y: один тип — ===; null == undefined; строка → число; boolean → число; объект → примитив; иначе false
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `mark + ""` вызвал `valueOf`, а не `toString`?
+   <Answer>Сложение зовёт ToPrimitive без подсказки, а без подсказки OrdinaryToPrimitive идёт как при
+   number: сначала `valueOf`. Что справа строка, он узнаёт уже после — и склеивает.</Answer>
+2. Что даёт `+[]`, `+[5]` и `+[1, 2]` и почему?
+   <Answer>0, 5 и NaN. ToNumber объекта — ToPrimitive с подсказкой number; `valueOf` массива
+   возвращает сам массив, поэтому работает `toString`: «», «5», «1,2». Дальше строка по
+   грамматике числовых строк.</Answer>
+3. Чем отличаются `Object.is`, `includes` и `===` на NaN и −0?
+   <Answer>SameValue (`Object.is`): NaN равен NaN, нули разные. SameValueZero (`includes`):
+   NaN равен NaN, нули равны. IsStrictlyEqual (`===`): NaN не равен NaN, нули равны.</Answer>
+4. Почему `"10" < "9"` — `true`, а `"10" < 9` — `false`?
+   <Answer>Две строки IsLessThan сравнивает по 16-битным элементам: «1» меньше «9». Если хотя бы одна
+   сторона — число, обе переводятся в числа, и 10 больше 9.</Answer>
+5. Пройдите лестницу для `[] == ![]`.
+   <Answer>`![]` — `false`; boolean → 0: `[] == 0`; объект → ToPrimitive → «»:
+   `"" == 0`; строка → число: `0 == 0` — `true`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness" />

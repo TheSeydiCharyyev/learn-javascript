@@ -1,0 +1,124 @@
+---
+title: День 12 — конспект
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+---
+
+# День 12. Функции и классы по спецификации
+
+<Subtitle>Выжимка лекции: параметры и их окружение, создание каждого вида функции, порядок создания класса и хвостовые вызовы.</Subtitle>
+
+## Главное
+
+<Definition>
+Каждая функция рождается в OrdinaryFunctionCreate: прототип, текст, параметры, тело, режим `this` и
+окружение. Вид функции решают добавки: **MakeConstructor** (`prototype` и
+`new`) у `function` и класса, **MakeMethod** (\[\[HomeObject\]\] для
+`super`) у методов. Параметры получают значения в FunctionDeclarationInstantiation — до первой
+инструкции тела.
+</Definition>
+
+## Параметры и их окружение
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+const len = [function (a, b = 1, c) {}, function ({ a }, ...rest) {}].map((f) => f.length);
+console.log(len.join());                  // 1,1 — до первого умолчания или остатка; шаблон — один
+var x = "внешний";
+function one(a = () => x) { var x = "тело"; return a(); }
+console.log(one());                       // внешний — у var тела своё окружение
+function order(a = b, b = 1) { return a + b; }
+console.log(attempt(() => order()));      // ReferenceError — b правее, ещё в мёртвой зоне
+const boom = () => { throw new Error("умолчание"); };
+console.log(attempt(() => (function* (y = boom()) {})()));   // Error — генератор бросает при вызове
+const p = (async (y = boom()) => {})();
+p.catch(() => {});
+console.log(p instanceof Promise);        // true — async-функция вернула отклонённый промис
+```
+
+<Remember>
+Параметры — слева направо, умолчание — при каждом вызове и только для `undefined`. Умолчание видит
+левых соседей, `this` и `arguments`, но не `var`, `let` и функции
+тела. Есть код в параметрах — у `var` тела своё окружение. Не простой список — без
+`"use strict"`, без повторов имён, и `arguments` не связан с параметрами.
+</Remember>
+
+## Функции, стрелки и методы
+
+```js
+const fact = function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); };
+console.log(fact(4), typeof factorial);   // 24 undefined — имя видно только внутри
+const rename = function r() { r = 0; return typeof r; };
+console.log(rename());                    // function — запись в имя молча пропала
+const obj = { m() {}, f: function () {} };
+console.log("prototype" in obj.m, "prototype" in obj.f);   // false true — метод не конструктор
+function outer() { return (() => this.name)(); }
+console.log(outer.call({ name: "снаружи" }));   // снаружи — у стрелки нет своего this
+```
+
+| Вид | `prototype` | `new` | `this` |
+| --- | --- | --- | --- |
+| `function f() {}` | есть, записываемый | да | свой |
+| `class C {}` | есть, не записываемый | только с `new` | свой |
+| стрелка | нет | нет | снаружи |
+| метод `{ m() {} }` | нет | нет | свой, и `super` |
+| `function*`, `async function*` | есть, без своего `constructor` | нет | свой |
+| `async function` | нет | нет | свой |
+
+<Remember>
+Объявление создаётся заранее, при входе в функцию, скрипт или блок; выражение — на своей строке. Имя выражения
+живёт в своём окружении: неизменяемое, но запись в него бросает только в строгом коде. Генератор считает
+параметры при вызове и бросает ошибку сразу; async-функция отклоняет промис.
+</Remember>
+
+## Классы и хвостовые вызовы
+
+```js
+const log = [];
+const say = (text, v) => { log.push(text); return v; };
+class Card {
+  [say("ключ", "show")]() {}
+  word = say("поле", "kitap");
+  static count = say("static", 0);
+  static { say("блок"); }
+}
+console.log(log.join(", "));    // ключ, static, блок — поле ждёт new
+new Card();
+console.log(log.join(", "));    // ключ, static, блок, поле — поле на каждом new
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+console.log(attempt(() => { class B { [B.name]() {} } }));   // ReferenceError — имя класса до шага 8 без значения
+function countdown(n) { "use strict"; return n === 0 ? "дно" : countdown(n - 1); }
+console.log(attempt(() => countdown(1e6)));                    // RangeError — V8 не делает хвостовые вызовы
+```
+
+<Remember>
+ClassDefinitionEvaluation: classEnv (имя без значения) → `extends` → `proto` и F →
+элементы по порядку (ключи и методы сразу) → имя получает F → статические поля и блоки по порядку. Поля
+экземпляра — на каждом `new`. Хвостовой вызов — последний шаг строгой обычной функции:
+`return f()`, ветки `?:`, правая часть `&&`, `||`,
+`??`. V8 его не делает — глубокую рекурсию пишут циклом.
+</Remember>
+
+<Homework>
+1. Предскажите `length` у `function f(a, { b } = {}, ...c) {}` и результат
+   `two()` для `function two(a = () => x, x = 2) { var x = 3; return [a(), x].join(); }`.
+   Объясните шагами FunctionDeclarationInstantiation.
+2. Предскажите журнал для
+   `class A extends say("e", Object) { static { say("b"); } [say("k", "m")]() {} static s = say("s", 1); }`
+   и найдите каждую строку среди шагов 15.7.14.
+3. По правилам HasCallInTailPosition (15.10.2) решите, какие вызовы хвостовые в строгой функции:
+   `return a ? f() : g() + 1;`, `return (log(), k());`,
+   `for (const x of xs) return f(x);`, `try { return f(); } finally { cleanup(); }`.
+4. Прочитайте раздел «Evaluation order» страницы MDN
+   [Classes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes) и
+   сопоставьте его семь пунктов с шагами 15.7.14. Почему MDN называет пункты 2 и 4 ненаблюдаемыми?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions)
+(Functions, Default parameters, Arrow function expressions, Classes, Static initialization blocks, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

@@ -1,0 +1,256 @@
+---
+title: День 20 — задания
+---
+
+# День 20. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-20` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага. `DataView`, `Float16Array` и base64 не трогаем — они на дне 21.</Subtitle>
+
+## Разминка
+
+<Task title="1. Что запишется" level="easy" time="7">
+<Goal>предсказывать запись в вид по операциям главы 7.</Goal>
+
+```js
+const kinds = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint32Array, Float32Array];
+console.log(kinds.map((K) => K.of(-1.5, 128, 65537, "0x1F", NaN).join(",")).join(" | "));
+console.log(BigUint64Array.of(-1n)[0] === 2n ** 64n - 1n, new Int8Array([127, 128, 255, 256]).join(), Uint8ClampedArray.of(-0.5, 0.5, 254.5, 255.5).join());
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого вида названа операция главы 7 и шаг, который решил −1.5 и 65537;
+- объяснено, почему строка «0x1F» записалась как 31 и почему `Float32Array` сохранил −1.5 и NaN.
+</Criteria>
+</Task>
+
+<Task title="2. Ключи вида" level="easy" time="7">
+<Goal>проходить внутренние методы 10.4.5 на краевых ключах.</Goal>
+
+```js
+"use strict";
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const ta = Int16Array.of(1, 2, 3);
+ta[3] = 4; ta["1e0"] = 5; ta[1e0] = 6; ta["-1"] = 7;
+console.log(ta.join(), Object.keys(ta).join(), "1e0" in ta, run(() => { ta.length = 10; }), ta.length);
+console.log(run(() => { delete ta[3]; }), run(() => { delete ta[2]; }), run(() => Object.defineProperty(ta, 2, { get() { return 1; } })), run(() => Object.preventExtensions(ta)), Object.isExtensible(ta));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждой из четырёх записей строки `ta[3] = 4; …` назван шаг CanonicalNumericIndexString и
+  метода, решивший её судьбу;
+- объяснено, почему бросает `ta.length = 10`, почему `delete ta[3]` проходит, а
+  `delete ta[2]` — нет, и почему `preventExtensions` здесь удался, а у вида на
+  изменяемом буфере (лекция, раздел 13) — нет.
+</Criteria>
+</Task>
+
+<Task title="3. Три вида на восьми байтах" level="easy" time="6">
+<Goal>видеть, какие байты читает каждый вид.</Goal>
+
+```js
+const buf = new ArrayBuffer(8);
+const u8 = new Uint8Array(buf), i16 = new Int16Array(buf, 2, 2), f32 = new Float32Array(buf, 4, 1);
+i16[0] = -1;
+f32[0] = 1;
+console.log(u8.join(" "), i16[1], new Uint16Array(buf)[1]);
+u8.fill(0x40, 4);
+console.log(f32[0], i16.join(), u8.subarray(2, 4).join());
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого вида записаны номера байтов, которые он видит;
+- объяснено, откуда байты 128 и 63 у единицы во `Float32Array` и почему `i16[1]`
+  после `fill` — 16448.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. concat для видов" level="medium" time="14">
+<Goal>склеивать виды без поэлементного цикла.</Goal>
+
+Напишите `concatTyped(...views)`: новый вид того же вида, что первый аргумент (без аргументов —
+пустой `Uint8Array`), в который все аргументы по очереди положены через
+[set](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/set)
+со своим `targetOffset`. MDN: «The offset into the target array at which to begin writing values».
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+Array.from(concatTyped(Uint8Array.of(1, 2), Uint8Array.of(3)));             // [1, 2, 3]
+Array.from(concatTyped(Uint8Array.of(1), Int16Array.of(300, -1)));          // [1, 44, 255]
+Array.from(concatTyped(Uint8ClampedArray.of(1), Int16Array.of(300, -1)));   // [1, 255, 0]
+concatTyped().length;                                                        // 0
+run(() => concatTyped(Uint8Array.of(1), BigInt64Array.of(1n)));             // "TypeError"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях; в коде один `set` на аргумент и ни одного
+  цикла по элементам;
+- объяснено по SetTypedArrayFromTypedArray, почему −1 дало 255, а у `Uint8ClampedArray` — 0,
+  и каким шагом бросает смешение с BigInt;
+- наследник `Uint8Array` первым аргументом даёт наследника, а
+  `concatTyped(a.subarray(1), a.subarray(0, 1))` для `a = Uint8Array.of(1, 2, 3)` —
+  `[2, 3, 1]`.
+</Criteria>
+</Task>
+
+<Task title="5. Свой [[HasProperty]]" level="medium" time="12">
+<Goal>перенести 7.1.21 и 10.4.5.3 в код.</Goal>
+
+Напишите `canonicalIndex(key)` по CanonicalNumericIndexString
+([7.1.21](https://tc39.es/ecma262/2026/#sec-canonicalnumericindexstring)) через `Number` и
+`String` и `typedHas(ta, key)` по \[\[HasProperty\]\] вида: числовой ключ — проверка индекса,
+остальные — обычный `in`.
+
+<Example>
+```js
+Object.is(canonicalIndex("-0"), -0);                                     // true
+[canonicalIndex("01"), canonicalIndex("1e3"), canonicalIndex("1000")];   // [undefined, undefined, 1000]
+typedHas(Uint8Array.of(1, 2), "1");                                      // true
+typedHas(Uint8Array.of(1, 2), "1.5");                                    // false
+typedHas(Uint8Array.of(1, 2), "length");                                 // true
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на 25 ключах («-0», «1.5», «01», «NaN», «Infinity», «4294967295», «1e21», символ и другие) и трёх видах —
+  обычном, за границей изменяемого буфера и на отсоединённом — `typedHas` совпадает с
+  `in`;
+- объяснено, почему «1e-7» — числовой ключ, а «1e21» и «0.0000001» — нет, и каким шагом 10.4.5.3
+  `"length"` даёт `true`.
+</Criteria>
+</Task>
+
+<Task title="6. «Карточки 2.0»: счётчики на изменяемом буфере" level="medium" time="12">
+<Goal>держать вид, который растёт вместе с колодой.</Goal>
+
+Напишите `makeProgress(maxCards)` → `{ counts, add(), know(i), forget() }`: буфер
+изменяемый, `maxByteLength` — `maxCards`; `counts` — один
+`Uint8ClampedArray` без длины, созданный один раз; `add` добавляет карточку,
+`know(i)` прибавляет 1 к её счётчику, `forget` убирает последнюю.
+
+<Example>
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const p = makeProgress(3);
+p.add();
+p.add();
+p.know(1);
+p.know(1);
+Array.from(p.counts);                     // [0, 2]
+p.forget();
+p.counts.length;                          // 1
+p.counts[1];                              // undefined
+run(() => makeProgress(2).forget());      // "RangeError"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- 300 вызовов `know(0)` дают 255; четвёртый `add` при `maxCards` 3 —
+  `RangeError`, и названы шаги `resize`, которые его бросили;
+- объяснено, почему `counts` не нужно создавать заново после `add` и
+  `forget` и почему у забытой карточки счётчик — `undefined`.
+</Criteria>
+</Task>
+
+<Task title="7. Передача владения" level="medium" time="12">
+<Goal>переносить буфер и не терять, куда смотрел вид.</Goal>
+
+Напишите `take(view)`: новый вид того же вида на `view.buffer.transfer()` с тем же
+смещением и длиной.
+
+<Example>
+```js
+const a = Uint16Array.of(1, 2, 3);
+const sub = a.subarray(1);
+const b = take(sub);
+[a.length, sub.length, b.length];        // [0, 0, 2]
+Array.from(b);                            // [2, 3]
+[b.byteOffset, b.buffer.byteLength];      // [2, 6]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- объяснено, почему однострочник
+  `new view.constructor(view.buffer.transfer(), view.byteOffset, view.length)` возвращает
+  пустой вид;
+- объяснено, почему опустел и `a`, хотя передавали `sub`, каким шагом
+  ArrayBufferCopyAndDetach бросает повторный `take(sub)` и что `take` сохраняет
+  изменяемость буфера.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Насыщение своими руками" level="hard" time="10">
+<Goal>перенести ToUint8Clamp в код и увидеть, чем прокси не вид.</Goal>
+
+Напишите `toUint8Clamp(x)` по шагам 7.1.12 без `Uint8ClampedArray` и
+`Math.round` и `clamped(view)` — прокси дня 16 над `Uint8Array`, чья ловушка
+`set` зажимает значение для числовых ключей.
+
+<Example>
+```js
+const c = clamped(new Uint8Array(4));
+c[0] = 300;
+c[1] = 2.5;
+c[2] = -7;
+[c[0], c[1], c[2]];                                                // [255, 2, 0]
+[toUint8Clamp(3.5), toUint8Clamp(NaN), toUint8Clamp("254.5")];   // [4, 0, 254]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на 1529 значениях (от −60 до 320 с шагом 0.25, NaN, ±Infinity, «12», «», `null`,
+  `true`, 1e300) модель совпадает с `Uint8ClampedArray.from`;
+- `c.fill(1)`, `c.length` и `c.set([1])` бросают `TypeError`;
+  объяснено по 23.2.4.4 и дню 16 (раздел 5), почему, хотя `c[0]` читается.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: fill" level="hard" time="10">
+<Goal>читать алгоритм, который заранее не разбирали.</Goal>
+
+Прочитайте %TypedArray%.prototype.fill
+(<a href="https://tc39.es/ecma262/2026/#sec-%typedarray%.prototype.fill">23.2.3.9</a>) и предскажите:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+let calls = 0;
+const ta = new Uint8Array(5);
+ta.fill({ valueOf() { calls++; return 7; } });
+ta.fill({ valueOf() { calls++; return 9; } }, 5);
+console.log(ta.join(), calls);
+const victim = new Uint8Array(4);
+console.log(run(() => victim.fill({ valueOf() { victim.buffer.transfer(); return 1; } })), victim.length);
+const rab = new ArrayBuffer(4, { maxByteLength: 4 });
+const grow = new Uint8Array(rab);
+console.log(run(() => grow.fill({ valueOf() { rab.resize(2); return 3; } })), grow.join());
+```
+
+<Criteria>
+- предсказаны три строки;
+- объяснено, почему `valueOf` вызван и для пустого диапазона и сколько раз на пять
+  элементов;
+- названы шаги, которые бросают после отсоединения и которые без ошибки укорачивают заливку после
+  `resize(2)`.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray/set)
+(TypedArray.prototype.set(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

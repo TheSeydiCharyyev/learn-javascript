@@ -1,0 +1,273 @@
+---
+title: День 13 — задания
+---
+
+# День 13. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-13` курса 3 и открываем через Live Server: модулям нужен сервер. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага.</Subtitle>
+
+## Разминка
+
+<Task title="1. Семь скриптов одной страницы" level="easy" time="7">
+<Goal>проходить проверки GlobalDeclarationInstantiation.</Goal>
+
+```html
+<!-- index.html -->
+<script>var a = 1; let b = 2; function c() { return "c"; } globalThis.d = 4;</script>
+<script>let a = 10;</script>
+<script>var b = 20;</script>
+<script>let d = 40; console.log(d, globalThis.d);</script>
+<script>function c() { return "новая c"; } console.log(c());</script>
+<script>let c = 3;</script>
+<script>console.log(a, b, c(), d);</script>
+```
+
+<Criteria>
+- предсказаны все строки консоли, с ошибками;
+- для каждой ошибки названы шаг 16.1.7 и проверка: HasLexicalDeclaration или HasRestrictedGlobalProperty;
+- объяснено, почему функцию `c` объявить заново можно, а `let c` — нельзя
+  (CanDeclareGlobalFunction и флаги свойства).
+</Criteria>
+</Task>
+
+<Task title="2. Прямой или косвенный" level="easy" time="7">
+<Goal>применять правило 13.3.6.1 и шаги 5–6 PerformEval.</Goal>
+
+```js
+var scope = "глобальная";
+const box = { eval, run() { var scope = "метод"; return [eval("scope"), this.eval("scope"), (0, eval)("scope"), (() => eval("scope"))()].join(); } };
+console.log(box.run());
+function outer() { var scope = "внешняя"; return function inner() { return eval("scope"); }; }
+console.log(outer()(), eval?.("scope"), (eval)("scope"));
+function strictRun() { "use strict"; return [typeof eval("this"), typeof (0, eval)("this")].join(); }
+console.log(strictRun());
+```
+
+<Criteria>
+- предсказаны три строки;
+- для каждого вызова названо условие 13.3.6.1, которое выполнено или нарушено;
+- объяснено, почему стрелка внутри `run` видит `scope` метода, а
+  `this` строгой функции — `undefined` только у прямого eval.
+</Criteria>
+</Task>
+
+<Task title="3. Куда ляжет var" level="easy" time="6">
+<Goal>предсказывать окружения EvalDeclarationInstantiation.</Goal>
+
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return e.name; } };
+function a() { var v = 0; eval("var v = 1"); return v; }
+function b() { "use strict"; var v = 0; eval("var v = 1"); return v; }
+function c() { let v = 0; eval("var v = 1"); return v; }
+function d() { let v = 0; { eval("var w = 1"); } return typeof w; }
+function e() { eval("function v() {}"); return typeof v; }
+console.log([a, b, c, d, e].map(attempt).join(" "));
+function f(x = eval("var y = 'умолчание'"), z = () => y) { var y = "тело"; return [z(), y].join("/"); }
+console.log(f(), attempt(() => { (0, eval)('"use strict"; var hidden = 1'); return typeof hidden; }));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для `c` названо окружение, в котором EvalDeclarationInstantiation нашла `v`;
+- объяснено, куда лёг `var y` из умолчания и почему стрелка `z` его видит.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Своя GlobalDeclarationInstantiation" level="medium" time="12">
+<Goal>перенести 16.1.7 в код.</Goal>
+
+Глобальная запись — `{ props, lex }`: `props` — свойства окна, имя →
+`{ configurable, writable, enumerable }`; `lex` — Set лексических имён. Скрипт —
+`{ lex, vars, functions }`, списки имён. Напишите `declare(record, script)`: проверки шагов
+1–3 (ответ — `"SyntaxError: имя"` или `"TypeError: имя"`, и ничего не создано), потом
+создание — лексические в `lex`, новые функции и `var` — неудаляемые записываемые
+перечисляемые свойства; ответ — `"ok"`. Окно считаем расширяемым.
+
+<Example>
+```js
+const hard = { configurable: false, writable: false, enumerable: false };
+const win = { props: { undefined: hard, NaN: hard, d: { configurable: true, writable: true, enumerable: true } }, lex: new Set() };
+declare(win, { lex: ["b"], vars: ["a"], functions: ["c"] });      // "ok"
+declare(win, { lex: ["a"], vars: [], functions: [] });            // "SyntaxError: a"
+declare(win, { lex: [], vars: ["b"], functions: [] });            // "SyntaxError: b"
+declare(win, { lex: ["d"], vars: [], functions: [] });            // "ok"
+declare(win, { lex: [], vars: [], functions: ["c"] });            // "ok"
+declare(win, { lex: ["fresh", "c"], vars: [], functions: [] });   // "SyntaxError: c"
+win.lex.has("fresh");                                             // false
+declare(win, { lex: [], vars: [], functions: ["NaN"] });          // "TypeError: NaN"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- те же семь скриптов страницей в Chrome дают те же ответы, кроме одного — найдено, какого, и
+  сказано, кто прав по тексту 2026;
+- объяснено, почему модели не нужен шаг 4 (CanDeclareGlobalVar) в браузере.
+</Criteria>
+</Task>
+
+<Task title="5. Свой порядок модулей" level="medium" time="12">
+<Goal>повторить обход InnerModuleEvaluation без `await`.</Goal>
+
+Граф — объект: имя модуля → список его запросов в порядке текста. Напишите
+`evaluationOrder(graph, entry)` — порядок, в котором модули выполнят своё тело: модуль отмечается до
+обхода своих запросов, отмеченный второй раз пропускается, тело — после всех запросов.
+
+<Example>
+```js
+evaluationOrder({ main: ["a", "b"], a: ["c"], b: ["c"], c: [] }, "main");              // ["c", "a", "b", "main"]
+evaluationOrder({ main: ["a"], a: ["b", "c"], b: ["c"], c: ["a"] }, "main");           // ["c", "b", "a", "main"]
+evaluationOrder({ main: ["storage", "load"], load: ["deck", "card", "errors"], card: ["errors"], deck: ["errors"], errors: [], storage: [] }, "main");   // ["storage", "errors", "deck", "card", "load", "main"]
+```
+</Example>
+
+<Criteria>
+- все три строки примера дают то, что в комментариях;
+- те же три графа, собранные файлами, где каждый модуль печатает своё имя, дают в Chrome тот же порядок;
+- названо поле Cyclic Module Record, которое играет роль отметки, и чего в модели нет: CycleRoot,
+  EvaluationError, AsyncEvaluationOrder.
+</Criteria>
+</Task>
+
+<Task title="6. Без eval" level="medium" time="12">
+<Goal>заменить eval средством по задаче.</Goal>
+
+Три функции написаны через eval:
+
+```js
+function getSetting(settings, path) { return eval(`settings.${path}`); }
+function calc(a, op, b) { return eval(`${a} ${op} ${b}`); }
+function parseDeck(text) { return eval(`(${text})`); }
+console.log(getSetting({ size: { font: 16 } }, "size.font"), calc(6, "*", 7), parseDeck('[{"word": "kitap"}]')[0].word);
+```
+
+Перепишите их без eval: путь — через `split` и квадратные скобки, `calc` — таблицей
+функций для `+ - * /` и ошибкой «нет операции «…»» для остального, колода — `JSON.parse`.
+
+<Example>
+```js
+const attempt = (f) => { try { return String(f()); } catch (e) { return `${e.name}: ${e.message}`; } };
+getSetting({ size: { font: 16 } }, "size.font");    // 16
+getSetting({ theme: "dark" }, "theme; alert(1)");    // undefined
+calc(6, "*", 7);                                     // 42
+attempt(() => calc(1, "; alert(1); 1", 2));          // "Error: нет операции «; alert(1); 1»"
+parseDeck('[{"word": "kitap"}]')[0].word;            // "kitap"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на странице с CSP `script-src 'self' 'unsafe-inline'` старые функции бросают EvalError,
+  новые работают;
+- объяснено, зачем в `calc` проверка `Object.hasOwn`: что дал бы
+  `calc(1, "constructor", 2)` без неё.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: цикл card.js и deck.js" level="medium" time="14">
+<Goal>находить мёртвую зону в цикле модулей и чинить её.</Goal>
+
+В `card.js` добавили колоду-образец, и теперь `card.js` и `deck.js`
+импортируют друг друга. Модель:
+
+```js
+// card.js
+import { Deck } from "./deck.js";
+export class Card { constructor(word) { this.word = word; } }
+export const EMPTY = new Deck([]);
+console.log("card.js: пустая колода готова");
+```
+
+```js
+// deck.js
+import { Card } from "./card.js";
+export class Deck { constructor(words) { this.cards = words.map((w) => new Card(w)); } }
+console.log("deck.js");
+```
+
+```js
+// load.js
+import "./deck.js";
+import "./card.js";
+console.log("load.js");
+```
+
+```js
+// main.js
+import "./load.js";
+console.log("main.js");
+```
+
+<Criteria>
+- предсказан вывод и названо, какой модуль выполнился первым и почему (InnerModuleEvaluation);
+- два исправления: переставить импорты в `load.js` и заменить `EMPTY` функцией
+  `emptyDeck()`; со вторым страница работает при любом порядке импортов;
+- объяснено, почему первое исправление хрупкое: какой новый импорт в другом файле его сломает.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Свой ResolveExport" level="hard" time="12">
+<Goal>перенести 16.2.1.7.2.2 в код.</Goal>
+
+Модуль — `{ local, indirect, star }`: свои экспорты, пересылаемые (имя →
+`[модуль, имя]`, `"*"` — объект модуля) и список `export *`. Напишите
+`resolveExport(mods, name, exportName)` по шагам раздела 8 лекции. Ответ — строка
+`"модуль.имя"` (`"модуль.*"` для объекта модуля), `null` или
+`"ambiguous"`.
+
+<Example>
+```js
+const mods = {
+  ru: { local: ["hello", "yes", "default"] }, tk: { local: ["hello", "bye"] }, base: { local: ["hello"] },
+  a: { star: ["base"] }, b: { star: ["base"] }, all: { star: ["ru", "tk"] }, same: { star: ["a", "b"] },
+  mine: { local: ["hello"], star: ["ru"] }, ns: { indirect: { ru: ["ru", "*"] } }, loop1: { star: ["loop2"] }, loop2: { star: ["loop1"] },
+};
+resolveExport(mods, "all", "bye");        // "tk.bye"
+resolveExport(mods, "all", "hello");      // "ambiguous"
+resolveExport(mods, "all", "default");    // null
+resolveExport(mods, "same", "hello");     // "base.hello"
+resolveExport(mods, "mine", "hello");     // "mine.hello"
+resolveExport(mods, "ns", "ru");          // "ru.*"
+resolveExport(mods, "loop1", "x");        // null
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- те же модули файлами в Chrome: каждый ответ-строка — значение импорта, `null` — «does not
+  provide an export», `"ambiguous"` — «conflicting star exports»;
+- написана `namespaceKeys(mods, name)` — GetExportedNames и отбор GetModuleNamespace; для
+  `all` она совпала с `Object.keys` настоящего объекта модуля.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: ранние ошибки экспортов" level="hard" time="8">
+<Goal>прочитать раздел, который на лекции был строкой справочника.</Goal>
+
+Прочитайте [16.2.3.1](https://tc39.es/ecma262/2026/#sec-exports-static-semantics-early-errors) и
+предскажите шесть ответов: модуль из строки загружается через адрес `data:`.
+
+```js
+const parse = async (code) => { try { await import("data:text/javascript," + encodeURIComponent(code)); return "ok"; } catch (e) { return e.name; } };
+const samples = ['const x = 1; export { x as "x y" };', 'export { "x y" };', 'const x = 1; export { x as if };', 'export { if };', 'export { static };', 'export { undeclared };'];
+Promise.all(samples.map(parse)).then((results) => console.log(results.join(" ")));
+```
+
+<Criteria>
+- предсказана строка;
+- каждая SyntaxError сопоставлена правилу 16.2.3.1, а для одной найден другой раздел;
+- объяснено по примечанию 16.2.3.1, почему `x as if` можно, а `{ if }` — нет.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval)
+(eval(), import defer, import source, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

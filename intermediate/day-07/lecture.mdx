@@ -1,0 +1,735 @@
+---
+title: "День 7 — Прототипы: цепочка, Object.create, new и instanceof"
+day: День 7 • урок 1
+heading: "Прототипы: цепочка, Object.create, new и instanceof"
+lead: Курс 2, Intermediate. Модуль «Прототипы и классы» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+  h3 { color: #9a3412; }
+  .step-number { background: #f97316; }
+  .toc a { color: #c2410c; }
+---
+
+<Goals>
+- объяснять, откуда объект берёт свойства, которых у него нет: цепочка прототипов и её
+  конец — `null`;
+- создавать объекты с нужным прототипом через `Object.create`, читать и проверять
+  прототип;
+- писать функцию-конструктор с методами в `prototype` и называть четыре шага
+  `new`;
+- понимать, что проверяет `instanceof`, и предсказывать его странные ответы;
+- делать словарь без унаследованных ключей через `Object.create(null)`.
+</Goals>
+
+<Toc />
+
+## 1. Загадка унаследованного {#riddle}
+
+С дня 21 Essentials мы пользуемся тем, чего никогда не писали. У объекта
+`{ name: "Аман" }` одно своё свойство, а метод `toString` у него есть.
+На дне 5 мы назвали такие свойства унаследованными, на дне 6 увидели их список в разделе 20.1.3
+спецификации — и каждый раз откладывали главный вопрос: откуда они берутся?
+
+```js
+const student = { name: "Аман" };
+
+console.log(Object.hasOwn(student, "toString"), "toString" in student);   // false true
+console.log(typeof student.toString);                                      // function
+```
+
+Своего `toString` нет, а `in` его находит и вызвать его можно. Сегодня —
+ответ. С него начинается модуль «Прототипы и классы»: четыре дня о том, как объекты делят методы
+между собой. Сегодня механизм — прототипы, с завтрашнего дня — классы, построенные на нём.
+
+## 2. Прототип и цепочка {#chain}
+
+У каждого объекта есть скрытая ссылка на другой объект — его **прототип**
+(от греческого «первообраз»). В спецификации это внутренний слот `[[Prototype]]` —
+двойные скобки, как у `[[Environment]]` дня 1. Прочитать его можно функцией
+`Object.getPrototypeOf`:
+
+```js
+const student = { name: "Аман" };
+const proto = Object.getPrototypeOf(student);
+
+console.log(proto === Object.prototype);         // true
+console.log(Object.hasOwn(proto, "toString"));   // true — вот где он живёт
+console.log(Object.getPrototypeOf(proto));       // null — дальше ничего
+```
+
+Прототип объекта из литерала — `Object.prototype`, тот самый общий объект раздела
+20.1.3. `toString` лежит в нём. У самого `Object.prototype` прототипа нет —
+`null`. Так получается **цепочка прототипов**: объект → его прототип →
+прототип прототипа → … → `null`. Свои цепочки есть у массивов и функций:
+
+```js
+const marks = [5, 4];
+function greet() {}
+
+console.log(Object.getPrototypeOf(marks) === Array.prototype);             // true
+console.log(Object.getPrototypeOf(Array.prototype) === Object.prototype);  // true
+console.log(Object.getPrototypeOf(greet) === Function.prototype);          // true
+console.log(Object.hasOwn(greet, "call"), Object.hasOwn(Function.prototype, "call"));   // false true
+```
+
+Теперь сходится всё, что модуль I1 откладывал. `call`, `apply` и
+`bind` дня 2 — не свои у каждой функции, а свойства `Function.prototype`:
+то самое «общее хранилище» дня 4. Методы массивов — в `Array.prototype`. А в конце
+любой цепочки — `Object.prototype` и `null`.
+
+<Scheme src="scheme-chain.svg">Три цепочки сходятся в `Object.prototype`</Scheme>
+
+## 3. Свой прототип: Object.create {#create}
+
+Прототип можно назначить самому. `Object.create(proto)` создаёт новый пустой объект,
+прототипом которого будет `proto`:
+
+```js
+const studentMethods = {
+  greet() {
+    return `Салам, ${this.name}!`;
+  },
+  get initial() {
+    return this.name[0];
+  },
+};
+
+const aman = Object.create(studentMethods);
+aman.name = "Аман";
+const meret = Object.create(studentMethods);
+meret.name = "Мерет";
+
+console.log(aman.greet(), meret.greet(), aman.initial);   // Салам, Аман! Салам, Мерет! А
+console.log(aman.greet === meret.greet, Object.keys(aman));   // true ['name']
+```
+
+У `aman` и `meret` по одному своему свойству — `name`. Метод
+`greet` один на двоих: `aman.greet === meret.greet`. Это обещал день 2:
+«методы можно сделать общими для многих объектов». Тысяча студентов — одна функция
+`greet`, а не тысяча копий, как у фабрики дня 1.
+
+Второй аргумент `Object.create` — дескрипторы свойств, как у `defineProperties`
+дня 5, и с теми же умолчаниями `false`:
+
+```js
+const base = { kind: "студент" };
+const aman = Object.create(base, { name: { value: "Аман", enumerable: true } });
+
+console.log(aman.kind, Object.getOwnPropertyDescriptor(aman, "name"));
+// студент {value: 'Аман', writable: false, enumerable: true, configurable: false}
+```
+
+Первый аргумент обязан быть объектом или `null`. Ошибку без аргумента вы видели
+на дне 12 Essentials: `Object.create()` —
+`TypeError: Object prototype may only be an Object or null: undefined`.
+
+## 4. Как ищется свойство {#lookup}
+
+Правило поиска короткое: сначала свои свойства объекта; не нашли — прототип, потом его
+прототип, и так до `null`; дошли до `null` — `undefined`. Поэтому
+`aman.missing` — `undefined`: поиск прошёл `aman`,
+`studentMethods`, `Object.prototype` и упёрся в `null`.
+Спецификация описывает этот шаг в разделе
+[10.1.8.1 OrdinaryGet](https://tc39.es/ecma262/2026/#sec-ordinaryget): «своего свойства
+нет — взять прототип; прототип `null` — вернуть `undefined`; иначе спросить
+прототип».
+
+В этом шаге есть деталь, без которой прототипы были бы бесполезны. Спрашивая прототип, язык
+передаёт ему и исходный объект — в спецификации он называется Receiver, «получатель». Геттер,
+найденный в прототипе, вызывается с `this`, равным получателю. А метод мы вызываем
+через точку у `aman`, и по правилу дня 2 `this` — тоже `aman`.
+Поэтому `aman.initial` — «А»: геттер живёт в `studentMethods`, а читает имя
+у `aman`.
+
+<Scheme src="scheme-lookup.svg">Где найдено — в прототипе; с чем работает — с `aman`</Scheme>
+
+<Important>
+Где метод **лежит** и с каким `this` он **работает** — разные
+вопросы. Лежит он в прототипе, один на всех. Работает с тем объектом, у которого его вызвали.
+Это и делает общие методы возможными.
+</Important>
+
+У поиска есть цена: несуществующее свойство всегда проходит цепочку до самого конца. В обычной
+программе это незаметно, но учебник MDN советует не строить слишком длинных цепочек — каждое звено
+добавляет шаг к каждому неудачному поиску.
+
+## 5. Запись: своё закрывает унаследованное {#shadow}
+
+Чтение идёт по цепочке, а запись — нет. Присваивание создаёт или меняет **своё**
+свойство объекта, прототип оно не трогает:
+
+```js
+const defaults = { topic: "все", count: 0 };
+const deck = Object.create(defaults);
+
+deck.topic = "еда";
+console.log(deck.topic, defaults.topic, Object.keys(deck));   // еда все ['topic']
+delete deck.topic;
+console.log(deck.topic);                                      // все — снова видно унаследованное
+for (const key in deck) {
+  console.log("for...in:", key);                              // topic, потом count
+}
+```
+
+Своё свойство `topic` **затенило** унаследованное: поиск находит своё
+первым и дальше не идёт. Удалили своё — снова видно свойство прототипа. А последние строки —
+та самая причина, по которой день 21 Essentials не любил `for...in`: он перебирает и
+унаследованные перечисляемые свойства. Своих у `deck` после `delete` нет,
+а `for...in` нашёл два ключа прототипа. `Object.keys(deck)` дал бы пустой
+массив.
+
+Два исключения, оба из дня 5. Если в цепочке нашёлся **сеттер**, присваивание
+вызовет его с `this` — исходным объектом, и своё свойство с этим именем не появится.
+А если унаследованное свойство **только для чтения**, присваивание не сработает
+вовсе — даже своё свойство не создастся:
+
+```js
+const base = Object.freeze({ level: 1 });
+const card = Object.create(base);
+
+card.level = 2;
+console.log(card.level, Object.keys(card));   // 1 [] — запись молча пропала
+```
+
+В строгом режиме — знакомое `Cannot assign to read only property 'level'`, хотя
+у самой `card` такого свойства нет. Правило записано в разделе
+[10.1.9.2](https://tc39.es/ecma262/2026/#sec-ordinarysetwithowndescriptor): свойство-данные
+с `writable: false`, найденное в цепочке, запрещает запись. Своё свойство с тем же
+именем всё же можно создать, но только через `defineProperty`. Программисты прозвали
+это правило «ошибкой переопределения» (override mistake), но так записано в спецификации, и Chrome
+ему следует.
+
+## 6. Проверить и сменить прототип {#inspect}
+
+```js
+const base = { a: 1 };
+const middle = Object.create(base);
+const last = Object.create(middle);
+
+console.log(base.isPrototypeOf(last), last.isPrototypeOf(base));            // true false
+console.log(Object.getPrototypeOf(Object.getPrototypeOf(last)) === base);   // true
+```
+
+`isPrototypeOf` отвечает, есть ли объект где-то в цепочке другого, — не обязательно
+первым звеном. `Object.getPrototypeOf` работает и с примитивами: сначала превращает
+значение в объект, как `Object()` дня 6, поэтому `Object.getPrototypeOf("abc")` —
+`String.prototype`. Сменить прототип готового объекта можно функцией
+`Object.setPrototypeOf(obj, proto)`, но MDN предупреждает: это медленная операция.
+Движки подстраивают работу с объектом под его цепочку, и смена её всё сбивает. Прототип задают при
+создании и больше не трогают.
+
+У смены прототипа есть и запреты — на MDN это две страницы «can't set prototype…». Первый —
+цепочка не может замкнуться в круг, иначе поиск свойства шёл бы бесконечно:
+
+```js
+const a = {};
+const b = Object.create(a);
+Object.setPrototypeOf(a, b);
+// TypeError: Cyclic __proto__ value
+```
+
+Алгоритм [10.1.2.1
+OrdinarySetPrototypeOf](https://tc39.es/ecma262/2026/#sec-ordinarysetprototypeof) перед сменой проходит новую цепочку и, встретив сам объект, отказывает.
+Второй запрет — нерасширяемый объект (день 6): `TypeError: #<Object> is not extensible`.
+А у `Object.prototype` прототип неизменяем всегда — `Immutable prototype object
+'Object.prototype' cannot have their prototype set`: иначе одна строка поменяла бы поведение
+всех объектов программы.
+
+### \_\_proto\_\_
+
+В старом коде прототип читают и меняют через свойство `obj.__proto__`. Это аксессор
+из `Object.prototype` (раздел 20.1.3.8), и у него в спецификации пометка «устаревшее,
+необязательное». Подвох в том, что у объекта без `Object.prototype` в цепочке этого
+аксессора нет. Пишите `Object.getPrototypeOf` и `Object.setPrototypeOf`.
+Другое дело — `__proto__` **в литерале**: это стандартная запись, которая
+задаёт прототип прямо при создании. Её повтор в одном литерале запрещён — ошибка дня 21 Essentials.
+
+```js
+const base = { kind: "студент" };
+const aman = { __proto__: base, name: "Аман" };
+
+console.log(aman.kind, Object.keys(aman), Object.getPrototypeOf(aman) === base);   // студент ['name'] true
+```
+
+## 7. Функция-конструктор и new {#new}
+
+`Object.create` удобен, но свойства каждого объекта приходится добавлять вручную.
+Много однотипных объектов создают **функцией-конструктором** и оператором
+`new`. Так написано почти всё до появления классов в 2015 году, и так классы устроены
+внутри:
+
+```js
+function Student(name, marks) {
+  this.name = name;
+  this.marks = marks;
+}
+
+Student.prototype.average = function () {
+  return this.marks.reduce((a, b) => a + b, 0) / this.marks.length;
+};
+
+const aman = new Student("Аман", [5, 4, 5]);
+const meret = new Student("Мерет", [4, 4]);
+
+console.log(aman.average(), meret.average());                     // 4.666666666666667 4
+console.log(aman.average === meret.average);                      // true
+console.log(Object.getPrototypeOf(aman) === Student.prototype);   // true
+console.log(aman);                                                // Student {name: 'Аман', marks: Array(3)}
+```
+
+Имя конструктора пишут с большой буквы — договорённость, как у `Date` и
+`Error`: «вызывать с `new`». Что делает `new Student(...)` —
+четыре шага из раздела
+[10.2.2
+\[\[Construct\]\]](https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects-construct-argumentslist-newtarget):
+
+1. Создать новый пустой объект, прототипом которого станет `Student.prototype`.
+2. Вызвать `Student` с `this`, равным этому объекту, — строка таблицы
+   дня 2 «`new F()` — новый объект».
+3. Тело функции пишет в `this` свои свойства нового объекта.
+4. Вернуть новый объект — если функция сама не вернула другой объект.
+
+<Scheme src="scheme-new.svg">Что делает `new Student("Аман", [5, 4, 5])`</Scheme>
+
+Консоль подписала объект `Student {…}` — по конструктору его прототипа. А шаг 4
+с оговоркой: если конструктор вернул объект, `new` отдаст его вместо нового; примитив
+в `return` игнорируется. Пользуются этим редко:
+
+```js
+function Maker() {
+  this.a = 1;
+  return { b: 2 };
+}
+
+console.log(new Maker());   // {b: 2} — вернула свой объект, новый пропал
+```
+
+### Почему методы — в prototype
+
+Метод можно написать и прямо в конструкторе: `this.greet = function () {…}`. Работать
+будет, но у каждого объекта окажется своя копия функции:
+
+```js
+function Teacher(name) {
+  this.name = name;
+  this.greet = function () {
+    return `Салам, ${this.name}!`;
+  };
+}
+
+const a = new Teacher("Мерет");
+const b = new Teacher("Сапар");
+console.log(a.greet === b.greet, Object.keys(a));   // false ['name', 'greet']
+```
+
+У прототипа есть и второе преимущество: метод, добавленный в него **позже**, сразу
+появляется у всех уже созданных объектов — поиск идёт по цепочке в момент вызова:
+
+```js
+function Student(name, marks) {
+  this.name = name;
+  this.marks = marks;
+}
+const aman = new Student("Аман", [5, 4, 5]);
+
+Student.prototype.best = function () {
+  return Math.max(...this.marks);
+};
+console.log(aman.best());   // 5 — метод добавлен после создания aman
+```
+
+|  | Фабрика с замыканием (день 1) | Метод в конструкторе | Метод в `prototype` |
+| --- | --- | --- | --- |
+| копий функции | на каждый объект | на каждый объект | одна на всех |
+| видна в `Object.keys` | да | да | нет |
+| спрятанные данные | да, в замыкании | да, в замыкании | нет, только `this` |
+| добавить всем позже | нет | нет | да |
+
+Спрятать данные и при этом держать методы в прототипе позволяют приватные поля классов — день 9.
+
+## 8. Свойства prototype и constructor {#prototype}
+
+Откуда у `Student` свойство `prototype`? Его получает каждая обычная
+функция при создании — мы видели его на дне 5 в `Object.getOwnPropertyNames(greet)`.
+Это обычный объект с одним свойством — `constructor`, ссылкой обратно на функцию:
+
+```js
+function Student(name) {
+  this.name = name;
+}
+
+console.log(Object.getOwnPropertyNames(Student.prototype), Student.prototype.constructor === Student);
+// ['constructor'] true
+const aman = new Student("Аман");
+console.log(aman.constructor === Student, [].constructor === Array);   // true true
+```
+
+`aman.constructor` — унаследованное свойство: поиск нашёл его в
+`Student.prototype`. И не путайте два «прототипа». `Student.prototype` —
+свойство функции: объект, который станет прототипом её экземпляров. А прототип самой функции
+`Student` — `Function.prototype`. Учебник MDN подчёркивает то же различие:
+`func.prototype` и `[[Prototype]]` — разные вещи.
+
+`constructor` — обычное свойство и может потеряться. Частая ошибка — заменить
+`prototype` целиком:
+
+```js
+function Student(name) {
+  this.name = name;
+}
+Student.prototype = {
+  greet() {
+    return `Салам, ${this.name}!`;
+  },
+};
+
+const aman = new Student("Аман");
+console.log(aman.greet(), aman.constructor === Student, aman.constructor === Object);
+// Салам, Аман! false true
+```
+
+У нового литерала нет своего `constructor`, и поиск нашёл его выше — в
+`Object.prototype`. Методы работают, а `constructor` врёт. Поэтому методы
+добавляют по одному, как в разделе 7, или возвращают `constructor` вручную.
+
+### Кто не конструктор
+
+У стрелочных функций и методов (день 5) свойства `prototype` нет, и с
+`new` их не вызвать. Это ошибка «is not a constructor» из дня 13 Essentials:
+
+```js
+const card = {
+  show() {},
+};
+new card.show();
+// TypeError: card.show is not a constructor
+```
+
+Та же ошибка у `new Math()`: `Math` вообще не функция, а объект
+с методами. И одна синтаксическая: `new` нельзя сочетать с `?.` —
+`new Student?.("Аман")` даёт `SyntaxError: Invalid optional chain from new
+expression`. MDN объясняет запрет: `new` обязан вернуть объект, а
+`?.` может вернуть `undefined`, и результат был бы неясен.
+
+## 9. Забытый new {#forgot}
+
+```js
+function Student(name) {
+  this.name = name;
+}
+
+const aman = Student("Аман");      // без new
+console.log(aman, window.name);    // undefined Аман
+window.name = "";                  // вернём имя окна (день 3)
+```
+
+Без `new` это обычный вызов по имени, и в обычном скрипте `this` —
+глобальный объект (день 2). Строка `this.name = name` записала имя в свойство окна —
+то самое `name` дня 3 с его сеттером. Функция ничего не вернула, и `aman`
+стал `undefined`. В строгом режиме ошибка видна сразу:
+
+```js
+"use strict";
+function Student(name) {
+  this.name = name;
+}
+Student("Аман");
+// TypeError: Cannot set properties of undefined (setting 'name')
+```
+
+Это одна из причин, по которым конструкторы сменились классами: класс без `new`
+не вызвать совсем (день 8).
+
+## 10. instanceof изнутри {#instanceof}
+
+На дне 11 Essentials `e instanceof RangeError` различал виды ошибок. Теперь видно,
+что он проверяет: есть ли `RangeError.prototype` в цепочке прототипов `e`.
+Алгоритм [7.3.21
+OrdinaryHasInstance](https://tc39.es/ecma262/2026/#sec-ordinaryhasinstance): взять `prototype` правой части и идти по цепочке левой,
+сравнивая звено за звеном; дошли до `null` — `false`.
+
+```js
+function Student(name) {
+  this.name = name;
+}
+const aman = new Student("Аман");
+
+console.log(aman instanceof Student, aman instanceof Object);                  // true true
+console.log("abc" instanceof String, Object.create(null) instanceof Object);   // false false
+Object.setPrototypeOf(aman, Array.prototype);
+console.log(aman instanceof Student, aman instanceof Array, Array.isArray(aman));   // false true false
+```
+
+Из алгоритма следуют все странности. У примитива цепочки нет: `"abc" instanceof String`
+— `false`. Объект без прототипа не наследует от `Object`. А после смены
+прототипа `aman` «стал массивом» для `instanceof`, но не для
+`Array.isArray`: та проверяет, как объект устроен, а не его цепочку. Поэтому массивы
+проверяют `Array.isArray`, как учил день 19 Essentials. «Потомки» дня 11 Essentials тоже
+объяснились: цепочка `RangeError` проходит через `Error.prototype`, и
+`e instanceof Error` — `true`.
+
+Тот же вопрос без конструктора задаёт `Student.prototype.isPrototypeOf(aman)`.
+А справа от `instanceof` должна стоять функция с объектом в `prototype`.
+Иначе — один из трёх текстов V8 со страницы MDN «invalid 'instanceof' operand»:
+
+```js
+console.log({} instanceof {});
+// TypeError: Right-hand side of 'instanceof' is not callable
+```
+
+Число справа даёт `Right-hand side of 'instanceof' is not an object`, а функция с
+примитивом в `prototype` — `Function has non-object prototype '5' in instanceof
+check`. Полный алгоритм `instanceof`
+([13.10.2](https://tc39.es/ecma262/2026/#sec-instanceofoperator)) начинается с вопроса,
+не задал ли объект справа своё правило проверки особым методом-символом; символы — день 11.
+
+## 11. Встроенные прототипы {#builtins}
+
+Теперь можно вернуть два долга. На дне 14 Essentials и на дне 4 был
+`Array.prototype.slice.call(arguments)` — метод `slice`, взятый прямо из
+прототипа массивов и вызванный на чужом объекте (день 2). А приём дня 6 в обычном виде пишется так:
+
+```js
+console.log(Object.prototype.toString.call([5, 4]));                     // [object Array]
+console.log(Array.prototype.slice.call({ 0: "a", 1: "b", length: 2 }));   // ['a', 'b']
+console.log("abc".toUpperCase === String.prototype.toUpperCase);         // true
+```
+
+Последняя строка отвечает на вопрос дня 5 Essentials. Там говорилось, что примитив
+«на мгновение» заворачивается в объект-обёртку и одалживает у неё методы. Теперь видно, где они
+лежат: прототип обёртки — `String.prototype`.
+
+Встроенные прототипы можно менять — и это плохая идея:
+
+```js
+Array.prototype.last = function () {
+  return this[this.length - 1];
+};
+
+for (const i in [5, 4]) {
+  console.log("for...in:", i);   // 0, 1 и last
+}
+delete Array.prototype.last;     // уберём за собой
+```
+
+<Mistake>
+Метод, добавленный в `Array.prototype`, появился у всех массивов программы — и в
+переборе `for...in` тоже: присваивание создаёт перечисляемое свойство (день 5). Хуже
+того, если в языке когда-нибудь появится свой метод с тем же именем, ваш код его подменит.
+MDN советует встроенные прототипы не расширять никогда — кроме полифилов, то есть кода,
+который добавляет новую возможность языка в старый браузер.
+</Mistake>
+
+## 12. Object.create(null) как словарь {#dict}
+
+Объект-словарь — обычный приём Essentials: на дне 18 так считали броски кубика,
+`counts[n] = (counts[n] || 0) + 1`. Но у `{}` есть прототип, а в нём —
+`constructor`, `toString` и ещё десять свойств. Если ключом окажется одно
+из этих слов, словарь сломается:
+
+```js
+const words = ["book", "constructor", "book"];
+
+const plain = {};
+for (const w of words) {
+  plain[w] = (plain[w] ?? 0) + 1;
+}
+console.log(plain.book, typeof plain.constructor);   // 2 string
+
+const dict = Object.create(null);
+for (const w of words) {
+  dict[w] = (dict[w] ?? 0) + 1;
+}
+console.log(dict.book, dict.constructor, "toString" in dict);   // 2 1 false
+```
+
+В `plain` слово «constructor» нашло унаследованную функцию `Object`,
+и `??` её не заменил: функция — не `null`. Функция плюс единица — строка
+`"function Object() { [native code] }1"`. В `dict` прототипа нет, а значит,
+нет и ключей «из ниоткуда». Цена — нет и полезного: `dict.hasOwnProperty` — не функция
+(берите `Object.hasOwn`, день 5), а `String(dict)` и шаблон с ним падают:
+`Cannot convert object to primitive value` — превращать нечем, `toString`
+нет. Полноценный словарь с любыми ключами — `Map`, день 14.
+
+До 2022 года, когда появился `Object.hasOwn`, библиотеки проверяли такие словари длинной
+записью `Object.prototype.hasOwnProperty.call(dict, "book")`: метод берут прямо из
+`Object.prototype` и вызывают на словаре, как `slice` в разделе 11. Встретите
+её в чужом коде — теперь её можно прочитать.
+
+## 13. «Карточки»: общие методы {#cards}
+
+Соберём день в «Карточках». Каждая карточка — объект со своими данными, а методы
+`flip` и `text` — один раз, в прототипе. Счёт по темам — в словаре без
+прототипа, а загрузка из JSON показывает, что прототип в JSON не сохраняется.
+
+```js
+function Card(id, word, translation, topic) {
+  this.id = id;
+  this.word = word;
+  this.translation = translation;
+  this.topic = topic;
+  this.flipped = false;
+}
+
+Card.prototype.flip = function () {
+  this.flipped = !this.flipped;
+  return this.text();
+};
+Card.prototype.text = function () {
+  return this.flipped ? this.translation : this.word;
+};
+
+const data = [
+  [1, "book", "книга", "школа"],
+  [4, "bread", "хлеб", "еда"],
+  [5, "water", "вода", "еда"],
+  [7, "house", "дом", "дом"],
+];
+const cards = data.map(([id, word, translation, topic]) => new Card(id, word, translation, topic));
+
+console.log(cards[1].flip(), cards[1].flip(), cards[2].text());
+console.log(cards[0].flip === cards[3].flip, Object.keys(cards[0]).length);
+
+const byTopic = Object.create(null);
+for (const card of cards) {
+  byTopic[card.topic] = (byTopic[card.topic] ?? 0) + 1;
+}
+console.log(JSON.stringify(byTopic));
+
+const saved = JSON.parse(JSON.stringify(cards[1]));
+console.log(saved instanceof Card, typeof saved.flip);
+const restored = Object.assign(Object.create(Card.prototype), saved);
+console.log(restored instanceof Card, restored.flip());
+```
+
+<ResultBox>
+хлеб bread water\
+true 5\
+\{"школа":1,"еда":2,"дом":1\}\
+false undefined\
+true хлеб
+</ResultBox>
+
+**Строка 1 — общие методы.** `flip` перевернул карточку
+`bread` туда и обратно, `text` показал слово третьей карточки. Каждый вызов
+работал со «своей» карточкой: `this` — объект слева от точки.
+
+**Строка 2 — сколько чего.** Функция `flip` одна на все карточки,
+своих свойств у карточки пять — только данные.
+
+**Строка 3 — словарь.** Темы стали ключами словаря без прототипа: тема вроде
+«constructor» не сломала бы счёт.
+
+**Строки 4 и 5 — загрузка.** JSON хранит только свои перечисляемые свойства
+(день 5), а прототип — нет: после `JSON.parse` карточка — простой объект без методов.
+Так было со словами `words.json` на днях 33–36 Essentials. Вернуть методы — значит
+вернуть прототип: `Object.create(Card.prototype)` даёт пустую «карточку», а
+`Object.assign` копирует в неё данные. Восстановленная карточка снова умеет
+переворачиваться.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Добавьте
+``Card.prototype.toString = function () { return `карточка ${this.word}`; };``
+и выведите `` `${cards[0]}` ``. Где шаблон находит `toString` теперь и где
+находил раньше?
+\
+\
+**Второй.** Замените `Object.create(null)` на `{}` и добавьте
+в данные карточку с темой `"toString"`. Что стало со счётом и почему?
+\
+\
+**Третий.** Создайте карточку без `new`:
+`const lost = Card(9, "apple", "яблоко", "еда")`. Что в `lost` и куда
+делись `word` и `flipped`? Проверьте `globalThis.word`.
+</TryIt>
+
+## 14. Что дальше {#next}
+
+Прототип — ссылка объекта на объект, цепочка таких ссылок — путь поиска свойства, а
+`new` связывает каждый новый объект с `prototype` конструктора. Это весь
+механизм наследования в JavaScript.
+
+Завтра — классы. Объявление `class Student` создаёт ту же функцию-конструктор
+и тот же `Student.prototype`, что мы писали сегодня вручную, только короче и строже:
+без `new` класс не вызвать, а методы в прототипе неперечисляемые и в
+`for...in` не всплывут. Все сегодняшние проверки — `getPrototypeOf`,
+`instanceof`, `constructor` — для классов ответят так же.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Guide: Inheritance and the prototype chain](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain) | прототип, цепочка, поиск свойства, конструкторы | <Full /> |
+| [Object.getPrototypeOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getPrototypeOf) | прочитать `[[Prototype]]` | <Full /> |
+| [Object.create()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/create) | новый объект с заданным прототипом; второй аргумент — дескрипторы | <Full /> |
+| [Object.setPrototypeOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/setPrototypeOf) | сменить прототип; медленно; запреты | <Full /> |
+| [Object.prototype.isPrototypeOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isPrototypeOf) | есть ли объект в цепочке другого | <Full /> |
+| [new](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/new) | четыре шага; возврат своего объекта | <Full /> |
+| [Object.prototype.constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/constructor) | ссылка из `prototype` на функцию; теряется при замене | <Full /> |
+| [instanceof](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/instanceof) | есть ли `F.prototype` в цепочке | <Full /> |
+| [Object.prototype.\_\_proto\_\_](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/proto) | устаревший аксессор; `__proto__` в литерале — стандарт | <Brief /> |
+| [Ошибка: "x" is not a constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Not_a_constructor) | `new` со стрелочной, методом, `Math` | <Brief /> |
+| [Ошибка: new keyword cannot be used with an optional chain](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_new_optional) | `Invalid optional chain from new expression` | <Brief /> |
+| [Ошибка: it would cause a prototype chain cycle](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cyclic_prototype) | `Cyclic __proto__ value` | <Brief /> |
+| [Ошибка: can't set prototype of this object](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_set_prototype) | нерасширяемый объект, `Object.prototype` | <Brief /> |
+| [Ошибка: invalid 'instanceof' operand](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/invalid_right_hand_side_instanceof_operand) | справа не функция или `prototype` не объект | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// у объекта есть [[Prototype]] — ссылка на другой объект; цепочка кончается null
+// {} → Object.prototype → null;  [] → Array.prototype → Object.prototype → null
+// function → Function.prototype (call, apply, bind) → Object.prototype → null
+
+// чтение: своё → прототип → его прототип → … → null → undefined
+// метод из прототипа работает с this того объекта, у которого его вызвали
+// запись: создаёт СВОЁ свойство (затеняет); исключения — сеттер в цепочке
+//   и свойство только для чтения в цепочке (запись молча пропадает)
+// for...in видит и унаследованные перечисляемые; Object.keys — только свои
+
+// Object.create(proto, дескрипторы) — объект с прототипом proto
+// Object.getPrototypeOf(obj); proto.isPrototypeOf(obj) — в цепочке ли
+// Object.setPrototypeOf — медленно; цикл и нерасширяемый объект — TypeError
+// obj.__proto__ — устарело; { __proto__: proto } в литерале — можно
+
+// function F(a) { this.a = a; }  F.prototype.method = function () {};
+// new F(1): 1) {} с [[Prototype]] = F.prototype  2) F с this = {}
+//           3) тело пишет свойства  4) вернуть объект (или объект из return)
+// методы — в F.prototype: одна копия на всех; добавленный позже есть и у старых объектов
+// F.prototype.constructor === F; заменили prototype целиком — constructor потерян
+// без new: this — окно (обычный режим) или undefined (строгий) — TypeError
+// стрелочные и методы не конструкторы; new с ?. — SyntaxError
+
+// x instanceof F — есть ли F.prototype в цепочке x; примитивы — false
+// Object.create(null) — словарь без унаследованных ключей (и без toString)
+// встроенные прототипы не расширять
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Где лежит `toString` объекта `{ name: "Аман" }` и как поиск его
+   находит?
+   <Answer>В `Object.prototype` — прототипе объекта из литерала. Своего свойства нет,
+   поиск идёт в прототип и находит его там.</Answer>
+2. Метод `average` лежит в `Student.prototype`. Почему
+   `aman.average()` считает оценки именно Амана?
+   <Answer>Метод вызван через точку у `aman`, и `this` внутри —
+   `aman`. Где метод лежит, на `this` не влияет.</Answer>
+3. Назовите четыре шага `new F()`.
+   <Answer>Создать объект с прототипом `F.prototype`; вызвать `F` с
+   `this` — этим объектом; тело пишет свойства; вернуть объект, если
+   `F` не вернула свой объект.</Answer>
+4. Почему `"abc" instanceof String` — `false`, хотя у строки есть
+   методы `String.prototype`?
+   <Answer>`instanceof` слева ждёт объект с цепочкой прототипов, а `"abc"` —
+   примитив. Методы ему одалживает временная обёртка, но в `instanceof` её нет.</Answer>
+5. Зачем словарю `Object.create(null)` вместо `{}`?
+   <Answer>У `{}` в прототипе есть `constructor`, `toString` и
+   другие свойства — ключи с такими именами найдут их и сломают счёт. У словаря без
+   прототипа унаследованных ключей нет.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Inheritance_and_the_prototype_chain" />

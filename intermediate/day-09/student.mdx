@@ -1,0 +1,95 @@
+---
+title: День 9 — конспект
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+---
+
+# День 9. Приватные элементы и static
+
+<Subtitle>Выжимка лекции: приватные поля, методы и аксессоры, проверка `#x in obj`, раздел 9.2, статические поля, методы и блок.</Subtitle>
+
+## Приватные элементы
+
+```js
+class Account {
+  #balance = 0;                           // объявить в теле класса
+
+  #check(sum) {                           // приватный метод
+    if (sum <= 0) {
+      throw new RangeError("сумма должна быть больше нуля");
+    }
+  }
+
+  deposit(sum) {
+    this.#check(sum);
+    this.#balance = this.#balance + sum;  // доступ только внутри класса
+    return this;
+  }
+
+  get balance() {
+    return this.#balance;
+  }
+
+  static isAccount(obj) {
+    return #balance in obj;               // проверка клейма
+  }
+}
+
+const account = new Account().deposit(100);
+account.balance;                          // 100
+Object.keys(account);                     // []
+```
+
+<Remember>
+Снаружи класса `obj.#x` — `SyntaxError: Private field '#x' must be declared in an
+enclosing class`, скрипт не запускается. **Консоль DevTools — исключение**:
+там к приватному полю можно обратиться для отладки, поэтому проверять приватность надо в файле.
+</Remember>
+
+<KeyPoint>
+`#x` не свойство: его не видят `Object.keys`, `for...in`, JSON,
+spread; `delete` нельзя; `Object.freeze` на него не действует.
+`obj["#x"]` — другое, обычное свойство. У чужого объекта чтение `#x` бросает
+`TypeError`, а не даёт `undefined`. Внутри класса доступен `#x`
+любого объекта этого класса. Приватные ошибки бросаются всегда, «тихого» режима у них нет.
+</KeyPoint>
+
+## Раздел 9.2
+
+Запись приватного окружения создаётся при каждой оценке класса: `[[Names]]` — его
+приватные имена, `[[OuterPrivateEnvironment]]` — запись внешнего класса.
+ResolvePrivateIdentifier ищет имя у себя, потом снаружи — поэтому вложенный класс видит
+`#`-имена внешнего. Приватные имена глобально уникальны: два класса из одной фабрики —
+разные `#count`. Значения лежат в `[[PrivateElements]]` объекта, по цепочке
+прототипов их не ищут.
+
+## static
+
+| Где | Что | Как достать |
+| --- | --- | --- |
+| функция-класс | `static` поля и методы | `Card.count`, `Card.create()` |
+| `Card.prototype` | обычные методы, геттеры | `card.flip()` |
+| каждый объект | поля, `#`-поля | `card.word` |
+
+<NoteBox>
+Объект статических элементов не видит: цепочка не проходит через функцию-класс.
+`Object.keys`, `Array.isArray`, `Number.isInteger` — статические
+методы встроенных классов. В статическом методе `this` — класс, но отделённый метод
+его теряет; надёжнее писать имя класса. `static { … }` — блок, который выполняется
+один раз при объявлении класса, вместе со статическими полями, в порядке записи.
+</NoteBox>
+
+<Homework>
+1. Переведите служебные поля одного класса своего проекта с `_x` на `#x`
+   и проверьте в файле, что снаружи к ним не обратиться.
+2. Добавьте этому классу статический фабричный метод, который создаёт объект из простого
+   объекта JSON.
+3. Прочитайте на MDN раздел «Simulating private constructors» страницы
+   [Private elements](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_elements)
+   и объясните своими словами, как статическое приватное поле запрещает `new` снаружи.
+4. Найдите в разделе 9.2 спецификации таблицу 18 и сравните её поля с полями записи окружения
+   из раздела 9.1 (день 1): что общего и в чём разница.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_elements" />

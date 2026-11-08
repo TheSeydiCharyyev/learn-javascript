@@ -1,0 +1,971 @@
+---
+title: "День 5 — Свойства изнутри: дескрипторы, геттеры и сеттеры"
+day: День 5 • урок 1
+heading: "Свойства изнутри: дескрипторы, геттеры и сеттеры"
+lead: Курс 2, Intermediate. Модуль «Объекты глубже» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #a855f7; }
+  h2 { color: #7e22ce; background: #faf5ff; border-left-color: #a855f7; }
+  h3 { color: #6b21a8; }
+  .step-number { background: #a855f7; }
+  .toc a { color: #7e22ce; }
+---
+
+<Goals>
+- читать дескриптор любого свойства и объяснять по нему, можно ли свойство записать,
+  увидеть при переборе и удалить;
+- создавать и менять свойства через `Object.defineProperty` и помнить, какие
+  признаки он ставит сам;
+- знать, что видят `Object.keys`, `for...in`, JSON, spread
+  и `Object.getOwnPropertyNames`;
+- писать геттеры и сеттеры: вычисляемое свойство, проверку значения, скрытое служебное поле;
+- понимать, чем сокращённая запись метода отличается от функции в свойстве.
+</Goals>
+
+<Toc />
+
+## 1. Две загадки дня 4 {#riddles}
+
+Вчера две вещи остались без ответа. Первая: `greet.name = "hello"` молча
+не срабатывает, а `delete greet.name` — срабатывает (задание 5). Вторая: свойства
+`name` и `length` у функции есть, а `Object.keys` их не видит.
+Соберём обе загадки в одном опыте:
+
+```js
+function greet() {}
+greet.name = "hello";
+
+console.log(greet.name);                     // greet — запись не сработала
+console.log(Object.keys(greet));             // [] — перебор свойства не видит
+console.log(Object.hasOwn(greet, "name"));   // true — а оно есть, и своё
+```
+
+Свойство одно, а ответы разные: прочитать можно, записать нельзя, перебор его не видит,
+удалить можно. Значит, кроме значения, у свойства есть ещё признаки, и каждый инструмент
+языка смотрит на свой. Эти признаки называются **атрибутами** свойства,
+а объект, который их перечисляет, — **дескриптором** (от англ. descriptor —
+«описатель»).
+
+С этого дня начинается модуль «Объекты глубже». Объекты вы знаете с дня 21 Essentials —
+снаружи: ключи, значения, перебор. Два дня модуля — взгляд изнутри: сегодня одно свойство,
+завтра объект целиком.
+
+## 2. Дескриптор свойства {#descriptor}
+
+Посмотреть дескриптор можно функцией `Object.getOwnPropertyDescriptor(объект, "ключ")`.
+Название длинное, но читается по словам: get own property descriptor — «получить дескриптор
+своего свойства». Возвращает она обычный объект:
+
+```js
+function greet() {}
+const student = { name: "Аман", age: 17 };
+
+console.log(Object.getOwnPropertyDescriptor(student, "name"));
+// {value: 'Аман', writable: true, enumerable: true, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(greet, "name"));
+// {value: 'greet', writable: false, enumerable: false, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(student, "phone"));
+// undefined — своего такого свойства нет
+```
+
+Четыре поля дескриптора — значение и три признака «да или нет»:
+
+| Поле | Что значит | Кто на него смотрит |
+| --- | --- | --- |
+| `value` | значение свойства | чтение `obj.x` |
+| `writable` | можно ли записать новое значение | присваивание `obj.x = …` |
+| `enumerable` | видно ли свойство при переборе | `Object.keys`, `for...in`, JSON, spread |
+| `configurable` | можно ли удалить свойство и менять его признаки | `delete`, `Object.defineProperty` |
+
+Теперь обе загадки читаются прямо из дескриптора `greet.name`.
+`writable: false` — поэтому запись не сработала. `enumerable: false` —
+поэтому `Object.keys` его не видит. `configurable: true` — поэтому
+сработал `delete` и поэтому имя можно переопределить (раздел 5). А у свойства
+`student.name` из литерала все три признака — `true`: так устроены все
+свойства, которые вы создавали в Essentials.
+
+<Scheme src="scheme-descriptor.svg">Дескриптор `greet.name`: три признака объясняют обе загадки дня 4</Scheme>
+
+Полезно посмотреть на дескрипторы знакомых свойств:
+
+```js
+console.log(Object.getOwnPropertyDescriptor(Math, "PI"));
+// {value: 3.141592653589793, writable: false, enumerable: false, configurable: false}
+console.log(Object.getOwnPropertyDescriptor([5, 4], "length"));
+// {value: 2, writable: true, enumerable: false, configurable: false}
+console.log(Object.getOwnPropertyDescriptor([5, 4], 0));
+// {value: 5, writable: true, enumerable: true, configurable: true}
+```
+
+`Math.PI` из дня 18 Essentials — настоящая константа: все признаки `false`.
+`length` массива записать можно, а перебор его не видит: `Object.keys([5, 4])` —
+это `['0', '1']`. Элементы массива — обычные свойства с ключами-номерами; номер
+`0` стал ключом `"0"`, как на дне 21 Essentials.
+
+## 3. writable: можно ли записать {#writable}
+
+Свойство с нужными признаками создаёт `Object.defineProperty(объект, "ключ", дескриптор)`
+— «определить свойство». Заведём у викторины номер, который нельзя менять:
+
+```js
+const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7 });
+
+quiz.id = 8;
+console.log(quiz.id);   // 7 — запись молча не сработала
+console.log(Object.getOwnPropertyDescriptor(quiz, "id"));
+// {value: 7, writable: false, enumerable: false, configurable: false}
+```
+
+Мы указали только `value`, а три признака оказались `false`. Это главное
+правило `defineProperty`, к нему вернёмся в разделе 6. А пока — та же тишина, что
+у `greet.name`. В строгом режиме — ошибка из таблицы дня 3:
+
+```js
+"use strict";
+const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7 });
+quiz.id = 8;
+// TypeError: Cannot assign to read only property 'id' of object '#<Object>'
+```
+
+`#<Object>` — так V8 называет в сообщениях обычный объект. На дне 4 у функции
+на этом месте стоял её исходный текст.
+
+<Important>
+`const` и `writable: false` защищают разное. `const` из дня 4
+Essentials запрещает положить в **переменную** другой объект, но не мешает
+менять его свойства. `writable: false` защищает одно **свойство**,
+а объект вокруг него можно менять как угодно.
+</Important>
+
+## 4. enumerable: видно ли при переборе {#enumerable}
+
+Признак `enumerable` («перечисляемое») решает, покажется ли свойство при переборе.
+Добавим студенту скрытый номер:
+
+```js
+const student = { name: "Аман" };
+Object.defineProperty(student, "id", { value: 17 });
+
+console.log(student.id);                           // 17 — читать можно
+console.log(Object.keys(student));                 // ['name']
+console.log(JSON.stringify(student));              // {"name":"Аман"}
+console.log({ ...student });                       // {name: 'Аман'}
+console.log(Object.getOwnPropertyNames(student));  // ['name', 'id']
+console.log(student.propertyIsEnumerable("id"));   // false
+```
+
+Свойство никуда не делось: по имени его прочитать можно. Но `Object.keys`, JSON
+и spread его пропускают. Видит его `Object.getOwnPropertyNames` — «имена своих
+свойств»: все строковые ключи, перечисляемые и нет. А метод `propertyIsEnumerable`
+отвечает на один вопрос: есть ли у объекта такое **своё** свойство и перечисляемое ли
+оно.
+
+Учебник MDN «Enumerability and ownership of properties» сводит всё в две таблицы. Вот их
+суть: кто какие свойства видит. Унаследованные — те, что достались объекту от языка,
+как `toString` на дне 21 Essentials; откуда они берутся — день 7.
+
+| Инструмент | своё, перечисляемое | своё, неперечисляемое | унаследованное |
+| --- | --- | --- | --- |
+| `Object.keys`, `values`, `entries` | да | нет | нет |
+| JSON, spread `{...obj}`, `Object.assign` | да | нет | нет |
+| `for...in` | да | нет | да, если перечисляемое |
+| `Object.getOwnPropertyNames` | да | да | нет |
+| `propertyIsEnumerable` | да | нет | нет |
+| `Object.hasOwn` | да | да | нет |
+| оператор `in` | да | да | да |
+
+Таблица объясняет совет дня 21 Essentials брать `Object.keys`, а не
+`for...in`: они расходятся в последнем столбце. И вчерашний пустой
+`Object.keys(greet)`: свои свойства функции `length`, `name`
+и `prototype` — неперечисляемые:
+
+```js
+function greet() {}
+greet.calls = 0;
+
+console.log(Object.keys(greet));                  // ['calls']
+console.log(Object.getOwnPropertyNames(greet));   // ['length', 'name', 'prototype', 'calls']
+```
+
+Свойство `prototype` — тема дня 7. Встроенные объекты почти все свои свойства прячут
+так же: у `Math` их больше сорока, а `Object.keys(Math)` — пустой массив.
+Иначе перебор любого объекта утонул бы в служебном.
+
+## 5. configurable: можно ли удалить и переопределить {#configurable}
+
+Последний признак — `configurable` («настраиваемое»). Если он `false`,
+свойство нельзя удалить и нельзя поменять его признаки. Обычный режим опять молчит, только
+`delete` отвечает `false` — а на дне 21 Essentials он отвечал `true`
+даже для несуществующего свойства:
+
+```js
+console.log(delete Math.PI, Math.PI);   // false 3.141592653589793
+```
+
+В строгом режиме — вторая обещанная днём 3 ошибка, «удаление неудаляемого свойства»:
+
+```js
+"use strict";
+delete Math.PI;
+// TypeError: Cannot delete property 'PI' of #<Object>
+```
+
+Отсюда и разница между `var` и простым свойством окна (день 3): `var`
+верхнего уровня создаёт свойство глобального объекта с `configurable: false`.
+
+```js
+var level = 1;
+globalThis.other = 2;
+
+console.log(delete globalThis.level, delete globalThis.other);   // false true
+```
+
+А вот попытка переопределить неконфигурируемое свойство через `defineProperty`
+падает **в любом режиме**. Молча не сработать `defineProperty` не умеет:
+либо сделал, либо бросил ошибку.
+
+```js
+const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7 });
+Object.defineProperty(quiz, "id", { value: 8 });
+// TypeError: Cannot redefine property: id
+```
+
+На MDN это страница «can't redefine non-configurable property». Два исключения из запрета,
+оба — про `writable`. Пока он `true`, значение можно менять и через
+`defineProperty`. И сам `writable` можно перевести из `true`
+в `false` — но не обратно:
+
+```js
+const quiz = {};
+Object.defineProperty(quiz, "id", { value: 7, writable: true });
+Object.defineProperty(quiz, "id", { value: 9 });         // можно: writable ещё true
+Object.defineProperty(quiz, "id", { writable: false });  // можно: true → false
+console.log(quiz.id);                                    // 9
+Object.defineProperty(quiz, "id", { writable: true });
+// TypeError: Cannot redefine property: id
+```
+
+Так устроен `length` массива из раздела 2: неконфигурируемый, но
+записываемый.
+
+### Разгадка: как переименовать функцию
+
+Теперь ответ на вторую половину вчерашней загадки. У `name` функции
+`writable: false`, но `configurable: true`. Присвоить нельзя, а
+переопределить — можно. Вчера обещали так переименовать обёртку `memo`:
+
+```js
+function memo(fn) {
+  const cache = {};
+  const wrapper = function (key) {
+    if (!Object.hasOwn(cache, key)) {
+      cache[key] = fn.call(this, key);
+    }
+    return cache[key];
+  };
+  Object.defineProperty(wrapper, "name", { value: `memo ${fn.name}` });
+  return wrapper;
+}
+
+function square(n) {
+  return n * n;
+}
+
+const fastSquare = memo(square);
+console.log(fastSquare.name, fastSquare(4));   // memo square 16
+```
+
+Теперь ошибка внутри обёртки покажет в стеке вызовов `at memo square`. Признаки `writable`
+и `enumerable` мы не указали — и они остались прежними, `false`: при
+**изменении** существующего свойства `defineProperty` трогает только
+указанное. Так же можно поправить `length` обёртки — это задание 7.
+
+## 6. Object.defineProperty целиком {#define}
+
+Соберём правила `defineProperty` в одном месте:
+
+1. **Новое свойство:** чего нет в дескрипторе, то `false`, а
+   `value` — `undefined`. Пустой дескриптор `{}` создаёт
+   невидимое свойство со значением `undefined`, которое нельзя ни записать,
+   ни удалить.
+2. **Существующее свойство:** меняется только то, что указали, остальное
+   остаётся как было.
+3. **Результат** — тот же объект, который передали первым аргументом.
+4. **Не молчит:** если изменение запрещено, бросает `TypeError`
+   в любом режиме.
+
+Первые два правила на одном объекте:
+
+```js
+const quiz = { position: 0 };
+Object.defineProperty(quiz, "position", { value: 5 });   // было — правило 2
+Object.defineProperty(quiz, "total", { value: 8 });      // не было — правило 1
+
+console.log(Object.getOwnPropertyDescriptor(quiz, "position"));
+// {value: 5, writable: true, enumerable: true, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(quiz, "total"));
+// {value: 8, writable: false, enumerable: false, configurable: false}
+```
+
+<Mistake>
+Частая ошибка — считать `Object.defineProperty(obj, "x", { value: 1 })` тем же,
+что `obj.x = 1`. Для нового свойства это не так: присваивание даёт все три признака
+`true`, а `defineProperty` — все три `false`. Свойство выйдет
+невидимым, неизменяемым и неудаляемым, и заметно это станет не сразу. Нужно обычное свойство —
+пишите признаки явно: `{ value: 1, writable: true, enumerable: true, configurable: true }`.
+</Mistake>
+
+### Несколько свойств сразу
+
+`Object.defineProperties(объект, { ключ: дескриптор, … })` делает то же для
+нескольких свойств: ключи второго аргумента — имена свойств, значения — их дескрипторы.
+Обратная функция — `Object.getOwnPropertyDescriptors(объект)`: дескрипторы всех
+своих свойств одним объектом.
+
+```js
+const deck = {};
+Object.defineProperties(deck, {
+  title: { value: "Карточки", enumerable: true },
+  version: { value: 2 },
+});
+
+console.log(Object.keys(deck), deck.version);          // ['title'] 2
+console.log(Object.getOwnPropertyDescriptors(deck));   // {title: {…}, version: {…}}
+```
+
+Вторую строку раскройте в консоли треугольником: под каждым ключом — его дескриптор.
+
+### Дескриптор — не объект
+
+Третий аргумент `defineProperty` обязан быть объектом. Число или `null`
+на его месте — ошибка. MDN называет её «"x" is not a non-null object», а Chrome пишет по-своему:
+
+```js
+Object.defineProperty({}, "x", 5);
+// TypeError: Property description must be an object: 5
+```
+
+Та же ошибка бывает в `defineProperties`, если значение одного из ключей — не
+объект: `{ title: "Карточки" }` вместо `{ title: { value: "Карточки" } }`.
+А если не объект — первый аргумент, сообщение другое:
+`Object.defineProperty called on non-object`.
+
+## 7. Геттер: свойство, которое считается {#getter}
+
+До сих пор за свойством стояло значение. Но бывают значения, которые не хранят, а
+**вычисляют**: средний балл зависит от оценок, процент выученного — от числа слов.
+Хранить их отдельно опасно: поменяли оценки — забыли обновить средний. В Essentials для этого
+писали функцию. Есть запись удобнее — **геттер** (от англ. get — «получить»):
+
+```js
+const student = {
+  name: "Аман",
+  marks: [5, 4, 5],
+  get average() {
+    const sum = this.marks.reduce((a, b) => a + b, 0);
+    return sum / this.marks.length;
+  },
+};
+
+console.log(student.average);   // 4.666666666666667
+student.marks.push(3);
+console.log(student.average);   // 4.25 — посчитано заново
+```
+
+Снаружи `average` выглядит как обычное свойство и читается без скобок. Но при
+каждом чтении язык вызывает функцию и отдаёт её результат. Внутри работает `this`
+дня 2: геттер вызывается у объекта, через который его прочитали, и `this` — этот
+объект.
+
+Запись геттера: слово `get`, имя, пустые скобки, тело с `return`.
+Параметров у геттера быть не может — при чтении свойства передать нечего:
+
+```js
+const student = {
+  get average(round) {
+    return 5;
+  },
+};
+// SyntaxError: Getter must not have any formal parameters.
+```
+
+Ошибка синтаксическая: скрипт не запустится целиком. На MDN это страница «getter functions
+must have no arguments».
+
+### Только геттер — запись некуда
+
+Что будет, если в `average` что-то записать? Сеттера нет, записывать некуда, и
+снова две реакции — обещанные таблицей дня 3 «свойства без сеттера»:
+
+```js
+"use strict";
+const student = {
+  marks: [5, 4],
+  get average() {
+    return (this.marks[0] + this.marks[1]) / 2;
+  },
+};
+student.average = 5;
+// TypeError: Cannot set property average of #<Object> which has only a getter
+```
+
+Без первой строки запись молча пропадёт, и `student.average` останется
+`4.5`. MDN называет эту ошибку «setting getter-only property» и отмечает: бывает она
+только в строгом режиме.
+
+## 8. Сеттер: свойство, которое проверяет {#setter}
+
+Пара геттеру — **сеттер** (от англ. set — «установить»): функция, которую язык
+вызывает при записи в свойство. Записанное значение приходит ей единственным аргументом.
+Главное применение — проверка. Оценка должна быть целым числом от 2 до 5:
+
+```js
+const student = {
+  _mark: 5,
+  get mark() {
+    return this._mark;
+  },
+  set mark(value) {
+    if (!Number.isInteger(value) || value < 2 || value > 5) {
+      console.log(`оценка ${value} не принята`);
+      return;
+    }
+    this._mark = value;
+  },
+};
+
+student.mark = 4;
+student.mark = 7;
+student.mark = "5";
+console.log(student.mark);   // 4
+```
+
+<ResultBox>
+оценка 7 не принята\
+оценка 5 не принята\
+4
+</ResultBox>
+
+Сеттер принял 4 и отбросил 7 и строку `"5"`: `Number.isInteger` из дня 17
+Essentials строку числом не считает. Само значение хранится в обычном свойстве
+`_mark`, а `mark` — только вход и выход: геттер читает, сеттер проверяет
+и пишет. Подчёркивание в начале имени — договорённость программистов: «служебное, снаружи не
+трогать». Язык его никак не защищает, об этом — раздел 10.
+
+У сеттера ровно один параметр. Без параметра или с двумя — синтаксическая ошибка:
+
+```js
+const student = {
+  set mark() {},
+};
+// SyntaxError: Setter must have exactly one formal parameter.
+```
+
+С `...rest` текст другой: `Setter function argument must not be a rest parameter`.
+На MDN оба случая — страница «setter functions must have one argument». Значение по умолчанию
+и деструктуризация в параметре сеттера разрешены. Свойство только с сеттером, без геттера,
+тоже бывает, но прочитать его нельзя: чтение даёт `undefined`.
+
+И одна ловушка, в которую попадает каждый:
+
+```js
+const student = {
+  set name(value) {
+    this.name = value;   // запись в name снова вызывает этот же сеттер
+  },
+};
+
+student.name = "Аман";
+// RangeError: Maximum call stack size exceeded
+```
+
+<Mistake>
+`this.name = value` внутри сеттера `name` — это снова запись в
+`name`, то есть снова вызов сеттера, и так без конца — бесконечная рекурсия дня 12
+Essentials с той же ошибкой. Поэтому значение и хранят в свойстве с другим именем:
+`_mark` для `mark`.
+</Mistake>
+
+## 9. Два вида свойств {#kinds}
+
+Теперь видно, что свойства бывают двух видов. Спецификация называет их
+**свойство-данные** (data property) и **свойство-аксессор**
+(accessor property, от англ. access — «доступ»). Дескрипторы у них разные:
+
+```js
+const student = {
+  _mark: 5,
+  get mark() {
+    return this._mark;
+  },
+};
+
+console.log(Object.getOwnPropertyDescriptor(student, "_mark"));
+// {value: 5, writable: true, enumerable: true, configurable: true}
+console.log(Object.getOwnPropertyDescriptor(student, "mark"));
+// {get: ƒ, set: undefined, enumerable: true, configurable: true}
+```
+
+У аксессора нет `value` и `writable` — вместо них `get`
+и `set`: функции или `undefined`. Буквой `ƒ` консоль Chrome
+коротко показывает функцию. `enumerable` и `configurable` есть у обоих видов.
+
+<Scheme src="scheme-kinds.svg">Снаружи оба вида читаются и пишутся одинаково, а внутри устроены по-разному</Scheme>
+
+### Аксессор через defineProperty
+
+Аксессор можно создать и через `defineProperty`: вместо `value` указать
+`get`, `set` или оба.
+
+```js
+const quiz = { words: ["bread", "water", "apple"] };
+Object.defineProperty(quiz, "total", {
+  get() {
+    return this.words.length;
+  },
+});
+
+console.log(quiz.total, Object.keys(quiz));   // 3 ['words']
+```
+
+Правило 1 раздела 6 действует и здесь: `enumerable` не указан — значит
+`false`, и `total` в `Object.keys` не попал. Смешать два вида
+в одном дескрипторе нельзя:
+
+```js
+Object.defineProperty({}, "total", {
+  value: 3,
+  get() {
+    return 3;
+  },
+});
+// TypeError: Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, #<Object>
+```
+
+И `get`, и `set` должны быть функциями: `{ get: 5 }` даст
+`TypeError: Getter must be a function: 5`.
+
+### Разгадка дня 3: имя окна
+
+Помните, на дне 3 `var name = 5` на верхнем уровне давало строку
+`"5"`? Мы сказали тогда, что свойство `name` у окна особое: «всё, что в него
+кладут, оно хранит строкой». Теперь видно, в чём особенность:
+
+```js
+const d = Object.getOwnPropertyDescriptor(window, "name");
+console.log(typeof d.get, typeof d.set);   // function function
+```
+
+`name` окна — аксессор. Браузер написал для него сеттер, который превращает
+значение в строку и сохраняет её как имя окна. `var name = 5` записало в свойство
+глобального объекта — то есть вызвало этот сеттер. Аксессоров среди свойств страницы много:
+`textContent` и `innerHTML` из дня 25 Essentials — тоже аксессоры. Запись
+в них вызывает функцию браузера, поэтому присваивание сразу меняет страницу.
+
+## 10. Скрытое служебное поле {#hidden}
+
+У студента из раздела 8 есть недостаток: служебное `_mark` видно везде.
+
+```js
+const student = {
+  _mark: 5,
+  get mark() {
+    return this._mark;
+  },
+};
+
+console.log(Object.keys(student));      // ['_mark', 'mark']
+console.log(JSON.stringify(student));   // {"_mark":5,"mark":5}
+```
+
+Оценка попала в JSON дважды. Геттер из литерала — перечисляемый, и `JSON.stringify`
+прочитал его как обычное свойство: вызвал и записал результат. Служебное поле спрячем через
+`enumerable: false`:
+
+```js
+const student = {
+  get mark() {
+    return this._mark;
+  },
+  set mark(value) {
+    if (Number.isInteger(value) && value >= 2 && value <= 5) {
+      this._mark = value;
+    }
+  },
+};
+Object.defineProperty(student, "_mark", { value: 5, writable: true });
+
+student.mark = 3;
+console.log(student.mark, Object.keys(student));   // 3 ['mark']
+console.log(JSON.stringify(student));              // {"mark":3}
+```
+
+Разберём дескриптор `_mark`. `writable: true` — иначе сеттер не смог бы
+записать новое значение. `enumerable` и `configurable` не указаны, значит,
+`false`. Снаружи объект выглядит так, будто у него одно свойство — `mark`.
+
+<Important>
+Скрытое — не значит защищённое. `student._mark = 100` сработает: поле записываемое,
+а сеттер при такой записи не вызывается. `enumerable: false` прячет поле от
+перебора и JSON, а не от записи. Настоящую защиту дают замыкание из дня 1 и приватные поля
+классов — день 9.
+</Important>
+
+## 11. Сокращённая запись методов {#methods}
+
+С первого дня курса мы пишем методы так: `show() {}` — без слова
+`function` и двоеточия. Essentials называл это короткой записью метода (дни 13 и 21).
+MDN называет её **определением метода** (method definition), и геттер с сеттером —
+её родственники: та же форма с приставкой `get` или `set`. Чем метод
+отличается от функции в свойстве?
+
+```js
+const quiz = {
+  show() {
+    return "show";
+  },
+  go: function () {
+    return "go";
+  },
+};
+
+console.log(Object.getOwnPropertyDescriptor(quiz, "show"));
+// {value: ƒ, writable: true, enumerable: true, configurable: true}
+console.log(quiz.show.name, quiz.go.name);   // show go
+console.log(Object.hasOwn(quiz.show, "prototype"), Object.hasOwn(quiz.go, "prototype"));
+// false true
+```
+
+Свойство одинаковое: свойство-данные, все признаки `true`, значение — функция.
+Имя тоже выводится одинаково, из ключа (таблица дня 4). Отличие — в самой функции: у метода
+нет свойства `prototype`, и с `new` его не вызвать —
+`new quiz.show()` бросит `TypeError: quiz.show is not a constructor`.
+Что такое `new` и `prototype`, разберём на дне 7. Ещё одно отличие —
+внутри метода работает слово `super`, это день 10.
+
+Имя метода записывается так же, как ключ литерала: можно в кавычках, а можно —
+**вычисляемое**, в квадратных скобках: ключом станет значение выражения. Перед
+именем могут стоять `get`, `set`, `async` (день 31 Essentials)
+и звёздочка генератора (день 12).
+
+```js
+const field = "score";
+const results = {
+  get [field]() {
+    return 10;
+  },
+  [field + "Max"]() {
+    return 20;
+  },
+  async load() {
+    return "загружено";
+  },
+};
+
+console.log(results.score, results.scoreMax(), results.scoreMax.name);   // 10 20 scoreMax
+```
+
+И строчка в таблицу имён дня 4: у функции-геттера имя с приставкой. Возьмите геттер из
+дескриптора: `Object.getOwnPropertyDescriptor(results, "score").get.name` — это
+`"get score"`, у сеттера было бы `"set score"`.
+
+## 12. Копия с геттерами и старый hasOwnProperty {#copy}
+
+Spread и `Object.assign` **читают** каждое перечисляемое свойство,
+то есть вызывают геттеры, и в копию кладут результат. Живой геттер превращается
+в застывшее число:
+
+```js
+const student = {
+  marks: [5, 4],
+  get average() {
+    return (this.marks[0] + this.marks[1]) / 2;
+  },
+};
+
+const flat = { ...student };
+const full = Object.defineProperties({}, Object.getOwnPropertyDescriptors(student));
+
+flat.marks = [3, 3];
+full.marks = [3, 3];
+console.log(flat.average, full.average);   // 4.5 3
+```
+
+`flat.average` застыл на 4.5: в копии это уже свойство-данные. `full`
+скопирован дескрипторами: `getOwnPropertyDescriptors` взял описания всех свойств,
+`defineProperties` создал по ним такие же, и геттер остался геттером. Так же
+копируются и неперечисляемые свойства, которые spread пропускает. Обе копии при этом
+поверхностные, как на дне 22 Essentials: не замени мы `marks`, массив был бы общим
+у оригинала и обеих копий.
+
+### hasOwnProperty
+
+В старом коде вместо `Object.hasOwn` из дня 21 Essentials встречается метод
+`obj.hasOwnProperty("ключ")`. Отвечает он на тот же вопрос — своё ли свойство, — но
+вызывается у самого объекта, и в этом его слабость:
+
+```js
+const box = { hasOwnProperty: 1, name: "коробка" };
+
+console.log(Object.hasOwn(box, "name"));   // true
+console.log(box.hasOwnProperty("name"));
+// TypeError: box.hasOwnProperty is not a function
+```
+
+Своё свойство с тем же именем закрыло метод. Бывают и объекты, у которых этого метода нет
+вовсе (день 7). `Object.hasOwn` появился в 2022 году как раз на замену: он работает
+с любым объектом. В своём коде пишите его.
+
+## 13. Раздел 20.1 спецификации {#spec}
+
+Объектам в спецификации посвящён раздел
+[20.1 Object Objects](https://tc39.es/ecma262/2026/#sec-object-objects), устроенный по
+образцу дня 4: 20.1.1 — конструктор, 20.1.2 — свойства конструктора, 20.1.3 и 20.1.4 — свойства
+прототипа и экземпляров, они завтра.
+
+Подраздел [20.1.1 The Object
+Constructor](https://tc39.es/ecma262/2026/#sec-object-constructor) короткий: `Object` — значение одноимённого глобального свойства;
+с `new` он создаёт новый обычный объект, без `new` — преобразует значение
+в объект (завтра); его можно указать после `extends` (день 10).
+
+Подраздел [20.1.2
+Properties of the Object Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-object-constructor) — главный сегодня: 23 функции вида
+`Object.что-то` и свойство `Object.prototype`, 24 пункта по алфавиту.
+Разложим их по курсу:
+
+| Когда | Что из 20.1.2 |
+| --- | --- |
+| Essentials, день 21 | `assign`, `entries`, `fromEntries`, `groupBy`, `hasOwn`, `keys`, `values` |
+| сегодня | `defineProperties`, `defineProperty`, `getOwnPropertyDescriptor`, `getOwnPropertyDescriptors`, `getOwnPropertyNames` |
+| день 6 | `freeze`, `isFrozen`, `seal`, `isSealed`, `preventExtensions`, `isExtensible`, `is` |
+| день 7 | `create`, `getPrototypeOf`, `setPrototypeOf` и свойство `prototype` |
+| день 11 | `getOwnPropertySymbols` |
+
+Откройте пункт [20.1.2.4
+Object.defineProperty](https://tc39.es/ecma262/2026/#sec-object.defineproperty). В алгоритме пять шагов, и каждый объясняет ошибку дня:
+
+1. Первый аргумент не объект — `TypeError`: `called on non-object`.
+2. Ключ превращается в строку (или символ, день 11) — поэтому `0` и `"0"`
+   в разделе 2 — один ключ.
+3. Третий аргумент превращается в дескриптор операцией
+   [ToPropertyDescriptor](https://tc39.es/ecma262/2026/#sec-topropertydescriptor)
+   (6.2.6.5). Она бросает три ошибки: не объект — «Property description must be an object»;
+   `get` или `set` не функция — «Getter must be a function»;
+   аксессор вперемешку с `value` или `writable` — «Invalid property
+   descriptor».
+4. Свойство определяется операцией DefinePropertyOrThrow — «определить или бросить»: отсюда
+   «Cannot redefine property» и правило 4 раздела 6.
+5. Возвращается тот же объект — правило 3.
+
+Сами признаки описаны в разделе
+[6.1.7.1 Property Attributes](https://tc39.es/ecma262/2026/#sec-property-attributes):
+таблица шести атрибутов — `[[Value]]`, `[[Writable]]`, `[[Get]]`,
+`[[Set]]`, `[[Enumerable]]`, `[[Configurable]]` — с видом свойства
+и значением по умолчанию, `undefined` или `false`. Отсюда правило 1.
+Двойные скобки — как у `[[Environment]]` дня 1: так спецификация пишет внутренние
+вещи. Дескриптор из `getOwnPropertyDescriptor` — их отражение: те же имена, без скобок
+и с маленькой буквы.
+
+## 14. «Карточки»: колода с геттерами и сеттером {#cards}
+
+Соберём день в «Карточках»: колода сама считает карточки и процент, проверяет тему
+и сохраняется в JSON без лишнего. Слова — те же восемь.
+
+```js
+const words = [
+  { id: 1, word: "book", topic: "школа" },
+  { id: 2, word: "teacher", topic: "школа" },
+  { id: 3, word: "lesson", topic: "школа" },
+  { id: 4, word: "bread", topic: "еда" },
+  { id: 5, word: "water", topic: "еда" },
+  { id: 6, word: "apple", topic: "еда" },
+  { id: 7, word: "house", topic: "дом" },
+  { id: 8, word: "window", topic: "дом" },
+];
+const topics = ["все", "школа", "еда", "дом"];
+
+const deck = {
+  learned: [1, 2],
+  get topic() {
+    return this._topic;
+  },
+  set topic(value) {
+    if (!topics.includes(value)) {
+      console.log(`темы «${value}» нет, осталась «${this._topic}»`);
+      return;
+    }
+    this._topic = value;
+  },
+  get cards() {
+    return words
+      .filter((w) => !this.learned.includes(w.id))
+      .filter((w) => this._topic === "все" || w.topic === this._topic);
+  },
+  get percent() {
+    return Math.round((this.learned.length / words.length) * 100);
+  },
+};
+Object.defineProperty(deck, "_topic", { value: "все", writable: true });   // служебное
+
+console.log(deck.cards.map((w) => w.word));
+deck.topic = "еда";
+deck.topic = "спорт";
+deck.learned.push(4);
+console.log(`${deck.topic}: ${deck.cards.length} карточки, выучено ${deck.percent}%`);
+console.log(JSON.stringify(deck));
+
+for (const key of ["cards", "percent"]) {
+  Object.defineProperty(deck, key, { enumerable: false });
+}
+const saved = JSON.stringify(deck);
+console.log(saved);
+
+Object.assign(deck, JSON.parse('{"learned":[5],"topic":"спорт"}'));
+console.log(deck.learned, deck.topic);
+```
+
+<ResultBox>
+(6) \['lesson', 'bread', 'water', 'apple', 'house', 'window'\]\
+темы «спорт» нет, осталась «еда»\
+еда: 2 карточки, выучено 38%\
+\{"learned":\[1,2,4\],"topic":"еда","cards":\[\{"id":5,"word":"water","topic":"еда"\},\{"id":6,"word":"apple","topic":"еда"\}\],"percent":38\}\
+\{"learned":\[1,2,4\],"topic":"еда"\}\
+темы «спорт» нет, осталась «еда»\
+(1) \[5\] еда
+</ResultBox>
+
+**Строки 1–3 — геттеры и сеттер.** Переменной «текущие карточки» в программе нет:
+список считается при каждом чтении. Сеттер пропустил «еду» и не пустил «спорт» — такой темы нет.
+После смены темы и нового выученного слова `cards` и `percent` пересчитались
+сами: в «еде» осталось два слова, выучено 3 из 8 — 37,5%, после округления 38.
+
+**Строка 4 — проблема.** Геттеры литерала перечисляемые, и `JSON.stringify`
+вызвал `cards` и `percent`. Для сохранения в `localStorage` (день 31
+Essentials) это лишнее: вычисляемое посчитается заново. `topic` — состояние колоды, его
+сохранить нужно; `_topic` скрыт.
+
+**Строка 5 — исправление.** Цикл поменял у двух геттеров только
+`enumerable` (правило 2 раздела 6). В JSON — ровно то, что нужно сохранить.
+
+**Строки 6–7 — загрузка.** `Object.assign` **записывает**
+свойства присваиванием и потому вызывает сеттер: `learned` загрузился, а тема «спорт»
+не прошла. Проверка в сеттере защищает и от чужих данных.
+
+<Scheme src="scheme-cards.svg">Признак `enumerable` решает, что колода отдаёт в JSON</Scheme>
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Уберите `writable: true` из дескриптора `_topic`.
+Что изменилось в выводе и почему нет ни одной ошибки? Добавьте первой строкой
+`"use strict"` — какая ошибка появится и при какой строке программы?
+\
+\
+**Второй.** Выведите `Object.keys(deck)` до цикла и после него.
+Какого ключа нет ни разу и почему?
+\
+\
+**Третий.** Замените строку с `Object.assign` на
+`const loaded = { ...deck, ...JSON.parse('{"learned":[5],"topic":"спорт"}') }`
+и выведите `loaded.topic` и `loaded.cards`. Почему сеттер не помешал
+и куда делись карточки?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+Сегодня мы смотрели на объект по одному свойству. Завтра — объект целиком. `Object.freeze`
+из дня 4 Essentials окажется не магией, а теми же признаками: он ставит каждому свойству
+`writable: false` и `configurable: false` и запрещает добавлять новые.
+
+```js
+const settings = Object.freeze({ theme: "светлая" });
+console.log(Object.getOwnPropertyDescriptor(settings, "theme"));
+// {value: 'светлая', writable: false, enumerable: true, configurable: false}
+```
+
+На дне 6 — `freeze`, `seal` и `preventExtensions`, проверки
+«заморожен ли объект», `Object.is` и его отличия от `===`, и короткие
+присваивания `&&=`, `||=`, `??=`.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Guide: Enumerability and ownership of properties](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Enumerability_and_ownership_of_properties) | кто какие свойства видит: перебор, JSON, spread, `in` | <Full /> |
+| [Object.getOwnPropertyDescriptor()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertyDescriptor) | дескриптор своего свойства | <Full /> |
+| [Object.defineProperty()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty) | создать или изменить свойство с признаками; по умолчанию `false` | <Full /> |
+| [Object.getOwnPropertyNames()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertyNames) | все свои строковые ключи, и неперечисляемые | <Full /> |
+| [Object.prototype.propertyIsEnumerable()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/propertyIsEnumerable) | своё ли свойство и перечисляемое ли | <Full /> |
+| [get](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get) | геттер: вычисляемое свойство, без параметров | <Full /> |
+| [set](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set) | сеттер: ровно один параметр, проверка значения | <Full /> |
+| [Method definitions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Method_definitions) | сокращённая запись метода; нет `prototype`, не для `new` | <Full /> |
+| [ECMA-262, 20.1.2 Properties of the Object Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-object-constructor) | 24 пункта `Object.*`; шаги `defineProperty` | <Full /> |
+| [Object.defineProperties()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperties) | несколько свойств одним вызовом | <Brief /> |
+| [Object.getOwnPropertyDescriptors()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertyDescriptors) | все дескрипторы; копия вместе с геттерами | <Brief /> |
+| [Object.prototype.hasOwnProperty()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/hasOwnProperty) | старый вариант `Object.hasOwn`; ломается | <Brief /> |
+| [ECMA-262, 20.1 Object Objects](https://tc39.es/ecma262/2026/#sec-object-objects) | как устроен раздел об объектах | <Brief /> |
+| [ECMA-262, 20.1.1 The Object Constructor](https://tc39.es/ecma262/2026/#sec-object-constructor) | конструктор `Object`: с `new` и без | <Brief /> |
+| [Ошибка: can't redefine non-configurable property](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_redefine_property) | `Cannot redefine property: x` | <Brief /> |
+| [Ошибка: "x" is not a non-null object](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/No_non-null_object) | `Property description must be an object` | <Brief /> |
+| [Ошибка: getter functions must have no arguments](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Getter_no_arguments) | `Getter must not have any formal parameters.` | <Brief /> |
+| [Ошибка: setter functions must have one argument](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Setter_one_argument) | `Setter must have exactly one formal parameter.` | <Brief /> |
+| [Ошибка: setting getter-only property](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Getter_only) | запись в свойство без сеттера; только строгий режим | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// дескриптор: Object.getOwnPropertyDescriptor(obj, "x")
+//   данные:   {value, writable, enumerable, configurable}
+//   аксессор: {get, set, enumerable, configurable}
+// writable     — можно ли записать: нет — обычный режим молчит, строгий — TypeError
+// enumerable   — видно ли в keys, for...in, JSON, spread, assign
+// configurable — можно ли delete и defineProperty:
+//                нет — delete даёт false (строгий — TypeError), defineProperty — TypeError всегда
+
+// литерал и присваивание — все признаки true
+// defineProperty для НОВОГО свойства: чего не указали — false
+// defineProperty для СУЩЕСТВУЮЩЕГО: меняет только указанное; возвращает тот же объект
+
+// getOwnPropertyNames — все свои строковые ключи, и неперечисляемые
+// obj.propertyIsEnumerable("x") — своё и перечисляемое
+// Object.hasOwn(obj, "x") — вместо obj.hasOwnProperty("x")
+
+// get x() { return … }  — без параметров, читается без скобок
+// set x(value) { … }    — ровно один параметр; проверка значения
+// только геттер: запись молчит, в строгом — TypeError
+// в сеттере x не писать this.x — RangeError; хранить в _x
+// скрыть служебное: Object.defineProperty(obj, "_x", { value: 0, writable: true })
+
+// spread и assign вызывают геттеры и кладут значения; assign вызывает и сеттеры
+// копия с геттерами: Object.defineProperties({}, Object.getOwnPropertyDescriptors(obj))
+// метод show() {} — как show: function () {}, но без prototype и не для new (день 7)
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `greet.name = "hello"` не работает, а
+   `Object.defineProperty(greet, "name", { value: "hello" })` — работает?
+   <Answer>У `name` функции `writable: false` — присваивание запрещено,
+   но `configurable: true` — переопределять признаки и значение можно.</Answer>
+2. Какие признаки получит свойство после `Object.defineProperty(obj, "x", { value: 1 })`,
+   если его не было? А если до этого было `obj.x = 0`?
+   <Answer>Нового свойства — все три `false`. Существующего — прежние
+   `true`: `defineProperty` поменяет только значение.</Answer>
+3. Что дадут `Object.keys([5, 4])` и `Object.getOwnPropertyNames([5, 4])`?
+   <Answer>`['0', '1']` и `['0', '1', 'length']`: `length`
+   массива — своё, но неперечисляемое свойство.</Answer>
+4. Почему в сеттере `name` нельзя писать `this.name = value`?
+   <Answer>Это снова запись в `name`, то есть снова вызов того же сеттера —
+   бесконечная рекурсия и `RangeError: Maximum call stack size exceeded`.
+   Значение хранят в свойстве с другим именем, например `_name`.</Answer>
+5. Чем копия `{ ...obj }` отличается от копии через
+   `getOwnPropertyDescriptors`, если у `obj` есть геттер?
+   <Answer>Spread вызывает геттер и кладёт в копию его результат — застывшее значение.
+   Копия дескрипторами переносит сам геттер, и он считает заново при каждом чтении.
+   Ещё она переносит неперечисляемые свойства, которые spread пропускает.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Enumerability_and_ownership_of_properties" />

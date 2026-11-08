@@ -1,0 +1,686 @@
+---
+title: "День 19 — Замена и разбиение: replace, replaceAll, split"
+day: День 19 • урок 1
+heading: "Замена и разбиение: replace, replaceAll, split"
+lead: Курс 2, Intermediate. Модуль «Строки и регулярные выражения» — третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f43f5e; }
+  h2 { color: #be123c; background: #fff1f2; border-left-color: #f43f5e; }
+  h3 { color: #9f1239; }
+  .step-number { background: #f43f5e; }
+  .toc a { color: #be123c; }
+---
+
+<Goals>
+- заменять первое и все совпадения: `replace`, `replaceAll` и флаг `g`;
+- вставлять в замену найденное и группы: `$&`, `$1`, `$<имя>`;
+- считать замену функцией и знать, какие аргументы она получает;
+- делить строку по шаблону: `split`, группы в разделителе, `limit`;
+- строить шаблон из ввода человека безопасно — `RegExp.escape`.
+</Goals>
+
+<Toc />
+
+## 1. Строка, которая меняется {#debts}
+
+У этого дня много долгов. День 17 Essentials показал, как лечить «4,5» перед `Number`, и пообещал:
+`replace` разбираем в курсе 2. День 16 Essentials сознательно пропустил `split`,
+`replace` и `match` — `match` был вчера. День 19 Essentials назвал `split`
+обратным действием к `join`. А на дне 17 курса 2 `checkCard` отвергала перевод с двумя
+пробелами — сегодня мы их просто уберём.
+
+```js
+console.log(Number("4,5".replace(",", ".")), "1,5,7".replace(",", "."), "1,5,7".replace(/,/g, "."));   // 4.5 1.5,7 1.5.7
+const text = "сухой  лёд   и  вода";
+console.log(text.replace(/ {2,}/g, " "), "|", text.split(/ +/));   // сухой лёд и вода | ['сухой', 'лёд', 'и', 'вода']
+console.log(text.length, text.replace(/ {2,}/g, " ").length);      // 20 16
+```
+
+Уже первая строка показывает главное правило дня: строка в роли шаблона заменяется один раз, регулярное
+выражение с флагом `g` — везде. Вторая и третья — два новых умения: заменить все «два и больше
+пробелов» одним и разрезать строку там, где стоят пробелы. Длина 20 → 16: исходная строка не изменилась,
+`replace` вернул новую.
+
+## 2. replace: строка или шаблон {#replace}
+
+```js
+const str = "Twas the night before Xmas...";
+console.log(str.replace(/xmas/i, "Christmas"), "|", str);   // Twas the night before Christmas... | Twas the night before Xmas...
+console.log("Apples are round, and apples are juicy.".replace(/apples/gi, "oranges"));   // oranges are round, and oranges are juicy.
+console.log("a.b.c".replace(".", "-"), "a.b.c".replace(/./g, "-"), "a.b.c".replace(/\./g, "-"), "xxx".replace("", "_"));
+// a-b.c ----- a-b-c _xxx
+```
+
+`строка.replace(что, чем)` возвращает новую строку — строки неизменяемы (день 16 Essentials), и
+`str` осталась прежней. Первый аргумент бывает двух видов:
+
+- **строка** ищется буквально, без особых символов, и заменяется *только первое*
+  вхождение: `"."` — это точка;
+- **регулярное выражение** ищется как шаблон: без `g` — первое совпадение, с
+  `g` — каждое. `/./g` заменил все пять символов, `/\./g` — только точки.
+
+Справочник MDN подчёркивает: регулярка с `g` — единственный случай, когда `replace`
+заменяет больше одного раза. Пустая строка-шаблон находится в самом начале, поэтому «\_» встал перед «xxx».
+Примеры «Xmas» и «apples» — со страницы метода; флаг `i` дня 17 сделал поиск без учёта регистра.
+
+Вчерашняя ловушка `lastIndex` здесь не страшна:
+
+```js
+const re = /\d/g;
+re.lastIndex = 3;
+console.log("a1b2".replace(re, "#"), re.lastIndex);     // a#b# 0
+const one = /\d/;
+one.lastIndex = 3;
+console.log("a1b2".replace(one, "#"), one.lastIndex);   // a#b2 3
+```
+
+С флагом `g` `replace` сам ставит `lastIndex` в 0 перед поиском, а последний
+неудачный `exec` снова оставляет там 0. Без `g` `lastIndex` не читается и не
+меняется — как говорил раздел 13 дня 18. Поэтому шаблон с `g` для `replace` безопасен, в
+отличие от `test`.
+
+## 3. replaceAll {#replaceall}
+
+```js
+console.log("aabbcc".replaceAll("b", "."), "a.b.c".replaceAll(".", "-"), "aabbcc".replaceAll(/b/g, "."), "xxx".replaceAll("", "_"));
+// aa..cc a-b-c aa..cc _x_x_x_
+"aabbcc".replaceAll(/b/, ".");
+// TypeError: String.prototype.replaceAll called with a non-global RegExp argument
+```
+
+`replaceAll` заменяет *все* вхождения строки — без регулярных выражений и без экранирования.
+Регулярку он тоже принимает, но только с флагом `g`: без него — `TypeError`, чтобы метод
+с «All» в имени не заменил молча одно совпадение. Это та же защита, что у `matchAll` вчера. На странице
+метода MDN приводит текст Firefox — «replaceAll must be called with a global RegExp»; Chrome пишет, как в
+комментарии, а страница ошибки собрала тексты всех браузеров. С регуляркой `replaceAll` делает ровно то же, что `replace`. Пустая
+строка-шаблон встаёт между всеми символами — точнее, между 16-битными частями строки (день 20).
+
+Зачем же `replaceAll`, если есть `/…/g`? Пример MDN — скрыть в отчёте имя, которое
+пришло извне:
+
+```js
+function unsafeRedactName(text, name) {
+  return text.replace(new RegExp(name, "g"), "[REDACTED]");
+}
+function semiSafeRedactName(text, name) {
+  return text.replaceAll(name, "[REDACTED]");
+}
+const report = "A hacker called ha.*er used special characters in their name to breach the system.";
+console.log(unsafeRedactName(report, "ha.*er"));
+console.log(semiSafeRedactName(report, "ha.*er"));
+```
+
+<ResultBox>
+A \[REDACTED\]s in their name to breach the system.\
+A hacker called \[REDACTED\] used special characters in their name to breach the system.
+</ResultBox>
+
+Имя «ha.\*er» в шаблоне стало «ha, потом что угодно, потом er» — и съело полстроки до последнего «er» в
+«characters». Строка в `replaceAll` ищется буквально, поэтому вторая версия верна. Это та же
+опасность, что «5.0» и «c++» дня 17; её последний шаг — раздел 9.
+
+## 4. Шаблоны замены: $&, $1, $\<имя> {#dollar}
+
+Вторая строка — не всегда просто текст. Знак `$` в ней открывает **шаблон замены**:
+
+| Шаблон | Что вставляет |
+| --- | --- |
+| `$&` | всё совпадение |
+| `$1` … `$99` | группу с этим номером (день 18) |
+| `$<имя>` | именованную группу |
+| `` $` `` | часть строки до совпадения |
+| `$'` | часть строки после совпадения |
+| `$$` | сам знак «$» |
+
+```js
+const s = "Сдача: 12.10.2026, ауд. 5";
+const DATE = /\d{2}\.\d{2}\.\d{4}/;
+console.log(s.replace(/(\d{2})\.(\d{2})\.(\d{4})/, "$3-$2-$1"));
+console.log(s.replace(/(?<day>\d{2})\.(?<month>\d{2})\.(?<year>\d{4})/, "$<year>-$<month>-$<day>"));
+console.log(s.replace(DATE, "[$&]"), "|", s.replace(DATE, "[$`]"), "|", s.replace(DATE, "[$']"));
+console.log("Maria Cruz".replace(/(\w+)\s(\w+)/, "$2, $1"), "Цена: 100".replace(/\d+/, "$$$&"));
+```
+
+<ResultBox>
+Сдача: 2026-10-12, ауд. 5\
+Сдача: 2026-10-12, ауд. 5\
+Сдача: \[12.10.2026\], ауд. 5 | Сдача: \[Сдача: \], ауд. 5 | Сдача: \[, ауд. 5\], ауд. 5\
+Cruz, Maria Цена: $100
+</ResultBox>
+
+<Scheme src="scheme-dollar.svg">Из чего `replace` собирает новую строку</Scheme>
+
+Дата «12.10.2026» стала «2026-10-12» — по номерам групп и по именам; вторая запись длиннее, зато не сломается,
+если группы переставят (вчерашний довод MDN). `$&` обернул совпадение скобками, `` $` `` и
+`$'` вставили то, что слева и справа от него. «Maria Cruz» — пример MDN «Switching words». В «Цене»
+`$$` дал знак доллара, а `$&` — найденное число.
+
+Крайние случаи справочник разбирает отдельно — их стоит знать, потому что ошибок они не дают:
+
+```js
+console.log("foo".replace(/(f)/, "$2"), "foo".replace("f", "$1"), "foo".replace(/(f)|(g)/, "$2"));     // $2oo $1oo oo
+console.log("foo".replace(/(f)/, "$10"), "foo".replace(/(f)/, "$<x>"), "Сумма 100".replace(/\d+/, "$0"));   // f0oo $<x>oo Сумма $0
+```
+
+Группы 2 в шаблоне нет — `$2` остаётся буквально. У строки-шаблона групп нет вовсе — `$1`
+тоже буквально; а вот `$&`, `` $` ``, `$'` и `$$` работают и со строкой.
+Группа есть, но не участвовала (её вариант `|` не подошёл) — пустая строка. `$10` при одной
+группе — это `$1` и цифра «0»: две цифры берутся, только если такая группа существует.
+`$<x>` без именованных групп и `$0` (группы считаются с единицы) — просто текст.
+
+## 5. Функция замены {#function}
+
+Вместо строки можно передать функцию: она вызывается на каждое совпадение, а то, что она вернёт, встаёт на место
+совпадения. Аргументы — по справочнику MDN:
+
+```js
+function replacer(match, p1, p2, p3, offset, string) {
+  return [p1, p2, p3].join(" - ");
+}
+console.log("abc12345#$*%".replace(/(\D*)(\d*)(\W*)/, replacer));   // abc - 12345 - #$*%
+console.log("Сумма: 5".replace(/\d/, () => "$&"), "a-b".replace("-", () => 5), "ab".replace(/(x)?b/, (m, p1) => String(p1)));
+// Сумма: $& a5b aundefined
+```
+
+`match` — совпадение (то же, что `$&`), дальше — группы `p1`…`pN`,
+затем `offset` — номер символа, с которого совпадение началось, и `string` — вся строка.
+Если в шаблоне есть именованные группы, последним приходит ещё объект `groups`. Вторая строка — три
+тонкости: шаблоны `$` к результату функции не применяются; вернувшееся число превращается в строку;
+группа, которая не участвовала, в функцию приходит как `undefined`, а не пустой строкой.
+
+Функция нужна, когда найденное надо *обработать*. Пример MDN — перевести имя свойства из
+`borderTop` в `border-top`:
+
+```js
+function styleHyphenFormat(propertyName) {
+  function upperToHyphenLower(match, offset, string) {
+    return (offset > 0 ? "-" : "") + match.toLowerCase();
+  }
+  return propertyName.replace(/[A-Z]/g, upperToHyphenLower);
+}
+console.log(styleHyphenFormat("borderTop"), styleHyphenFormat("BorderTop"), "borderTop".replace(/[A-Z]/g, "-" + "$&".toLowerCase()));
+// border-top border-top border-Top
+```
+
+С флагом `g` функция вызвана для каждой заглавной; `offset > 0` не ставит дефис в самом
+начале. Последний вызов — ошибка, которую показывает MDN: `"$&".toLowerCase()` вычисляется один раз,
+*до* замены, и остаётся строкой «$&» — регистр никто не меняет. Ещё пример оттуда же — градусы
+Фаренгейта в Цельсия:
+
+```js
+function f2c(text) {
+  return text.replace(/(-?\d+(?:\.\d*)?)F\b/g, (match, p1) => `${((p1 - 32) * 5) / 9}C`);
+}
+console.log(f2c("Вода кипит при 212F, а замерзает при 32F"), f2c("0F"));
+// Вода кипит при 100C, а замерзает при 0C -17.77777777777778C
+```
+
+Группа — всегда строка, но вычитание дня 6 Essentials превращает её в число. А вот практика плана — шаблон
+письма «Здравствуйте, \{name\}»:
+
+```js
+function fill(template, data) {
+  return template.replace(/\{(\w+)\}/g, (whole, key) => (Object.hasOwn(data, key) ? data[key] : whole));
+}
+console.log(fill("Здравствуйте, {name}! Оценка: {mark}. {unknown}", { name: "Аман", mark: 5 }));
+// Здравствуйте, Аман! Оценка: 5. {unknown}
+console.log(fill("Цена: {price}", { price: "$&100" }), "|", "Цена: {price}".replace("{price}", "$&100"), "|", fill("{a}{b}", { a: "{b}", b: 1 }));
+// Цена: $&100 | Цена: {price}100 | {b}1
+```
+
+Фигурные скобки экранированы — в шаблоне они квантификатор (день 17). Незнакомое имя остаётся как было:
+функция вернула всё совпадение. `Object.hasOwn` (день 5) не даёт найти `{toString}` в
+прототипе. Почему функция, а не строка: в данных может оказаться `$`, и строка-замена поняла бы
+«$&» как шаблон. И третий вызов: вставленный текст повторно не просматривается — «\{b\}» из данных так и
+остался «\{b\}».
+
+## 6. Остаточный параметр в функции замены {#rest}
+
+На дне 14 Essentials была загадочная строка: `function replacer(match, ...groups, offset)` —
+`SyntaxError`, остаточный параметр должен стоять последним. Теперь видно, откуда пример: настоящая функция
+замены получает группы *в середине*, а после них — `offset` и строку. Сколько групп — зависит от
+шаблона, поэтому справочник MDN собирает всё остальное в массив и ищет `offset` с конца:
+
+```js
+function addOffset(match, ...args) {
+  const offset = args.at(-2);
+  return `${match} (${offset}) `;
+}
+console.log("abcd".replace(/(bc)/, addOffset), "|", "abcd".replace(/(?<group>bc)/, addOffset));     // abc (1) d | abc (abcd) d
+function addOffsetSafe(match, ...args) {
+  const hasNamedGroups = typeof args.at(-1) === "object";
+  const offset = hasNamedGroups ? args.at(-3) : args.at(-2);
+  return `${match} (${offset}) `;
+}
+console.log("abcd".replace(/(bc)/, addOffsetSafe), "|", "abcd".replace(/(?<group>bc)/, addOffsetSafe));   // abc (1) d | abc (1) d
+console.log("12.10".replace(/(?<d>\d+)\.(?<m>\d+)/, (...args) => JSON.stringify(args)));
+// ["12.10","12","10",0,"12.10",{"d":"12","m":"10"}]
+```
+
+Первая версия ошиблась на шаблоне с именем: последним пришёл объект `groups`, и
+`args.at(-2)` (метод `at` дня 16 Essentials) оказался строкой «abcd», а не номером. Вторая
+отличает их по типу — объект или строка. Последняя строка показывает весь список аргументов: совпадение, две
+группы, номер 0, строка, объект групп.
+
+## 7. split: строка на части {#split}
+
+```js
+const months = "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec";
+console.log(months.split(",").length, months.split(",", 3), "Аман, Мерет".split(", "), ["Аман", "Мерет"].join(", "));
+// 12 ['Jan', 'Feb', 'Mar'] ['Аман', 'Мерет'] Аман, Мерет
+console.log("Oh brave new world".split(), ",a,".split(","), "abc".split(""), "".split(","), "".split(""));
+// ['Oh brave new world'] ['', 'a', ''] ['a', 'b', 'c'] [''] []
+console.log("a,b,c".split(",", 0), "a,b,c".split(",", -1), "a,b".split(null), "anullb".split(null));
+// [] ['a', 'b', 'c'] ['a,b'] ['a', 'b']
+```
+
+`строка.split(разделитель, limit)` режет строку там, где стоит разделитель, и возвращает массив
+кусков; сам разделитель в куски не входит. Это обратное к `join` дня 19 Essentials: «Аман, Мерет»
+туда и обратно. Правила со страницы MDN:
+
+- без разделителя — массив из одной строки целиком;
+- разделитель в начале или в конце — пустые строки по краям: `",a,"` даёт три куска;
+- пустая строка-разделитель режет на отдельные символы — точнее, 16-битные части (день 20);
+- пустая строка и непустой разделитель — `['']`; пустая и пустой — `[]`, единственный
+  способ получить пустой массив без `limit`;
+- `limit` — сколько кусков взять, остаток выбрасывается; 0 — `[]`. Число превращается в
+  целое без знака, поэтому -1 становится 4294967295 — «всё»;
+- разделитель, который не регулярка, превращается в строку: `null` — это «null».
+
+## 8. split по шаблону {#splitre}
+
+Настоящая сила `split` — разделитель-шаблон. Практика плана — «разбить по нескольким
+разделителям»:
+
+```js
+console.log("Аман, Мерет;Гүлнар ; Сапар".split(/\s*[,;]\s*/));   // ['Аман', 'Мерет', 'Гүлнар', 'Сапар']
+console.log("строка 1\r\nстрока 2\nстрока 3".split(/\r?\n/), "  a  b \t c ".split(/\s+/), "  a  b \t c ".trim().split(/\s+/));
+// ['строка 1', 'строка 2', 'строка 3'] ['', 'a', 'b', 'c', ''] ['a', 'b', 'c']
+const names = "Harry Trump ;Fred Barney; Helen Rigby ; Bill Abel ;Chris Hand ";
+console.log(names.split(/\s*(?:;|$)\s*/));
+// ['Harry Trump', 'Fred Barney', 'Helen Rigby', 'Bill Abel', 'Chris Hand', '']
+```
+
+Класс `[,;]` — любой из разделителей, `\s*` вокруг — съесть пробелы. Строки текста
+делят по `\r?\n`: в файлах из Windows перед переносом стоит ещё `\r`. Слова — по
+`\s+`, но сначала `trim` (день 16 Essentials), иначе пробелы по краям дадут пустые куски.
+Пример MDN с именами: `$` внутри группы тоже разделитель, поэтому пробел в самом конце строки дал
+последний пустой кусок.
+
+```js
+console.log("Аман,Мерет;Гүлнар".split(/[,;]/), "Аман,Мерет;Гүлнар".split(/([,;])/));
+// ['Аман', 'Мерет', 'Гүлнар'] ['Аман', ',', 'Мерет', ';', 'Гүлнар']
+console.log("Hello 1 word. Sentence number 2.".split(/(\d)/), "a1b2c3".split(/(\d)/, 2), "a-b".split(/(x)?-/));
+// ['Hello ', '1', ' word. Sentence number ', '2', '.'] ['a', '1'] ['a', undefined, 'b']
+console.log("ab".split(/a*?/), "ab".split(/a*/), "a-b".split(/-/g), "a-b".split(/-/y));
+// ['a', 'b'] ['', 'b'] ['a', 'b'] ['a', 'b']
+```
+
+<Scheme src="scheme-splitre.svg">Разделители выпадают — пока в шаблоне нет группы</Scheme>
+
+Группа в разделителе — особый случай: её текст *вставляется* в результат между кусками. Так
+`split` сохраняет то, по чему резал, — пример MDN с цифрами. `limit` считает и эти вставки:
+из «a1b2c3» с лимитом 2 вышли «a» и «1». Группа, которая не участвовала, вставляет `undefined`.
+
+Последняя строка — тонкости из примечания спецификации. Шаблон, который может совпасть с пустой строкой, режет
+между символами, но только первое совпадение на каждом месте считается: ленивый `a*?` на первом месте
+совпал пустым — «a» и «b»; жадный `a*` съел «a» — и получился пустой первый кусок. Флаги `g`
+и `y` для `split` ничего не значат (почему — раздел 13).
+
+## 9. RegExp.escape: запрос человека {#escape}
+
+Долг дня 17: запрос «c++» ронял `new RegExp`, а «5.0» находил «540». Человек не обязан знать, что
+точка и плюс — особые символы. `RegExp.escape(строка)` экранирует всё опасное, и строка становится
+буквальным шаблоном:
+
+```js
+const safe = RegExp.escape("c++");
+console.log(safe, new RegExp(safe, "i").test("Курс C++"), RegExp.escape("5.0"), new RegExp(RegExp.escape("5.0")).test("540"));
+// \x63\+\+ true \x35\.0 false
+console.log(RegExp.escape("(a)"), RegExp.escape("foo-bar"), RegExp.escape("a b"), RegExp.escape("Мары"), RegExp.escape("$100"));
+// \(a\) \x66oo\x2dbar \x61\x20b Мары \$100
+```
+
+Что и как он экранирует — по справочнику MDN:
+
+- 14 синтаксических символов дня 17 и `/` — обратной косой: `\+`, `\.`,
+  `\(`, `\$`;
+- остальные знаки препинания (``, - = < > # & ! % : ; @ ~ ' ` "``) и пробел — кодом
+  `\x..`: дефис — `\x2d`, пробел — `\x20`;
+- `\n`, `\t` и соседи — своими записями;
+- *первую* цифру или латинскую букву — тоже кодом: «c» стала `\x63`;
+- кириллица и прочие буквы остаются как есть — «Мары».
+
+Странное правило про первый символ защищает склейку. Если шаблон заканчивается ссылкой `\1`, а за ним
+вставлена строка «1», получится `\11` — без флагов это уже другой, старый код символа из приложения B
+(день 17):
+
+```js
+console.log(new RegExp("(a)\\1" + "1").test("aa1"), new RegExp("(a)\\1" + RegExp.escape("1")).test("aa1"));   // false true
+```
+
+Главный пример справочника — убрать из ссылок адрес сайта:
+
+```js
+function removeDomain(text, domain) {
+  return text.replace(new RegExp(`https?://${domain}(?=/)`, "g"), "");
+}
+function removeDomainSafe(text, domain) {
+  return text.replace(new RegExp(`https?://${RegExp.escape(domain)}(?=/)`, "g"), "");
+}
+const link = "См. https://developer.mozilla.org/en-US/docs/Web";
+const fake = "Не MDN: https://developer-mozilla.org/, осторожно!";
+console.log(removeDomain(link, "developer.mozilla.org"), "|", removeDomain(fake, "developer.mozilla.org"));
+console.log(removeDomainSafe(fake, "developer.mozilla.org"));
+```
+
+<ResultBox>
+См. /en-US/docs/Web | Не MDN: /, осторожно!\
+Не MDN: https://developer-mozilla.org/, осторожно!
+</ResultBox>
+
+Без экранирования точки в адресе стали «любым символом», и чужой сайт с дефисами тоже потерял адрес. А зачем
+`RegExp.escape`, если есть `replaceAll` со строкой? Он нужен, когда вокруг текста человека
+требуется шаблон: граница, флаг `i`, проверка позиции. Третья функция примера MDN про отчёт:
+
+```js
+function superSafeRedactName(text, name) {
+  return text.replaceAll(new RegExp(`\\b${RegExp.escape(name)}\\b`, "g"), "[REDACTED]");
+}
+const report = "A hacker called acke breached the system.";
+console.log(report.replaceAll("acke", "[REDACTED]"), "|", superSafeRedactName(report, "acke"));
+// A h[REDACTED]r called [REDACTED] breached the system. | A hacker called [REDACTED] breached the system.
+```
+
+Буквальный `replaceAll` нашёл «acke» и внутри «hacker»; граница слова `\b` это отсекла. В
+шаблонной строке обратная косая удвоена — как в строке дня 17. Для русских имён вместо `\b` нужна своя
+граница из проверок позиции (день 18).
+
+## 10. Телефоны и маски {#practice}
+
+Две практики плана. Телефоны, которые люди пишут как попало, — к одному виду:
+
+```js
+const phones = ["+993 65 12-34-56", "8 (65) 123456", "993-65-123456", "65 12 34 56"];
+const normalPhone = (p) => p.replace(/\D/g, "").slice(-8).replace(/^(\d{2})(\d{6})$/, "+993 $1 $2");
+console.log(phones.map(normalPhone));   // ['+993 65 123456', '+993 65 123456', '+993 65 123456', '+993 65 123456']
+const card = "1234 5678 9012 3456";
+console.log(card.replace(/\d(?=.*\d{4}$)/g, "*"), "aman@mail.tm".replace(/^(.)[^@]*/, "$1***"));   // **** **** **** 3456 a***@mail.tm
+```
+
+Телефон — в три шага: `\D` с флагом `g` убирает всё, кроме цифр; `slice(-8)`
+берёт восемь последних — код оператора и номер; группы раскладывают их по местам. Маска карты — опережающая
+проверка дня 18: «цифра, после которой где-то есть четыре цифры в самом конце». Последние четыре цифры этому не
+удовлетворяют и остаются. В почте группа сохранила первую букву, а `[^@]*` забрал остальное имя.
+
+## 11. Методы-символы и Symbol.species {#symbols}
+
+Как строковый метод узнаёт, что ему дали регулярку? Он и не узнаёт. У `RegExp.prototype` есть пять
+методов под встроенными символами (день 11): `[Symbol.match]`, `[Symbol.matchAll]`,
+`[Symbol.replace]`, `[Symbol.search]`, `[Symbol.split]`. Строковый метод проверяет:
+есть у аргумента метод с нужным символом — зовёт его и отдаёт результат.
+
+```js
+console.log(/-/g[Symbol.replace]("2016-01-01", "."), /-/[Symbol.split]("a-b-c"), /\d+/g[Symbol.match]("2016-01-02"), /-/[Symbol.search]("2016-01-02"));
+// 2016.01.01 ['a', 'b', 'c'] ['2016', '01', '02'] 4
+const byComma = { [Symbol.split]: (str) => str.split(",").map((s) => s.trim()) };
+console.log("Аман , Мерет,Гүлнар".split(byComma));   // ['Аман', 'Мерет', 'Гүлнар']
+class Brackets extends RegExp {
+  [Symbol.split](str, limit) {
+    return super[Symbol.split](str, limit).map((x) => `(${x})`);
+  }
+}
+console.log("2016-01-02".split(new Brackets("-")), "a-b".replace(new Brackets("-"), "+"));   // ['(2016)', '(01)', '(02)'] a+b
+```
+
+Прямые вызовы из справочника дают то же, что строковые методы, только строка — аргумент. Значит, «шаблоном»
+может быть любой объект: `byComma` — даже не регулярка. Наследник `RegExp` (день 10) меняет
+одно поведение через `super`, остальное — как у родителя: `replace` у `Brackets`
+обычный.
+
+`RegExp[Symbol.species]` — геттер, который возвращает `this`, как у массива на дне 10.
+Два метода из пяти по нему строят копию шаблона перед работой:
+
+```js
+class Loud extends RegExp {
+  static get [Symbol.species]() {
+    console.log("копия");
+    return this;
+  }
+}
+const loud = new Loud("-", "g");
+console.log("a-b".split(loud), "a-b".replace(loud, "+"));
+console.log([..."a-b".matchAll(loud)].length, "a-b".match(loud), loud.lastIndex);
+```
+
+<ResultBox>
+копия\
+(2) \['a', 'b'\] a+b\
+копия\
+1 (1) \['-'\] 0
+</ResultBox>
+
+Копию делают `split` и `matchAll` — поэтому вчера `matchAll` не трогал
+`lastIndex` исходного шаблона. `replace`, `match` и `search` работают
+с самим шаблоном. Отсюда пример MDN с флагом `y`:
+
+```js
+const sticky = /a/y;
+const out = [];
+for (let i = 0; i < 5; i++) out.push(`${"aaa".replace(sticky, "b")} ${sticky.lastIndex}`);
+console.log(out, "aa-a".replace(/a/gy, "b"));   // ['baa 1', 'aba 2', 'aab 3', 'aaa 0', 'baa 1'] bb-a
+```
+
+С `y` без `g` `replace` зовёт `exec` один раз и не сбрасывает
+`lastIndex`: каждый вызов заменяет следующую «a». С `gy` замена идёт подряд и встаёт на
+дефисе — дальше `lastIndex` не ищет. И последнее: по `Symbol.match` язык решает, регулярка ли
+перед ним. Ошибка дня 17 «First argument to String.prototype.includes must not be a regular expression» — это та
+проверка: если записать шаблону `re[Symbol.match] = false`, `includes` примет его и превратит
+в строку «/a/».
+
+## 12. Ошибки и тихие сюрпризы {#errors}
+
+| Код | Текст Chrome |
+| --- | --- |
+| `"aabbcc".replaceAll(/b/, ".")` | `TypeError: String.prototype.replaceAll called with a non-global RegExp argument` |
+| `RegExp.escape(5)` | `TypeError: input argument must be a string` |
+| `String.prototype.replace.call(null, "a", "b")` | `TypeError: String.prototype.replace called on null or undefined` |
+| `RegExp.prototype[Symbol.replace].call("x", "a", "b")` | `TypeError: Method RegExp.prototype.@@replace called on incompatible receiver x` |
+
+Первая — разобранная защита `replaceAll`; её страница MDN — та же, что у `matchAll` вчера.
+Вторая — `RegExp.escape` не превращает число в строку, а требует строку. Третья появляется, когда метод
+строки вызвали на `null` через `call` (день 2); обычный `null.replace` падает раньше
+— «Cannot read properties of null». Четвёртая: методы-символы требуют объект. Опаснее ошибок — тихие результаты:
+
+```js
+console.log("abc".replace("b"), "abc".replaceAll(/b/g), "x".replace(/x/, null), "a,b".split(null));   // aundefinedc aundefinedc null ['a,b']
+```
+
+Забытый второй аргумент — это `undefined`, и он превращается в строку «undefined»; `null` —
+в «null». В `split` разделитель `null` тоже стал строкой «null» и в «a,b» не нашёлся.
+
+## 13. Разделы 22.2.5 и 22.2.6 спецификации {#spec}
+
+[22.2.5 Properties of the RegExp
+Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-regexp-constructor) — что лежит на самом `RegExp`. Три пункта: `RegExp.escape` (22.2.5.1),
+`RegExp.prototype` (22.2.5.2: только для чтения, неперечисляемый, ненастраиваемый — день 5) и геттер
+`[Symbol.species]` (22.2.5.3, одна строка: «вернуть this»). В Chrome у `RegExp` есть и
+устаревшие `RegExp.$1`, `RegExp.lastMatch` и их соседи — в тексте спецификации их нет, на MDN
+они помечены как устаревшие, пользоваться ими не нужно.
+
+[RegExp.escape](https://tc39.es/ecma262/2026/#sec-regexp.escape) по шагам: не строка — TypeError;
+пройти строку по кодовым точкам (день 20); первую цифру или латинскую букву записать как `\x` и две
+шестнадцатеричные цифры; остальное отдать EncodeForRegExpEscape (22.2.5.1.1). Та смотрит по порядку: синтаксический
+символ или `/` — обратная косая перед ним; символ из таблицы управляющих (`\t \n \v \f \r`) —
+его запись; знак из списка ``,-=<>#&!%:;@~'`"``, пробельный символ, перевод строки или половинка
+суррогатной пары — `\xHH` или `\uHHHH`; иначе — сам символ. Примечание предупреждает не путать
+его с EscapeRegExpPattern — операцией геттера `source` дня 17: та готовит шаблон к показу строкой, эта —
+строку к вставке в шаблон.
+
+[22.2.6 Properties of the
+RegExp Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-regexp-prototype-object) начинается с важного: прототип — обычный объект, а не регулярное выражение. Дальше —
+список: `constructor`, `exec`, геттеры флагов и `flags`, `source`,
+`test`, `toString` и пять методов-символов.
+
+```js
+console.log(Object.prototype.toString.call(RegExp.prototype), RegExp.prototype.source, RegExp.prototype.global);   // [object Object] (?:) undefined
+const flagsGetter = Object.getOwnPropertyDescriptor(RegExp.prototype, "flags").get;
+console.log(flagsGetter.call({ global: true, sticky: 1, ignoreCase: "yes", hasIndices: 0 }));   // giy
+console.log(Object.getOwnPropertySymbols(RegExp.prototype).length, RegExp[Symbol.species] === RegExp);   // 5 true
+```
+
+Геттер `flags` (22.2.6.4) не хранит строку — он читает свойства `hasIndices`,
+`global`, `ignoreCase` и остальные по очереди и добавляет букву за каждое истинное. Поэтому он
+работает даже на простом объекте — и поэтому `replaceAll` и `[Symbol.replace]` узнают о
+флаге `g`, читая `flags`.
+
+<Scheme src="scheme-spec.svg">Кто на самом деле выполняет `replace`, `split` и соседей</Scheme>
+
+Схема — пересказ строковых методов из 22.1.3 и пяти методов из 22.2.6. Возьмём два главных.
+
+[String.prototype.replace](https://tc39.es/ecma262/2026/#sec-string.prototype.replace) (22.1.3.19):
+если у первого аргумента есть метод `[Symbol.replace]` — вызвать его и вернуть результат. Иначе оба
+аргумента — строки: найти первое вхождение, функцию замены вызвать с (найденное, место, строка), а строку-замену
+отдать GetSubstitution без групп. Вот почему `$1` со строкой-шаблоном остаётся буквальным.
+`replaceAll` (22.1.3.20) отличается двумя шагами: регулярка без `g` — TypeError, а строка
+ищется по всем местам, со сдвигом хотя бы на 1 — отсюда «\_x_x_x\_».
+
+<a href="https://tc39.es/ecma262/2026/#sec-regexp.prototype-%symbol.replace%">RegExp.prototype\[Symbol.replace\]</a>
+(22.2.6.11): прочитать `flags`; если есть «g» — записать `lastIndex` 0 и звать RegExpExec, пока
+не придёт `null`, после пустого совпадения сдвигая `lastIndex` (AdvanceStringIndex дня 18).
+Только когда *все* совпадения собраны, начинаются замены: функции — аргументы (совпадение, группы, место,
+строка и, если есть имена, `groups`), строке — [GetSubstitution](https://tc39.es/ecma262/2026/#sec-getsubstitution)
+(22.1.3.19.1). Та идёт по шаблону замены слева направо: `$$`, `` $` ``, `$&`,
+`$'`, цифры (две — только если такая группа есть), `$<` (только если есть имена), иначе
+символ как есть. Куски между совпадениями копируются без изменений.
+
+<a href="https://tc39.es/ecma262/2026/#sec-regexp.prototype-%symbol.split%">RegExp.prototype\[Symbol.split\]</a>
+(22.2.6.14): взять конструктор через SpeciesConstructor, сделать копию с флагами шаблона плюс «y» и идти по строке:
+поставить копии `lastIndex` на текущее место; нет совпадения — шаг вперёд; совпадение пустое у конца
+прошлого разделителя — тоже шаг; иначе отрезать кусок, добавить группы и продолжить с конца совпадения. Копия с
+`y` проверяет ровно текущее место — поэтому `g` и `y` исходного шаблона ничего не
+меняют, о чём говорит примечание 2.
+
+## 14. «Карточки»: чистка и безопасный поиск {#cards}
+
+Возвращаемся к коду дня 17. Перевод с лишними пробелами больше не отвергаем, а чистим; запрос человека
+экранируем; подсвечиваем *все* совпадения — это третий опыт вчерашних «Карточек». И принимаем новые слова
+текстом по строкам — на этот раз через `split`.
+
+```js
+const cards = [
+  { id: 1, word: "book", translation: "книга" },
+  { id: 2, word: "teacher", translation: "учитель" },
+  { id: 3, word: "bread", translation: "хлеб" },
+  { id: 4, word: "water", translation: "вода" },
+  { id: 5, word: "house", translation: "дом" },
+];
+const tidy = (s) => s.replace(/​/g, "").trim().replace(/\s+/g, " ");
+
+function findCards(query) {
+  const re = new RegExp(RegExp.escape(tidy(query)), "i");
+  return cards.filter((c) => re.test(c.word) || re.test(c.translation)).map((c) => c.word);
+}
+function highlight(word, query) {
+  return word.replace(new RegExp(RegExp.escape(query), "gi"), "[$&]");
+}
+const text = "book — книга\nwater —  вода\n\nhouse—дом";
+const added = text.split(/\n+/).map((line) => line.split(/\s*—\s*/)).map(([word, translation]) => ({ word, translation: tidy(translation) }));
+
+console.log(tidy("  сухой  лёд​ "), findCards("ea"), findCards("."), findCards("c++"), findCards(" ХЛ "));
+console.log(highlight("teacher", "e"), highlight("teacher", "EA"), highlight("a.b.c", "."));
+console.log(added.length, added.map((c) => `${c.word}=${c.translation}`));
+```
+
+<ResultBox>
+сухой лёд (2) \['teacher', 'bread'\] (0) \[\] (0) \[\] (1) \['bread'\]\
+t\[e\]ach\[e\]r t\[ea\]cher a\[.\]b\[.\]c\
+3 (3) \['book=книга', 'water=вода', 'house=дом'\]
+</ResultBox>
+
+**Строка 1 — чистка и поиск.** `tidy` убирает невидимый `​` дня 17 (он не
+пробельный, `trim` его не снимает), обрезает края и сжимает любые пробелы в один. Запрос чистится той же
+функцией и экранируется: «.» и «c++» теперь ищутся буквально — пустой ответ вместо всех пяти карточек и
+`SyntaxError`.
+
+**Строка 2 — подсветка.** Флаг `g` — все совпадения, `i` — без регистра,
+`$&` вставляет найденное, поэтому регистр в скобках — как в слове. Две «e» в «teacher» подсвечены без
+`matchAll` и без цикла.
+
+**Строка 3 — импорт.** `split(/\n+/)` режет по одному или нескольким переносам —
+пустая строка текста не даёт пустой карточки. Второй `split` делит строку по тире с любыми пробелами
+вокруг, деструктуризация дня 22 Essentials раскладывает пару по именам.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Уберите из `findCards` вызов `RegExp.escape` и снова вызовите
+`findCards(".")` и `findCards("c++")`. Какой опыт дня 17 вернулся?
+\
+\
+**Второй.** В `highlight` замените `"[$&]"` на `` `[${query}]` `` и
+вызовите `highlight("teacher", "EA")`. Что изменилось и почему `$&` честнее?
+\
+\
+**Третий.** В импорте замените `/\n+/` на `"\n"`. Почему программа упала и
+какая строка текста в этом виновата?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+За три дня шаблон научился проверять, искать, разбирать, менять и резать текст. Осталась одна оговорка, которая
+повторялась весь модуль: «16-битные части», `[а-яё]` вместо «любой буквы» и `\b`, который не
+знает кириллицы. Завтра, на дне 20, — Юникод: почему `split("")` ломает смайлик пополам, флаги
+`u` и `v`, классы `\p{…}` для букв любого алфавита — и туркменских ä, ç, ň, ö, ş,
+ü, ý, ž, — `normalize` и `String.raw`, с которым не нужно удваивать обратную косую.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [String.prototype.replace()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace) | строка или шаблон, шаблоны `$`, функция замены | <Full /> |
+| [String.prototype.replaceAll()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replaceAll) | все вхождения; регулярка — только с `g` | <Full /> |
+| [String.prototype.split()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/split) | разделитель-строка и шаблон, группы, `limit` | <Full /> |
+| [RegExp.escape()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/escape) | строка → буквальный шаблон | <Full /> |
+| [RegExp.prototype\[Symbol.match\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/Symbol.match) | что зовёт `match` | <Brief /> |
+| [RegExp.prototype\[Symbol.matchAll\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/Symbol.matchAll) | что зовёт `matchAll`; копия | <Brief /> |
+| [RegExp.prototype\[Symbol.replace\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/Symbol.replace) | что зовут `replace` и `replaceAll`; флаг `y` | <Brief /> |
+| [RegExp.prototype\[Symbol.search\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/Symbol.search) | что зовёт `search` | <Brief /> |
+| [RegExp.prototype\[Symbol.split\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/Symbol.split) | что зовёт `split`; копия с `y` | <Brief /> |
+| [RegExp\[Symbol.species\]](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/Symbol.species) | конструктор копии | <Brief /> |
+| [ECMA-262, 22.2.5](https://tc39.es/ecma262/2026/#sec-properties-of-the-regexp-constructor) | `RegExp.escape`, `prototype`, `[Symbol.species]` | <Brief /> |
+| [ECMA-262, 22.2.6](https://tc39.es/ecma262/2026/#sec-properties-of-the-regexp-prototype-object) | прототип: флаги, `exec`, методы-символы | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// s.replace("x", y) — первое вхождение строки; s.replace(/x/g, y) — все; s.replaceAll("x", y) — все
+// replaceAll с регуляркой — только с g, иначе TypeError
+// в строке замены: $& — совпадение, $1…$99 — группы, $<имя>, $` — до, $' — после, $$ — знак $
+// функция замены: (match, p1…pN, offset, string, groups?) => строка; $ в её результате не работает
+// s.split(sep, limit) — куски без разделителя; группа в шаблоне-разделителе попадает в массив
+// split(/\s*[,;]\s*/) — несколько разделителей; split(/\r?\n/) — строки; trim().split(/\s+/) — слова
+// RegExp.escape(ввод) — буквальный шаблон: new RegExp(RegExp.escape(q), "gi")
+// строковый метод зовёт re[Symbol.replace / split / match / matchAll / search]; копию делают split и matchAll
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `"a-b-c".replace("-", "+")` дал «a+b-c»?
+   <Answer>Строка-шаблон заменяется только один раз — первое вхождение. Все — `replaceAll("-", "+")`
+   или регулярка с флагом `g`: `replace(/-/g, "+")`.</Answer>
+2. Что вставят `$&`, `$1` и `$$` в строке замены?
+   <Answer>Всё совпадение, текст первой группы и сам знак «$». `$1` работает только с регуляркой, в
+   которой есть группа 1, иначе остаётся буквальным.</Answer>
+3. Почему `"aabbcc".replaceAll(/b/, ".")` бросает `TypeError`, а `replace(/b/, ".")` — нет?
+   <Answer>`replaceAll` обещает заменить все, а шаблон без `g` заменил бы одно. Чтобы это не
+   прошло молча, метод проверяет флаг и бросает ошибку.</Answer>
+4. Чем `"a1b2".split(/\d/)` отличается от `"a1b2".split(/(\d)/)`?
+   <Answer>Первый — `['a', 'b', '']`: цифры выпали. Второй — `['a', '1', 'b', '2', '']`:
+   текст группы вставлен между кусками. Пустая строка в конце — после последнего разделителя.</Answer>
+5. Зачем `RegExp.escape`, если есть `replaceAll` со строкой?
+   <Answer>Когда вокруг ввода человека нужен шаблон: флаг `i`, граница слова, проверка позиции,
+   якоря. Тогда ввод вставляют в `new RegExp`, и его особые символы надо экранировать.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace" />

@@ -1,0 +1,100 @@
+---
+title: День 8 — конспект
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+---
+
+# День 8. Классы: конструктор, методы, поля
+
+<Subtitle>Выжимка лекции: класс как запись функции-конструктора, `constructor`, методы и геттеры, поля, потерянный `this`, отличия от функции-конструктора.</Subtitle>
+
+## Главное
+
+<Definition>
+**Класс** — запись функции-конструктора и её `prototype` в одном месте.
+`typeof` класса — `"function"`; методы лежат в `Класс.prototype`;
+цепочка, `instanceof` и `constructor` — как на дне 7.
+</Definition>
+
+```js
+class Card {
+  flipped = false;                  // поле: своё у каждого объекта
+  handleFlip = () => this.flip();   // поле-стрелка: не теряет this
+
+  constructor(word, translation) {  // при new, после полей
+    this.word = word;
+    this.translation = translation;
+  }
+
+  flip() {                          // метод: в Card.prototype, неперечисляемый
+    this.flipped = !this.flipped;
+    return this.text();
+  }
+
+  text() {
+    return this.flipped ? this.translation : this.word;
+  }
+
+  get label() {                     // геттер: тоже в Card.prototype
+    return `карточка ${this.word}`;
+  }
+}
+
+const card = new Card("bread", "хлеб");
+card.handleFlip();                  // "хлеб"
+```
+
+Сеттер в классе проверяет значение и при создании: `this.mark = mark` в конструкторе
+находит сеттер по цепочке. Но поле с тем же именем (`mark = 7;`) **определяет**
+своё свойство и обходит сеттер — так не пишут. Метод, который возвращает `this`, позволяет
+цепочку: `new Deck().add("book").add("water")`.
+
+## Порядок при new
+
+<Remember>
+1\) объект с прототипом `Card.prototype`; 2) поля сверху вниз, `this` — новый
+объект; 3) тело `constructor`; 4) вернуть объект. Поле не видит того, что запишет
+конструктор: `total = this.items.length` — `TypeError`. Конструктор
+перезаписывает одноимённое поле.
+</Remember>
+
+## Класс и функция-конструктор
+
+|  | Функция-конструктор | Класс |
+| --- | --- | --- |
+| без `new` | работает (и портит `this`) | `TypeError: Class constructor … cannot be invoked without 'new'` |
+| режим | как у скрипта | всегда строгий |
+| методы в прототипе | перечисляемые | неперечисляемые |
+| до объявления | работает | `ReferenceError`, как `let` |
+| `globalThis` | есть | нет |
+| `prototype` | можно заменить | только для чтения |
+
+<KeyPoint>
+Отделённый метод класса (`const f = card.flip`) теряет `this` и падает:
+режим строгий. Лечение — поле-стрелка, `this.flip = this.flip.bind(this)` в конструкторе
+или обёртка `() => card.flip()` в месте вызова. Поле-стрелка — своя копия функции
+в каждом объекте и ключ в `Object.keys`.
+</KeyPoint>
+
+<NoteBox>
+Выражение класса: `const C = class {}`; `class Inner {}` в выражении — имя
+видно только внутри. Класс, возвращённый из функции, может нести настройки в замыкании.
+Конструктор один (`A class may only have one constructor`); в поле нельзя
+`arguments` — `SyntaxError`. После `JSON.parse` объект
+восстанавливают через `new`: поля-стрелки создаёт только конструктор.
+</NoteBox>
+
+<Homework>
+1. Перепишите функцию-конструктор из домашнего задания дня 7 на класс. Сравните
+   `Object.keys` прототипа до и после.
+2. Найдите в своём проекте обработчик события, который вызывает метод объекта. Сделайте
+   метод полем-стрелкой и уберите `bind` или обёртку.
+3. Прочитайте на MDN учебник
+   [Using classes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_classes),
+   раздел «Why classes?», и выпишите, какие доводы за классы приводит автор.
+4. Найдите в спецификации раздел 11.2.2 Strict Mode Code и выпишите, какой код в нём назван
+   строгим всегда.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_classes" />

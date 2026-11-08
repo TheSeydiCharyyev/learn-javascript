@@ -1,0 +1,780 @@
+---
+title: День 6 — Защита объектов, Object.is и логическое присваивание
+day: День 6 • урок 1
+heading: Защита объектов, Object.is и логическое присваивание
+lead: Курс 2, Intermediate. Модуль «Объекты глубже» — второй, последний день. 45 минут.
+css: |
+  h1 { border-bottom-color: #a855f7; }
+  h2 { color: #7e22ce; background: #faf5ff; border-left-color: #a855f7; }
+  h3 { color: #6b21a8; }
+  .step-number { background: #a855f7; }
+  .toc a { color: #7e22ce; }
+---
+
+<Goals>
+- выбирать из трёх уровней защиты объекта — `preventExtensions`, `seal`,
+  `freeze` — и проверять их функциями `isExtensible`, `isSealed`,
+  `isFrozen`;
+- объяснять, почему заморозка неглубокая, и писать глубокую заморозку рекурсией;
+- знать четыре способа сравнить значения и где каждый работает внутри языка;
+- писать значения по умолчанию и правки на месте через `??=`, `||=`,
+  `&&=`;
+- понимать, откуда у любого объекта `toString` и `valueOf` и что делает
+  `Object()`.
+</Goals>
+
+<Toc />
+
+## 1. Опечатка, которую не поймал день 3 {#typo}
+
+На дне 3 мы признали: строгий режим ловит опечатку в имени переменной, но не в имени
+свойства. `quiz.positon = 1` просто добавляет объекту новое свойство. Тогда же
+обещали способ это исправить. Вот он:
+
+```js
+"use strict";
+
+const quiz = Object.seal({ position: 0 });
+quiz.position = 3;   // своё свойство менять можно
+quiz.positon = 1;
+// TypeError: Cannot add property positon, object is not extensible
+```
+
+`Object.seal` («запечатать») зафиксировал состав объекта: свойства, которые были,
+остаются и меняются, а новых не будет. В строгом режиме попытка добавить — ошибка с именем
+виноватого свойства. Без строгого режима запись молча пропадёт: та же пара «тишина или ошибка»,
+что весь модуль I1 и вчерашний день.
+
+Вчера мы защищали одно свойство его признаками. Сегодня — объект целиком. А во второй
+половине дня — как язык сравнивает значения, когда `===` мало, и три коротких
+оператора присваивания.
+
+## 2. Три уровня защиты {#levels}
+
+Кроме признаков свойств, у каждого объекта есть признак самого объекта — **расширяемый**
+ли он, можно ли добавлять ему свойства. Три функции включают защиту по нарастающей:
+
+| Функция | добавлять | удалять | записывать | Проверка |
+| --- | --- | --- | --- | --- |
+| `Object.preventExtensions` | нет | да | да | `Object.isExtensible` → `false` |
+| `Object.seal` | нет | нет | да | `Object.isSealed` → `true` |
+| `Object.freeze` | нет | нет | нет | `Object.isFrozen` → `true` |
+
+<Scheme src="scheme-levels.svg">Защита по нарастающей: от «без новых свойств» до «только чтение»</Scheme>
+
+Все три функции возвращают тот же объект, поэтому их удобно писать прямо вокруг литерала, как
+в разделе 1. И все три **необратимы**: функции «разморозить» в языке нет. Нужен
+изменяемый вариант — делают копию: spread кладёт свойства в новый, обычный объект.
+
+## 3. preventExtensions: без новых свойств {#prevent}
+
+```js
+const card = Object.preventExtensions({ word: "book", topic: "школа" });
+
+card.level = 2;          // новое — молча пропало
+card.word = "lesson";    // старое — меняется
+delete card.topic;       // и удаляется
+console.log(card, Object.isExtensible(card));   // {word: 'lesson'} false
+```
+
+В строгом режиме вместо тишины — ошибка. MDN называет её «can't define property "x": "obj" is
+not extensible», а у Chrome два текста — для присваивания и для `defineProperty`:
+
+```js
+"use strict";
+const card = Object.preventExtensions({ word: "book" });
+card.level = 2;
+// TypeError: Cannot add property level, object is not extensible
+```
+
+`Object.defineProperty(card, "level", { value: 2 })` на том же объекте бросит
+`TypeError: Cannot define property level, object is not extensible` — и в обычном режиме
+тоже: `defineProperty` не молчит (день 5, правило 4).
+
+## 4. seal: состав зафиксирован {#seal}
+
+`Object.seal` делает то же, что `preventExtensions`, и ещё ставит каждому
+свойству `configurable: false`. Удалять свойства и менять их признаки больше нельзя,
+а записывать — можно:
+
+```js
+const student = Object.seal({ name: "Аман", mark: 5 });
+
+student.mark = 4;        // записывать можно
+delete student.name;     // удалить нельзя: молча false
+console.log(student, Object.isSealed(student));   // {name: 'Аман', mark: 4} true
+console.log(Object.getOwnPropertyDescriptor(student, "mark"));
+// {value: 4, writable: true, enumerable: true, configurable: false}
+```
+
+Дескриптор показывает, что именно сделал `seal`: `configurable: false`.
+В строгом режиме `delete student.name` — `TypeError: Cannot delete property 'name'
+of #<Object>`, знакомая со вчерашнего дня ошибка.
+
+Запечатанный объект — хорошая форма для настроек и записей с известным набором полей: опечатка
+в имени не создаст лишнего поля, а значения остаются живыми.
+
+## 5. freeze: только чтение {#freeze}
+
+`Object.freeze` из дня 4 Essentials — третья ступень: всё, что делает `seal`,
+плюс `writable: false` у каждого свойства-данных. Его дескриптор мы видели вчера
+в разделе 15. Сегодня — деталь, о которой легко забыть, — свойства-аксессоры:
+
+```js
+let saved = "светлая";
+const settings = Object.freeze({
+  get theme() {
+    return saved;
+  },
+  set theme(value) {
+    saved = value;
+  },
+});
+
+settings.theme = "тёмная";
+console.log(settings.theme, Object.isFrozen(settings));   // тёмная true
+```
+
+Объект заморожен, а значение поменялось. `writable` бывает только у свойств-данных,
+у аксессора `freeze` ставит лишь `configurable: false`, и геттер с сеттером
+продолжают работать. Данные лежат снаружи, в замыкании, и заморозка до них не дотягивается.
+«Заморожен» значит «свойства объекта не меняются», а не «значения никогда не меняются».
+
+## 6. Массивы под защитой {#arrays}
+
+Массив — тоже объект, элементы — его свойства с ключами-номерами (день 5), и защита работает
+так же. Но есть отличие, которое легко пропустить: методы массива падают **в любом
+режиме**.
+
+```js
+const topics = Object.freeze(["школа", "еда", "дом"]);
+
+topics[0] = "спорт";                              // присваивание — молча
+console.log(topics);                              // ['школа', 'еда', 'дом']
+console.log(topics.map((t) => t.toUpperCase()));  // новый массив — можно
+topics.push("спорт");
+// TypeError: Cannot add property 3, object is not extensible
+```
+
+Присваивание в обычном режиме молчит, а `push` бросает ошибку и без
+`"use strict"`. В алгоритмах методов массива спецификация пишет каждое значение
+операцией `Set` с флагом «при неудаче бросить ошибку» — так что методы ведут себя
+строго всегда. Методы, которые возвращают новый массив, — `map`, `filter`,
+`toSorted` из дня 20 Essentials, — работают.
+
+С запечатанным массивом интереснее: элементы менять можно, а длину — нет. `pop`
+должен удалить последний элемент, а тот неудаляемый:
+
+```js
+const marks = Object.seal([5, 4, 3]);
+
+marks[0] = 2;
+console.log(marks);   // [2, 4, 3]
+marks.pop();
+// TypeError: Cannot delete property '2' of [object Array]
+```
+
+MDN называет эту ошибку «can't delete non-configurable array element». Её можно получить
+и без `pop`: `marks.length = 1` пытается удалить элементы с конца. В обычном
+режиме длина молча останется 3, в строгом — `TypeError` с тем же концом:
+`Failed to set the 'length' property on 'Array': Cannot delete property '2' of [object Array]`.
+
+## 7. Как это устроено в спецификации {#integrity}
+
+Всё, что делают `seal` и `freeze`, вы умеете со вчерашнего дня. В спецификации
+обе функции вызывают одну операцию —
+[SetIntegrityLevel](https://tc39.es/ecma262/2026/#sec-setintegritylevel) (7.3.15),
+«установить уровень целостности», с уровнем `sealed` или `frozen`. Её шаги:
+
+1. Запретить расширение — то же, что делает `preventExtensions`.
+2. Взять список своих ключей.
+3. Для `sealed` — каждому свойству `DefinePropertyOrThrow` с дескриптором
+   `{ configurable: false }`.
+4. Для `frozen` — то же, а свойствам-данным ещё и `writable: false`.
+   Аксессорам — только `configurable: false`: вот откуда живой сеттер раздела 5.
+
+DefinePropertyOrThrow — та же операция, что в шаге 4 `defineProperty` вчера. Значит,
+`seal` можно написать самому: `preventExtensions` и цикл
+`defineProperty` по `getOwnPropertyNames` (задание 5).
+
+Проверки устроены зеркально — операция
+[TestIntegrityLevel](https://tc39.es/ecma262/2026/#sec-testintegritylevel) (7.3.16):
+объект расширяемый — сразу «нет», иначе проверить признаки каждого свойства. Отсюда два
+неожиданных ответа:
+
+```js
+console.log(Object.isFrozen(Object.preventExtensions({})));   // true — проверять нечего
+console.log(Object.isFrozen(5), Object.freeze(5));            // true 5
+```
+
+Пустой нерасширяемый объект считается и запечатанным, и замороженным: свойств нет, нарушать
+нечего. Примитивы и так неизменяемы (день 5 Essentials) — для них `isFrozen` отвечает
+`true`, а `freeze` просто возвращает значение. И наоборот: если у объекта
+каждое свойство только для чтения и неконфигурируемое, но сам он расширяемый, — он не заморожен:
+в него можно добавить новое.
+
+## 8. Заморозка неглубокая {#deep}
+
+```js
+const settings = Object.freeze({
+  theme: "светлая",
+  topics: ["школа", "еда"],
+});
+
+settings.topics.push("дом");
+console.log(settings.topics, Object.isFrozen(settings.topics));   // ['школа', 'еда', 'дом'] false
+```
+
+`freeze` заморозил свойство `topics`: в нём всегда будет тот же массив.
+Но сам массив — отдельный объект, и его никто не замораживал. Как с `const` на дне 4
+Essentials: защищена ссылка, а не то, на что она указывает. Чтобы заморозить всё дерево, нужна
+рекурсия из дня 12 Essentials:
+
+```js
+function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  }
+  return obj;
+}
+
+const settings = deepFreeze({ theme: "светлая", topics: ["школа", "еда"] });
+console.log(Object.isFrozen(settings.topics));   // true
+```
+
+Три детали. `value !== null` нужно из-за ошибки языка: `typeof null` —
+`"object"` (день 5 Essentials). Проверка `!Object.isFrozen(value)` спасает от
+зацикливания: если объект где-то ссылается сам на себя, второй раз мы в него не пойдём — он уже
+заморожен (задание 8). А `Object.values` видит только перечисляемые свойства (день 5);
+для настроек этого хватает.
+
+Что и когда защищать? Постоянные данные программы — умолчания, списки тем, таблицы оценок —
+замораживают, чтобы никакая функция не испортила их по ошибке. Объекты с известным набором полей
+запечатывают, чтобы ловить опечатки. Данные, которые программа меняет, не трогают. И помните: без
+строгого режима защита молчит — нарушение не сломает программу, но и не покажет себя. Поэтому
+защиту включают вместе со строгим режимом.
+
+## 9. Четыре сравнения {#equality}
+
+Вторая тема дня. Essentials приучил нас к правилу «только `===`». Но способов
+сравнить значения в языке четыре, и два из них работают внутри знакомых методов. Учебник MDN
+«Equality comparisons and sameness» называет их по операциям спецификации:
+
+| Операция | Где работает | Приводит типы | `NaN` и `NaN` | `0` и `-0` |
+| --- | --- | --- | --- | --- |
+| [IsLooselyEqual](https://tc39.es/ecma262/2026/#sec-islooselyequal) | `==` | да | не равны | равны |
+| [IsStrictlyEqual](https://tc39.es/ecma262/2026/#sec-isstrictlyequal) | `===`, `indexOf`, `switch` | нет | не равны | равны |
+| [SameValueZero](https://tc39.es/ecma262/2026/#sec-samevaluezero) | `includes`, коллекции дней 14–15 | нет | равны | равны |
+| [SameValue](https://tc39.es/ecma262/2026/#sec-samevalue) | `Object.is`, `defineProperty` | нет | равны | не равны |
+
+<Scheme src="scheme-equality.svg">Каждое из трёх сравнений отличается от `===` одним правилом</Scheme>
+
+```js
+console.log(NaN === NaN, Object.is(NaN, NaN));        // false true
+console.log(0 === -0, Object.is(0, -0));              // true false
+console.log(Object.is("1", 1), Object.is({}, {}));    // false false
+```
+
+С объектами все четыре одинаковы: сравнивают, тот же ли это объект, а не одинаково ли
+содержимое (день 7 Essentials). Сравнение содержимого называют **глубоким равенством**;
+встроенного нет, как и глубокой заморозки, — его пишут рекурсией.
+
+### Как работает ==
+
+На дне 7 Essentials таблица `==` выглядела набором случайностей: «правил приведения
+больше десяти, и запомнить их никто не может». В спецификации это один короткий алгоритм —
+[IsLooselyEqual](https://tc39.es/ecma262/2026/#sec-islooselyequal) (7.2.13). Его шаги:
+
+1. Типы одинаковые — дальше как `===`.
+2. `null` и `undefined` равны друг другу — и больше ничему.
+3. Число и строка — строка превращается в число.
+4. `true` или `false` с любой стороны превращается в число 1 или 0.
+5. Объект и примитив — объект превращается в примитив (раздел 13).
+6. BigInt со строкой или числом сравнивается как число; всё остальное — `false`.
+
+После каждого превращения алгоритм начинается заново. Разберём строки таблицы дня 7:
+
+```js
+console.log([] == false, [1] == 1, null == 0);   // true true false
+```
+
+`[] == false` — три превращения подряд. Шаг 4: `false` становится
+`0`. Шаг 5: массив становится примитивом — пустой строкой, как `String([])`.
+Шаг 3: `""` становится `0`. Остаётся `0 === 0`. А
+`null == 0` — `false` по шагу 2: `null` ни во что не превращается
+и равен только `undefined`. «Отдельное правило» дня 7 Essentials — это шаг 2. Правило
+курса прежнее, пишем `===`, но читать `==` в чужом коде теперь можно по шагам,
+а не наугад.
+
+<ProTip>
+Между шагами 2 и 3 в спецификации есть пункт только для браузеров. Старый объект
+`document.all` притворяется пустым: `document.all == null` — `true`,
+`typeof document.all` — `"undefined"`, а в условии он ложный. Старые
+сайты проверяли `if (document.all)`, чтобы узнать Internet Explorer, и браузеры
+сохранили объект, но сделали проверку ложной — чтобы такие сайты не сломались.
+</ProTip>
+
+## 10. NaN и -0 на практике {#zero}
+
+Теперь разгадана загадка дня 19 Essentials: `includes` находит `NaN`,
+а `indexOf` — нет. `includes` сравнивает через SameValueZero,
+`indexOf` — через `===`. А нули оба считают равными:
+
+```js
+const nums = [1, NaN, -0];
+
+console.log(nums.includes(NaN), nums.indexOf(NaN));   // true -1
+console.log(nums.includes(0), nums.indexOf(0));       // true 2
+```
+
+Откуда вообще берётся `-0`? Не только из записи `-0` (день 5 Essentials).
+Его дают обычные вычисления:
+
+```js
+console.log(Math.round(-0.4), 0 * -5, -0 + 0);            // -0 -0 0
+console.log(1 / Math.round(-0.4));                        // -Infinity
+console.log(`${Math.round(-0.4)}`, JSON.stringify(-0));   // 0 0
+```
+
+Минус ноль почти незаметен: `===` считает его нулём, строка и JSON теряют минус.
+Выдают его деление (`1 / -0` — `-Infinity`), консоль и `Object.is`.
+Температура, округлённая до `-0`, в консоли покажется «-0», а на странице — «0».
+
+И связь со вчерашним днём. Исключение «то же значение можно переопределить даже у
+неконфигурируемого свойства» проверяет «то же» через SameValue:
+
+```js
+const o = {};
+Object.defineProperty(o, "x", { value: NaN });
+Object.defineProperty(o, "x", { value: NaN });   // то же значение: можно
+Object.defineProperty(o, "x", { value: -0 });
+// TypeError: Cannot redefine property: x
+```
+
+<Important>
+Когда писать `Object.is`? Почти никогда. Учебник MDN советует `===`,
+а для `NaN` — `Number.isNaN` из дня 5 Essentials. `Object.is`
+нужен, когда важно отличить `-0` от `0` или когда вы повторяете
+поведение `defineProperty`.
+</Important>
+
+## 11. Логическое присваивание {#logical}
+
+Третья тема дня — три оператора, которые соединяют `||`, `&&`
+и `??` из дня 7 Essentials с присваиванием:
+
+| Запись | Значит | Присваивает, когда `a` |
+| --- | --- | --- |
+| `a \|\|= b` | `a \|\| (a = b)` | ложное |
+| `a &&= b` | `a && (a = b)` | истинное |
+| `a ??= b` | `a ?? (a = b)` | `null` или `undefined` |
+
+Обратите внимание на расшифровку: `a || (a = b)`, а не `a = a || b`.
+Присваивания может **не быть вовсе**. Если `a` уже истинное,
+`a ||= b` его только прочитает: правая часть не вычисляется, записи нет. Это видно
+на сеттере дня 5:
+
+```js
+const log = [];
+const quiz = {
+  _total: 5,
+  get total() {
+    log.push("чтение");
+    return this._total;
+  },
+  set total(value) {
+    log.push(`запись ${value}`);
+    this._total = value;
+  },
+};
+
+quiz.total ||= 10;
+console.log(log.join(", "));   // чтение
+quiz.total = quiz.total || 10;
+console.log(log.join(", "));   // чтение, чтение, запись 5
+```
+
+Длинная запись `quiz.total = quiz.total || 10` записала то же значение 5 заново —
+сеттер вызвался зря. А с замороженным объектом лишняя запись — это уже ошибка:
+
+```js
+"use strict";
+const settings = Object.freeze({ theme: "тёмная", timer: 0 });
+
+settings.theme ||= "светлая";   // записи нет — ошибки нет
+settings.timer ??= 10;          // 0 — не null: записи нет
+settings.timer ||= 10;
+// TypeError: Cannot assign to read only property 'timer' of object '#<Object>'
+```
+
+Первые две строки прошли: присваивать было нечего. Третья упала: `0` ложное,
+и `||=` попытался записать `10` в замороженный объект.
+
+В спецификации это видно по шагам раздела
+[13.15.2](https://tc39.es/ecma262/2026/#sec-assignment-operators-runtime-semantics-evaluation).
+Для `??=`: вычислить, куда писать; прочитать значение; если оно не `null` и не
+`undefined` — вернуть его и закончить; иначе вычислить правую часть и записать. «Закончить»
+стоит раньше вычисления правой части, поэтому без записи нет ни сеттера, ни ошибки, ни даже вызова
+функции справа.
+
+<Scheme src="scheme-logical.svg">Логическое присваивание записывает, только если ответ «да»</Scheme>
+
+И строчка в таблицу имён дня 4: если справа безымянная функция, а слева имя переменной,
+функция получает это имя. После `handler ||= function () {}`
+`handler.name` — `"handler"`, как при обычном присваивании.
+
+## 12. Умолчания и правки на месте {#defaults}
+
+Главное применение — значения по умолчанию. Правило выбора то же, что на дне 7 Essentials
+между `||` и `??`: «ноль и пустая строка — это данные?»
+
+```js
+const options = { timer: 0, title: "", level: null };
+
+options.timer ??= 10;            // 0 — данные: остался 0
+options.title ||= "Карточки";    // пустой заголовок не годится: заменили
+options.level ??= 1;             // null — заменили
+options.theme ??= "светлая";     // свойства не было — создали
+console.log(options);
+// {timer: 0, title: 'Карточки', level: 1, theme: 'светлая'}
+```
+
+`&&=` — для правки на месте: поменять значение, только если оно есть.
+
+```js
+const student = { name: "  Аман ", group: "" };
+
+student.name &&= student.name.trim();     // имя есть — обрезали
+student.group &&= student.group.trim();   // пусто — не трогаем
+console.log(student);   // {name: 'Аман', group: ''}
+```
+
+### memo в одну строку
+
+То, что правая часть вычисляется лениво, делает `??=` удобным для памяти-кеша. Обёртка
+`memo` дня 4 сжимается до одной строки:
+
+```js
+function memo(fn) {
+  const cache = {};
+  return function (key) {
+    return (cache[key] ??= fn.call(this, key));
+  };
+}
+
+let calls = 0;
+const square = memo((n) => {
+  calls = calls + 1;
+  return n * n;
+});
+console.log(square(4), square(4), calls);   // 16 16 1
+```
+
+Ответ уже в памяти — `fn` не вызывается вовсе. Но у сокращения есть цена. На дне 4 мы
+проверяли `Object.hasOwn(cache, key)`, а здесь проверка другая: «значение не
+`null` и не `undefined`». Если функция вернула `undefined`, память
+его не заметит, и функция будет вызываться каждый раз. Для чисел годится, для функций без
+`return` — нет.
+
+### Скобки обязательны
+
+Две ошибки дня вы встречали в Essentials, а сегодня у них появились страницы MDN.
+`??` нельзя смешивать с `||` и `&&` без скобок (день 7
+Essentials); Chrome называет второй из знаков:
+
+```js
+const level = null ?? 1 || 2;
+// SyntaxError: Unexpected token '||'
+```
+
+В обратном порядке, `null || 1 ?? 2`, — `Unexpected token '??'`. Скобки
+говорят, что считать первым: `(null ?? 1) || 2` или `null ?? (1 || 2)`.
+MDN: «cannot use ?? unparenthesized within || and && expressions». Вторая — унарный
+оператор слева от `**` (день 6 Essentials): `-2 ** 2` — это
+`(-2) ** 2` или `-(2 ** 2)`? Язык не угадывает. То же с `typeof`,
+`!` и другими унарными: `typeof 2 ** 2` — та же `SyntaxError: Unary
+operator used immediately before exponentiation expression`. MDN: «unparenthesized unary
+expression can't appear on the left-hand side of '\*\*'». Логическому присваиванию `??`
+справа не мешает: `a ||= b ?? c` — правая часть отдельное выражение.
+
+## 13. Что есть у каждого объекта {#object}
+
+Откуда у объекта `{ x: 1 }` метод `toString`, если мы его не писали? Он
+унаследован (день 7) от общего объекта, который спецификация описывает в разделе
+[20.1.3
+Properties of the Object Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-object-prototype-object). Этот раздел — список того, что есть у любого
+обычного объекта: `hasOwnProperty` и `propertyIsEnumerable` (день 5),
+`constructor`, `isPrototypeOf` и `__proto__` (день 7), а ещё
+`toString`, `valueOf` и `toLocaleString`. Раздел
+[20.1.4 Properties of
+Object Instances](https://tc39.es/ecma262/2026/#sec-properties-of-object-instances) — одна фраза: у экземпляров нет особых свойств, кроме унаследованных.
+
+`toString` объясняет надпись `[object Object]`, которую Essentials
+показывал не раз: так объект превращается в строку, если не сказать иначе.
+
+```js
+const card = { word: "book" };
+console.log(`${card}`, String([1, 2]));   // [object Object] 1,2
+
+const toStr = card.toString;              // одалживаем метод, как на дне 2
+console.log(toStr.call([1, 2]), toStr.call(null), toStr.call(() => 1));
+// [object Array] [object Null] [object Function]
+```
+
+У массивов свой `toString` — он склеивает элементы через запятую. А общий
+`toString` объектов, вызванный через `call`, называет вид значения:
+`[object Array]`, `[object Null]`, `[object Function]`. До
+`Array.isArray` так проверяли, массив ли перед вами, и в старом коде приём встречается
+до сих пор.
+
+Свой `toString` у объекта заменяет общий — шаблонная строка вызовет его:
+
+```js
+const card = {
+  word: "book",
+  toString() {
+    return `карточка ${this.word}`;
+  },
+};
+
+console.log(`${card}`, card.toLocaleString());   // карточка book карточка book
+console.log(card.valueOf() === card);            // true
+```
+
+`toLocaleString` по спецификации просто вызывает `toString`; свой, с учётом
+языка, есть у чисел, дат и массивов — это день 25. `valueOf` у обычного объекта
+возвращает сам объект, а у обёрток примитивов из дня 5 Essentials — примитив.
+
+### Object()
+
+Последнее обещание вчерашнего дня — сам `Object`, вызванный как функция
+(20.1.1.1). Он превращает значение в объект: примитив — в обёртку, как `new Number`
+дня 5 Essentials; `null` и `undefined` — в новый пустой объект; объект
+возвращает как есть.
+
+```js
+const card = { word: "book" };
+
+console.log(typeof Object(5), Object(5) + 1);       // object 6
+console.log(Object(null), Object(card) === card);   // {} true
+```
+
+Писать `Object(5)` незачем: обёртки не нужны, а пустой объект проще написать
+`{}`. Но запись `Object(x) === x` встречается как проверка «x — объект».
+
+### Объект → примитив
+
+Шаг 5 алгоритма `==` и вся арифметика превращают объект в примитив операцией
+[ToPrimitive](https://tc39.es/ecma262/2026/#sec-toprimitive) (7.1.1). Для обычного объекта
+она пробует два метода по очереди: когда нужна строка (шаблон, `String`) — сначала
+`toString`, потом `valueOf`; в остальных случаях — наоборот. Побеждает первый,
+кто вернул примитив:
+
+```js
+const card = {
+  word: "book",
+  valueOf() {
+    return 42;
+  },
+  toString() {
+    return "карточка";
+  },
+};
+
+console.log(card + 1, card * 2, `${card}`, card == 42);   // 43 84 карточка true
+```
+
+У обычного объекта `valueOf` возвращает сам объект — не примитив, — и дело доходит
+до `toString`. Поэтому массив `[1]` в `[1] == 1` становится строкой
+`"1"`, а объект в шаблоне — `[object Object]`. Свой `valueOf` есть
+у `Date` из дня 17 Essentials: он возвращает то же число, что `getTime`,
+поэтому даты можно вычитать и без `getTime`.
+
+## 14. «Карточки»: замороженные умолчания {#cards}
+
+Соберём день в «Карточках». Настройки приходят из `localStorage` строкой JSON,
+и в них может чего-то не хватать. Умолчания заморожены целиком, недостающее подставляет
+`??=`, а готовые настройки запечатаны от опечаток.
+
+```js
+"use strict";
+
+function deepFreeze(obj) {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  }
+  return obj;
+}
+
+const DEFAULTS = deepFreeze({
+  theme: "светлая",
+  timer: 10,
+  topics: ["все", "школа", "еда", "дом"],
+});
+
+function loadSettings(json) {
+  const settings = JSON.parse(json);
+  settings.theme ??= DEFAULTS.theme;
+  settings.timer ??= DEFAULTS.timer;
+  settings.topic ??= DEFAULTS.topics[0];
+  return Object.seal(settings);
+}
+
+const settings = loadSettings('{"timer":0,"topic":null}');
+console.log(settings);
+
+settings.theme = "тёмная";
+try {
+  settings.thme = "светлая";
+} catch (error) {
+  console.log(`настройки: ${error.message}`);
+}
+try {
+  DEFAULTS.topics.push("спорт");
+} catch (error) {
+  console.log(`умолчания: ${error.message}`);
+}
+console.log(settings.theme, Object.isSealed(settings), Object.isFrozen(DEFAULTS.topics));
+```
+
+<ResultBox>
+\{timer: 0, topic: 'все', theme: 'светлая'\}\
+настройки: Cannot add property thme, object is not extensible\
+умолчания: Cannot add property 4, object is not extensible\
+тёмная true true
+</ResultBox>
+
+**Строка 1 — умолчания.** В сохранённых настройках был `timer: 0`
+(«без таймера») и `topic: null`. `??=` оставил ноль — это данные, заменил
+`null` на «все» и добавил недостающую тему оформления.
+
+**Строка 2 — печать.** Своё поле `theme` поменялось, а опечатка
+`thme` в строгом режиме остановлена с именем виноватого свойства.
+
+**Строка 3 — глубокая заморозка.** Вложенный массив тем тоже заморожен, и
+никакая часть программы не испортит умолчания для следующих загрузок. С обычным
+`freeze` `push` прошёл бы молча.
+
+**Строка 4 — проверки.** Тема поменялась, настройки запечатаны, массив тем
+заморожен.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Замените `??=` в строке с `timer` на
+`||=`. Каким стал таймер и почему для «без таймера» это ошибка?
+\
+\
+**Второй.** Замените `deepFreeze` при создании `DEFAULTS`
+на `Object.freeze`. Какая строка вывода пропала, а какая изменилась?
+\
+\
+**Третий.** Уберите `"use strict"`. Какая ошибка исчезла, какая осталась
+и почему — по разделу 6?
+</TryIt>
+
+## 15. Итоги модуля и что дальше {#module}
+
+Модуль «Объекты глубже» закончен. Два дня — два взгляда на объект изнутри:
+
+| День | Главная мысль | В спецификации |
+| --- | --- | --- |
+| 5 | у каждого свойства дескриптор: значение или геттер и сеттер плюс три признака | 20.1.2, 6.1.7.1 |
+| 6 | у объекта — расширяемость; три уровня защиты; четыре сравнения; `??=` и соседи | 7.3.15, 7.2.9–7.2.14, 20.1.3 |
+
+Дважды за эти дни мы говорили «унаследованное» и откладывали ответ: откуда у объекта
+`toString`, `hasOwnProperty` и `propertyIsEnumerable`, если мы их
+не писали? Это следующий модуль, «Прототипы и классы». День 7 — цепочка прототипов,
+`Object.create`, `new` и `instanceof`.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Object.preventExtensions()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/preventExtensions) | запрет новых свойств | <Full /> |
+| [Object.isExtensible()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible) | можно ли добавлять свойства | <Full /> |
+| [Object.seal()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/seal) | + `configurable: false` у всех свойств | <Full /> |
+| [Object.isSealed()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed) | запечатан ли объект | <Full /> |
+| [Object.freeze()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/freeze) | + `writable: false`; неглубокая; аксессоры живы | <Full /> |
+| [Object.isFrozen()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen) | заморожен ли объект; пустой нерасширяемый — да | <Full /> |
+| [Guide: Equality comparisons and sameness](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness) | четыре сравнения: `==`, `===`, SameValueZero, SameValue | <Full /> |
+| [Object.is()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/is) | SameValue: `NaN` равен себе, `0` ≠ `-0` | <Full /> |
+| [Logical OR assignment (\|\|=)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_OR_assignment) | записать, если значение ложное | <Full /> |
+| [Logical AND assignment (&&=)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_AND_assignment) | записать, если значение истинное | <Full /> |
+| [Nullish coalescing assignment (??=)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing_assignment) | записать, если `null` или `undefined` | <Full /> |
+| [Object() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/Object) | значение → объект; обёртка, пустой объект или тот же | <Brief /> |
+| [Object.prototype.toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/toString) | `[object Object]`, `[object Array]` | <Brief /> |
+| [Object.prototype.toLocaleString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/toLocaleString) | у обычного объекта вызывает `toString` | <Brief /> |
+| [Object.prototype.valueOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/valueOf) | у обычного объекта — он сам | <Brief /> |
+| [ECMA-262, 20.1.3 Properties of the Object Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-object-prototype-object) | что есть у любого обычного объекта | <Brief /> |
+| [ECMA-262, 20.1.4 Properties of Object Instances](https://tc39.es/ecma262/2026/#sec-properties-of-object-instances) | своих особых свойств нет | <Brief /> |
+| [Ошибка: can't define property "x": "obj" is not extensible](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_define_property_object_not_extensible) | `Cannot add property x, object is not extensible` | <Brief /> |
+| [Ошибка: can't delete non-configurable array element](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Non_configurable_array_element) | `Cannot delete property '2' of [object Array]` | <Brief /> |
+| [Ошибка: cannot use ?? unparenthesized within \|\| and &&](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_use_nullish_coalescing_unparenthesized) | `Unexpected token '\|\|'` или `'??'` | <Brief /> |
+| [Ошибка: unparenthesized unary expression … '\*\*'](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Unparenthesized_unary_expr_lhs_exponentiation) | `Unary operator used immediately before exponentiation expression` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// три уровня, все необратимы и возвращают тот же объект:
+// Object.preventExtensions(obj) — нет новых свойств           Object.isExtensible → false
+// Object.seal(obj)   — + configurable: false: нет удаления     Object.isSealed → true
+// Object.freeze(obj) — + writable: false: нет записи           Object.isFrozen → true
+// нарушение: обычный режим — молча; строгий — TypeError;
+//   defineProperty и методы массива (push, pop, sort) — TypeError всегда
+// freeze неглубокий: вложенные объекты — deepFreeze рекурсией (с проверкой isFrozen)
+// аксессоры замороженного объекта работают: freeze не трогает get и set
+// isFrozen({} после preventExtensions) → true; isFrozen(5) → true
+
+// ==  — приводит типы; NaN != NaN, 0 == -0                (старый код)
+// === — IsStrictlyEqual: NaN !== NaN, 0 === -0            (наш код, indexOf, switch)
+// SameValueZero: NaN равен NaN, 0 равен -0                (includes, Map, Set)
+// Object.is — SameValue: NaN равен NaN, 0 ≠ -0            (defineProperty)
+// объекты все четыре сравнивают по ссылке
+// == по шагам: тот же тип → ===; null == undefined (и только); строка → число;
+//    true/false → 1/0; объект → примитив; после превращения — сначала
+
+// a ||= b  — a || (a = b): записать, если a ложное
+// a &&= b  — a && (a = b): записать, если a истинное
+// a ??= b  — a ?? (a = b): записать, если a null или undefined
+// записи может не быть: сеттер не вызовется, заморозка не помешает, правая часть не вычислится
+// cache[key] ??= fn(key) — память в одну строку, но undefined она не запоминает
+// ?? вместе с || и && — только в скобках; -2 ** 2 — только в скобках
+
+// {}.toString → "[object Object]"; через call — вид: [object Array], [object Null]
+// valueOf обычного объекта — он сам; toLocaleString → toString
+// Object(5) — обёртка; Object(null) — {}; Object(obj) === obj
+// объект → примитив (ToPrimitive): valueOf, потом toString; для шаблона и String — наоборот
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем `seal` отличается от `freeze` по признакам свойств?
+   <Answer>Оба запрещают расширение и ставят всем свойствам `configurable: false`.
+   `freeze` ещё ставит свойствам-данным `writable: false`:
+   в запечатанный объект записывать можно, в замороженный — нет.</Answer>
+2. Объект заморожен, а `settings.theme = "тёмная"` поменял значение. Как такое
+   возможно?
+   <Answer>`theme` — аксессор. `freeze` ставит аксессорам только
+   `configurable: false`, и сеттер продолжает работать, записывая
+   данные туда, где они хранятся, например в замыкание.</Answer>
+3. Почему `[NaN].includes(NaN)` — `true`, а
+   `[NaN].indexOf(NaN)` — `-1`?
+   <Answer>`includes` сравнивает через SameValueZero, где `NaN` равен
+   `NaN`, а `indexOf` — через `===`, где не равен.</Answer>
+4. Чем `obj.x ||= 5` отличается от `obj.x = obj.x || 5`?
+   <Answer>Если `obj.x` истинное, `||=` ничего не записывает: сеттер не
+   вызовется, на замороженном объекте ошибки не будет. Длинная запись записывает всегда.</Answer>
+5. В настройках `timer: 0` значит «без таймера». Что писать для умолчания:
+   `timer ||= 10` или `timer ??= 10`?
+   <Answer>`??=`: он заменяет только `null` и `undefined`.
+   `||=` заменил бы и ноль, и «без таймера» превратилось бы в 10 секунд.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness" />

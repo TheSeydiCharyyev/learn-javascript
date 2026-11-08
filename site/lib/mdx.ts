@@ -21,7 +21,8 @@
 //                                          front dropped); <Toc> with its own list where the two differ
 import { evaluate } from "@mdx-js/mdx";
 import * as runtime from "react/jsx-runtime";
-import remarkGfm from "remark-gfm";
+import { gfmTable } from "micromark-extension-gfm-table";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
 import YAML from "yaml";
 import type { ComponentType } from "react";
 
@@ -72,6 +73,17 @@ function remarkHeadingIds() {
     });
 }
 
+// Of GFM only its tables (| a | b |). The rest of remark-gfm the course does not use, and one part of it does harm:
+// it makes links of bare addresses and emails in the text — "http://127.0.0.1:5500/missing.js" in a result box,
+// «aman@mail.tm» in a task (Intermediate, 08.11.2026) — even escaped (it looks for them after the escapes are read),
+// and with a line break right after the address it takes the "\" of the break into the link. The HTML pages have no
+// such links: a link is [text](url). Checked: all 216 pages of Essentials compile to the same code as with remark-gfm.
+function remarkTables(this: { data(): object }) {
+  const data = this.data() as { micromarkExtensions?: unknown[]; fromMarkdownExtensions?: unknown[] };
+  (data.micromarkExtensions ??= []).push(gfmTable());
+  (data.fromMarkdownExtensions ??= []).push(gfmTableFromMarkdown());
+}
+
 const jsxAttr = (name: string, value: string) => ({ type: "mdxJsxAttribute", name, value });
 
 // A fenced code block becomes <Code lang="js" file="…" code="…" />: the component highlights it the way the HTML
@@ -116,7 +128,7 @@ export function mdxContent(rel: string, body: string, firstLine = 1) {
     const escaped = body.replace(HEADING_ID, "$1 \\{#$2\\}");
     compiled.set(
       rel,
-      evaluate(escaped, { ...runtime, remarkPlugins: [remarkGfm, remarkHeadingIds, remarkCodeBlocks, remarkToc], development: false })
+      evaluate(escaped, { ...runtime, remarkPlugins: [remarkTables, remarkHeadingIds, remarkCodeBlocks, remarkToc], development: false })
         .then((m) => m.default as ComponentType<{ components?: Record<string, unknown> }>)
         .catch((e: Error & { line?: number; column?: number }) => {
           // MDX names the place in the text after the frontmatter (escaping heading ids keeps the lines)

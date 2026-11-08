@@ -1,0 +1,787 @@
+---
+title: "День 34 — Итоговый проект: реализация"
+day: День 34 • урок 1
+heading: "Итоговый проект: реализация"
+lead: Курс 2, Intermediate. Итоговый проект — второй из четырёх дней. 45 минут.
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+  h3 { color: #854d0e; }
+  .step-number { background: #eab308; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- вести работу по плану: проверки — код — проверка — отметка;
+- выносить логику в методы класса, чтобы проверять её без страницы;
+- писать проверки раньше метода и ловить ими ошибки, которые страница прячет;
+- держать один общий `Map` на все колоды и не подменять его;
+- сравнивать план с фактом и переносить остаток на день 35.
+</Goals>
+
+<Toc />
+
+## 1. Как работать по плану {#how}
+
+Вчера составили план: шесть задач на сегодня, у каждой — минуты и проверка. Главное правило из Essentials не
+изменилось: **одна задача за раз**. Новое — порядок внутри задачи. Если задача меняет класс, проверки
+для неё сначала пишут на странице проверок (день 33): заглушка их проваливает, настоящий метод — нет. Потом —
+слушатель и проверка руками.
+
+<Scheme src="scheme-how.svg">Одна задача за раз: проверки раньше кода, отметка — только когда вкладка проверок молчит</Scheme>
+
+Перед большой правкой — копия папки проекта (`cards-2`), как в Essentials.
+
+### Если застряли
+
+| Шаг | Что делать |
+| --- | --- |
+| 1 | прочитать красную строку в консоли и текст в `#error` — целиком, до конца |
+| 2 | посмотреть на вкладку проверок: что она пишет после правки |
+| 3 | спросить из консоли страницу и хранилище: переменные модулей она не видит (день 30), а разметку и `localStorage` видит |
+| 4 | не помогло за 10 минут — вернуться к копии и повторить задачу меньшими шагами |
+
+## 2. Откуда начинаем {#start}
+
+Каркас дня 33 показывает первую карточку колоды «школа», вкладка проверок молчит. По таблице возможностей:
+
+| № | Возможность | Состояние | Задача сегодня |
+| --- | --- | --- | --- |
+| 1 | загрузить колоду | готово |  |
+| 2 | сообщить об ошибке загрузки | готово |  |
+| 3 | перевернуть карточку | заглушка | 1 |
+| 4 | «Знаю» | заглушка, `know` пустой | 2 |
+| 5 | «Повторить» | заглушка | 3 |
+| 6 | выбрать колоду | кнопок нет | 4 |
+| 7 | счётчик «На сегодня: N из M» | готово |  |
+| 8 | помнить прогресс | читаем, но не пишем | 5 |
+| 9 | начать сначала | заглушка | 6 |
+
+Задачи идут в порядке плана — каждая опирается на предыдущие:
+
+| Задача | Опирается на |
+| --- | --- |
+| 1. переворот | текущую карточку — раздел 3 |
+| 2. «Знаю» | текущую карточку и `flipped`; `know` меняет общий прогресс |
+| 3. «Повторить» | круг в `cardAt`; виден, когда «Знаю» укоротил колоду |
+| 4. кнопки колод | общий прогресс: его видно, только когда колод две и больше |
+| 5. сохранение | «Знаю»: без него нечего сохранять |
+| 6. «На сегодня всё», сброс | всё выше: колода пустеет только после «Знаю» |
+
+А начинаем, как в Essentials, с текущей карточки — о ней говорят все три кнопки.
+
+## 3. Сначала — карточка на экране {#current}
+
+В Essentials текущую карточку возвращала функция `current` в `app.js`. В курсе 2 её место —
+в классе: колода знает, какие карточки показать сегодня, а `main.js` знает только номер места
+`position`. Метод получает место и дату и ничего не меняет:
+
+```js
+// deck.js: новый метод после due
+  // карточка на месте position, по кругу; null — на сегодня карточек нет
+  cardAt(position, today) {
+    const cards = this.due(today);
+    return cards.length === 0 ? null : cards[position % cards.length];
+  }
+```
+
+Остаток от деления — тот же, что в Essentials: `position` растёт без конца, а карточки идут по кругу.
+`null` — честный ответ «на сегодня всё». И раз это метод класса, его проверяют на странице проверок, без
+`main.js` и без щелчков:
+
+```js page="test.html"
+// tests.js, перед «проверки закончены»
+const fresh = new Deck(school, new Map());
+console.assert(fresh.cardAt(0, today)?.word === "book", "первая карточка — book");
+console.assert(fresh.cardAt(3, today)?.word === "book", "после последней — снова первая");
+console.assert(new Deck(school.slice(0, 1), later).cardAt(0, today) === null, "всё отложено — карточки нет");
+```
+
+<ResultBox>
+проверки закончены
+</ResultBox>
+
+В Essentials такую функцию проверял `testCurrent`: он подменял переменные программы и возвращал их
+назад. Теперь подменять нечего — для проверки создают отдельную колоду с нужным прогрессом, а программа на
+странице её не видит и не замечает. В `main.js` текущая карточка — одна строка. `?.` и `??` (дни 22 и 7 Essentials)
+— на случай, когда колоды нет в `opened`, потому что она не загрузилась: тогда и карточки нет.
+
+```js
+// main.js: новая функция перед render
+// карточка на экране; null — на сегодня всё
+function current() {
+  return opened.get(chosen)?.cardAt(position, today) ?? null;
+}
+```
+
+## 4. Задача 1: переворот {#flip}
+
+Что показать — слово или перевод, — решает `render`, а слушатель только меняет `flipped`,
+как в Essentials:
+
+```js
+// main.js: замена render
+function render() {
+  const deck = opened.get(chosen);
+  const word = current();
+  card.textContent = word === null ? "На сегодня всё" : (flipped ? word.translation : word.word);
+  counter.textContent = `На сегодня: ${deck.due(today).length} из ${deck.size}`;
+}
+```
+
+```js
+// main.js: замена слушателя карточки
+card.addEventListener("click", () => {
+  if (current() === null) return;   // переворачивать нечего
+  flipped = !flipped;
+  render();
+});
+```
+
+<ResultBox>
+<table className="scenario">
+<thead>
+<tr><th>Что сделали</th><th>Карточка</th><th>Счётчик</th></tr>
+</thead>
+<tbody>
+<tr><td>открыли</td><td>book</td><td>На сегодня: 3 из 3</td></tr>
+<tr><td>щелчок по карточке</td><td>книга</td><td>На сегодня: 3 из 3</td></tr>
+<tr><td>щелчок по карточке</td><td>book</td><td>На сегодня: 3 из 3</td></tr>
+</tbody>
+</table>
+</ResultBox>
+
+Задача закрыта — отметка в плане и настоящие минуты.
+
+## 5. Задача 2: «Знаю» {#know}
+
+«Знаю» — метод `know` по правилу дня 22: пауза — шаг × 2 дней, шаг удваивается. Сначала проверки —
+что должно стать с прогрессом после одного и двух «Знаю»:
+
+```js page="test.html"
+// tests.js, перед «проверки закончены»
+const progress = new Map();
+const food = new Deck(all[1].cards.map((item) => new Card(item)), progress);
+food.know(4, today);
+console.assert(String(progress.get(4)?.next) === "2026-10-28", "первое «Знаю» — повтор через 2 дня");
+food.know(4, today.add({ days: 2 }));
+console.assert(String(progress.get(4)?.next) === "2026-11-01", "второе — ещё через 4 дня");
+console.assert(food.due(today).length === 2, "bread ушла из сегодняшних");
+console.assert(throws(() => food.know(1, today)), "know пропустил чужой номер");
+```
+
+<ResultBox>
+Assertion failed: первое «Знаю» — повтор через 2 дня\
+Assertion failed: второе — ещё через 4 дня\
+Assertion failed: bread ушла из сегодняшних\
+Assertion failed: know пропустил чужой номер\
+проверки закончены
+</ResultBox>
+
+Четыре красные строки на заглушке. Заметьте `String(progress.get(4)?.next)`: пока прогресса нет,
+`?.` даёт `undefined`, и проверка проваливается, а не падает, — иначе вкладка остановилась бы
+на первой строке, как заглушка без `return` на дне 33. Первая попытка метода:
+
+```js page="test.html"
+// deck.js: так НЕ надо
+  know(id, today) {
+    if (!this.#cards.has(id)) throw new CardsError(`в колоде нет карточки ${id}`);
+    const state = this.#progress.get(id) ?? { next: today, step: 1 };
+    state.next.add({ days: state.step * 2 });
+    state.step *= 2;
+    this.#progress.set(id, state);
+  }
+```
+
+<ResultBox>
+Assertion failed: первое «Знаю» — повтор через 2 дня\
+Assertion failed: второе — ещё через 4 дня\
+Assertion failed: bread ушла из сегодняшних\
+проверки закончены
+</ResultBox>
+
+Сторож чужого номера работает, а даты — нет. На странице это выглядело бы так: «Знаю» — и карточка на месте.
+Причина — в строке `state.next.add(…)`: даты `Temporal` не меняются (день 22),
+`add` возвращает новую дату, а старая остаётся. Результат никуда не записан, день повтора так и остался
+сегодняшним. Правильно — собрать новый объект прогресса:
+
+```js page="test.html"
+// deck.js: настоящий know
+  know(id, today) {
+    if (!this.#cards.has(id)) throw new CardsError(`в колоде нет карточки ${id}`);
+    const step = this.#progress.get(id)?.step ?? 1;
+    this.#progress.set(id, { next: today.add({ days: step * 2 }), step: step * 2 });
+  }
+```
+
+<ResultBox>
+проверки закончены
+</ResultBox>
+
+<Scheme src="scheme-know.svg">Жизнь одной карточки: каждое «Знаю» в день повтора удваивает паузу</Scheme>
+
+Пауза считается от дня, когда нажали «Знаю», а не от прошлой даты повтора. Если ученик пропустил неделю и
+вернулся 5 ноября, карточка с повтором 1 ноября уже в колоде, а «Знаю» отложит её до 13 ноября — на 8 дней от
+сегодняшнего. Пропущенные дни не съедают паузу.
+
+Теперь слушатель. Строка `flipped = false` — правило дня 34 Essentials: что зависит от текущей
+карточки, сбрасывается вместе с ней, иначе следующая откроется переводом. А `position` не меняется:
+отложенная карточка ушла из `due`, и на её место встала следующая.
+
+```js
+// main.js: замена слушателя «Знаю»
+knowButton.addEventListener("click", () => {
+  const word = current();
+  if (word === null) return;
+  opened.get(chosen).know(word.id, today);
+  flipped = false;
+  render();
+});
+```
+
+```js
+// в консоли страницы
+document.querySelector("#know").click();
+console.log(document.querySelector("#card").textContent, "|", document.querySelector("#counter").textContent);
+```
+
+<ResultBox>
+teacher | На сегодня: 2 из 3
+</ResultBox>
+
+## 6. Задача 3: «Повторить» и круг {#again}
+
+```js
+// main.js: замена слушателя «Повторить»
+againButton.addEventListener("click", () => {
+  position++;
+  flipped = false;
+  render();
+});
+```
+
+Круг уже живёт в `cardAt`: после «Знаю» на book в колоде «школа» две карточки, и «Повторить» ведёт
+teacher → lesson → снова teacher.
+
+### Разбор: колода «кончилась» после трёх «Повторить»
+
+Версия `cardAt` без остатка от деления:
+
+```js page="test.html"
+// deck.js: так НЕ надо
+  cardAt(position, today) {
+    const cards = this.due(today);
+    return cards.length === 0 ? null : cards[position];
+  }
+```
+
+<ResultBox>
+Assertion failed: после последней — снова первая\
+проверки закончены
+</ResultBox>
+
+Вкладка проверок поймала её сразу. А на странице ошибки не видно: три раза «Повторить» — и на карточке «На
+сегодня всё», кнопки пропали, хотя счётчик пишет «На сегодня: 3 из 3». В Essentials та же ошибка давала красную
+строку `reading 'word'`. Здесь `cards[3]` — `undefined`, а `?? null` в
+`current` превратил его в «карточек нет». Оператор, который защищал от незагруженной колоды, спрятал
+выход за край массива. `undefined` и `null` значат разное (день 34 Essentials), и
+`??` смешивает их — поэтому проверки сравнивают с точным ответом, а не «хоть с чем-то».
+
+## 7. Задача 4: кнопки колод {#decks}
+
+Кнопки строятся один раз из `decks.json`, как кнопки тем в Essentials:
+
+```js
+// main.js: новая функция перед render
+// кнопки колод — из decks.json, один раз
+function makeDeckButtons() {
+  deckButtons.append(...decks.map((info) => {
+    const button = document.createElement("button");
+    button.textContent = info.name;
+    button.dataset.deck = info.id;
+    return button;
+  }));
+}
+```
+
+```js
+// main.js: замена слушателя кнопок колод
+deckButtons.addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  chosen = button.dataset.deck;
+  position = 0;
+  flipped = false;
+  await openDeck();
+});
+```
+
+```js
+// main.js: конец
+makeDeckButtons();
+await openDeck();
+```
+
+```js
+// main.js, в конец render
+  deckButtons.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.deck === chosen));
+```
+
+Слушатель — `async`: при первом выборе колоды `openDeck` ждёт `import()` её
+файла. Позиция и `flipped` сбрасываются — они зависят от колоды. Выделенную кнопку, как и всё на
+странице, рисует `render`.
+
+<ResultBox>
+<table className="scenario">
+<thead>
+<tr><th>Что сделали</th><th>Карточка</th><th>Счётчик</th></tr>
+</thead>
+<tbody>
+<tr><td>открыли</td><td>book</td><td>На сегодня: 3 из 3</td></tr>
+<tr><td>колода «еда»</td><td>bread</td><td>На сегодня: 3 из 3</td></tr>
+<tr><td>колода «дом»</td><td>house</td><td>На сегодня: 2 из 2</td></tr>
+<tr><td>колода «еда»</td><td>bread</td><td>На сегодня: 3 из 3</td></tr>
+</tbody>
+</table>
+</ResultBox>
+
+Файл колоды запрошен один раз: в DevTools на вкладке Network (Сеть) `food.json` — одна строка, хотя
+«еду» выбирали дважды. Второй раз колоду отдал `opened`. Да и `import()` того же адреса не
+скачал бы файл снова — модуль уже в памяти (день 31). `opened` бережёт другое: колода не собирается
+заново, и сторожа не проверяют те же карточки второй раз.
+
+А если щёлкнуть «еду» и сразу «дом», пока «еда» ещё грузится? Ничего не перепутается. В
+`opened.set(chosen, await loadDeck(…))` аргументы вычисляются слева направо: `chosen`
+прочитан до `await`, и «еда» ляжет под своим `id`, даже если к концу загрузки выбран уже
+«дом». А `render` после `await` рисует ту колоду, которая выбрана сейчас, — и только когда
+она открыта. На странице будет «house», выделена кнопка «дом», а «еда» при следующем выборе откроется без
+запроса.
+
+## 8. Задача 5: сохранение {#save}
+
+Как в Essentials, запись — одной строкой в конце `render`: он вызывается после каждого изменения.
+`save` из `storage.js` превращает `Map` и даты в строку:
+
+```js
+// main.js, в конец render
+  localStorage.setItem(KEY, save(progress));
+```
+
+```js
+// в консоли страницы
+document.querySelector("#know").click();
+console.log(localStorage.getItem("cards2:progress"));
+```
+
+<ResultBox>
+\{"$map":\[\[1,\{"next":\{"$date":"2026-10-28"\},"step":2\}\]\]\}
+</ResultBox>
+
+Ровно та строка, которую на дне 33 мы записали руками. Обновим страницу:
+
+```js
+// в консоли страницы
+location.reload();
+```
+
+```js
+// в консоли страницы, после обновления
+console.log(document.querySelector("#card").textContent, "|", document.querySelector("#counter").textContent);
+```
+
+<ResultBox>
+teacher | На сегодня: 2 из 3
+</ResultBox>
+
+Почему в `render`, а не в слушателе «Знаю»? Прогресс меняет не только он — в задаче 6 появится
+«Начать сначала». Запись в одном месте сохранит и сброс, без новой строки.
+
+### Разбор: JSON.stringify вместо save
+
+```js
+// так НЕ надо — последняя строка render
+  localStorage.setItem(KEY, JSON.stringify(progress));
+```
+
+**Шаг 1. Симптом.** «Знаю» на book — «teacher», всё как надо. Обновили страницу — пустая карточка,
+пустой счётчик, а в консоли `Uncaught TypeError: this[#progress].get is not a function`. Ошибка
+указывает на `deck.js`, хотя там ничего не меняли.
+
+**Шаг 2. Что в хранилище?** `localStorage.getItem("cards2:progress")` — `"{}"`.
+`JSON.stringify` не умеет `Map` (день 31) и записал пустой объект. При открытии
+`load("{}")` вернул обычный объект, не `null`, и `?? new Map()` не сработал: колоды
+получили вместо `Map` объект без метода `get`. Ошибка сделана в одной строке
+`main.js`, а всплыла после обновления в другом модуле. **Шаг 3.** Хранилище пишет и читает
+одна пара функций — `save` и `load` из `storage.js`.
+
+Вторая половина строки 8 — «28 октября вернулись». Поменяйте учебное «сегодня» в `main.js` на
+`"2026-10-28"` и обновите страницу: снова «book», «На сегодня: 3 из 3». «Знаю» в этот день отложит её
+до 1 ноября — шаг уже 2, пауза 4 дня. Потом верните 26 октября.
+
+## 9. Задача 6: «На сегодня всё» и «Начать сначала» {#empty}
+
+Когда отложены все карточки колоды, кнопкам «Знаю» и «Повторить» нечего делать — их прячем. Окончательный
+`render`:
+
+```js
+// main.js: замена render
+function render() {
+  const deck = opened.get(chosen);
+  const word = current();
+  card.textContent = word === null ? "На сегодня всё" : (flipped ? word.translation : word.word);
+  knowButton.hidden = word === null;
+  againButton.hidden = word === null;
+  counter.textContent = `На сегодня: ${deck.due(today).length} из ${deck.size}`;
+  deckButtons.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.deck === chosen));
+  localStorage.setItem(KEY, save(progress));
+}
+```
+
+«Начать сначала» необратимо — сначала `confirm` (день 28 Essentials). А очищает прогресс
+`clear` — метод `Map` дня 14:
+
+```js
+// main.js: замена слушателя «Начать сначала»
+resetButton.addEventListener("click", () => {
+  if (!confirm("Забыть весь прогресс?")) return;
+  progress.clear();
+  position = 0;
+  flipped = false;
+  render();
+});
+```
+
+<ResultBox>
+<table className="scenario">
+<thead>
+<tr><th>Что сделали</th><th>Карточка</th><th>Счётчик</th></tr>
+</thead>
+<tbody>
+<tr><td>колода «еда»</td><td>bread</td><td>На сегодня: 3 из 3</td></tr>
+<tr><td>«Знаю», «Знаю», «Знаю»</td><td>На сегодня всё</td><td>На сегодня: 0 из 3</td></tr>
+<tr><td>«Начать сначала» → Отмена</td><td>На сегодня всё</td><td>На сегодня: 0 из 3</td></tr>
+<tr><td>«Начать сначала» → OK</td><td>bread</td><td>На сегодня: 3 из 3</td></tr>
+</tbody>
+</table>
+</ResultBox>
+
+На «На сегодня всё» кнопок «Знаю» и «Повторить» нет, а их слушатели всё равно начинаются с проверки на
+`null`: кнопку прячут, слушатель защищают.
+
+## 10. Разбор: сброс, который не сбросил {#bug-reset}
+
+Почему `clear()`, а не новый пустой `Map`? Попробуем:
+
+```js
+// main.js: так НЕ надо
+resetButton.addEventListener("click", () => {
+  if (!confirm("Забыть весь прогресс?")) return;
+  progress = new Map();
+  position = 0;
+  flipped = false;
+  render();
+});
+```
+
+**Шаг 1. Симптом.** «Знаю», «Начать сначала», OK — на странице «teacher», «На сегодня: 2 из 3», а в
+консоли `Uncaught TypeError: Assignment to constant variable.` (день 4 Essentials): `progress`
+объявлен через `const`.
+
+**Шаг 2. Заменим `const` на `let`.** Ошибки нет, но на странице всё те же
+«teacher» и «2 из 3». А после обновления — снова все три карточки: сброс «сработал», но не сразу. Подсказку даёт
+хранилище: сразу после сброса `localStorage.getItem("cards2:progress")` — `{"$map":[]}`, пусто,
+а экран по-прежнему считает book отложенной. Хранилище и экран разошлись — значит, у них разные источники.
+
+**Шаг 3. Причина.** `Map` один, а держат его несколько: имя `progress` в
+`main.js` и `#progress` каждой открытой колоды — его передали им в конструкторе.
+
+<Scheme src="scheme-bug-reset.svg">clear() очищает тот Map, который видят все; присваивание перевешивает одно имя</Scheme>
+
+`progress = new Map()` перевешивает только имя в `main.js`. Колоды по-прежнему смотрят на
+старый `Map`, и `render` показывает старый прогресс, а `save` пишет новый,
+пустой, — поэтому сброс виден только после обновления. `clear()` очищает тот самый `Map`,
+который видят все. Правило: общий объект меняют, а не подменяют, — и `const` это правило сторожит.
+Ошибка шага 1 была подсказкой, а не помехой.
+
+## 11. Программа целиком {#whole}
+
+```js
+// main.js
+import decks from "./data/decks.json" with { type: "json" };
+import { save, load } from "./storage.js";
+import { loadDeck } from "./load.js";
+
+const KEY = "cards2:progress";
+const today = Temporal.PlainDate.from("2026-10-26");            // учебное «сегодня»; в жизни — Temporal.Now.plainDateISO()
+const progress = load(localStorage.getItem(KEY)) ?? new Map();  // номер карточки → { next, step }, на все колоды
+const opened = new Map();                                        // id колоды → Deck: каждая грузится один раз
+let chosen = decks[0].id;                                        // id выбранной колоды
+let position = 0;                                                // какая карточка колоды на экране
+let flipped = false;                                             // виден ли перевод
+
+const deckButtons = document.querySelector(".decks");
+const loading = document.querySelector("#loading");
+const error = document.querySelector("#error");
+const card = document.querySelector("#card");
+const knowButton = document.querySelector("#know");
+const againButton = document.querySelector("#again");
+const counter = document.querySelector("#counter");
+const resetButton = document.querySelector("#reset");
+console.assert(![deckButtons, loading, error, card, knowButton, againButton, counter, resetButton].includes(null), "на странице нет элемента");
+
+// карточка на экране; null — на сегодня всё
+function current() {
+  return opened.get(chosen)?.cardAt(position, today) ?? null;
+}
+
+// кнопки колод — из decks.json, один раз
+function makeDeckButtons() {
+  deckButtons.append(...decks.map((info) => {
+    const button = document.createElement("button");
+    button.textContent = info.name;
+    button.dataset.deck = info.id;
+    return button;
+  }));
+}
+
+// страница из данных
+function render() {
+  const deck = opened.get(chosen);
+  const word = current();
+  card.textContent = word === null ? "На сегодня всё" : (flipped ? word.translation : word.word);
+  knowButton.hidden = word === null;
+  againButton.hidden = word === null;
+  counter.textContent = `На сегодня: ${deck.due(today).length} из ${deck.size}`;
+  deckButtons.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.deck === chosen));
+  localStorage.setItem(KEY, save(progress));
+}
+
+// открыть выбранную колоду; с сервера — только в первый раз
+async function openDeck() {
+  try {
+    if (!opened.has(chosen)) opened.set(chosen, await loadDeck(decks.find((d) => d.id === chosen), progress));
+  } catch (err) {
+    error.textContent = `${err.message}: ${err.cause.message}`;
+  }
+  loading.hidden = true;
+  if (opened.has(chosen)) render();
+}
+
+deckButtons.addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  chosen = button.dataset.deck;
+  position = 0;
+  flipped = false;
+  await openDeck();
+});
+card.addEventListener("click", () => {
+  if (current() === null) return;   // переворачивать нечего
+  flipped = !flipped;
+  render();
+});
+knowButton.addEventListener("click", () => {
+  const word = current();
+  if (word === null) return;
+  opened.get(chosen).know(word.id, today);
+  flipped = false;
+  render();
+});
+againButton.addEventListener("click", () => {
+  position++;
+  flipped = false;
+  render();
+});
+resetButton.addEventListener("click", () => {
+  if (!confirm("Забыть весь прогресс?")) return;
+  progress.clear();
+  position = 0;
+  flipped = false;
+  render();
+});
+
+makeDeckButtons();
+await openDeck();
+```
+
+Сравните с каркасом дня 33: имена, переменные и порядок частей те же, заглушки стали кодом, добавились
+`current` и `makeDeckButtons`. В `deck.js` — новый `cardAt` и настоящий
+`know`; `card.js`, `load.js`, `errors.js` и `storage.js` не
+менялись. Что спрашивают на защите и где ответ:
+
+| Вопрос | Где ответ |
+| --- | --- |
+| почему пауза растёт: 2 дня, потом 4, потом 8? | `know`, правило дня 22 |
+| что будет после последней карточки? | `%` в `cardAt`: снова первая |
+| почему файл колоды скачивается один раз? | `opened` и `import()` дня 31 |
+| почему `clear()`, а не `new Map()`? | разбор раздела 10 |
+
+## 12. Проверка по таблице возможностей {#check}
+
+Все задачи отмечены — проходим таблицу целиком, как на защите, с чистого прогресса:
+
+<ResultBox>
+<table className="scenario">
+<thead>
+<tr><th>Что сделали</th><th>Карточка</th><th>Счётчик</th></tr>
+</thead>
+<tbody>
+<tr><td>открыли</td><td>book</td><td>На сегодня: 3 из 3</td></tr>
+<tr><td>щелчок по карточке</td><td>книга</td><td>На сегодня: 3 из 3</td></tr>
+<tr><td>«Знаю»</td><td>teacher</td><td>На сегодня: 2 из 3</td></tr>
+<tr><td>«Повторить»</td><td>lesson</td><td>На сегодня: 2 из 3</td></tr>
+<tr><td>щелчок по карточке, «Повторить»</td><td>teacher</td><td>На сегодня: 2 из 3</td></tr>
+<tr><td>колода «дом»</td><td>house</td><td>На сегодня: 2 из 2</td></tr>
+<tr><td>«Знаю», «Знаю»</td><td>На сегодня всё</td><td>На сегодня: 0 из 2</td></tr>
+<tr><td>обновили страницу</td><td>teacher</td><td>На сегодня: 2 из 3</td></tr>
+<tr><td>колода «дом»</td><td>На сегодня всё</td><td>На сегодня: 0 из 2</td></tr>
+<tr><td>«Начать сначала» → Отмена</td><td>На сегодня всё</td><td>На сегодня: 0 из 2</td></tr>
+<tr><td>«Начать сначала» → OK</td><td>house</td><td>На сегодня: 2 из 2</td></tr>
+</tbody>
+</table>
+</ResultBox>
+
+После обновления открыта «школа», а не «дом»: выбранная колода — переменная, её не сохраняли. Это решение, а не
+ошибка, — запишите его в таблицу возможностей.
+
+### Проверки кодом
+
+Руками проверяют то, что видит человек, а вкладкой проверок — то, что может тихо сломаться при следующей
+правке. Она молчит до последней строки, а покраснеет вот когда:
+
+| Проверки | Сторожат | Покраснеют, если |
+| --- | --- | --- |
+| данные | поля и номера во всех файлах | файл колоды поправили руками с ошибкой |
+| сторожа | `Card` и `Deck` | из конструктора убрали проверку |
+| `due` | что показать сегодня | сломали сравнение дат |
+| `cardAt` | круг и «пусто» | убрали `%` |
+| `know` | даты и шаг | забыли записать результат `add` |
+
+### Крайние случаи
+
+| Случай | Что будет | Почему |
+| --- | --- | --- |
+| на сегодня одна карточка, «Повторить» | та же карточка | остаток от деления на 1 — всегда 0 |
+| «Знаю» на последней карточке круга | снова первая | `due` короче, `%` возвращает в начало |
+| отложены все карточки колоды | «На сегодня всё», кнопок нет | `cardAt` — `null` |
+| «Начать сначала», Отмена | ничего | `confirm` вернул `false` |
+| в хранилище испорченная строка | `main.js` падает на `load`, «Загрузка…» висит | `JSON.parse` вне `try` |
+| колода не загрузилась, «Повторить» | на карточке прежнее слово, потом «На сегодня всё» и красная строка | `render` ждёт открытую колоду |
+
+Две последние строки — известные недоработки. Они попадут в задачу «крайние случаи» дня 35.
+
+## 13. План и факт {#fact}
+
+В конце дня к задачам плана дописывают настоящие минуты. `plan` — массив дня 33:
+
+```js
+// в консоли — plan из дня 33
+const actual = [15, 30, 15, 20, 10, 10];   // минуты на деле, по порядку задач дня 34
+const day34 = plan.filter((t) => t.day === 34);
+console.log(actual.reduce((sum, m) => sum + m, 0) - day34.reduce((sum, t) => sum + t.minutes, 0));
+console.log(day34.filter((t, i) => actual[i] > t.minutes).map((t) => t.task).join(", "));
+console.log(plan.filter((t) => t.day === 35 && !t.later).reduce((sum, t) => sum + t.minutes, 0));
+```
+
+<ResultBox>
+10\
+«Знаю»: повтор по датам\
+65
+</ResultBox>
+
+Перерасход — 10 минут, и видно откуда: «Знаю» заняло 30 вместо 20, по дороге нашлась ошибка с датами раздела
+5\. Не ускоряться, а пересчитать день 35: без задачи «потом» он занимает 65 минут — перерасход помещается. А новая
+идея, пришедшая по дороге, не делается, а записывается в «потом»:
+
+```js
+// в консоли
+plan.push({ day: 35, task: "клавиши: пробел — перевернуть", minutes: 15, later: true });
+console.log(plan.filter((t) => t.later).map((t) => t.task).join(", "));
+```
+
+<ResultBox>
+поиск по слову, клавиши: пробел — перевернуть
+</ResultBox>
+
+## 14. Что дальше {#next}
+
+Все возможности таблицы работают. Завтра, на дне 35, — доработка: телефон, крайние случаи с двумя известными
+недоработками, поиск по слову из списка «потом» и чтение чужого кода. Последняя проверка дня — в консоли
+страницы:
+
+```js
+// в консоли страницы
+console.assert(document.querySelectorAll(".decks button").length === 3, "кнопок колод не три");
+console.assert(localStorage.getItem("cards2:progress") !== null, "прогресс не сохраняется");
+```
+
+<ResultBox>
+консоль пуста — день 34 закрыт
+</ResultBox>
+
+К концу дня 34 в вашем проекте: все строки таблицы возможностей, кроме «потом», работают; вкладка проверок пишет
+одну строку, и у каждого нового метода на ней есть свои проверки; в плане у каждой задачи — факт, а план дня 35
+пересчитан. На практике вы делаете то же со своим проектом: задача за задачей, сначала проверки на вкладке, потом
+код и отметка минут. Если задача идёт вдвое дольше плана, — остановитесь и спросите данные.
+
+<Ref>
+<p style={{margin: "0 0 8px"}}>Новых страниц нет — проект пользуется разобранными раньше:</p>
+
+| Страница | Где в проекте | День |
+| --- | --- | --- |
+| [% (остаток)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Remainder) | `cardAt`: колода по кругу | Essentials, день 6 |
+| [??](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing) | `current`, шаг в `know` | Essentials, день 7 |
+| [?.](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining) | `current`, проверки `know` | Essentials, день 22 |
+| [TypeError: invalid assignment to const](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_const_assignment) | разбор сброса | Essentials, день 4 |
+| [confirm()](https://developer.mozilla.org/en-US/docs/Web/API/Window/confirm) | «Начать сначала» | Essentials, день 28 |
+| [setItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/setItem) | сохранение в конце `render` | Essentials, день 31 |
+| [Map.clear()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/clear) | сброс общего прогресса | 14 |
+| [Temporal.PlainDate.add()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/add) | `know`: день повтора | 22 |
+| [import()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import) | колода по кнопке, один раз | 31 |
+</Ref>
+
+<Cheatsheet>
+```js
+// ЗАДАЧА: проверки на вкладке → код → вкладка молчит + руками → отметка минут
+
+// ЛОГИКА — В КЛАССЕ, СОСТОЯНИЕ ЭКРАНА — В main.js
+return cards.length === 0 ? null : cards[position % cards.length];
+return opened.get(chosen)?.cardAt(position, today) ?? null;   // ?? смешивает undefined и null
+
+// ПРОВЕРКА ПРОВАЛИВАЕТСЯ, А НЕ ПАДАЕТ
+console.assert(String(progress.get(4)?.next) === "2026-10-28", "первое «Знаю» — повтор через 2 дня");
+
+// TEMPORAL НЕ МЕНЯЕТСЯ: add возвращает новую дату
+this.#progress.set(id, { next: today.add({ days: step * 2 }), step: step * 2 });
+
+// ОБЩИЙ ОБЪЕКТ МЕНЯЮТ, А НЕ ПОДМЕНЯЮТ
+progress.clear();                                   // не progress = new Map()
+
+// ЗАПИСЬ — В КОНЦЕ render, НЕОБРАТИМОЕ — ЧЕРЕЗ confirm
+localStorage.setItem(KEY, save(progress));
+if (!confirm("Забыть весь прогресс?")) return;
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему текущую карточку выбирает метод `cardAt` колоды, а не функция в `main.js`?
+   <Answer>Тогда её проверяет страница проверок — без разметки, щелчков и `main.js`. В
+   `main.js` остаётся только номер места `position`.</Answer>
+2. Почему «Знаю» с `state.next.add(…)` не откладывает карточку?
+   <Answer>Даты `Temporal` не меняются: `add` возвращает новую дату, а результат никуда
+   не записан. Нужно положить в прогресс новый объект с новой датой.</Answer>
+3. Почему проверки `know` пишут `String(progress.get(4)?.next)`?
+   <Answer>Пока прогресса нет, `?.` даёт `undefined`, и проверка проваливается, а не
+   падает. Иначе страница проверок остановилась бы на первой строке.</Answer>
+4. Без `%` в `cardAt` страница не падает. Что она показывает и почему?
+   <Answer>После трёх «Повторить» — «На сегодня всё» при счётчике «3 из 3». `cards[3]` —
+   `undefined`, а `?? null` в `current` выдал его за «карточек нет».</Answer>
+5. Почему сброс через `progress = new Map()` виден только после обновления?
+   <Answer>Колоды держат старый `Map` — его передали им в конструкторе. Присваивание перевешивает
+   одно имя: экран показывает старый прогресс, а `save` пишет новый, пустой.</Answer>
+6. Задачи дня заняли на 10 минут больше плана. Что делать?
+   <Answer>Не ускоряться, а пересчитать следующий день: задача «потом» уходит в запас, и главное помещается.
+   Новые идеи — тоже в «потом».</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/clear" />

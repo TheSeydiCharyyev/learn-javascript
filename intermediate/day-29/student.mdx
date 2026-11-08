@@ -1,0 +1,98 @@
+---
+title: День 29 — конспект
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+---
+
+# День 29. Асинхронные итераторы и генераторы, for await...of
+
+<Subtitle>Выжимка лекции: async function\*, for await...of, очередь вызовов, Symbol.asyncIterator, Array.fromAsync.</Subtitle>
+
+## Главное
+
+```js
+async function* pages() {
+  try {
+    yield await later(["book", "water"], 100);
+    yield later(["apple"], 100);          // yield ждёт промис сам
+    yield ["teacher"];
+  } finally {
+    console.log("закрыт");                // после break — до выхода из цикла
+  }
+}
+(async () => {
+  for await (const page of pages()) {
+    console.log(page.join(", "));
+    if (page.includes("apple")) break;
+  }
+  console.log(await Array.fromAsync(pages()));
+})();
+```
+
+## Четыре вида функций
+
+|  | одно значение | много значений |
+| --- | --- | --- |
+| сразу | `function` → значение | `function*` → `next()` даёт `{ value, done }` |
+| потом | `async function` → промис | `async function*` → `next()` даёт промис `{ value, done }` |
+
+<Definition>
+**Асинхронный генератор** — функция `async function*`: в теле можно и `await`, и
+`yield`. Вызов возвращает объект `AsyncGenerator`, тело начинается на первом
+`next()`. Записи: объявление, выражение, метод `async *name() {}`; стрелочной нет.
+`yield промис` и `return промис` ждут промис сами — `value` промисом не бывает.
+</Definition>
+
+## for await...of
+
+| Что | Как |
+| --- | --- |
+| где писать | в `async`-функции, асинхронном генераторе, модуле |
+| что перебирает | `[Symbol.asyncIterator]()`, а если его нет — обычный `[Symbol.iterator]()`, ожидая каждое значение |
+| досрочный выход | `break`, ошибка, `return` → цикл зовёт и ждёт `return()` источника |
+| массив промисов | загрузки уже идут одновременно; поздний отказ раньше своей очереди — «Uncaught (in promise)» |
+| значение `return` | цикл его не видит, только `next()` |
+
+<NoteBox>
+Частые ошибки: `for await` вне `async`-функции — `SyntaxError: Unexpected reserved
+word`; `for...of` по асинхронному генератору — `TypeError: gen is not iterable`;
+`for await` по числу — `5 is not async iterable`. Методы генератора и
+`Array.fromAsync` ошибку не бросают, а отклоняют свой промис.
+</NoteBox>
+
+<KeyPoint>
+Асинхронный генератор ленив: следующее значение он готовит, только когда его попросили. Постраничная загрузка
+останавливается на нужной странице, а тики «раз в секунду» не копятся, пока цикл занят, — в отличие от
+`setInterval`.
+</KeyPoint>
+
+<Remember>
+`next`, `return` и `throw` возвращают промисы. Вызовы, сделанные, пока генератор
+занят, встают в очередь и выполняются по порядку. `return(v)` на `yield` работает как
+`return v` в этом месте — `finally` выполнится. Свой перебор:
+`{ async *[Symbol.asyncIterator]() { … } }`.
+</Remember>
+
+<NoteBox>
+`await Array.fromAsync(source, mapFn)` — массив из асинхронного, обычного или похожего на массив
+источника; значения берёт по одному. `Promise.all` ждёт все сразу. Методов `map` и
+`take` у асинхронных итераторов нет — их пишут сами, асинхронными генераторами.
+`AsyncGeneratorFunction` не глобальный, у объекта генератора есть `[Symbol.asyncIterator]()`
+и `[Symbol.asyncDispose]()`, но нет `[Symbol.iterator]`. Спецификация: очередь
+`[[AsyncGeneratorQueue]]` и пять состояний — раздел 27.6.
+</NoteBox>
+
+<Homework>
+1. Перепишите один свой цикл с `await` внутри `for...of` через асинхронный генератор и
+   `for await`.
+2. Проверьте в Chrome: сколько раз сработает `setInterval` на 300 мс, пока цикл из лекции получает три
+   тика.
+3. Прочитайте на странице
+   [Array.fromAsync()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fromAsync)
+   раздел «Closing sync iterables on rejection» и запустите пример.
+4. Найдите в ECMA-262 раздел 27.6.3.8 AsyncGeneratorYield и выпишите, что делает `yield`, если в очереди
+   ещё есть запросы.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for-await...of" />

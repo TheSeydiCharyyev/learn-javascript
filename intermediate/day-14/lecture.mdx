@@ -1,0 +1,625 @@
+---
+title: День 14 — Map и WeakMap
+day: День 14 • урок 1
+heading: Map и WeakMap
+lead: "Курс 2, Intermediate. Модуль «Коллекции: Map, Set, WeakMap, WeakSet» — первый день. 45 минут."
+css: |
+  h1 { border-bottom-color: #84cc16; }
+  h2 { color: #4d7c0f; background: #f7fee7; border-left-color: #84cc16; }
+  h3 { color: #3f6212; }
+  .step-number { background: #84cc16; }
+  .toc a { color: #4d7c0f; }
+---
+
+<Goals>
+- хранить пары «ключ — значение» в `Map`: `set`, `get`, `has`,
+  `delete`, `size`, `clear`;
+- объяснять, чем ключи `Map` отличаются от ключей объекта, и выбирать между ними;
+- перебирать `Map` по порядку вставки и пользоваться её итераторами;
+- считать частоты и группировать: `getOrInsert`, `Map.groupBy`;
+- понимать, зачем нужен `WeakMap`, и строить на нём кеш и скрытые данные.
+</Goals>
+
+<Toc />
+
+## 1. Словарь, который нам обещали {#promise}
+
+Этот день обещали трижды. На дне 4 у `memo` ключи `1` и `"1"` попадали в одну
+ячейку. На дне 7 словарь `Object.create(null)` спасал от ключей «из ниоткуда», но терял
+`toString`. А день 36 Essentials в списке «чего не хватает» назвал `Map`. Вот главная
+беда объекта как словаря:
+
+```js
+const marks = {};
+const aman = { name: "Аман" };
+const meret = { name: "Мерет" };
+
+marks[aman] = 5;
+marks[meret] = 3;
+console.log(marks[aman], Object.keys(marks));   // 3 ['[object Object]']
+
+const byStudent = new Map();
+byStudent.set(aman, 5).set(meret, 3);
+console.log(byStudent.get(aman), byStudent.get(meret), byStudent.size);   // 5 3 2
+```
+
+Ключ объекта — строка или символ (день 11). Объект-ученик превратился в строку
+`"[object Object]"` через `toString` дня 6 — и оба ученика легли в одну ячейку: оценку
+Амана затёрла оценка Мерета. `Map` — **словарь**, где ключом может быть любое
+значение, а сам объект-ученик и есть ключ. Справочник MDN описывает его так: `Map` хранит пары
+«ключ — значение» и помнит порядок, в котором ключи добавляли.
+
+## 2. Шесть операций {#basics}
+
+Основа — пример учебника MDN «Keyed collections», на словах «Карточек»:
+
+```js
+const dict = new Map();
+dict.set("book", "книга").set("water", "вода").set("bread", "хлеб");
+
+console.log(dict.size, dict.get("book"), dict.get("house"), dict.has("water"));   // 3 книга undefined true
+console.log(dict.delete("water"), dict.delete("water"), dict.size);              // true false 2
+dict.set("book", "учебник");
+console.log(dict);        // Map(2) {'book' => 'учебник', 'bread' => 'хлеб'}
+dict.clear();
+console.log(dict.size);   // 0
+```
+
+| Операция | Что делает | Возвращает |
+| --- | --- | --- |
+| `set(key, value)` | добавить или заменить значение ключа | саму коллекцию — можно сцеплять |
+| `get(key)` | прочитать значение | значение или `undefined` |
+| `has(key)` | есть ли ключ | `true` / `false` |
+| `delete(key)` | удалить запись | `true`, если было что удалять |
+| `size` | число записей — свойство, не метод | число |
+| `clear()` | удалить всё | `undefined` |
+
+Две тонкости. `get` отвечает `undefined` и на «ключа нет», и на «ключ есть, значение
+`undefined`» — различает их `has`, как `Object.hasOwn` в `memo` дня 4.
+А `size` — геттер без сеттера (день 5): `dict.size = 10` тихо пропадёт, а в строгом режиме
+— `Cannot set property size of #<Map> which has only a getter`. В консоли словарь виден как
+`Map(2) {'book' => 'учебник', …}`: число записей и стрелки «ключ => значение».
+
+## 3. Ключом может быть что угодно {#keys}
+
+```js
+const m = new Map();
+const card = { id: 1 };
+
+m.set(card, "первый").set({ id: 1 }, "второй");
+m.set(1, "число").set("1", "строка");
+m.set(NaN, "не число").set(-0, "ноль");
+console.log(m.size, m.get(card), m.get({ id: 1 }));        // 6 первый undefined
+console.log(m.get(1), m.get("1"), m.get(NaN), m.get(0));   // число строка не число ноль
+```
+
+Ключи сравниваются алгоритмом **SameValueZero** дня 6 — как `===`, но
+`NaN` равен `NaN`, а `-0` равен `0`. Отсюда три правила:
+
+- `1` и `"1"` — разные ключи: никакого превращения в строку.
+- Объект-ключ ищется **по ссылке**, а не по содержимому: `{ id: 1 }`, написанный
+  второй раз, — другой объект, и `get` его не находит. Ключ надо хранить в переменной.
+- `NaN` находится, хотя `NaN !== NaN`; ключ `-0` записывается как
+  `0`.
+
+## 4. Ловушка: свойство вместо записи {#trap}
+
+Справочник MDN предупреждает: `Map` — тоже объект, и квадратные скобки работают, но мимо
+словаря:
+
+```js
+const wrong = new Map();
+wrong["book"] = "книга";
+console.log(wrong.book, wrong.has("book"), wrong.size, wrong.get("book"));   // книга false 0 undefined
+```
+
+Появилось обычное свойство объекта, а в самом словаре пусто: `has`, `size` и
+`get` его не видят. Записи `Map` — только через `set`.
+
+## 5. Создать, скопировать, слить {#build}
+
+Конструктор принимает любой перебираемый объект пар `[ключ, значение]` (день 11). Пары
+объекта даёт `Object.entries` дня 21 Essentials, обратно собирает `Object.fromEntries`:
+
+```js
+const words = { book: "книга", water: "вода" };
+const dict = new Map(Object.entries(words));
+
+console.log(dict.get("water"), dict);                         // вода Map(2) {'book' => 'книга', 'water' => 'вода'}
+console.log(Object.fromEntries(dict), JSON.stringify(dict));   // {book: 'книга', water: 'вода'} {}
+console.log(JSON.stringify([...dict]));                       // [["book","книга"],["water","вода"]]
+```
+
+`JSON.stringify` записей `Map` не видит — получается `{}`. Сохранять
+словарь в JSON (и в `localStorage` дня 31 Essentials) нужно массивом пар `[...dict]`
+или через `Object.fromEntries`, а читать — обратно через `new Map(…)`.
+
+Копия и слияние — из примеров MDN:
+
+```js
+const first = new Map([[1, "one"], [2, "two"], [3, "three"]]);
+const second = new Map([[1, "uno"], [2, "dos"]]);
+const merged = new Map([...first, ...second]);
+
+console.log(merged, new Map(first) === first);   // Map(3) {1 => 'uno', 2 => 'dos', 3 => 'three'} false
+```
+
+При слиянии повторный ключ получает последнее значение. `new Map(first)` — новая коллекция,
+но копия неглубокая: значения-объекты общие. Без `new` —
+`TypeError: Constructor Map requires 'new'` (страница MDN «calling a builtin constructor without
+new»). Элемент, который не пара, — `Iterator value 1 is not an entry object`, а обычный объект
+вместо массива пар — `object is not iterable`.
+
+## 6. Перебор и порядок {#iterate}
+
+```js
+const marks = new Map([["Аман", 5], ["Мерет", 3], ["Айна", 4]]);
+
+for (const [name, mark] of marks) {
+  console.log(name, mark);
+}
+marks.forEach((mark, name) => console.log(`${name}: ${mark}`));
+console.log(marks.values().reduce((a, b) => a + b), marks.keys().filter((n) => n.length > 4).toArray());
+console.log(marks[Symbol.iterator] === marks.entries);
+```
+
+<ResultBox>
+Аман 5\
+Мерет 3\
+Айна 4\
+Аман: 5\
+Мерет: 3\
+Айна: 4\
+12 (1) \['Мерет'\]\
+true
+</ResultBox>
+
+`for...of` по `Map` выдаёт пары `[ключ, значение]` — деструктуризация дня 22
+раскладывает их сразу. `[Symbol.iterator]` — тот же метод, что `entries`.
+`keys`, `values`, `entries` возвращают итераторы `Map` со всеми
+методами дня 13: пример MDN — `marks.values().reduce(…)` вместо `[...marks.values()].reduce(…)`
+без промежуточного массива. Ловушка `forEach`: колбэк получает сначала **значение**,
+потом ключ, третьим — сам словарь; так у массива: значение, номер, массив.
+
+Порядок — порядок первой вставки. У объекта он сложнее (день 11, раздел 4): номера вперёд:
+
+```js
+const m = new Map([["b", 2], ["a", 1], [10, "десять"], [2, "два"]]);
+m.set("b", 20);
+console.log([...m.keys()]);      // ['b', 'a', 10, 2]
+m.delete("b");
+m.set("b", 200);
+console.log([...m.keys()]);      // ['a', 10, 2, 'b']
+const obj = { b: 2, a: 1, 10: "десять", 2: "два" };
+console.log(Object.keys(obj));   // ['2', '10', 'b', 'a']
+```
+
+Замена значения место не меняет; удалённый и добавленный заново ключ уходит в конец. Почему — увидим
+в спецификации. Перебор «живой», как у итераторов массива дня 11: записи, добавленные во время перебора,
+будут пройдены, удалённые до своей очереди — нет. Отсюда опасная мелочь из спецификации: если в
+`forEach` удалить и тут же снова добавить *текущий* ключ, он снова окажется впереди обхода,
+и цикл не кончится.
+
+## 7. Map или объект {#choose}
+
+Справочник MDN сравнивает их таблицей. Её суть:
+
+|  | Map | Объект |
+| --- | --- | --- |
+| случайные ключи | только то, что положили | ключи прототипа: `constructor`, `toString`… (лечится `Object.create(null)` дня 7) |
+| ключи от пользователя | безопасно | ключ `"__proto__"` трогает прототип — «загрязнение прототипа» |
+| типы ключей | любые | строки и символы |
+| порядок | порядок вставки | номера, потом строки, потом символы |
+| размер | `size` | `Object.keys(obj).length` |
+| перебор | перебираемый | нет — через `Object.entries` |
+| частые добавления и удаления | оптимизирован | не оптимизирован |
+| JSON | вручную, через массив пар | сразу |
+
+Две первые строки — в деле. Посчитаем слова, среди которых попались неудачные:
+
+```js
+const counts = {};
+const safe = new Map();
+for (const word of ["constructor", "book", "__proto__"]) {
+  counts[word] = (counts[word] ?? 0) + 1;
+  safe.set(word, (safe.get(word) ?? 0) + 1);
+}
+console.log(typeof counts.constructor, Object.keys(counts), safe.get("constructor"), safe.size);
+// string ['constructor', 'book'] 1 3
+```
+
+Объект нашёл у `constructor` унаследованную функцию — та же беда, что на дне 7, — а слово
+`"__proto__"` вообще пропало: запись в это имя пытается сменить прототип объекта. Учебник MDN даёт
+три правила выбора. `Map` — когда ключи неизвестны до запуска программы, особенно если приходят
+извне, и когда ключи — не строки. Объект — когда набор полей известен заранее и все ключи — строки:
+карточка `{ word, translation }` остаётся объектом, а словарь «слово → перевод» лучше сделать
+`Map`.
+
+## 8. Подсчёт и группировка {#count}
+
+Две частые задачи с `Map` — посчитать, сколько раз встретилось, и разложить по группам:
+
+```js
+const answers = ["book", "water", "book", "bread", "book", "water"];
+const freq = new Map();
+for (const word of answers) {
+  freq.set(word, (freq.get(word) ?? 0) + 1);
+}
+console.log(freq);   // Map(3) {'book' => 3, 'water' => 2, 'bread' => 1}
+
+const byTopic = new Map();
+byTopic.getOrInsert("еда", []).push("bread");
+byTopic.getOrInsert("еда", []).push("water");
+byTopic.getOrInsert("дом", []).push("house");
+console.log(byTopic.get("еда"), byTopic.size);   // ['bread', 'water'] 2
+```
+
+`getOrInsert(key, value)` возвращает значение ключа, а если ключа нет — сначала записывает
+`value`. Так «массив группы» появляется сам при первом слове темы. Брат
+`getOrInsertComputed(key, fn)` вызывает `fn(key)`, только когда ключа нет: у
+`getOrInsert` значение по умолчанию вычисляется всегда, даже если не понадобится.
+
+Для массива целиком есть `Map.groupBy` — родственник `Object.groupBy` дня 21
+Essentials. Разница — в ключах групп:
+
+```js
+const words = [
+  { word: "book", topic: "школа" },
+  { word: "bread", topic: "еда" },
+  { word: "lesson", topic: "школа" },
+  { word: "water", topic: "еда" },
+];
+const groups = Map.groupBy(words, (w) => w.topic);
+console.log([...groups.keys()], groups.get("еда").map((w) => w.word));   // ['школа', 'еда'] ['bread', 'water']
+
+const short = { short: true };
+const long = { short: false };
+const bySize = Map.groupBy(words, (w) => (w.word.length <= 4 ? short : long));
+console.log(bySize.get(short).map((w) => w.word), bySize.get({ short: true }));   // ['book'] undefined
+```
+
+Ключом группы может быть объект — пример MDN с `restock`. Достать группу можно только тем же
+объектом: новый `{ short: true }` — другой ключ. `Object.groupBy` превратил бы ключи
+в строки.
+
+## 9. memo дня 4 на Map {#memo}
+
+Возвращаем долг. `memo` дня 4 хранил память в объекте, и `fastSquare(1)` и
+`fastSquare("1")` делили ячейку. С `Map` правка — в трёх строках:
+
+```js
+function memo(fn) {
+  const cache = new Map();
+  return function (key) {
+    if (!cache.has(key)) {
+      cache.set(key, fn.call(this, key));
+    }
+    return cache.get(key);
+  };
+}
+
+function describe(x) {
+  describe.calls++;
+  return `${typeof x} ${x}`;
+}
+describe.calls = 0;
+
+const fast = memo(describe);
+console.log(fast(1), "|", fast("1"), "|", fast(1), describe.calls);   // number 1 | string 1 | number 1 2
+```
+
+Число и строка — разные ключи, третий вызов взят из памяти, настоящих вычислений два. Ключом теперь может
+быть и объект, и `NaN`. Но у такой памяти есть цена: она держит каждый ключ, пока жив сам
+`memo`. Для ключей-объектов есть коллекция, которая так не делает.
+
+## 10. WeakMap: ключи, которые не держат {#weak}
+
+Сначала — как браузер освобождает память. Объект живёт, пока до него можно добраться: из переменной,
+из другого живого объекта, из массива. Когда последняя такая ссылка пропала, объект недостижим, и
+**сборщик мусора** рано или поздно освобождает его память. Когда именно — решает движок, код
+этого не видит.
+
+`Map` держит свои ключи крепко: пока жив словарь, живы все объекты-ключи, даже если больше они
+никому не нужны. `WeakMap` («слабый словарь») держит ключи **слабо**: если до
+объекта-ключа больше никак не добраться, сборщик может забрать и объект, и его запись.
+
+```js
+const aman = { name: "Аман" };
+const meret = { name: "Мерет" };
+const visits = new WeakMap();
+
+visits.set(aman, 3).set(meret, 1);
+console.log(visits.get(aman), visits.has(meret), visits.delete(meret), visits.has(meret));   // 3 true true false
+console.log(visits.size, typeof visits.keys, typeof visits.forEach);                         // undefined undefined undefined
+visits.set("Аман", 3);
+// TypeError: Invalid value used as weak map key
+```
+
+<Scheme src="scheme-weak.svg">Крепкая и слабая ссылка на ключ</Scheme>
+
+Отсюда все отличия `WeakMap`:
+
+- **Ключ — только объект или символ не из реестра.** Строку или число можно создать заново
+  в любой момент — у них нет «времени жизни», за которым следить. Символ из `Symbol.for`
+  (день 11) тоже: его вернёт любой, кто знает строку. Иначе — `Invalid value used as weak map key`
+  (страница MDN «WeakSet key/WeakMap value must be an object»). `get` и `has` с таким
+  ключом не падают, а просто отвечают `undefined` и `false`.
+- **Нет `size`, перебора и `clear`.** Список ключей зависел бы от того,
+  успел ли поработать сборщик, — один и тот же код давал бы разные ответы. MDN называет это
+  недетерминированностью. Нужен список — берите `Map`. `for...of` по
+  `WeakMap` — `is not iterable`.
+- **Остальное как у `Map`:** `set`, `get`, `has`,
+  `delete`, `getOrInsert`, `getOrInsertComputed`; ключи по ссылке.
+
+Раздел MDN «Why WeakMap?» объясняет и альтернативу: словарь на двух массивах (ключи и значения) ищет
+перебором — медленно, и держит все ключи вечно — утечка памяти. `WeakMap` решает обе беды.
+
+## 11. Кеш и скрытые данные на WeakMap {#cache}
+
+Главное применение — данные **про** объект, которые живут, пока жив он. Пример MDN «Caching»:
+запомнить результат долгого расчёта для объекта-аргумента.
+
+```js
+const cache = new WeakMap();
+let computed = 0;
+
+function stats(student) {
+  if (!cache.has(student)) {
+    computed++;
+    const avg = student.marks.reduce((a, b) => a + b) / student.marks.length;
+    cache.set(student, { avg, best: Math.max(...student.marks) });
+  }
+  return cache.get(student);
+}
+
+const aman = { name: "Аман", marks: [5, 4, 5] };
+console.log(stats(aman).avg.toFixed(2), stats(aman).best, computed);              // 4.67 5 1
+console.log(stats({ name: "Аман", marks: [5, 4, 5] }) === stats(aman), computed);   // false 2
+```
+
+Второй вызов для `aman` взят из кеша; объект с такими же данными — другой ключ и считается
+заново. Когда `aman` станет никому не нужен, его запись уйдёт вместе с ним — кеш не растёт
+вечно, как память `memo` на `Map`. Цена — кеш не узнает, что оценки изменились:
+после `aman.marks.push(2)` он вернёт старый ответ, пока запись не удалить через
+`delete`.
+
+Второе применение — **метаданные** чужих объектов: отметить кнопку страницы «нажата» или
+карточку «показана». MDN сравнивает способы, и сравнение замыкает линию дней 5, 9 и 11:
+
+|  | свойство `_x` | ключ-символ | `#x` | `WeakMap` |
+| --- | --- | --- | --- | --- |
+| видно в `keys`, JSON | да | нет | нет | нет |
+| достаётся через `getOwnPropertySymbols` | — | да | нет | нет |
+| работает с чужим объектом | да | да | нет, только свой класс | да |
+| знает только код с доступом к коллекции | нет | нет | да | да |
+
+`WeakMap` хранит данные снаружи объекта: сам объект не меняется вовсе. До приватных полей
+дня 9 так и делали приватность классов — MDN показывает этот приём и тут же отмечает, что теперь для своих
+классов есть `#`.
+
+## 12. Ошибки дня и Symbol.species {#errors}
+
+| Код | Текст Chrome |
+| --- | --- |
+| `Map()`, `WeakMap()` | `Constructor Map requires 'new'` |
+| `new Map([1, 2])` | `Iterator value 1 is not an entry object` |
+| `new Map({ a: 1 })` | `object is not iterable (cannot read property Symbol(Symbol.iterator))` |
+| `new WeakMap().set("a", 1)`, ключ `Symbol.for(…)` | `Invalid value used as weak map key` |
+| `for (const x of wm)` | `wm is not iterable` |
+| `map.size = 10` в строгом режиме | `Cannot set property size of #<Map> which has only a getter` |
+
+Первая строка — общее правило со страницы MDN: все современные встроенные конструкторы
+(`Map`, `Set`, `Promise`…) требуют `new`. Без него работают только
+старые — `Object`, `Array`, `Error`, `Function`, `RegExp`,
+а `Date`, `String`, `Number`, `Boolean` без `new` возвращают
+другое (строку, примитив — день 5 Essentials).
+
+И долг дня 10: `Map[Symbol.species]` — геттер, который возвращает сам конструктор; наследник
+может переопределить его, чтобы методы создавали объекты родителя. У `Map` он пока ни одним
+методом не используется — MDN прямо это отмечает. По-настоящему `Symbol.species` работает у
+массивов (день 10) и разбирается в курсе 3.
+
+## 13. Раздел 24.1 спецификации {#spec}
+
+Глава [24 Keyed Collections](https://tc39.es/ecma262/2026/#sec-keyed-collections) — коллекции
+с ключами: 24.1 `Map`, 24.2 `Set` (день 15), 24.3 `WeakMap`, 24.4
+`WeakSet` (день 15) и 24.5 — общие операции. Прочитаем
+[24.1 Map Objects](https://tc39.es/ecma262/2026/#sec-map-objects). Вводная часть — два абзаца:
+ключи и значения — любые значения языка; ключ встречается в словаре один раз, а различаются ключи по
+SameValueZero. И требование к движку: доступ должен быть в среднем быстрее, чем перебор всех записей
+(«сублинейный»), — например, хеш-таблица. Структура данных в тексте спецификации нужна, чтобы описать
+поведение, а не чтобы так программировать.
+
+Эта структура — внутренний слот `[[MapData]]` (24.1.4): **список записей**
+`{ [[Key]], [[Value]] }`. Перескажем методы:
+
+- [set](https://tc39.es/ecma262/2026/#sec-map.prototype.set) (24.1.3.11): превратить
+  `-0` в `+0` операцией
+  [CanonicalizeKeyedCollectionKey](https://tc39.es/ecma262/2026/#sec-canonicalizekeyedcollectionkey)
+  (24.5.1); пройти список — нашёлся ключ, заменить значение **на месте**; нет — дописать новую
+  запись **в конец**. Вернуть словарь — отсюда сцепление.
+- [delete](https://tc39.es/ecma262/2026/#sec-map.prototype.delete) (24.1.3.3): найденной записи
+  присвоить ключу и значению особое значение *empty* — запись не вырезается, а помечается
+  пустой. Примечание: настоящие движки могут удалять физически.
+- [forEach](https://tc39.es/ecma262/2026/#sec-map.prototype.foreach) (24.1.3.5) и итераторы
+  идут по списку номером, пропуская пустые записи, и на каждом шаге заново смотрят его длину.
+
+<Scheme src="scheme-spec.svg">Список `[[MapData]]` и что с ним делают `delete` и `set`</Scheme>
+
+Схема объясняет порядок раздела 6: «b» после удаления и новой вставки оказалась в конце. И «живой» перебор:
+обход идёт по номеру в списке, добавленные записи дописаны в конец — до них очередь дойдёт. А итератор
+`Map` (24.1.5) — снова генератор спецификации, как вчерашние помощники: его `next` —
+GeneratorResume с меткой `%MapIteratorPrototype%`; поэтому в цепочке у него
+`Iterator.prototype` и все методы дня 13.
+
+Конструктор ([24.1.1.1](https://tc39.es/ecma262/2026/#sec-map-iterable)): NewTarget
+`undefined` — `TypeError` (тот самый «requires 'new'»); создать объект со слотом
+`[[MapData]]`; если аргумент есть — взять у словаря метод `set` и вызвать операцию
+AddEntriesFromIterable (24.1.1.2). Она перебирает аргумент протоколом дня 11, каждый элемент должен быть
+объектом (иначе «is not an entry object»), читает у него свойства `"0"` и `"1"` и
+передаёт их в `set`. Отсюда две мелочи: парой может быть и объект `{ 0: k, 1: v }`, а
+наследник `Map` со своим `set` получит в нём и записи из конструктора.
+
+Раздел [24.3](https://tc39.es/ecma262/2026/#sec-weakmap-objects) про `WeakMap` устроен
+так же, но вместо CanonicalizeKeyedCollectionKey в `set` стоит проверка CanBeHeldWeakly: можно ли
+держать значение слабо — объект или символ не из реестра. Нельзя — `TypeError`.
+
+## 14. «Карточки»: номера, темы, попытки {#cards}
+
+Соберём три коллекции вокруг карточек. `byId` — то самое «быстро находить слово по номеру»
+дня 36 Essentials. `byTopic` — группы через `Map.groupBy`. `stats` —
+попытки ответа на `WeakMap`: статистика живёт рядом с карточкой, но саму карточку не трогает.
+
+```js
+const cards = [
+  { id: 1, word: "book", translation: "книга", topic: "школа" },
+  { id: 2, word: "teacher", translation: "учитель", topic: "школа" },
+  { id: 3, word: "bread", translation: "хлеб", topic: "еда" },
+  { id: 4, word: "water", translation: "вода", topic: "еда" },
+  { id: 5, word: "house", translation: "дом", topic: "дом" },
+];
+
+const byId = new Map(cards.map((card) => [card.id, card]));   // номер → карточка
+const byTopic = Map.groupBy(cards, (card) => card.topic);      // тема → карточки
+const stats = new WeakMap();                                   // карточка → попытки
+
+function answer(id, text) {
+  const card = byId.get(id);
+  const s = stats.getOrInsertComputed(card, () => ({ tries: 0, right: 0 }));
+  s.tries++;
+  if (text === card.translation) s.right++;
+}
+
+answer(1, "книга");
+answer(3, "вода");
+answer(3, "хлеб");
+answer(4, "вода");
+
+console.log(byId.get(3).word, byId.has(9), byId.size);
+console.log([...byTopic.keys()], byTopic.get("еда").map((c) => c.word));
+console.log(stats.get(byId.get(3)), stats.has(byId.get(5)));
+const progress = new Map(byTopic.entries().map(([topic, list]) => [topic, list.filter((c) => stats.get(c)?.right > 0).length]));
+console.log(progress);
+console.log(JSON.stringify(byId.get(3)), Object.keys(byId.get(3)).length);
+```
+
+<ResultBox>
+bread false 5\
+(3) \['школа', 'еда', 'дом'\] (2) \['bread', 'water'\]\
+\{tries: 2, right: 1\} false\
+Map(3) \{'школа' => 1, 'еда' => 2, 'дом' => 0\}\
+\{"id":3,"word":"bread","translation":"хлеб","topic":"еда"\} 4
+</ResultBox>
+
+**Строка 1 — словарь по номеру.** `new Map(cards.map(…))` собрал словарь из пар
+`[id, карточка]`; ключи — числа, без превращения в строки.
+
+**Строка 2 — группы.** Порядок тем — порядок, в котором они впервые встретились.
+
+**Строка 3 — попытки.** `getOrInsertComputed` создал запись при первом ответе на
+карточку. На `bread` отвечали дважды, верно один раз; на `house` — ни разу.
+
+**Строка 4 — итоги.** Итератор `byTopic.entries()` с `map` дня 13 дал
+пары `[тема, число выученных]`, а конструктор собрал из них новый `Map`.
+
+**Строка 5 — карточка не тронута.** Ни в JSON, ни в `Object.keys` следов статистики
+нет — в отличие от метки-символа дня 11, её не найдёт даже `getOwnPropertySymbols`.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Замените `new WeakMap()` на `new Map()`. Вывод тот же — что
+теперь можно сделать со `stats` (проверьте `size` и перебор) и чем это опасно для
+памяти, если карточки удаляют?
+\
+\
+**Второй.** Сделайте `byId` обычным объектом: `byId[card.id] = card`. Какие
+строки придётся переписать и какого типа станут ключи?
+\
+\
+**Третий.** Добавьте в конец `answer(9, "что-то")`. Какая ошибка и почему именно
+такая? Как защитить `answer` одной проверкой?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+`Map` — словарь «ключ → значение». Завтра, на дне 15, — его сосед `Set`: коллекция
+уникальных значений без ключей, с теми же `has`, `delete`, `size` и новыми
+операциями над множествами — объединение, пересечение, разность. И `WeakSet` — слабая отметка
+«уже видел этот объект». А день 16 — мини-проект «журнал группы» на классах и коллекциях.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Keyed collections](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Keyed_collections) | учебник: Map, WeakMap; Map против объекта | <Full /> |
+| [Map](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map) | словарь с любыми ключами; сравнение с объектом; примеры | <Full /> |
+| [Map() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/Map) | из перебираемого объекта пар; только с `new` | <Full /> |
+| [Map.prototype.set()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/set) | добавить или заменить; возвращает словарь | <Full /> |
+| [Map.prototype.get()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/get) | значение или `undefined` | <Full /> |
+| [Map.prototype.has()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/has) | есть ли ключ | <Full /> |
+| [Map.prototype.delete()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/delete) | удалить; `true`, если было | <Full /> |
+| [Map.prototype.size](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/size) | число записей; только для чтения | <Full /> |
+| [Map.prototype.clear()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/clear) | удалить всё | <Full /> |
+| [Map.prototype.forEach()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/forEach) | колбэк (значение, ключ, словарь) | <Full /> |
+| [Map.prototype.keys()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/keys) | итератор ключей | <Full /> |
+| [Map.prototype.values()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/values) | итератор значений | <Full /> |
+| [Map.prototype.entries()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/entries) | итератор пар | <Full /> |
+| [Map.prototype\[Symbol.iterator\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/Symbol.iterator) | то же, что `entries`; `for...of` | <Full /> |
+| [Map.groupBy()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/groupBy) | группы с любыми ключами | <Full /> |
+| [WeakMap](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap) | слабые ключи; зачем; кеш, метаданные, приватность | <Full /> |
+| [WeakMap() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap/WeakMap) | пары с ключами-объектами | <Full /> |
+| [WeakMap.prototype.set()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap/set) | ключ — объект или символ не из реестра | <Full /> |
+| [WeakMap.prototype.get()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap/get) | значение или `undefined` | <Full /> |
+| [WeakMap.prototype.has()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap/has) | есть ли ключ | <Full /> |
+| [WeakMap.prototype.delete()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap/delete) | удалить запись | <Full /> |
+| [ECMA-262, 24.1 Map Objects](https://tc39.es/ecma262/2026/#sec-map-objects) | `[[MapData]]`; `set`, `delete`, перебор | <Full /> |
+| [Map.prototype.getOrInsert()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/getOrInsert) | значение или записать умолчание | <Brief /> |
+| [Map.prototype.getOrInsertComputed()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/getOrInsertComputed) | умолчание из функции — только при нужде | <Brief /> |
+| [WeakMap.prototype.getOrInsert()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap/getOrInsert) | то же у `WeakMap` | <Brief /> |
+| [WeakMap.prototype.getOrInsertComputed()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap/getOrInsertComputed) | то же у `WeakMap` | <Brief /> |
+| [Map\[Symbol.species\]](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map/Symbol.species) | конструктор для производных; у `Map` не используется | <Brief /> |
+| [Ошибка: calling a builtin constructor without new](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Builtin_ctor_no_new) | `Constructor Map requires 'new'` | <Brief /> |
+| [Ошибка: WeakMap key must be an object](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Key_not_weakly_held) | `Invalid value used as weak map key` | <Brief /> |
+| [ECMA-262, 24 Keyed Collections](https://tc39.es/ecma262/2026/#sec-keyed-collections) | как устроена глава о коллекциях | <Brief /> |
+| [ECMA-262, 24.1.1–24.1.5](https://tc39.es/ecma262/2026/#sec-map-constructor) | конструктор, его свойства, прототип, экземпляры, итераторы | <Brief /> |
+| [ECMA-262, 24.3 и 24.3.1–24.3.4](https://tc39.es/ecma262/2026/#sec-weakmap-objects) | `WeakMap`: CanBeHeldWeakly вместо перебора | <Brief /> |
+| [ECMA-262, 24.5 и 24.5.1](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-keyed-collections) | CanonicalizeKeyedCollectionKey: `-0` → `+0` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// const m = new Map([[k1, v1], [k2, v2]]);   // без new — TypeError
+// m.set(k, v).set(k2, v2)   m.get(k)   m.has(k)   m.delete(k)   m.size   m.clear()
+// ключи — любые, по SameValueZero: 1 ≠ "1", объект — по ссылке, NaN находится, -0 = 0
+// m["x"] = 1 — свойство объекта, НЕ запись словаря
+// порядок — первой вставки; замена — на месте; удалили и добавили — в конец
+// for (const [k, v] of m)   m.forEach((v, k) => …)   — сначала значение!
+// keys(), values(), entries() — итераторы с методами дня 13: m.values().reduce(…)
+// new Map(Object.entries(obj))  ↔  Object.fromEntries(m);   JSON.stringify(m) — "{}"
+// JSON: JSON.stringify([...m])  →  new Map(JSON.parse(text))
+// m.getOrInsert(k, []).push(x)   m.getOrInsertComputed(k, (k) => …)
+// Map.groupBy(items, (x) => ключ) — ключи групп любые, в отличие от Object.groupBy
+// WeakMap: ключ — объект или Symbol() (не Symbol.for); set/get/has/delete; нет size и перебора
+// WeakMap — кеш и метаданные: запись живёт, пока жив объект-ключ
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему объект-словарь «склеил» двух учеников, а `Map` — нет?
+   <Answer>Ключ объекта — строка: оба ученика превратились в `"[object Object]"`. Ключ
+   `Map` — любое значение, объекты сравниваются по ссылке.</Answer>
+2. Что выведет `new Map().set({ id: 1 }, "x").get({ id: 1 })`?
+   <Answer>`undefined`: это два разных объекта. Ключ-объект нужно хранить в переменной.</Answer>
+3. Как сохранить `Map` в JSON и прочитать обратно?
+   <Answer>`JSON.stringify([...m])` — массив пар; обратно — `new Map(JSON.parse(text))`.
+   Сам `JSON.stringify(m)` даёт `{}`.</Answer>
+4. Когда выбрать `Map`, а когда объект?
+   <Answer>`Map` — ключи неизвестны заранее, приходят извне или не строки, часто добавляются и
+   удаляются. Объект — набор полей известен заранее, ключи — строки.</Answer>
+5. Почему у `WeakMap` нет `size` и перебора?
+   <Answer>Записи исчезают вместе с объектами-ключами, когда их забирает сборщик мусора, а когда это
+   случится — неизвестно. Список ключей зависел бы от сборщика.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map" />

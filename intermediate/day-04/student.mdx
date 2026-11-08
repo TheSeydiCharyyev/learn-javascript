@@ -1,0 +1,137 @@
+---
+title: День 4 — конспект
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+---
+
+# День 4. Функция как объект: свойства и arguments
+
+<Subtitle>Выжимка лекции: `name`, `length`, свои свойства функции, `arguments`, конструктор `Function`, обёртки `once` и `memo`.</Subtitle>
+
+## Главное
+
+<Definition>
+**Функция** — объект, который можно вызвать. У неё есть ссылка на окружение
+(день 1), собственные свойства `name` и `length`, общие методы
+`call`, `apply`, `bind`, `toString` — и можно
+добавить свои свойства.
+</Definition>
+
+## name и length
+
+| Функция | `name` |
+| --- | --- |
+| `function greet() {}` | `"greet"` |
+| `const sum = () => 1` | `"sum"` — из переменной |
+| `{ show() {} }` | `"show"` — из ключа |
+| `greet.bind(null)` | `"bound greet"` |
+| `new Function(...)` | `"anonymous"` |
+| в массиве, аргументом, из `return` | `""` |
+
+```js
+(function (a, b) {}).length;        // 2
+(function (a, b = 1, c) {}).length; // 1 — до первого умолчания
+(function (a, ...rest) {}).length;  // 1 — остаточный не считается
+(function ({ a, b }) {}).length;    // 1 — деструктуризация — один параметр
+```
+
+<Remember>
+`name` и `length` — **только для чтения** (раздел 20.2.4):
+обычный режим молчит, строгий бросает `TypeError`. В `Object.keys`
+их не видно. `length` — сколько объявлено, `arguments.length` — сколько передали.
+</Remember>
+
+## Свои свойства
+
+```js
+function greet(student) {
+  greet.calls = greet.calls + 1;
+  return `Салам, ${student}!`;
+}
+greet.calls = 0;
+```
+
+Удобно для отладки и пометок. Но свойство видно и меняется снаружи — данные, которые надо
+защитить, держат в замыкании.
+
+## arguments
+
+<KeyPoint>
+Похож на массив (номера и `length`), перебирается в `for...of`, свой
+на каждый вызов. В массив: `[...arguments]`, `Array.from(arguments)`,
+`[].slice.call(arguments)`. В новом коде — `...rest`.
+</KeyPoint>
+
+|  | Обычный режим | Строгий режим |
+| --- | --- | --- |
+| связь с параметрами | есть, если параметры простые | нет |
+| `arguments.callee`, `f.caller` | работают (устарели) | `TypeError` |
+
+```js
+function outer() {
+  const inner = () => arguments.length;   // стрелочная берёт arguments у outer
+  return inner(1, 2, 3);
+}
+outer(9);   // 1
+```
+
+## Function и toString
+
+<NoteBox>
+`new Function("a", "b", "return a + b")` — функция из строк. Её окружение —
+всегда глобальное (замыкания нет), строка становится кодом (опасно), часто запрещена
+настройками сайта. **Не пишем.**
+\
+`return` на верхнем уровне скрипта — `SyntaxError: Illegal return statement`.
+\
+`toString()` — исходник целиком, с комментариями; у встроенных и привязанных —
+`[native code]`. Для отладки — да, для логики — нет.
+</NoteBox>
+
+## Обёртки
+
+```js
+function once(fn) {
+  let done = false;
+  let result;
+  return function (...args) {          // обычная функция: нужен свой this
+    if (!done) {
+      done = true;
+      result = fn.apply(this, args);   // передать this и все аргументы
+    }
+    return result;
+  };
+}
+
+function memo(fn) {
+  const cache = {};                    // ключи — строки! Map — день 14
+  return function (key) {
+    if (!Object.hasOwn(cache, key)) {
+      cache[key] = fn.call(this, key);
+    }
+    return cache[key];
+  };
+}
+```
+
+<Remember>
+Обёртка = замыкание для состояния + **обычная** `function` +
+`fn.apply(this, args)`. Обёртка — другая функция: своё `name`
+(обычно пустое) и свой `length`.
+</Remember>
+
+<Homework>
+1. Найдите в своём итоговом проекте Essentials функцию, которую вызывают много раз
+   с одними и теми же данными. Оберните её в `memo` и посчитайте свойством
+   функции, сколько вызовов стало настоящими.
+2. Запишите в таблицу `name` и `length` пяти функций своего проекта
+   и проверьте в консоли.
+3. Прочитайте на MDN страницу
+   [arguments](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/arguments)
+   и выпишите, чем он отличается от массива, кроме методов.
+4. Откройте раздел 20.2 спецификации и найдите в 20.2.3 два свойства, которых не было
+   в лекции. Запишите их названия и угадайте по ним, с какой темой будущих дней они связаны.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function" />

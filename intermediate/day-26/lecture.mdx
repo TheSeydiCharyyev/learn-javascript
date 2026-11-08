@@ -1,0 +1,892 @@
+---
+title: "День 26 — Ошибки: Error, его виды, cause и свои классы ошибок"
+day: День 26 • урок 1
+heading: "Ошибки: Error, его виды, cause и свои классы ошибок"
+lead: Курс 2, Intermediate. Модуль «Ошибки и асинхронность» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #92400e; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #b45309; }
+---
+
+<Goals>
+- находить по тексту из консоли страницу справочника ошибок MDN и понимать, что она говорит;
+- знать устройство объекта `Error`: что у ошибки своё, что из прототипа и почему JSON видит «\{\}»;
+- выбирать вид ошибки — `TypeError`, `RangeError`, `SyntaxError`, `ReferenceError` — и знать, когда их бросает движок;
+- писать свои классы ошибок через `extends Error` и цепочки причин через `cause`;
+- отличать `Error.isError` от `instanceof` и читать стек в консоли Chrome.
+</Goals>
+
+<Toc />
+
+## 1. Обещания, накопленные за курс {#debts}
+
+День 11 Essentials научил ловить ошибки `try...catch`, бросать `throw` и различать вид через
+`instanceof`, который «сработает и для потомков типа»; там же к ошибке добавляли своё поле
+(`error.mark = 9`) и запрещали бросать строку. День 10 курса 2 показал, что `RangeError` —
+наследник `Error`, и отложил на сегодня свои классы ошибок:
+
+```js
+class ValidationError extends Error {
+  constructor(message, field) {
+    super(message);
+    this.name = "ValidationError";
+    this.field = field;
+  }
+}
+try {
+  throw new ValidationError("оценка 9 вне диапазона 2–5", "mark");
+} catch (e) {
+  console.log(e instanceof ValidationError, e instanceof Error, e.name, e.field, String(e));
+}
+// true true ValidationError mark ValidationError: оценка 9 вне диапазона 2–5
+```
+
+Пять строк класса — и у ошибки своё имя, поле `field` и место в семье `Error`. Чтобы
+писать такие классы без ловушек (забытый `super`, потерянная причина, «Error» вместо имени), разберём
+`Error` целиком — от справочника MDN до раздела 20.5 спецификации.
+
+## 2. Справочник ошибок MDN {#reference}
+
+У MDN есть отдельный [справочник
+ошибок JavaScript](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors) — 131 страница, по странице на ошибку. Заголовок страницы — `name` и
+`message` ошибки, «отправная точка», как пишет справочник. Курс давно с ними работает: 53 страницы
+разобраны в Essentials, 75 — в днях курса 2, где ошибка встретилась впервые, три оставлены курсу 3.
+
+| Вид | Страниц | Например |
+| --- | --- | --- |
+| `SyntaxError` | 72 | «Unexpected token», «missing ) after argument list» |
+| `TypeError` | 37 | «'x' is not iterable», «invalid assignment to const "x"» |
+| `RangeError` | 11 | «invalid array length», «BigInt division by zero» |
+| `ReferenceError` | 5 | «"x" is not defined» |
+| остальные | 6 | `URIError`, `InternalError`, `AggregateError`, `Error` и два предупреждения |
+
+Страница устроена всегда одинаково: **Message** — как сообщение пишут разные движки (пометки
+«V8-based», «Firefox», «Safari»), **Error type** — вид, **What went wrong?** — что не так,
+**Examples** — плохой код рядом с исправленным. Заголовок обычно в формулировке Firefox, поэтому текст
+из Chrome ищут в разделе Message.
+
+```js
+const lessons = undefined;
+try {
+  lessons.length;
+} catch (e) {
+  console.log(e.name, "|", e.message);
+}
+// TypeError | Cannot read properties of undefined (reading 'length')
+```
+
+Как найти страницу по такой строке:
+
+1. Вид — `TypeError` — сужает поиск до 37 страниц.
+2. Уберите свои имена (`'length'` в справочнике — «x») и поищите текст поисковиком со словом MDN.
+   Этот текст стоит в разделе Message двух страниц: «TypeError: "x" is (not) "y"» и «TypeError: null/undefined has no
+   properties» — читайте обе.
+3. Не нашлось — ищите по смыслу: страница «SyntaxError: JSON.parse: bad parsing» перечисляет 31 текст Firefox, а
+   V8 пишет своё — «Unexpected end of JSON input» (день 23 Essentials).
+4. На найденной странице главное — What went wrong? и пары «плохо / хорошо» в Examples.
+
+Консоль, пишет справочник, может дать рядом с ошибкой ссылку на его страницу; нет ссылки — ищите по шагам выше. И
+помните: `message` пишут для людей, в разных браузерах он разный, и программа на него не опирается
+(раздел 8).
+
+## 3. Объект Error: message и name {#error}
+
+```js
+const e = new Error("нет такой оценки");
+console.log(Object.getOwnPropertyNames(e), Object.hasOwn(e, "name"), e.name, Error.prototype.name);
+console.log(JSON.stringify(Object.getOwnPropertyDescriptor(e, "message")));
+console.log(Error("без new") instanceof Error, Object.hasOwn(new Error(), "message"), new Error().message === "", typeof new Error(42).message);
+```
+
+<ResultBox>
+(2) \['stack', 'message'\] false Error Error\
+\{"value":"нет такой оценки","writable":true,"enumerable":false,"configurable":true\}\
+true false true string
+</ResultBox>
+
+[`Error`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error)
+работает и с `new`, и без: справочник
+[конструктора](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/Error)
+и спецификация прямо пишут, что `Error(…)` равен `new Error(…)`. Первый аргумент —
+[`message`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/message),
+текст для человека. Конструктор переводит его в строку (42 → `"42"`) и кладёт в **собственное
+неперечисляемое** свойство: в дескрипторе дня 5 только `enumerable` — `false`. Без
+аргумента своего `message` нет, и чтение находит пустую строку в `Error.prototype`. Второе своё
+свойство — `stack` (раздел 13).
+
+[`name`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/name)
+— вид ошибки — лежит не в объекте, а в прототипе: у `Error.prototype` это `"Error"`, у каждого
+вида — своё (день 10). Оба свойства можно переписать у объекта — пример справочника делает из обычной ошибки
+«ParseError»:
+
+```js
+const e = new Error("Malformed input");
+e.name = "ParseError";
+console.log(e.toString(), Object.keys(e));
+// ParseError: Malformed input (1) ['name']
+```
+
+Присваивание создало своё — и уже перечисляемое — свойство `name`: обычное присваивание дня 5 даёт все
+три признака `true`. Это пригодится в разделе 10.
+
+## 4. toString и почему JSON видит «\{\}» {#tostring}
+
+Строкой ошибку делает
+[`Error.prototype.toString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/toString)
+— его зовут `String(e)`, шаблонная строка и сложение со строкой. Правило: `name`, двоеточие,
+пробел, `message`; если одно из двух пусто — только другое; вместо `undefined` в имени —
+«Error». Пять примеров со страницы метода:
+
+```js
+const e1 = new Error("fatal error");
+const e2 = new Error("fatal error"); e2.name = undefined;
+const e3 = new Error("fatal error"); e3.name = "";
+const e4 = new Error("fatal error"); e4.name = ""; e4.message = undefined;
+const e5 = new Error("fatal error"); e5.name = "hello"; e5.message = undefined;
+console.log([e1, e2, e3, e4, e5].map((x) => JSON.stringify(x.toString())).join(" "));
+// "Error: fatal error" "Error: fatal error" "fatal error" "" "hello"
+```
+
+Неперечисляемые `message`, `stack` и `cause` — ловушка для журналов и
+`localStorage`:
+
+```js
+const err = new Error("колода пуста", { cause: "no-cards" });
+err.deck = "animals";
+console.log(JSON.stringify(err), Object.keys(err), JSON.stringify({ ...err }), JSON.stringify(new Error("x")));
+const toData = (x) => ({ name: x.name, message: x.message, cause: x.cause });
+console.log(JSON.stringify(toData(err)));
+```
+
+<ResultBox>
+\{"deck":"animals"\} (1) \['deck'\] \{"deck":"animals"\} \{\}\
+\{"name":"Error","message":"колода пуста","cause":"no-cards"\}
+</ResultBox>
+
+`JSON.stringify`, `Object.keys` и spread видят только перечисляемое (таблица «кто что видит»
+дня 5): от ошибки осталось поле `deck`, от обычной — `{}`. Сохраняют ошибку по полям, как
+`toData`.
+
+## 5. TypeError и RangeError {#kinds}
+
+Встроенных видов шесть, и движок выбирает между ними сам. Два самых частых:
+
+| Вид | Когда, по справочнику | Тексты V8 из курса |
+| --- | --- | --- |
+| [`TypeError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError) | операцию нельзя выполнить — обычно значение не того типа; ещё — попытка изменить неизменяемое и значение не по назначению | `Cannot read properties of null (reading 'f')`, `Assignment to constant variable.`, `5 is not iterable`, `Cannot mix BigInt and other types, use explicit conversions` |
+| [`RangeError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError) | значение не из допустимого набора или диапазона | `Invalid array length`, `toFixed() digits argument must be between 0 and 100`, `The normalization form should be one of NFC, NFD, NFKC, NFKD.` |
+
+Своя проверка выбирает так же: тип не тот — `TypeError`; тип тот, но значение не из допустимых —
+`RangeError`. И «допустимые» — не только числа: второй пример справочника бросает `RangeError`, когда вместо «apple», «banana» или «carrot» пришла «cabbage». Так же поступал
+`Intl` на дне 25: нет `currency` — `TypeError`, стиль «money» —
+`RangeError`.
+
+```js
+function checkMark(mark) {
+  if (typeof mark !== "number") throw new TypeError(`оценка должна быть числом, а не ${typeof mark}`);
+  if (![2, 3, 4, 5].includes(mark)) throw new RangeError(`оценка ${mark} не из набора 2, 3, 4, 5`);
+  return mark;
+}
+for (const mark of [5, "5", 9, 4.5]) {
+  try {
+    console.log(checkMark(mark));
+  } catch (e) {
+    console.log(`${e.name}: ${e.message}`);
+  }
+}
+```
+
+<ResultBox>
+5\
+TypeError: оценка должна быть числом, а не string\
+RangeError: оценка 9 не из набора 2, 3, 4, 5\
+RangeError: оценка 4.5 не из набора 2, 3, 4, 5
+</ResultBox>
+
+## 6. SyntaxError и ReferenceError {#syntax}
+
+[`SyntaxError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError)
+— текст, который нельзя разобрать. Важно, когда это случается: движок разбирает скрипт **целиком до
+запуска**, поэтому ошибку в тексте скрипта его же `try` не поймает — скрипт не начался:
+
+```js
+console.log("до ошибки");
+try {
+  let x = ;
+} catch (e) {
+  console.log("поймали");
+}
+// SyntaxError: Unexpected token ';'
+```
+
+Не вывелось даже «до ошибки». Ловится `SyntaxError`, только когда разбор идёт во время работы: `JSON.parse` (день 23 Essentials), `new RegExp` (день 17),
+`new Function` (день 4) и `eval` (день 3):
+
+```js
+for (const text of ['{"word": "book"}', "{word: 'book'}", ""]) {
+  try {
+    console.log(JSON.parse(text).word);
+  } catch (e) {
+    console.log(e.name, "|", e.message);
+  }
+}
+try { new RegExp("("); } catch (e) { console.log(e.name, "|", e.message); }
+```
+
+<ResultBox>
+book\
+SyntaxError | Expected property name or '\}' in JSON at position 1 (line 1 column 2)\
+SyntaxError | Unexpected end of JSON input\
+SyntaxError | Invalid regular expression: /(/: Unterminated group
+</ResultBox>
+
+Самому `SyntaxError` бросают в своём разборщике текста, как `JSON.parse`. Но единого правила
+нет: `Temporal.PlainDate.from("abc")` бросает `RangeError` (день 22). Выберите одно для всей
+программы.
+
+[`ReferenceError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError)
+— имени нет: не объявлено (день 5 Essentials), ещё в мёртвой зоне (день 4), присваивание необъявленному в строгом
+режиме (день 3 курса 2), `this` до `super()` (день 10). Сами его почти не бросают.
+`typeof` — исключение: необъявленное имя он молча называет `"undefined"`.
+
+```js
+try { lessonCount; } catch (e) { console.log(e.name, "|", e.message); }
+try { total; let total = 0; } catch (e) { console.log(e.name, "|", e.message); }
+console.log(typeof lessonCount);
+```
+
+<ResultBox>
+ReferenceError | lessonCount is not defined\
+ReferenceError | Cannot access 'total' before initialization\
+undefined
+</ResultBox>
+
+Ловушка из соседнего мира: методы страницы бросают ошибки DOM со своими именами, и одно совпадает:
+
+```js
+try {
+  document.querySelector("[");
+} catch (e) {
+  console.log(e.name, e instanceof SyntaxError, e.constructor.name, e instanceof Error);
+}
+// SyntaxError false DOMException true
+```
+
+По имени это `SyntaxError`, по классу — нет. День 11 Essentials различал `name` и
+`instanceof` только «потомками»; вот вторая разница — одно имя у разных классов.
+
+## 7. EvalError, URIError, InternalError {#rare}
+
+```js
+console.log(typeof InternalError, typeof EvalError, new EvalError("x").name, URIError.length, Object.getPrototypeOf(URIError) === Error);
+try { decodeURIComponent("%"); } catch (e) { console.log(e.name, "|", e.message); }
+try { (function deep() { deep(); })(); } catch (e) { console.log(e.name, "|", e.message); }
+```
+
+<ResultBox>
+undefined function EvalError 1 true\
+URIError | URI malformed\
+RangeError | Maximum call stack size exceeded
+</ResultBox>
+
+| Вид | Когда |
+| --- | --- |
+| [`EvalError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError) | спецификация его больше не бросает (20.5.5.1), он остался ради старого кода; ошибки внутри `eval` — обычные `SyntaxError`, `ReferenceError`… |
+| [`URIError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError) | `decodeURIComponent`, `decodeURI`, `encodeURI` с неправильной строкой (день 31 Essentials, одинокая половинка дня 20) |
+| [`InternalError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError) | только Firefox: «too much recursion». В Chrome конструктора нет, рекурсия даёт `RangeError` — так и в разделе Message страницы справочника |
+| `AggregateError` | несколько ошибок сразу — день 27 |
+
+Конструкторы видов устроены одинаково — раздел 20.5.6 называет их общим именем NativeError:
+[`TypeError()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError/TypeError),
+[`RangeError()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError/RangeError),
+[`SyntaxError()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError/SyntaxError),
+[`ReferenceError()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError/ReferenceError),
+[`EvalError()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError/EvalError),
+[`URIError()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError/URIError)
+и [`InternalError()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError/InternalError) из Firefox.
+У всех аргументы `(message, options)`, работа с `new` и без, `length` 1, а прототип
+каждого конструктора — сам `Error`.
+
+## 8. cause: ошибка внутри ошибки {#cause}
+
+Внизу бросили ошибку с техническим текстом, а наверху нужен смысл — «колода не прочитана». Новая ошибка без связи
+потеряет старую вместе с её стеком; справочник советует передать старую в настройке [`cause`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause):
+
+```js
+function readDeck(text) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error("колода не прочитана", { cause: err });
+  }
+}
+try {
+  readDeck("{word: 'book'}");
+} catch (e) {
+  console.log(String(e), "←", e.cause.name, e.cause instanceof SyntaxError);
+}
+// Error: колода не прочитана ← SyntaxError true
+```
+
+Правила `cause` (InstallErrorCause, 20.5.8.1): свойство появляется, только если второй аргумент —
+объект, в котором **есть** ключ `cause`, даже равный `undefined`; оно своё и
+неперечисляемое, значение — любое. Строка вторым аргументом ничего не даёт — справочник объясняет это старой
+нестандартной записью `Error(message, fileName)` из Firefox.
+
+```js
+console.log("cause" in new Error("x"), "cause" in new Error("x", "строка"), "cause" in new Error("x", { details: 1 }), "cause" in new Error("x", { cause: undefined }), new Error("x", { cause: 0 }).cause);
+// false false false true 0
+```
+
+Раз значение любое, причиной может быть не ошибка, а данные для программы. Справочник показывает это на
+генераторе ключей RSA; у нас — табель:
+
+```js
+function checkMarks(marks) {
+  const bad = marks.filter((m) => ![2, 3, 4, 5].includes(m));
+  if (bad.length > 0) {
+    throw new RangeError("в табеле есть оценки вне 2–5", { cause: { code: "BadMark", values: bad } });
+  }
+}
+try {
+  checkMarks([5, 9, 4, 0]);
+} catch (e) {
+  console.log(e.message, "|", e.cause.code, e.cause.values);
+}
+// в табеле есть оценки вне 2–5 | BadMark (2) [9, 0]
+```
+
+Совет справочника для библиотек: различайте ошибки по `cause` или по классу, а не по
+`message` — текст переформулируют, и чужая проверка `err.message === "…"` сломается. И
+граница: `cause` — одна поломка с пояснением сверху; несколько независимых — это
+`AggregateError` (день 27).
+
+## 9. Практика: цепочка причин {#chain}
+
+Практика плана: «Карточки» читают колоду в два слоя, каждый добавляет свой смысл; третий слой — ошибка
+`JSON.parse`:
+
+```js
+function parseDeck(text) {
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error("файл колоды повреждён", { cause: err });
+  }
+}
+function loadDeck(text) {
+  try {
+    return parseDeck(text);
+  } catch (err) {
+    throw new Error("колода «animals» не загружена", { cause: err });
+  }
+}
+function* causes(err) {
+  yield err;
+  if (err instanceof Error && "cause" in err) yield* causes(err.cause);
+}
+try {
+  loadDeck('[{"word": "cat"},');
+} catch (e) {
+  console.log([...causes(e)].map(String).join(" ← "));
+  console.log([...causes(e)].length, e.stack.includes("повреждён"));
+}
+```
+
+<ResultBox>
+Error: колода «animals» не загружена ← Error: файл колоды повреждён ← SyntaxError: Unexpected end of JSON input\
+3 false
+</ResultBox>
+
+Поймана одна ошибка, но по ссылкам `cause` видна вся история: что сказать человеку (верхний текст), где
+искать (средний) и что сломалось на самом деле (нижний). Генератор `causes` идёт по цепочке через
+`yield*` дня 12, пока есть причина. `String(e)` и `e.stack` причин не показывают,
+отсюда `false`.
+
+<Scheme src="scheme-chain.svg">Цепочка причин: одна поймана, три видны</Scheme>
+
+## 10. Свой класс ошибки. Практика: ValidationError {#custom}
+
+Практика плана и долг дня 10. Своё поле из дня 11 Essentials (`error.mark = 9`) работало, но вид такой
+ошибки — обычный `Error`, и в `catch` её не отличить от чужой. Свой класс решает это: проверка
+формы ученика бросает `ValidationError` с полем и значением, а ловящий код берёт только её.
+
+```js
+class ValidationError extends Error {
+  constructor(message, field, value) {
+    super(message);
+    this.name = "ValidationError";
+    this.field = field;
+    this.value = value;
+  }
+}
+function checkStudent(data) {
+  if (typeof data.name !== "string" || data.name.trim() === "") throw new ValidationError("нужно имя", "name", data.name);
+  if (!Number.isInteger(data.mark) || data.mark < 2 || data.mark > 5) throw new ValidationError(`оценка ${data.mark} вне диапазона 2–5`, "mark", data.mark);
+  return data;
+}
+for (const data of [{ name: "Аман", mark: 5 }, { name: " ", mark: 4 }, { name: "Мерет", mark: 7 }]) {
+  try {
+    console.log("принят:", checkStudent(data).name);
+  } catch (e) {
+    if (!(e instanceof ValidationError)) throw e;
+    console.log(`поле ${e.field}: ${e.message}`, JSON.stringify(e));
+  }
+}
+```
+
+<ResultBox>
+принят: Аман\
+поле name: нужно имя \{"name":"ValidationError","field":"name","value":" "\}\
+поле mark: оценка 7 вне диапазона 2–5 \{"name":"ValidationError","field":"mark","value":7\}
+</ResultBox>
+
+Три правила такого класса. **Первое** — `super(message)` до любого `this`.
+Объект ошибки создаёт конструктор `Error`, и только он даёт ему внутренний слот `[[ErrorData]]`
+(раздел 16); без `super` — `ReferenceError` дня 10. **Второе** — имя: класс сам
+его не задаёт.
+
+```js
+class NoName extends Error {}
+const e = new NoName("x");
+console.log(e.name, String(e), e.constructor.name, e instanceof NoName);
+// Error Error: x NoName true
+```
+
+`constructor.name` — «NoName», а `name` по-прежнему «Error» из `Error.prototype`:
+так ошибка и выглядит в консоли и в `String(e)`. Задать имя можно тремя способами:
+
+| Способ | Где лежит `name` | В JSON и `Object.keys` |
+| --- | --- | --- |
+| `this.name = "ValidationError"` в конструкторе | своё у каждого объекта | видно |
+| поле класса `name = "ValidationError"` (день 8) | своё у каждого объекта | видно |
+| `static { this.prototype.name = "ValidationError"; }` (день 9) | в прототипе, как у встроенных | не видно |
+
+Справочник берёт первый способ, и мы тоже — поэтому в JSON выше есть `name`, но нет
+`message`. **Третье** — в `catch` свою ошибку обрабатываем, а чужую
+(`TypeError` из опечатки) пробрасываем через `throw e`, как учил день 11 Essentials.
+
+## 11. Семья своих ошибок {#family}
+
+Ошибок в программе обычно несколько. Удобно завести базовый класс программы, а от него — частные:
+
+```js
+class AppError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+class ValidationError extends AppError {
+  constructor(message, field, options) {
+    super(message, options);
+    this.field = field;
+  }
+}
+class NotFoundError extends AppError {}
+function describe(e) {
+  if (e instanceof ValidationError) return `проверка: поле ${e.field}`;
+  if (e instanceof NotFoundError) return `не найдено: ${e.message}`;
+  if (e instanceof AppError) return `ошибка программы: ${e.message}`;
+  throw e;
+}
+const errors = [new ValidationError("нет перевода", "translation"), new NotFoundError("слово «kitap»"), new AppError("колода пуста", { cause: { size: 0 } })];
+for (const e of errors) console.log(e.name, "|", describe(e), "|", e instanceof AppError, e.cause);
+try {
+  describe(new TypeError("чужая"));
+} catch (e) {
+  console.log("проброшена:", String(e));
+}
+```
+
+<ResultBox>
+ValidationError | проверка: поле translation | true undefined\
+NotFoundError | не найдено: слово «kitap» | true undefined\
+AppError | ошибка программы: колода пуста | true \{size: 0\}\
+проброшена: TypeError: чужая
+</ResultBox>
+
+Имя задаёт базовый класс через `new.target.name` (день 10): при `new NotFoundError` это
+«NotFoundError», и наследникам не нужно повторять строку. `options` передаётся в `super`, как в
+примере справочника `MyError`, — иначе `cause` пропадёт: `Error` читает его только из
+своих аргументов. Проверки — от частного к общему: поставьте `instanceof AppError` первым — и до других
+веток дело не дойдёт, ведь вся семья — тоже `AppError`.
+
+<Scheme src="scheme-family.svg">Семья Error: встроенные виды и свои классы</Scheme>
+
+## 12. Error.isError против instanceof {#iserror}
+
+```js
+const fake = Object.create(Error.prototype);
+document.body.innerHTML = "<iframe></iframe>";
+const FrameError = document.querySelector("iframe").contentWindow.Error;
+const frameError = new FrameError("из рамки");
+console.log(fake instanceof Error, Error.isError(fake), frameError instanceof Error, Error.isError(frameError));
+console.log(Object.prototype.toString.call(frameError), Object.prototype.toString.call({ [Symbol.toStringTag]: "Error" }), Error.isError(Error.prototype));
+```
+
+<ResultBox>
+true false false true\
+\[object Error\] \[object Error\] false
+</ResultBox>
+
+`instanceof` смотрит на цепочку прототипов (день 7) и ошибается в обе стороны: объект с
+`Error.prototype` в цепочке считает ошибкой, хотя её никто не создавал, а ошибку из рамки
+`iframe` не признаёт — у каждого окна свой `Error`.
+[`Error.isError`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/isError)
+проверяет не цепочку, а **клеймо** — слот `[[ErrorData]]`, который ставит только
+конструктор `Error`, как у `Array.isArray` и `#x in obj` дня 9.
+`Object.prototype.toString` тоже смотрит на слот, но его обманывает `Symbol.toStringTag` (день
+11). У самого `Error.prototype` клейма нет (20.5.3). В Node 22 метода ещё нет.
+
+Отсюда совет справочника: `catch` ловит всё, что бросили, хоть строку, — пойманное приводят к ошибке
+через `Error.isError`:
+
+```js
+function toError(value) {
+  return Error.isError(value) ? value : new Error(String(value), { cause: value });
+}
+for (const thrown of [new RangeError("оценка 9"), "что-то не так", 404]) {
+  try {
+    throw thrown;
+  } catch (e) {
+    const err = toError(e);
+    console.log(err.name, "|", err.message, "|", err === e, err.cause === e);
+  }
+}
+```
+
+<ResultBox>
+RangeError | оценка 9 | true false\
+Error | что-то не так | false true\
+Error | 404 | false true
+</ResultBox>
+
+В `causes` из раздела 9 надёжнее тоже `Error.isError(err)` вместо
+`instanceof Error`: тогда цепочка не оборвётся на ошибке из другого окна.
+
+## 13. stack. Практика: читаем стек в консоли Chrome {#stack}
+
+[`stack`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stack)
+— путь вызовов до места, где ошибку **создали**; читать его научил день 11 Essentials. В стандарте
+свойства нет (комитет только собирается его описать, пишет справочник), но оно есть во всех браузерах, у каждого
+движка в своём формате. В Chrome это своё неперечисляемое свойство ошибки; справочник называет его
+свойством-значением, а в Chrome 155 это аксессор — пара `get` и `set` дня 5.
+
+```js
+const d = Object.getOwnPropertyDescriptor(new Error("x"), "stack");
+console.log(typeof d.get, typeof d.set, d.enumerable, "stack" in Error.prototype);
+// function function false false
+```
+
+Практика плана. Страница с файлом `app.js` открыта через Live Server (день 2 Essentials); кнопка
+«Показать» выводит переводы колоды, и у одной карточки перевода нет:
+
+```js
+// app.js
+const deck = [{ word: "cat", translation: "кошка" }, { word: "suw" }];
+function translationOf(card) {
+  return card.translation.toUpperCase();
+}
+function render(cards) {
+  return cards.map((card) => translationOf(card));
+}
+document.body.innerHTML = "<button>Показать</button>";
+document.querySelector("button").addEventListener("click", function onShow() {
+  try {
+    render(deck);
+  } catch (e) {
+    console.log(e.stack);
+  }
+});
+document.querySelector("button").click();
+```
+
+```plain-out
+TypeError: Cannot read properties of undefined (reading 'toUpperCase')
+    at translationOf (http://127.0.0.1:5500/app.js:4:27)
+    at http://127.0.0.1:5500/app.js:7:30
+    at Array.map (<anonymous>)
+    at render (http://127.0.0.1:5500/app.js:7:16)
+    at HTMLButtonElement.onShow (http://127.0.0.1:5500/app.js:12:5)
+    at http://127.0.0.1:5500/app.js:17:34
+```
+
+Читаем сверху вниз. Первая строка — вид и текст: у `undefined` прочитали `toUpperCase`.
+Дальше кадры «at имя (адрес:строка:столбец)»: упало в `translationOf`, строка 4; её вызвала безымянная
+стрелка из строки 7 — колбэк `map`; у встроенного `Array.map` адреса нет —
+`<anonymous>`. Выше — `render` и обработчик `onShow` с объектом, на котором он
+сработал, `HTMLButtonElement`, а внизу — вызов `click()` в строке 17. Щёлкните кнопку мышью —
+этой строки не будет: событие от человека начинает новую цепочку вызовов. Так же свою цепочку начинают таймеры и, по
+справочнику, обработчики промисов.
+
+В консоли стек стоит под красной строкой ошибки, адреса в нём кликаются (день 3 Essentials), а непойманная ошибка
+начинается словом «Uncaught». Другие подписи кадров:
+
+| Кадр | Что это |
+| --- | --- |
+| `at new Journal (…)` | конструктор класса `Journal` |
+| `at Object.show (…)` | метод `show` объекта-литерала |
+| `at get average (…)` | геттер `average` |
+| `at gen.next (<anonymous>)` | шаг генератора `gen` (день 12) |
+| `at eval (eval at …)` | код из `eval` или `new Function` |
+| `at HTMLButtonElement.<anonymous>` | безымянный обработчик события |
+
+И о времени. Стек собирают при **создании** ошибки, а не при броске: `new Error().stack`
+без всякого `throw` показывает, кто вызвал текущую функцию. А строку стека Chrome складывает при первом
+чтении: `name` из конструктора своего класса в неё попадает («ValidationError: …»), а сменённый после
+чтения — уже нет.
+
+## 14. stackTraceLimit и captureStackTrace {#v8}
+
+У V8 для стека свой нестандартный набор. [`Error.stackTraceLimit`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stackTraceLimit)
+— сколько кадров собирать, по умолчанию 10: больше — удобнее с глубокой рекурсией, меньше — дешевле. Упрощённый
+пример справочника:
+
+```js
+function down(n) {
+  if (n === 0) throw new Error("дно");
+  down(n - 1);
+}
+const frames = [];
+for (const limit of [10, 3, 0]) {
+  Error.stackTraceLimit = limit;
+  try { down(20); } catch (e) { frames.push((e.stack.match(/ at /g) ?? []).length); }
+}
+Error.stackTraceLimit = 10;
+console.log(frames);
+// (3) [10, 3, 0]
+```
+
+При нуле остаётся только строка «Error: дно». Лимит общий для всей страницы — его меняют на время и
+возвращают.
+
+[`Error.captureStackTrace(obj, fn)`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/captureStackTrace)
+кладёт `stack` на любой объект, выбрасывая кадры от `fn` и выше. Пример справочника — функция
+«где я»:
+
+```js
+// app.js
+function getStack() {
+  const obj = {};
+  Error.captureStackTrace(obj, getStack);
+  return obj.stack;
+}
+function showLesson() {
+  console.log(getStack());
+}
+showLesson();
+```
+
+```plain-out
+Error
+    at showLesson (http://127.0.0.1:5500/app.js:8:15)
+    at http://127.0.0.1:5500/app.js:10:1
+```
+
+Кадра `getStack` нет — его вырезал второй аргумент. Справочник ставит такой вызов и в конструктор
+своего класса ошибки, чтобы скрыть кадр конструктора, но в Chrome это лишнее: кадр `new ValidationError` у
+наследника `Error` V8 не показывает сам.
+
+Свойства [`fileName`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/fileName),
+[`lineNumber`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/lineNumber) и
+[`columnNumber`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/columnNumber)
+есть только в Firefox; в Chrome все три — `undefined`, место ищут в `stack`.
+
+## 15. Ошибки дня {#errors}
+
+| Код | Что видно в Chrome | Что не так |
+| --- | --- | --- |
+| `constructor(m) { this.x = 1; super(m); }` | `ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor` | `super` — первым |
+| `try { … }` без `catch` и `finally` | `SyntaxError: Missing catch or finally after try` | нужен хотя бы один |
+| `throw`, перенос строки, `new Error()` | `SyntaxError: Illegal newline after throw` | выражение — на той же строке |
+| `catch (e) { let e = 2; }` | `SyntaxError: Identifier 'e' has already been declared` | имя уже занято параметром |
+| `new Error(Symbol("s"))` | `TypeError: Cannot convert a Symbol value to a string` | `message` переводится в строку |
+| `Error.prototype.toString.call(5)` | `TypeError: Method Error.prototype.toString called on incompatible receiver 5` | нужен объект |
+| `Error.captureStackTrace(5)` | `TypeError: invalid_argument` | нужен объект; текст без пояснений |
+| `class A extends Error.prototype {}` | `TypeError: Class extends value Error is not a constructor or null` | прототип вместо класса, напечатан как «Error» |
+| `JSON.stringify(e)` | `"{}"`, без ошибки | свойства неперечисляемые (раздел 4) |
+| `super(message)` без `options` | у ошибки нет `cause`, без ошибки | передать `options` (раздел 11) |
+| `throw` в `finally` | первая ошибка пропала, без следа | `finally` только прибирает (день 11 Essentials) |
+
+Три последние строки — тихие: ошибки нет, а данные потеряны. Их ловят только проверкой результата.
+
+## 16. Что говорит спецификация {#spec}
+
+Раздел [20.5 Error Objects](https://tc39.es/ecma262/2026/#sec-error-objects) начинается так:
+экземпляры `Error` бросают при ошибках времени выполнения, они же — база для своих классов; сам движок
+бросает только встроенные виды и `AggregateError`. Подробно — конструктор, кратко — остальное:
+
+- [20.5.1 The Error Constructor](https://tc39.es/ecma262/2026/#sec-error-constructor) и
+  [20.5.1.1 Error ( message \[ , options \] )](https://tc39.es/ecma262/2026/#sec-error-message). Без
+  `new` NewTarget — сама функция, поэтому `Error()` работает. OrdinaryCreateFromConstructor
+  создаёт объект со слотом `[[ErrorData]]` и прототипом из NewTarget — при `new
+  ValidationError` это `ValidationError.prototype`. Потом `message` (если не
+  `undefined`) — ToString и неперечисляемое свойство, и InstallErrorCause. Наследник, сказано в 20.5.1,
+  должен вызвать `super`, чтобы получить слот.
+- [20.5.2](https://tc39.es/ecma262/2026/#sec-properties-of-the-error-constructor):
+  [20.5.2.1 Error.isError](https://tc39.es/ecma262/2026/#sec-error.iserror) — три шага: не объект —
+  `false`; нет слота `[[ErrorData]]` — `false`; иначе `true`.
+  `Error.prototype` нельзя переписать.
+- [20.5.3](https://tc39.es/ecma262/2026/#sec-properties-of-the-error-prototype-object) — прототип
+  сам не ошибка, слота нет; `message` — пустая строка, `name` — «Error»;
+  [20.5.3.4 toString](https://tc39.es/ecma262/2026/#sec-error.prototype.tostring) — правило раздела 4.
+- [20.5.4](https://tc39.es/ecma262/2026/#sec-properties-of-error-instances) — слот
+  `[[ErrorData]]` нужен только `Object.prototype.toString` и `Error.isError`.
+- [20.5.5](https://tc39.es/ecma262/2026/#sec-native-error-types-used-in-this-standard) — шесть видов
+  по строке описания: `EvalError` «сейчас не используется», `TypeError` — «когда ни один
+  другой вид не подходит».
+- [20.5.6 NativeError Object Structure](https://tc39.es/ecma262/2026/#sec-nativeerror-object-structure)
+  — один шаблон на шесть видов: прототип конструктора — `%Error%`, у каждого свой прототип со своим
+  `name`.
+- [20.5.8](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-error-objects):
+  [20.5.8.1 InstallErrorCause](https://tc39.es/ecma262/2026/#sec-installerrorcause) — если
+  `options` — объект и HasProperty находит в нём `"cause"`, значение копируется в
+  неперечисляемое свойство. HasProperty, а не проверка на `undefined` — отсюда
+  `{ cause: undefined }` раздела 8.
+
+Раздел 20.5.7 (`AggregateError`) — день 27. А `stack` в тексте нет: его описывает отдельное
+предложение комитета, на которое ссылается справочник.
+
+<Scheme src="scheme-spec.svg">Что происходит при `new ValidationError`: шаги 20.5.1.1 и InstallErrorCause</Scheme>
+
+## 17. «Карточки»: колода с проверкой {#cards}
+
+Колода «Карточек» приходит текстом — из `words.json` (день 33 Essentials) или
+`localStorage`. Ошибки трёх родов: файл не разбирается, в нём не список, у карточки нет поля. Человеку
+нужен понятный текст, программисту — причина:
+
+```js
+class CardsError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = new.target.name;
+  }
+}
+class DeckFormatError extends CardsError {}
+class CardError extends CardsError {
+  constructor(message, index, options) {
+    super(message, options);
+    this.index = index;
+  }
+}
+function parseDeck(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    throw new DeckFormatError("файл колоды повреждён", { cause: err });
+  }
+  if (!Array.isArray(data)) throw new DeckFormatError("в файле не список карточек");
+  data.forEach((card, i) => {
+    if (typeof card.word !== "string") throw new CardError("нет слова", i);
+    if (typeof card.translation !== "string") throw new CardError(`у «${card.word}» нет перевода`, i);
+  });
+  return data;
+}
+function start(text) {
+  try {
+    return `колода: ${parseDeck(text).length} карточки`;
+  } catch (e) {
+    if (e instanceof CardError) return `карточка ${e.index + 1}: ${e.message}`;
+    if (e instanceof DeckFormatError) return "cause" in e ? `${e.message}: ${e.cause.message}` : e.message;
+    throw e;
+  }
+}
+const texts = ['[{"word": "cat", "translation": "кошка"}, {"word": "kitap", "translation": "книга"}]', '[{"word": "cat", "translation": "кошка"}, {"word": "suw"}]', '[{"word": "cat"},', '{"word": "cat"}', "[null]"];
+for (const text of texts) {
+  try {
+    console.log(start(text));
+  } catch (e) {
+    console.log("не наша ошибка:", String(e));
+  }
+}
+```
+
+<ResultBox>
+колода: 2 карточки\
+карточка 2: у «suw» нет перевода\
+файл колоды повреждён: Unexpected end of JSON input\
+в файле не список карточек\
+не наша ошибка: TypeError: Cannot read properties of null (reading 'word')
+</ResultBox>
+
+**Строки 1–4.** Каждая своя ошибка дошла до `start` и стала текстом для человека; у
+повреждённого файла добавлена причина из `cause`. **Строка 5.** `[null]` проверка
+не предусмотрела: `card.word` у `null` — чужой для `start` `TypeError`, и
+она пробросила его наверх. Проброс показал дыру в проверке, а не спрятал её.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Уберите `options` из `super(message, options)` в
+`CardsError`. Что стало с третьей строкой и почему `"cause" in e` дал `false`?
+\
+\
+**Второй.** Добавьте в `start` первой веткой
+`if (e instanceof CardsError) return e.message;`. Какие строки изменились и почему?
+\
+\
+**Третий.** Закройте дыру: в начале `forEach` бросьте `CardError("не карточка", i)`,
+если `card` — не объект или `null`. Что теперь в пятой строке?
+</TryIt>
+
+## 18. Что дальше {#next}
+
+Модуль «Ошибки и асинхронность» начат с ошибок не случайно: дальше они будут приходить не сразу, а потом. День 27 —
+промисы целиком и `AggregateError`, ошибка со списком ошибок внутри; день 28 — `async`-функции
+изнутри.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [JavaScript error reference](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors) | 131 страница ошибок и как ими пользоваться | <Full /> |
+| [Error](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/Error) | виды, свои классы, `cause` в наследнике | <Full /> |
+| [message](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/message), [name](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/name) | текст — своё свойство, имя — в прототипе | <Full /> |
+| [cause](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause) | причина, данные вместо текста | <Full /> |
+| [Error.isError()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/isError) | клеймо против `instanceof`, приведение пойманного | <Full /> |
+| [TypeError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError), [RangeError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError), [SyntaxError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError), [ReferenceError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError) | когда бросает движок и когда — мы | <Full /> |
+| ECMA-262, 20.5 | конструктор, `isError`, прототип, InstallErrorCause | <Full /> |
+| [stack](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stack), [captureStackTrace()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/captureStackTrace), [stackTraceLimit](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/stackTraceLimit) | нестандартное, есть в V8: разделы 13 и 14 | <Brief /> |
+| [toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/toString) | правило «name: message», раздел 4 | <Brief /> |
+| [EvalError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError), [URIError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError), [InternalError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError) и конструкторы семи видов | раздел 7 | <Brief /> |
+| [fileName](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/fileName), [lineNumber](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/lineNumber), [columnNumber](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/columnNumber) | только Firefox, раздел 14 | <Brief /> |
+| подразделы 20.5.1–20.5.6, 20.5.8 | раздел 16 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// new Error(message, { cause }) — с new и без; message и cause свои, неперечисляемые; name — в прототипе
+// String(e) — "name: message"; JSON.stringify(e) — только перечисляемое, у обычной ошибки "{}"
+// тип не тот — TypeError; значение не из допустимых — RangeError; SyntaxError в тексте скрипта не ловится
+// class MyError extends Error { constructor(m, o) { super(m, o); this.name = new.target.name; } }
+// catch: свои — по instanceof от частного к общему, чужие — throw e
+// Error.isError(x) — клеймо [[ErrorData]]: не обмануть цепочкой прототипов, работает между окнами
+// e.stack — кадры на момент создания (не стандарт); Error.stackTraceLimit = 10; Error.captureStackTrace(obj, fn)
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `JSON.stringify(new Error("x"))` — `"{}"`?
+   <Answer>`message` и `stack` — свои, но неперечисляемые, `name` — в прототипе,
+   а `JSON.stringify` берёт только свои перечисляемые.</Answer>
+2. Чем `new Error("x", { cause: undefined })` отличается от `new Error("x")`?
+   <Answer>У первой есть своё `cause`, равное `undefined`: InstallErrorCause проверяет
+   наличие ключа (HasProperty), а не значение.</Answer>
+3. Почему `try { let x = ; } catch {}` не ловит ошибку?
+   <Answer>Это `SyntaxError` разбора: скрипт разбирают целиком до запуска, и с ошибкой он не
+   запускается вовсе.</Answer>
+4. Что покажет `String(e)` для `class MyError extends Error {}` и почему?
+   <Answer>«Error: …» — класс не задаёт `name`, он читается из `Error.prototype`. Имя задают в
+   конструкторе: `this.name = new.target.name`.</Answer>
+5. Когда `instanceof Error` и `Error.isError` отвечают по-разному?
+   <Answer>Ошибка из `iframe` — `false` и `true`,
+   `Object.create(Error.prototype)` — `true` и `false`: первый смотрит на
+   цепочку прототипов, второй — на слот `[[ErrorData]]`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error" />

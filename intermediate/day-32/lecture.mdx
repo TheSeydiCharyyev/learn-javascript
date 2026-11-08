@@ -1,0 +1,682 @@
+---
+title: "День 32 — Мини-проект: расписание занятий на модулях"
+day: День 32 • урок 1
+heading: "Мини-проект: расписание занятий на модулях"
+lead: Курс 2, Intermediate. Проектный день после модулей I6–I9. 45 минут.
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+  h3 { color: #854d0e; }
+  .step-number { background: #eab308; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- собрать приложение из модулей, где у каждого файла одна задача;
+- хранить данные в JSON-файлах и загружать их через `import()` и `Promise.all`;
+- считать даты и длительности на `Temporal`, а показывать их через `Intl` на двух языках;
+- искать по названию регулярным выражением, безопасным для любого ввода;
+- заворачивать ошибки загрузки в свой класс с `cause` и узнавать типичные поломки по симптомам.
+</Goals>
+
+<Toc />
+
+## 1. Проект вместо новой темы {#why}
+
+Новых тем курс больше не даёт: модули I1–I9 пройдены. День 16 собрал журнал на классах из того, что дали первые
+пятнадцать дней. Сегодня — то, что добавили дни 17–31. Собираем **расписание занятий на неделю** для
+нескольких групп: данные лежат в JSON-файлах, программа разложена по модулям, даты считает `Temporal`, а
+показывает `Intl` — по-русски или по-английски, по кнопке.
+
+| Что понадобится | Откуда |
+| --- | --- |
+| классы, приватные поля, `static` | дни 8–9 |
+| `RegExp`, флаг `i`, `RegExp.escape` | дни 17, 19 |
+| `Temporal.PlainDateTime`, `Duration`, `compare`, `until` | дни 22–23 |
+| `Intl.DateTimeFormat`, `formatRange`, `Intl.NumberFormat` | день 25 |
+| свой класс ошибки, `cause` | день 26 |
+| `Promise.all`, `async`/`await` | дни 27–28 |
+| модули, JSON-модуль, `import()` | дни 30–31 |
+
+Порядок — как на дне 16: задание, данные, по одному модулю за шаг и проверка после каждого. Одно отличие: в
+модулях переменные не видны из консоли (день 30), поэтому проверку шага пишут временным `main.js`. Папка
+проекта — `schedule`, открывать через Live Server.
+
+## 2. Что должно уметь расписание {#spec}
+
+| № | Возможность | Как проверить |
+| --- | --- | --- |
+| 1 | показать занятия всех групп по времени | шесть строк, понедельник сверху |
+| 2 | отметить прошедшие занятия | серые строки до «сейчас» |
+| 3 | итог: занятий, часов, через сколько ближайшее | строка над списком |
+| 4 | искать по названию, без учёта регистра | «c++», «(regexp)» — ищутся буквально |
+| 5 | переключать язык | RU и EN меняют и подписи, и даты, и числа |
+| 6 | сообщить, если расписание группы не загрузилось | текст ошибки и её причина |
+
+<Scheme src="scheme-spec.svg">Расписание при «сейчас» = вторник, 27 октября, 12:00: прошедшие занятия серые</Scheme>
+
+«Сейчас» в учебном проекте зафиксировано: вторник, 27 октября 2026, 12:00. Так вывод не зависит от дня, когда
+вы открыли страницу; в настоящей программе вместо него стоит `Temporal.Now.plainDateTimeISO()` (день 22).
+Чего расписание **не** делает: не фильтрует по группе, не делит занятия по дням и не переживает
+неудачную загрузку одной группы — это задания.
+
+## 3. Данные: четыре JSON-файла {#data}
+
+Данные отделены от кода. Список групп — файл `data/groups.json`:
+
+```js file="data/groups.json"
+[
+  { "id": "js-1", "name": "JS-1" },
+  { "id": "js-2", "name": "JS-2" },
+  { "id": "cpp-1", "name": "C++-1" }
+]
+```
+
+И у каждой группы — свой файл `data/`*номер*`.json`: `data/js-1.json`,
+`data/js-2.json`, `data/cpp-1.json`.
+
+```js file="data/js-1.json"
+{
+  "lessons": [
+    { "title": "Модули: import и export", "start": "2026-10-26T14:00", "duration": "PT1H30M", "room": "201" },
+    { "title": "JSON и import()", "start": "2026-10-28T14:00", "duration": "PT1H30M", "room": "201" }
+  ]
+}
+```
+
+```js file="data/js-2.json"
+{
+  "lessons": [
+    { "title": "Регулярные выражения (RegExp)", "start": "2026-10-27T10:00", "duration": "PT2H", "room": "105" },
+    { "title": "Temporal и Intl", "start": "2026-10-29T10:00", "duration": "PT2H", "room": "105" }
+  ]
+}
+```
+
+```js file="data/cpp-1.json"
+{
+  "lessons": [
+    { "title": "C++: указатели", "start": "2026-10-26T16:00", "duration": "PT1H", "room": "301" },
+    { "title": "C++ и шаблоны", "start": "2026-10-31T09:00", "duration": "PT1H30M", "room": "301" }
+  ]
+}
+```
+
+JSON не умеет хранить даты (день 31), поэтому начало занятия — строка ISO дня 22, а длительность — строка
+`PT1H30M` дня 23. Обе превратятся в объекты `Temporal` в классе `Lesson`. Добавить группу
+— значит добавить строку в `groups.json` и один файл; код при этом не меняется.
+
+## 4. Своя ошибка загрузки {#error}
+
+Если файл группы не загрузился, человеку нужно сообщение «какая группа», а программисту — исходная ошибка. Это
+свой класс ошибки дня 26 со свойством `cause`:
+
+```js
+// errors.js
+export class ScheduleError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "ScheduleError";
+  }
+}
+```
+
+`options` передаётся в `Error` целиком: `new ScheduleError("…", { cause })` запишет
+причину в `cause`, как на дне 26. Модуль из пяти строк — нормально: его импортирует любой, кому нужна эта
+ошибка, и класс будет один на всю программу.
+
+## 5. Класс Lesson {#lesson}
+
+Занятие — название, группа, начало, длительность и аудитория. Строки из JSON конструктор сразу превращает в
+`Temporal`, а конец занятия вычисляется при чтении:
+
+```js
+// lesson.js
+export class Lesson {
+  #title;
+  #group;
+  #start;
+  #duration;
+  #room;
+
+  constructor({ title, start, duration, room }, group) {
+    this.#title = title;
+    this.#group = group;
+    this.#start = Temporal.PlainDateTime.from(start);
+    this.#duration = Temporal.Duration.from(duration);
+    this.#room = room;
+  }
+
+  get title() {
+    return this.#title;
+  }
+
+  get group() {
+    return this.#group;
+  }
+
+  get start() {
+    return this.#start;
+  }
+
+  get duration() {
+    return this.#duration;
+  }
+
+  get end() {
+    return this.#start.add(this.#duration);
+  }
+
+  get room() {
+    return this.#room;
+  }
+
+  isPast(now) {
+    return Temporal.PlainDateTime.compare(this.end, now) <= 0;
+  }
+
+  static compare(a, b) {
+    return Temporal.PlainDateTime.compare(a.start, b.start);
+  }
+}
+```
+
+Приватные поля и геттеры — как у `Student` дня 16, но защищать здесь проще: объекты
+`Temporal` неизменяемы (день 22), и копию отдавать не нужно. Сравнение — только через
+`compare`: `<` у `Temporal` бросает `TypeError`. Статический
+`compare` пригодится для сортировки. Проверка шага — временный `main.js`:
+
+```js
+// main.js — проверка шага
+import { Lesson } from "./lesson.js";
+const now = Temporal.PlainDateTime.from("2026-10-27T12:00");
+const lesson = new Lesson({ title: "Модули: import и export", start: "2026-10-26T14:00", duration: "PT1H30M", room: "201" }, "JS-1");
+console.log(lesson.title, lesson.group, lesson.end.toString(), lesson.isPast(now));
+console.log(lesson.start.dayOfWeek, lesson.duration.total("minutes"));
+try {
+  new Lesson({ title: "Ошибка", start: "27.10.2026 10:00", duration: "PT1H", room: "1" }, "JS-2");
+} catch (e) {
+  console.log(e.name, e.message);
+}
+```
+
+<ResultBox>
+Модули: import и export JS-1 2026-10-26T15:30:00 true\
+1 90\
+RangeError Temporal error: Invalid character while parsing year value.
+</ResultBox>
+
+Понедельник — день 1, полтора часа — 90 минут. Дата в русском виде `Temporal` не принимает: он читает
+только ISO (день 22). Эта ошибка ещё встретится в разделе 13.
+
+## 6. Загрузка: import() и Promise.all {#load}
+
+Файлы групп грузятся динамическим импортом дня 31 — путь вычисляется из номера группы. Все группы — сразу, через
+`Promise.all` дня 27:
+
+```js
+// load.js
+import { Lesson } from "./lesson.js";
+import { ScheduleError } from "./errors.js";
+
+export async function loadGroup(group) {
+  try {
+    const { default: data } = await import(`./data/${group.id}.json`, { with: { type: "json" } });
+    return data.lessons.map((item) => new Lesson(item, group.name));
+  } catch (cause) {
+    throw new ScheduleError(`Не удалось загрузить расписание ${group.name}`, { cause });
+  }
+}
+
+export async function loadSchedule(groups) {
+  const lists = await Promise.all(groups.map(loadGroup));
+  return lists.flat().toSorted(Lesson.compare);
+}
+```
+
+В `try` две вещи, которые могут упасть: загрузка файла и создание занятий. Любая из них превращается в
+`ScheduleError` с понятным текстом, а исходная ошибка уходит в `cause`. `Promise.all`
+ждёт все группы одновременно и отдаёт массив массивов в порядке групп. `flat` делает из него один
+список, а `toSorted(Lesson.compare)` — расписание по времени, не трогая исходного массива. Путь
+`./data/…` разрешается от `load.js`, а не от страницы (день 30). Проверка шага:
+
+```js
+// main.js — проверка шага
+import groups from "./data/groups.json" with { type: "json" };
+import { loadGroup, loadSchedule } from "./load.js";
+const lessons = await loadSchedule(groups);
+console.log(lessons.length, lessons.map((lesson) => lesson.group).join(", "));
+try {
+  await loadGroup({ id: "py-1", name: "PY-1" });
+} catch (e) {
+  console.log(e.name, e.message);
+  console.log(e.cause.name, e.cause.message);
+}
+```
+
+<ResultBox>
+6 JS-1, C++-1, JS-2, JS-1, JS-2, C++-1\
+ScheduleError Не удалось загрузить расписание PY-1\
+TypeError Failed to fetch dynamically imported module: http://127.0.0.1:5500/data/py-1.json
+</ResultBox>
+
+Группы перемешались: сортировка идёт по началу занятия, а не по группе. Список групп пришёл статическим
+JSON-модулем, а файлы групп — динамическим: статический годится, когда путь известен заранее.
+
+## 7. Вывод на двух языках {#format}
+
+Всё, что видит человек, собирает модуль `format.js`. Подписи — в объекте по локалям, даты и числа —
+через `Intl` дня 25:
+
+```js
+// format.js
+export const TEXT = {
+  "ru-RU": { title: "Расписание на неделю", lessons: "Занятий", hours: "часов", next: "ближайшее через", room: "ауд.", empty: "Ничего не нашлось" },
+  "en-US": { title: "Weekly schedule", lessons: "Lessons", hours: "hours", next: "next in", room: "room", empty: "Nothing found" },
+};
+
+export function when(lesson, locale) {
+  const format = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return format.formatRange(lesson.start, lesson.end);
+}
+
+export function line(lesson, locale) {
+  return `${when(lesson, locale)} · ${lesson.group} · ${lesson.title} · ${TEXT[locale].room} ${lesson.room}`;
+}
+
+export function hours(lessons, locale) {
+  const total = lessons.reduce((sum, lesson) => sum.add(lesson.duration), new Temporal.Duration());
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(total.total("hours"));
+}
+```
+
+`formatRange` сам решает, как записать промежуток: день и месяц один раз, время — «с … по …». Часы
+складываются методом `add` длительностей (день 23), начиная с пустой `new Temporal.Duration()`, и
+переводятся в число `total("hours")`. Запятую или точку в «9,5» выбирает уже
+`NumberFormat`. Проверка шага:
+
+```js
+// main.js — проверка шага
+import { Lesson } from "./lesson.js";
+import { line, hours } from "./format.js";
+const a = new Lesson({ title: "Модули: import и export", start: "2026-10-26T14:00", duration: "PT1H30M", room: "201" }, "JS-1");
+const b = new Lesson({ title: "Temporal и Intl", start: "2026-10-29T10:00", duration: "PT2H", room: "105" }, "JS-2");
+for (const locale of ["ru-RU", "en-US"]) {
+  console.log(line(a, locale));
+  console.log(hours([a, b], locale));
+}
+```
+
+<ResultBox>
+пн, 26 окт., 14:00–15:30 · JS-1 · Модули: import и export · ауд. 201\
+3,5\
+Mon, Oct 26, 2:00 – 3:30 PM · JS-1 · Модули: import и export · room 201\
+3.5
+</ResultBox>
+
+Одни и те же данные — две записи: русские сутки до 24 часов и английские AM/PM, «пн» и «Mon», запятая и точка.
+Названия занятий не переводятся — это данные, а не подписи интерфейса.
+
+## 8. Поиск по названию {#search}
+
+Человек вводит что угодно, и это «что угодно» становится регулярным выражением. День 19 предупреждал:
+`c++` или `(regexp)` — сами по себе шаблоны со спецсимволами. `RegExp.escape`
+превращает ввод в буквальный поиск:
+
+```js
+// search.js
+export function matcher(query) {
+  const clean = query.trim();
+  if (clean === "") return () => true;
+  const pattern = new RegExp(RegExp.escape(clean), "i");
+  return (lesson) => pattern.test(lesson.title);
+}
+```
+
+`matcher` возвращает функцию-проверку — замыкание дня 1 с готовым шаблоном. Её можно сразу отдать в
+`filter`. Пустой запрос пропускает всё, флаг `i` не различает регистр. Флага `g`
+нет, и это важно: с ним `test` запоминал бы `lastIndex` между вызовами (день 18). Проверка
+шага:
+
+```js
+// main.js — проверка шага
+import { matcher } from "./search.js";
+const lessons = ["C++: указатели", "C++ и шаблоны", "Регулярные выражения (RegExp)", "JSON и import()"].map((title) => ({ title }));
+for (const query of ["c++", "(regexp)", "IMPORT()", ".*", ""]) {
+  console.log(JSON.stringify(query), lessons.filter(matcher(query)).length);
+}
+```
+
+<ResultBox>
+"c++" 2\
+"(regexp)" 1\
+"IMPORT()" 1\
+".\*" 0\
+"" 4
+</ResultBox>
+
+Каждый запрос нашёл ровно то, что написано буквами. `.*` — ни одного: точка и звёздочка теперь просто
+символы. Проверка шага получает объекты с одним `title` — `matcher` не знает про класс
+`Lesson`, ему хватает свойства.
+
+## 9. Разметка {#markup}
+
+```html file="index.html"
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Расписание</title>
+  <style>
+    .past { color: #94a3b8; }
+    .languages .active { font-weight: bold; }
+    .error { color: #b91c1c; }
+  </style>
+  <script type="module" src="main.js"></script>
+</head>
+<body>
+  <h1 id="heading"></h1>
+  <p class="languages">
+    <button data-locale="ru-RU">RU</button>
+    <button data-locale="en-US">EN</button>
+  </p>
+  <input id="search" placeholder="Поиск по названию">
+  <p id="summary"></p>
+  <ul id="lessons"></ul>
+  <p id="empty" hidden></p>
+  <p id="error" class="error"></p>
+</body>
+</html>
+```
+
+Модуль подключён в `<head>`, но элементы страницы найдёт: модули выполняются после разбора
+страницы (день 30), `defer` не нужен. Значения `data-locale` — сразу ключи объекта
+`TEXT` и локали `Intl`. Абзац `#empty` скрыт атрибутом `hidden`, пока что-то
+найдено.
+
+## 10. Главная схема {#idea}
+
+Схема дня 16 остаётся: страница — картинка данных, слушатель меняет состояние и зовёт `render`. Новое
+— кто за что отвечает. Каждый модуль знает своё и импортирует только то, что ему нужно:
+
+<Scheme src="scheme-idea.svg">Модули расписания: у каждого одна задача</Scheme>
+
+Правило то же, что у классов дня 16: `lesson.js` не знает про страницу, `format.js` — про
+загрузку, `search.js` — про `Intl`. Поэтому каждый модуль проверили отдельно, своим временным
+`main.js`. А если завтра расписание понадобится в другом приложении, `lesson.js` и
+`load.js` переедут туда без изменений.
+
+## 11. main.js: состояние и render {#main}
+
+```js
+// main.js
+import groups from "./data/groups.json" with { type: "json" };
+import { loadSchedule } from "./load.js";
+import { TEXT, line, hours } from "./format.js";
+import { matcher } from "./search.js";
+
+const now = Temporal.PlainDateTime.from("2026-10-27T12:00");
+let locale = "ru-RU";
+let query = "";
+let lessons = [];
+
+const heading = document.querySelector("#heading");
+const languages = document.querySelector(".languages");
+const search = document.querySelector("#search");
+const summary = document.querySelector("#summary");
+const list = document.querySelector("#lessons");
+const empty = document.querySelector("#empty");
+const error = document.querySelector("#error");
+
+function makeItem(lesson) {
+  const li = document.createElement("li");
+  li.textContent = line(lesson, locale);
+  li.classList.toggle("past", lesson.isPast(now));
+  return li;
+}
+
+function render() {
+  const text = TEXT[locale];
+  const visible = lessons.filter(matcher(query));
+  const next = visible.find((lesson) => Temporal.PlainDateTime.compare(lesson.start, now) > 0);
+  heading.textContent = text.title;
+  list.replaceChildren(...visible.map(makeItem));
+  empty.textContent = text.empty;
+  empty.hidden = visible.length > 0;
+  summary.textContent = `${text.lessons}: ${visible.length} · ${text.hours}: ${hours(visible, locale)}`;
+  if (next) summary.textContent += ` · ${text.next} ${now.until(next.start).toLocaleString(locale)}`;
+  languages.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.locale === locale));
+}
+
+search.addEventListener("input", () => {
+  query = search.value;
+  render();
+});
+
+languages.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  locale = button.dataset.locale;
+  render();
+});
+
+try {
+  lessons = await loadSchedule(groups);
+} catch (e) {
+  error.textContent = `${e.message}: ${e.cause.message}`;
+}
+render();
+```
+
+Состояние программы — три переменные: `locale`, `query`, `lessons`. Всё остальное
+вычисляется в `render`, как средний балл дня 16. Видимые занятия — фильтр по запросу. Ближайшее — первое
+видимое, которое начнётся после «сейчас»: список уже отсортирован, поэтому хватает `find`. «Через сколько»
+— `until` дня 22: длительность в днях и часах, а `toLocaleString` дня 23 пишет её по-русски или
+по-английски. `replaceChildren` заменяет все строки списка одним вызовом.
+
+Последние строки — `await` на верхнем уровне модуля (день 30): `main.js` дожидается
+расписания, а `render` рисует то, что есть. Если загрузка упала, `lessons` остаётся пустым
+массивом, и страница показывает «Занятий: 0» вместе с текстом ошибки и её причиной.
+
+### Отладка: заглянуть в состояние
+
+На дне 16 в консоли можно было набрать `group.get(1)`. Здесь `lessons` из консоли не видно —
+это переменная модуля (день 30). Выход подсказал тот же день: модуль сам кладёт нужное в `globalThis`.
+Одно имя на весь проект, как `globalThis.cards` дня 3, и только на время отладки:
+
+```js
+// в конец main.js — на время отладки
+globalThis.debug = {
+  get lessons() {
+    return lessons;
+  },
+  get state() {
+    return { locale, query, visible: lessons.filter(matcher(query)).length };
+  },
+};
+```
+
+Теперь в консоли `debug.state` — `{locale: 'ru-RU', query: '', visible: 6}`, после поиска «c++»
+— `visible: 2`, а `debug.lessons[0].end.toString()` — `'2026-10-26T15:30:00'`.
+Геттеры здесь не для красоты (день 5): они читают переменные модуля в момент обращения. Обычное свойство
+`{ lessons }` запомнило бы массив, который был при создании объекта, и после нового присваивания
+`lessons` показывало бы старый. Перед сдачей проекта эти строки удаляют.
+
+## 12. Разбор: «c++» ломает поиск {#bug-escape}
+
+Частая первая версия `search.js` обходится без `RegExp.escape`:
+`new RegExp(clean, "i")`. На словах всё работает. Набираем «c++» по буквам:
+
+| Набрано | Итоговая строка | Консоль |
+| --- | --- | --- |
+| c | Занятий: 2 · часов: 2,5 · ближайшее через 3 дн. 21 ч | — |
+| c+ | то же | — |
+| c++ | то же | `Uncaught SyntaxError: Invalid regular expression: /c++/i: Nothing to repeat` |
+
+**Шаг 1. Что не так?** На «c++» страница ничего не сообщила и показывает старый результат: два
+занятия C++. Выглядит верно, но это остатки от «c+».
+
+**Шаг 2. Почему «c+» сработал?** `c+` — тоже шаблон: «одна или больше букв c» (день 17).
+Совпадение случайное. А `c++` — уже ошибка шаблона, она вылетела из `matcher`, прервала
+`render`, и список остался от прошлого вызова.
+
+**Шаг 3. Чиним.** `RegExp.escape(clean)` — и `c++` ищется буквально, как в
+разделе 8. Урок шире одной функции: **текст человека никогда не становится кодом**, ни шаблоном, ни
+HTML (поэтому в `makeItem` — `textContent`).
+
+## 13. Разбор: ещё три ошибки {#bugs}
+
+### По-английски «hours: 9,5»
+
+После «EN» итоговая строка — `Lessons: 6 · hours: 9,5 · next in 1 day, 2 hr`: подписи английские, а
+число с русской запятой. Причина — вызов `hours(visible)` без второго аргумента. `locale` стал
+`undefined`, а `Intl` без локали берёт язык браузера (день 25), у нас русский. Подписи берутся
+из `TEXT[locale]` в `render`, поэтому они переключились, а число — нет. Ищите места, где локаль
+не передана.
+
+### Список пуст, под ним «Temporal error»
+
+На странице «Занятий: 0 · часов: 0» и «Ничего не нашлось», хотя искать было не в чем, а ниже: `Не удалось
+загрузить расписание JS-2: Temporal error: Invalid character while parsing year value.` В `data/js-2.json` кто-то записал начало по-русски —
+`"27.10.2026 10:00"`. Сообщение уже говорит главное: какая группа (текст `ScheduleError`) и что
+случилось (`cause`). Но пропали **все** группы, а не одна: `Promise.all` отклоняется
+при первом же отказе (день 27). Устойчивая загрузка на `Promise.allSettled` — задание 5.
+
+### Пустая страница, даже без заголовка
+
+Ни заголовка, ни списка, ни сообщения под ним. В консоли: `Failed to load module script: Expected a
+JavaScript-or-Wasm module script but the server responded with a MIME type of "application/json"`. В
+`main.js` забыли `with { type: "json" }` у импорта `groups.json`. Это ошибка загрузки
+графа (день 30): не выполнился ни один модуль, поэтому и `catch` внизу `main.js` её не поймал.
+
+| Симптом | Причина | Где смотреть |
+| --- | --- | --- |
+| на «c++» старый список, в консоли «Nothing to repeat» | ввод стал шаблоном | `RegExp.escape` в `search.js` |
+| английские подписи, русские числа и даты | локаль не передана в `Intl` | вызовы `hours`, `line` |
+| «Занятий: 0» и «Temporal error» под списком | не-ISO строка в JSON; `Promise.all` роняет все группы | файл из текста ошибки |
+| пустая страница, «Expected a JavaScript-or-Wasm module script» | JSON без `with` | импорты `main.js` |
+
+## 14. Программа целиком {#whole}
+
+| Файл | Задача | Импортирует |
+| --- | --- | --- |
+| `index.html` | рама страницы | `main.js` |
+| `main.js` | состояние, `render`, слушатели | `groups.json`, `load.js`, `format.js`, `search.js` |
+| `load.js` | загрузка групп | `lesson.js`, `errors.js`; файлы групп — `import()` |
+| `lesson.js` | занятие на `Temporal` | — |
+| `format.js` | подписи и `Intl` | — |
+| `search.js` | поиск по названию | — |
+| `errors.js` | `ScheduleError` | — |
+| `data/*.json` | группы и занятия | — |
+
+Сценарий, в котором каждая ветка программы сработала хотя бы раз, — по шагам на одной странице:
+
+<table className="scenario">
+<thead>
+<tr><th>Что сделали</th><th>Что на странице</th></tr>
+</thead>
+<tbody>
+<tr><td>открыли страницу</td><td>Занятий: 6 · часов: 9,5 · ближайшее через 1 дн. 2 ч</td></tr>
+<tr><td>первая строка списка</td><td>пн, 26 окт., 14:00–15:30 · JS-1 · Модули: import и export · ауд. 201</td></tr>
+<tr><td>серых строк</td><td>3</td></tr>
+<tr><td>поиск «c++»</td><td>Занятий: 2 · часов: 2,5 · ближайшее через 3 дн. 21 ч</td></tr>
+<tr><td>«EN»</td><td>Lessons: 2 · hours: 2.5 · next in 3 days, 21 hr</td></tr>
+<tr><td>поиск «(regexp)»</td><td>Lessons: 1 · hours: 2</td></tr>
+<tr><td>поиск «xyz»</td><td>Nothing found</td></tr>
+<tr><td>очистили поиск, «RU»</td><td>Занятий: 6 · часов: 9,5 · ближайшее через 1 дн. 2 ч</td></tr>
+</tbody>
+</table>
+
+Занятие «(regexp)» во вторник уже прошло, поэтому «ближайшего» в итоге нет — строка короче. Крайние случаи —
+каждый с чистой страницы:
+
+| Что сделали | Что на странице | Почему |
+| --- | --- | --- |
+| поиск из одних пробелов | все шесть занятий | `trim` в `matcher` |
+| поиск «.\*» | «Ничего не нашлось» | `RegExp.escape`: точка и звёздочка — буквы |
+| поиск «МОДУЛИ» | Занятий: 1 · часов: 1,5 | флаг `i` |
+| в `groups.json` группа `py-1` без файла | «Не удалось загрузить расписание PY-1: Failed to fetch dynamically imported module: …» и пустой список | `Promise.all`, раздел 13 |
+
+<TryIt>
+Два опыта.
+\
+\
+**Первый.** Поставьте `now` на `"2026-11-01T00:00"`. Что пропало из итоговой
+строки и сколько строк стало серыми?
+\
+\
+**Второй.** Добавьте группу `py-1` по-настоящему: строку в `groups.json` и файл
+`data/py-1.json` с двумя занятиями. Какие модули пришлось менять?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+Дни 33–36 — итоговый проект курса: замысел и план, реализация, доработка и защита. План требует в нём классы,
+модули, асинхронную загрузку и хотя бы одно из: `Map`/`Set`, регулярные выражения,
+`Temporal`/`Intl`. Сегодняшнее расписание — образец такого проекта, только маленький.
+
+### Как расширять проект самим
+
+| Идея | Что понадобится |
+| --- | --- |
+| фильтр по группе | кнопки из `groups.json`, второе условие в `filter` |
+| устойчивая загрузка | `Promise.allSettled`, причины отказов из `cause` |
+| занятия по дням | `Map.groupBy` по `toPlainDate()`, заголовок дня через `Intl` |
+| подсветка найденного | `replace` или `split` по тому же безопасному шаблону |
+| группа по кнопке | `import()` по щелчку, как викторина дня 31 |
+
+Каждая идея ложится в ту же схему: данные — в JSON, правило — в свой модуль, показ — в `render`,
+действие — в слушатель, который меняет состояние и зовёт `render`.
+
+<Ref>
+<p style={{margin: "0 0 8px"}}>Новых страниц нет — проект пользуется разобранными раньше:</p>
+
+| Страница | Где в проекте | День |
+| --- | --- | --- |
+| [RegExp.escape](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/escape) | `search.js` | 19 |
+| [Temporal.PlainDateTime](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime) | начало и конец занятия, «сейчас» | 22 |
+| [Temporal.Duration](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Duration) | длительность, сумма часов | 23 |
+| [Intl.DateTimeFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat) | `formatRange` в `when` | 25 |
+| [Intl.NumberFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat) | часы в `hours` | 25 |
+| [Error: cause](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause) | `ScheduleError` | 26 |
+| [Promise.all](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all) | `loadSchedule` | 27 |
+| [JavaScript modules](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules) | вся папка | 30 |
+| [import()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import), [Import attributes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/with) | файлы групп, `groups.json` | 31 |
+</Ref>
+
+<Cheatsheet>
+```js
+// СХЕМА: данные — в JSON, правило — в модуле, показ — в render, слушатель меняет состояние и зовёт render
+// ПАПКА: index.html, main.js, load.js, lesson.js, format.js, search.js, errors.js, data/*.json
+
+// ЗАГРУЗКА: import(`./data/${id}.json`, { with: { type: "json" } }) — путь от модуля, не от страницы
+// все сразу: (await Promise.all(groups.map(loadGroup))).flat().toSorted(Lesson.compare)
+// ошибка: catch (cause) { throw new ScheduleError("какая группа", { cause }); }
+
+// TEMPORAL: строки ISO из JSON — PlainDateTime.from, Duration.from; сравнение — только compare
+// сумма: lessons.reduce((sum, l) => sum.add(l.duration), new Temporal.Duration()).total("hours")
+
+// INTL: локаль — в каждый вызов; formatRange(start, end); NumberFormat — запятая или точка
+// ПОИСК: new RegExp(RegExp.escape(query.trim()), "i") — ввод человека никогда не шаблон
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему проверку шага в проекте на модулях пишут временным `main.js`, а не в консоли?
+   <Answer>Переменные и импорты модуля не видны из консоли DevTools (день 30). Временный `main.js`
+   импортирует нужный модуль и печатает результат.</Answer>
+2. Зачем `loadGroup` ловит ошибку и бросает новую?
+   <Answer>Человеку нужно понятное «не удалось загрузить расписание JS-2», а программисту — исходная ошибка. Новая
+   `ScheduleError` несёт оба: текст в `message`, исходную ошибку — в `cause`.</Answer>
+3. Почему «c+» в поиске без `RegExp.escape` «работает», а «c++» — нет?
+   <Answer>«c+» — правильный шаблон «одна или больше c», совпадение случайное. «c++» — ошибка шаблона «Nothing to
+   repeat». С `RegExp.escape` оба ищутся буквально.</Answer>
+4. Почему в английском варианте число часов может выйти с запятой?
+   <Answer>Если `Intl.NumberFormat` не получил локаль, он берёт язык браузера. Локаль нужно передавать
+   в каждый вызов.</Answer>
+5. Одна группа не загрузилась — почему пропали все?
+   <Answer>`Promise.all` отклоняется при первом отказе, и `loadSchedule` не возвращает ничего.
+   Чтобы показать остальные группы, нужен `Promise.allSettled`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules" />

@@ -1,0 +1,470 @@
+---
+title: "День 25 — Intl: NumberFormat, DateTimeFormat и локали"
+day: День 25 • урок 1
+heading: "Intl: NumberFormat, DateTimeFormat и локали"
+lead: "Курс 2, Intermediate. Модуль «Числа и даты: Date, Temporal, основы Intl» — пятый, последний день. 45 минут."
+css: |
+  h1 { border-bottom-color: #06b6d4; }
+  h2 { color: #0e7490; background: #ecfeff; border-left-color: #06b6d4; }
+  h3 { color: #155e75; }
+  .step-number { background: #06b6d4; }
+  .toc a { color: #0e7490; }
+---
+
+<Goals>
+- понимать, что такое локаль и как браузер выбирает её для вывода;
+- писать числа, цены, проценты и единицы через `Intl.NumberFormat` и `toLocaleString`;
+- писать даты и время для людей через `Intl.DateTimeFormat`, в том числе даты `Temporal`;
+- сравнивать и сортировать строки по правилам языка через `localeCompare`;
+- знать, что делать, когда нужной локали в браузере нет, — на примере туркменской.
+</Goals>
+
+<Toc />
+
+## 1. Обещания, накопленные за курс {#debts}
+
+Это, пожалуй, самый «долговой» день курса. День 16 Essentials отложил `toLocaleLowerCase("tr")`, день
+17 — настройки `toLocaleDateString`. День 6 курса 2 обещал «свой» `toLocaleString` у чисел, дат и
+массивов, день 20 — что `localeCompare` сравнивает строки после нормализации. Дни 21–24 откладывали всё «для
+людей» — от названий месяцев до «1 250,50 ТМТ».
+
+```js
+const amount = 1250.5;
+const lesson = new Date(2026, 9, 12, 14, 30);
+console.log(amount.toLocaleString("ru-RU", { style: "currency", currency: "TMT" }), "|", lesson.toLocaleDateString("ru-RU", { dateStyle: "long" }), "|", Temporal.Duration.from({ hours: 1, minutes: 30 }).toLocaleString("ru-RU"), "|", "I".toLocaleLowerCase("tr"), "|", "é".localeCompare("é".normalize("NFD")));
+// 1 250,50 ТМТ | 12 октября 2026 г. | 1 ч 30 мин | ı | 0
+```
+
+Цена в манатах, дата словами, длительность по-русски, турецкая «ı» без точки и две разные записи «é» (составная и
+разложенная дня 20), которые `localeCompare` считает равными. За всем этим стоит один объект —
+`Intl`.
+
+## 2. Intl: один шаблон для всех {#intl}
+
+```js
+const price = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "TMT" });
+console.log(price.format(1250.5), price.format(30), typeof Intl, Object.prototype.toString.call(Intl), Intl.NumberFormat("en-US").format(1250.5));
+// 1 250,50 ТМТ 30,00 ТМТ object [object Intl] 1,250.5
+new Intl();   // TypeError: Intl is not a constructor
+```
+
+`Intl` — пространство имён, как `Math` и `Temporal`: в нём лежат «форматировщики»
+для разных задач. Справочник MDN подчёркивает, что почти все они устроены одинаково. Сначала создаёте объект с
+**локалью** и **настройками** — он запоминает правила. Потом зовёте его метод
+(`format`) на данных столько раз, сколько нужно. В отличие от `Temporal`, конструкторы
+`Intl` по старой традиции работают и без `new`.
+
+<Scheme src="scheme-intl.svg">Шаблон Intl: локаль и настройки → форматировщик → строка</Scheme>
+
+Сегодня два форматировщика — `NumberFormat` и `DateTimeFormat` — и сравнение строк. Остальные
+объекты `Intl` (списки, «3 дня назад», формы множественного числа, сравнение через `Collator`,
+разбиение текста на слова) — курс 3.
+
+## 3. Локаль {#locale}
+
+```js
+const date = new Date(2026, 9, 12);
+for (const locale of ["ru-RU", "en-US", "en-GB", "de-DE", "ja-JP"]) {
+  console.log(locale, new Intl.DateTimeFormat(locale).format(date), new Intl.NumberFormat(locale).format(1250.5));
+}
+```
+
+<ResultBox>
+ru-RU 12.10.2026 1&nbsp;250,5\
+en-US 10/12/2026 1,250.5\
+en-GB 12/10/2026 1,250.5\
+de-DE 12.10.2026 1.250,5\
+ja-JP 2026/10/12 1,250.5
+</ResultBox>
+
+**Локаль** — набор привычек письма: порядок числа и месяца, разделители, названия. Записывают её
+тегом BCP 47: язык, при нужде письменность и регион — `"ru-RU"`, `"en-GB"`,
+`"sr-Latn"`. Справочник объясняет, зачем регион: у американцев и британцев один язык, но 12 октября у
+первых — 10/12, у вторых — 12/10. После `-u-` в теге можно дописать «расширения»: систему цифр
+`nu`, календарь `ca`, отсчёт часов `hc`.
+
+```js
+console.log(new Intl.NumberFormat().resolvedOptions().locale, new Intl.DateTimeFormat(["xx", "en-US"]).resolvedOptions().locale, (1250.5).toLocaleString("ru-RU-u-nu-arab"), new Intl.DateTimeFormat("ru-RU-u-ca-persian", { dateStyle: "long" }).format(new Date(2026, 9, 12)));
+// ru-RU en-US ١٬٢٥٠٫٥ 20 мехр 1405 г. перс. год
+```
+
+Без локали берётся язык браузера; в наших примерах это Chrome на русском, поэтому `ru-RU`. Можно дать
+список — подойдёт первая, которую браузер знает (несуществующая `xx` пропущена). Как выбирать? Справочник
+советует не полагаться на язык браузера, а брать язык, который выбрал пользователь на вашем сайте: иначе английская
+страница покажет японские даты. И главное правило проверки: **не сравнивайте вывод `Intl` с
+готовой строкой** — он разный в разных браузерах и версиях; это видно уже в разделе 6.
+
+## 4. NumberFormat. Практика: цены в манатах {#numbers}
+
+```js
+const prices = [1250.5, 30, 999999.999, 0.5];
+const ru = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "TMT" });
+const en = new Intl.NumberFormat("en-US", { style: "currency", currency: "TMT" });
+console.log(prices.map((p) => ru.format(p)).join(" | "));
+console.log(prices.map((p) => en.format(p)).join(" | "));
+console.log(ru.format(prices.reduce((a, b) => a + b)), new Intl.NumberFormat("ru-RU", { style: "currency", currency: "JPY" }).format(1250.5));
+```
+
+<ResultBox>
+1&nbsp;250,50&nbsp;ТМТ | 30,00&nbsp;ТМТ | 1&nbsp;000&nbsp;000,00&nbsp;ТМТ | 0,50&nbsp;ТМТ\
+TMT&nbsp;1,250.50 | TMT&nbsp;30.00 | TMT&nbsp;1,000,000.00 | TMT&nbsp;0.50\
+1&nbsp;001&nbsp;281,00&nbsp;ТМТ 1&nbsp;251&nbsp;¥
+</ResultBox>
+
+Практика плана. Настройка `style` говорит, что за число: `"decimal"` (по умолчанию),
+`"percent"`, `"currency"` или `"unit"`. Для валюты нужен её код ISO 4217 —
+у нового туркменского маната это `TMT`. По-русски он пишется кириллицей «ТМТ» после суммы, по-английски
+«TMT» — перед ней. Копеек у маната два знака (тенге), поэтому 30 — «30,00», а 999 999,999 округлилось до миллиона.
+У японской иены дробной части нет вовсе — 1 251 ¥. Число знаков форматировщик знает сам: это данные о валюте.
+
+## 5. Цифры, округление, запись {#digits}
+
+```js
+const n = 1234567.891;
+console.log(n.toLocaleString("ru-RU", { maximumFractionDigits: 1 }), "|", n.toLocaleString("en-US", { maximumFractionDigits: 0 }), "|", (0.075).toLocaleString("ru-RU", { style: "percent", minimumFractionDigits: 1 }), "|", n.toLocaleString("ru-RU", { notation: "compact", compactDisplay: "long" }), "|", n.toLocaleString("en-US", { notation: "compact" }));
+// 1 234 567,9 | 1,234,568 | 7,5 % | 1,2 миллиона | 1.2M
+console.log((5).toLocaleString("ru-RU", { signDisplay: "always" }), (5).toLocaleString("ru-RU", { minimumIntegerDigits: 3 }), (1250.5).toLocaleString("ru-RU", { useGrouping: false }), [1, 2, 5, 81].map((h) => h.toLocaleString("ru-RU", { style: "unit", unit: "hour", unitDisplay: "long" })).join(", "), (60).toLocaleString("ru-RU", { style: "unit", unit: "kilometer-per-hour" }));
+// +5 005 1250,5 1 час, 2 часа, 5 часов, 81 час 60 км/ч
+```
+
+Настройки цифр: `minimumFractionDigits` и `maximumFractionDigits` (сколько знаков после
+запятой), `minimumIntegerDigits` (дополнить нулями слева), значащие цифры. По умолчанию у обычного числа
+максимум три знака после запятой, у процента — ноль, у валюты — сколько положено валюте. Округление — «до
+ближайшего, половину вверх», как в школе, его меняет `roundingMode`. `notation: "compact"` пишет
+«1,2 миллиона», `signDisplay` — знак плюс, `useGrouping: false` убирает пробелы между разрядами.
+Процент умножает число на 100: 0,075 — 7,5 %. А стиль `"unit"` сам склоняет слово: 1 час, 2 часа, 5 часов
+— то, что вручную пишут длинным `if`.
+
+## 6. Невидимые пробелы и formatToParts {#parts}
+
+```js
+const price = (1250.5).toLocaleString("ru-RU", { style: "currency", currency: "TMT" });
+const space = String.fromCharCode(160);
+console.log(price === "1 250,50 ТМТ", price.charCodeAt(1), price.replaceAll(space, " ") === "1 250,50 ТМТ");   // false 160 true
+const parts = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "TMT" }).formatToParts(1250.5);
+console.log(parts.map((p) => p.type).join(" "), parts.map(({ type, value }) => (type === "currency" ? `[${value}]` : value)).join(""));
+// integer group integer decimal fraction literal currency 1 250,50 [ТМТ]
+const options = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "TMT" }).resolvedOptions();
+console.log(options.locale, options.minimumFractionDigits, options.maximumFractionDigits, options.currencyDisplay, options.roundingMode);   // ru-RU 2 2 symbol halfExpand
+```
+
+Вот почему справочник запрещает сравнивать вывод с готовой строкой: «1 250,50 ТМТ» в коде и результат
+`format` выглядят одинаково, но не равны. Между разрядами и перед «ТМТ» стоит **неразрывный
+пробел** — символ с кодом 160, а не обычный 32. Он нужен, чтобы сумма не разорвалась на две строки. Если строку
+всё же надо разбирать, есть `formatToParts`: тот же результат кусками с типом — целая часть, разделитель
+групп, запятая, дробь, валюта. Так удобно, например, выделить валюту или вставить разметку. `resolvedOptions`
+показывает, какие правила форматировщик принял на самом деле.
+
+<Scheme src="scheme-parts.svg">formatToParts: из чего собрана цена по-русски и по-английски</Scheme>
+
+## 7. toLocaleString у чисел, BigInt и массивов {#shortcuts}
+
+```js
+console.log(9007199254740993n.toLocaleString("ru-RU"), (9007199254740993).toLocaleString("ru-RU"), [1250.5, 3].toLocaleString("en-US"), [1250.5, 3].toLocaleString("ru-RU", { style: "currency", currency: "TMT" }));
+// 9 007 199 254 740 993 9 007 199 254 740 992 1,250.5,3 1 250,50 ТМТ,3,00 ТМТ
+```
+
+`toLocaleString(локаль, настройки)` у числа принимает те же аргументы, что `NumberFormat`, у
+даты — что `DateTimeFormat`. По спецификации каждый вызов строит новый форматировщик, поэтому справочник
+советует для многих значений один объект и его `format` — как в разделе 4. `BigInt` дня 21
+форматируется точно до последней цифры, а обычное число уже потеряло тройку. У массива `toLocaleString`
+зовёт его у каждого элемента и склеивает их запятой — обещанный днём 6 «свой» `toLocaleString`; запятая
+между элементами плохо читается рядом с русской запятой в числах.
+
+## 8. DateTimeFormat. Практика: даты по-русски и по-английски {#dates}
+
+```js
+const d = new Date(2026, 9, 12, 14, 30);
+console.log(d.toLocaleString("ru-RU"), "|", d.toLocaleString("en-US"), "|", d.toLocaleString("ru-RU", { dateStyle: "full", timeStyle: "short" }), "|", d.toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" }));
+// 12.10.2026, 14:30:00 | 10/12/2026, 2:30:00 PM | понедельник, 12 октября 2026 г. в 14:30 | Monday, October 12, 2026 at 2:30 PM
+console.log(d.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "short" }), "|", d.toLocaleString("ru-RU", { month: "long", year: "numeric" }), "|", d.toLocaleString("ru-RU", { month: "long" }), "|", d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }), "|", d.toLocaleString("ru-RU", { hour: "numeric", minute: "2-digit", hour12: true }));
+// пн, 12 окт. | октябрь 2026 г. | октябрь | 02:30 PM | 2:30 PM
+```
+
+Обещание дня 17 Essentials — настройки даты. Есть два способа сказать, что выводить. **Стили**
+`dateStyle` и `timeStyle` (`"full"`, `"long"`, `"medium"`,
+`"short"`) — готовые наборы, свои для каждой локали. **Части** — `weekday`,
+`year`, `month`, `day`, `hour`, `minute`,
+`second`, `timeZoneName` — со значениями вроде `"numeric"`, `"2-digit"`,
+`"long"`, `"short"`. Смешивать способы нельзя (раздел 14). Если не задано ничего, дата
+выводится числами. Русское «октябрь» в именительном падеже, а «12 октября» — в родительном: форматировщик знает
+грамматику, поэтому названия месяцев берут у него, а не из своего массива, — совет дня 22.
+`hour12` переключает 12- и 24-часовую запись.
+
+```js
+const days = ["2026-10-12T09:00", "2026-10-14T09:00", "2026-10-16T14:30"].map((s) => Temporal.PlainDateTime.from(s));
+for (const locale of ["ru-RU", "en-US"]) {
+  const f = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  console.log(days.map((x) => f.format(x)).join(" | "));
+}
+```
+
+<ResultBox>
+понедельник, 12 октября в 09:00 | среда, 14 октября в 09:00 | пятница, 16 октября в 14:30\
+Monday, October 12 at 9:00 AM | Wednesday, October 14 at 9:00 AM | Friday, October 16 at 2:30 PM
+</ResultBox>
+
+Практика плана: первая неделя расписания на двух языках. Один набор частей — и каждая локаль сама решает порядок,
+слова «в» и «at», 24 или 12 часов.
+
+## 9. Пояс, календарь и части даты {#zones}
+
+```js
+const moment = new Date(Date.UTC(2026, 9, 12, 9, 30));
+const at = (zone) => new Intl.DateTimeFormat("ru-RU", { timeZone: zone, hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(moment);
+console.log(["Asia/Ashgabat", "Europe/Berlin", "America/New_York"].map(at).join(" | "));   // 14:30 GMT+5 | 11:30 GMT+2 | 05:30 GMT-4
+const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" }).formatToParts(moment);
+console.log(parts.map((p) => `${p.type}=${p.value}`).join(" "));   // weekday=понедельник literal=,  day=12 literal=  month=октября
+const used = new Intl.DateTimeFormat("ru-RU").resolvedOptions();
+console.log(used.locale, used.calendar, used.timeZone, used.year, used.month, used.day);   // ru-RU gregory Asia/Ashgabat numeric 2-digit 2-digit
+```
+
+Настройка `timeZone` показывает момент `Date` в нужном поясе — то, чего не умели геттеры
+дня 21. `timeZoneName` дописывает смещение. Календарь меняют настройкой `calendar` или
+расширением `-u-ca-`, как персидский в разделе 3. `formatToParts` работает и здесь, а
+`resolvedOptions` выдаёт пояс устройства — справочник называет это способом узнать пояс пользователя.
+
+## 10. Temporal и Intl {#temporal}
+
+```js
+const pd = Temporal.PlainDate.from("2026-10-12");
+const ym = Temporal.PlainYearMonth.from({ year: 2026, month: 10, calendar: "gregory" });
+const md = Temporal.PlainMonthDay.from({ monthCode: "M10", day: 12, calendar: "gregory" });
+const z = Temporal.ZonedDateTime.from("2026-10-12T14:30[Europe/Berlin]");
+console.log(pd.toLocaleString("ru-RU", { dateStyle: "long" }), "|", ym.toLocaleString("ru-RU", { year: "numeric", month: "long" }), "|", md.toLocaleString("ru-RU", { day: "numeric", month: "long" }), "|", z.toLocaleString("ru-RU", { timeStyle: "full" }), "|", Temporal.Duration.from({ hours: 81 }).toLocaleString("ru-RU", { style: "long" }), "|", Temporal.Duration.from({ hours: 1, minutes: 30, seconds: 15 }).toLocaleString("en-US", { style: "digital" }));
+// 12 октября 2026 г. | октябрь 2026 г. | 12 октября | 14:30:00 Центральная Европа, летнее время | 81 час | 1:30:15
+new Intl.DateTimeFormat("ru-RU").format(z);   // TypeError: Invalid argument for Temporal [object Temporal.ZonedDateTime]
+```
+
+Даты `Temporal` понимают те же настройки. `PlainDate` и `PlainDateTime` выводятся
+как есть — пояса у них нет, ничего не пересчитывается. Обещание дня 23: «Mismatched calendars» у
+`PlainYearMonth` и `PlainMonthDay` исчезает, если создать их в календаре
+`"gregory"`, которым пишет русская локаль. `ZonedDateTime` выводится в своём поясе; в чужой
+`DateTimeFormat` его не передать — справочник объясняет: пояс в объекте уже закреплён. Длительность пишет
+«81 час» или «1:30:15», и эти настройки — объекта `Intl.DurationFormat` (курс 3).
+
+## 11. localeCompare. Практика: сортировка фамилий {#compare}
+
+```js
+const names = ["Ёлкин", "абдуллаев", "Яковлев", "Ершов", "Абаев", "Чарыев"];
+console.log(names.toSorted().join(" "), "|", names.toSorted((a, b) => a.localeCompare(b, "ru")).join(" "));
+// Ёлкин Абаев Ершов Чарыев Яковлев абдуллаев | Абаев абдуллаев Ёлкин Ершов Чарыев Яковлев
+console.log(["урок 10", "урок 2", "урок 1"].toSorted((a, b) => a.localeCompare(b, "ru", { numeric: true })).join(", "), "|", "Gülnar".localeCompare("Gulnar", "tk", { sensitivity: "base" }), "Gülnar".localeCompare("Gulnar"), "a".localeCompare("B"), "a" < "B");
+// урок 1, урок 2, урок 10 | 0 1 -1 false
+console.log("I".toLowerCase(), "I".toLocaleLowerCase("tr"), "i".toLocaleUpperCase("tr"), "ä".localeCompare("z", "de"), "ä".localeCompare("z", "sv"));   // i ı İ -1 1
+```
+
+Практика плана. `sort()` без функции сравнивает номера символов (день 20 Essentials): «Ё» в таблице
+раньше всех заглавных букв, а строчные — после всех заглавных, поэтому «Ёлкин» первый, а «абдуллаев» последний.
+`localeCompare` сравнивает по правилам языка: «ё» стоит у «е», регистр не ломает порядок. Ответ —
+отрицательное число, ноль или положительное; справочник предупреждает: ждать именно −1 и 1 нельзя, у браузеров
+бывает и −2.
+
+Третий аргумент — настройки. `numeric: true` сравнивает числа внутри строк как числа: «урок 2» раньше
+«урока 10». `sensitivity: "base"` считает равными буквы с разными знаками и регистром — Gülnar и Gulnar
+совпали: это поиск без диакритики, который день 20 собирал через `normalize` и `\p{M}`. И
+обещания: две записи «é» для `localeCompare` равны — он сравнивает строки после нормализации (раздел 1);
+`toLocaleLowerCase("tr")` знает турецкую «ı» без точки — долг дня 16 Essentials. Немцы ставят «ä» перед
+«z», шведы — после: порядок зависит от языка.
+
+## 12. Туркменской локали в Chrome нет {#tk}
+
+```js
+const october = new Date(2026, 9, 12);
+const tk = new Intl.DateTimeFormat("tk", { month: "long" });
+console.log(tk.format(october), tk.resolvedOptions().locale, Intl.DateTimeFormat.supportedLocalesOf(["tk", "tr", "ru", "uz"]));
+// октябрь ru-RU (3) ['tr', 'ru', 'uz']
+console.log(new Intl.DateTimeFormat("uz", { dateStyle: "full" }).format(october), "|", new Intl.DateTimeFormat("tr", { dateStyle: "full" }).format(october), "|", ["Annaýew", "Ärsaryýew", "Esenow", "Zarow"].toSorted((a, b) => a.localeCompare(b, "tk")).join(" "));
+// 2026 M10 12, Mon | 12 Ekim 2026 Pazartesi | Annaýew Ärsaryýew Esenow Zarow
+```
+
+Отдельный раздел плана — честно о нашей локали. Данные о языках браузер берёт из библиотеки ICU, и сборка Chrome
+несёт не все языки. Туркменского (`tk`) в Chrome 155 нет. Ошибки не будет: форматировщик молча переходит
+к языку браузера — в русском Chrome это «октябрь» и `ru-RU`, в английском — «October» и
+`en-US`. `supportedLocalesOf` такие языки отбрасывает: проверять поддержку надо им, а не
+глазами. С соседями не лучше. Турецкий есть целиком. Узбекский Chrome называет поддержанным, но вместо названий пишет
+«M10» и «Mon»: данных о нём в сборке почти нет.
+
+Для сравнения — Node 22 с полной ICU: тот же движок V8, но «Oktýabr», «12 oktýabr 2026 duşenbe» и «1 250,50 TMT»,
+а фамилии в нём сортируются по туркменскому алфавиту. В Chrome при `"tk"` правила общие, и «Ärsaryýew»
+стоит рядом с «Annaýew», а не после «Esenow», как в туркменском алфавите (A, B, Ç, D, E, Ä…). Что делать на
+туркменском сайте? Числа — с любой локалью, где та же запись (у русской — пробелы и запятая), даты — своими
+названиями месяцев (здесь массив оправдан: данных нет), порядок — своей функцией сравнения. Это задания 8 и 9.
+
+<Scheme src="scheme-tk.svg">Выбор локали: что происходит с «tk» в Chrome и в Node</Scheme>
+
+## 13. Остальные методы {#shared}
+
+```js
+console.log(new Intl.NumberFormat("ru-RU").formatRange(3, 5), "|", new Intl.NumberFormat("ru-RU", { style: "currency", currency: "TMT" }).formatRange(1250, 1500), "|", new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" }).formatRange(new Date(2026, 9, 12), new Date(2026, 9, 16)), "|", new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" }).formatRange(new Date(2026, 9, 12), new Date(2026, 11, 31)));
+// 3–5 | 1 250,00–1 500,00 ТМТ | 12–16 октября 2026 г. | 12 октября – 31 декабря 2026 г.
+```
+
+| Страница | Что делает |
+| --- | --- |
+| [`NumberFormat.formatRange`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/formatRange), [`formatRangeToParts`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/formatRangeToParts) | диапазон чисел: «3–5», валюта один раз в конце |
+| [`DateTimeFormat.formatRange`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/formatRange), [`formatRangeToParts`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/formatRangeToParts) | диапазон дат без повторов: «12–16 октября 2026 г.»; у частей есть поле `source` |
+| [`NumberFormat.supportedLocalesOf`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/supportedLocalesOf), [`DateTimeFormat.supportedLocalesOf`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/supportedLocalesOf) | какие из запрошенных локалей есть в данных |
+| [`Array.prototype.toLocaleString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toLocaleString), [`BigInt.prototype.toLocaleString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt/toLocaleString) | раздел 7 |
+| [`toLocaleLowerCase`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/toLocaleLowerCase), [`toLocaleUpperCase`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/toLocaleUpperCase) | регистр по правилам языка: турецкие «ı» и «İ» |
+
+## 14. Ошибки дня {#errors}
+
+| Код | Ошибка в Chrome | Что не так |
+| --- | --- | --- |
+| `new Intl()` | `TypeError: Intl is not a constructor` | пространство имён |
+| `{ style: "currency" }` | `TypeError: Currency code is required with currency style.` | нужен `currency` |
+| `{ currency: "TM" }` | `RangeError: Invalid currency code : TM` | код из трёх букв |
+| `{ style: "money" }` | `RangeError: Value money out of range for Intl.NumberFormat options property style` | нет такого стиля |
+| `{ style: "unit", unit: "liters" }` | `RangeError: Invalid unit argument for Intl.NumberFormat() 'liters'` | единица — `"liter"` |
+| `{ maximumFractionDigits: 200 }` | `RangeError: maximumFractionDigits value is out of range.` | не больше 100 |
+| `new Intl.NumberFormat("i")`, `localeCompare(…, "i")` | `RangeError: Invalid language tag: i` | неправильный тег |
+| `{ dateStyle: "long", month: "long" }` | `TypeError: Invalid option : option` | стиль и части вместе |
+| `{ timeZone: "Mars/Olympus" }` | `RangeError: Invalid time zone specified: Mars/Olympus` | нет такого пояса |
+| `format(new Date("x"))` | `RangeError: Invalid time value` | неверная дата |
+| `format(zonedDateTime)` | `TypeError: Invalid argument for Temporal [object Temporal.ZonedDateTime]` | его `toLocaleString` |
+| `Temporal.PlainYearMonth.from("2026-10").toLocaleString("ru-RU")` | `RangeError: Mismatched calendars.` | календарь `gregory` |
+
+Текст «Invalid option : option» для смеси стиля и частей не называет ни одной настройки — запомните его в лицо.
+Неизвестная локаль ошибкой не считается вовсе (раздел 12).
+
+## 15. Что говорит спецификация {#spec}
+
+`Intl` описан не в ECMA-262, а в отдельном стандарте — **ECMA-402**, спецификации
+интернационализации. Плана дня касаются две его главы: 11 (DateTimeFormat) и 16 (NumberFormat), подробно — их
+первые разделы о конструкторах.
+
+- [16.1 The Intl.NumberFormat Constructor](https://tc39.es/ecma402/2026/#sec-intl-numberformat-constructor)
+  и [16.1.1 Intl.NumberFormat ( \[ locales \[ , options \] \] )](https://tc39.es/ecma402/2026/#sec-intl.numberformat):
+  без `new` вместо NewTarget берётся сама функция — поэтому вызов без `new` работает.
+  Шаги: ResolveOptions выбирает локаль, SetNumberFormatUnitOptions читает стиль, валюту и единицу (нет
+  `currency` при стиле `"currency"` — `TypeError`), потом
+  `notation`, цифры, группировка, знак. Умолчания знаков после запятой: у валюты — CurrencyDigits,
+  у процента 0, у остального 3.
+- [16.5.1 CurrencyDigits](https://tc39.es/ecma402/2026/#sec-currencydigits) — число знаков валюты по
+  данным реализации, «если данных нет — 2»: манат — 2, иена — 0.
+- [11.1 The Intl.DateTimeFormat Constructor](https://tc39.es/ecma402/2026/#sec-intl-datetimeformat-constructor),
+  [11.1.1](https://tc39.es/ecma402/2026/#sec-intl.datetimeformat) и
+  [11.1.2 CreateDateTimeFormat](https://tc39.es/ecma402/2026/#sec-createdatetimeformat): пояс по
+  умолчанию — SystemTimeZoneIdentifier (пояс устройства), неизвестный — `RangeError`; если задан
+  `dateStyle` или `timeStyle` и хоть одна часть — `TypeError`; если не задано
+  ничего, год, месяц и число становятся `"numeric"`.
+- [9.2.7 ResolveLocale](https://tc39.es/ecma402/2026/#sec-resolvelocale) — выбор локали из запрошенных
+  и доступных; не нашлось ни одной — локаль по умолчанию. Отсюда тихая подмена `tk`.
+- [20.1.1
+  String.prototype.localeCompare](https://tc39.es/ecma402/2026/#sup-String.prototype.localeCompare) заменяет определение ECMA-262: строит `Intl.Collator` из локали и
+  настроек и сравнивает им. [Number.prototype.toLocaleString](https://tc39.es/ecma402/2026/#sup-number.prototype.tolocalestring)
+  так же строит `Intl.NumberFormat` — при каждом вызове.
+- Остальные разделы глав [11](https://tc39.es/ecma402/2026/#datetimeformat-objects) и
+  [16](https://tc39.es/ecma402/2026/#numberformat-objects) — кратко: слоты экземпляров, методы прототипа,
+  алгоритмы разбиения на части (PartitionNumberPattern, PartitionDateTimePattern), округление, диапазоны. Вывод
+  спецификация не фиксирует: какие именно строки получатся, решают данные о локалях.
+
+## 16. «Карточки» на двух языках {#cards}
+
+«Карточки» изучают на русском и на английском интерфейсе. Даты повторения и процент выучивания должны выглядеть
+привычно для каждого языка, а слова — стоять по алфавиту.
+
+```js
+const cards = [
+  { word: "water", next: Temporal.PlainDate.from("2026-10-15"), done: 0.75 },
+  { word: "Book", next: Temporal.PlainDate.from("2026-10-13"), done: 0.4 },
+  { word: "apple", next: Temporal.PlainDate.from("2026-10-20"), done: 1 },
+];
+function view(locale) {
+  const date = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "long" });
+  const percent = new Intl.NumberFormat(locale, { style: "percent" });
+  return cards.toSorted((a, b) => a.word.localeCompare(b.word, locale)).map((c) => `${c.word}: ${date.format(c.next)}, ${percent.format(c.done)}`).join(" | ");
+}
+console.log(view("ru-RU"));
+console.log(view("en-US"));
+```
+
+<ResultBox>
+apple: вт, 20 октября, 100&nbsp;% | Book: вт, 13 октября, 40&nbsp;% | water: чт, 15 октября, 75&nbsp;%\
+apple: Tue, October 20, 100% | Book: Tue, October 13, 40% | water: Thu, October 15, 75%
+</ResultBox>
+
+**Строки 1 и 2.** Форматировщики создаются один раз на вызов `view` и работают для всех
+карточек. Даты `PlainDate` выводятся по-русски с родительным падежом и по-английски с месяцем впереди,
+процент — с неразрывным пробелом по-русски и без пробела по-английски. Сортировка `localeCompare` не
+сбилась на заглавной «Book».
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Вызовите `view("tk")`. Почему результат совпал с русским и как это проверить
+через `resolvedOptions`?
+\
+\
+**Второй.** Сравните слова оператором `<`:
+`toSorted((a, b) => (a.word < b.word ? -1 : 1))`. Куда переехала «Book» и почему? А что сделает
+`toSorted()` вовсе без функции, если в массиве объекты?
+\
+\
+**Третий.** Сравните `view("ru-RU")` со строкой, переписанной из результата вручную, через
+`===`. Почему `false` и что сказал бы справочник о таком тесте?
+</TryIt>
+
+## 17. Итоги модуля I7 и что дальше {#next}
+
+| День | Тема | Главное |
+| --- | --- | --- |
+| 21 | BigInt и Date | целые без границы; дата — один момент; разбор строк и сеттеры с переносом |
+| 22 | Temporal: Plain-классы, Now | неизменяемые даты; месяцы с 1; «31 января + месяц» = 28 февраля |
+| 23 | Duration, PlainYearMonth, PlainMonthDay | строки P…; перенос и total; дата-опора для месяцев |
+| 24 | Instant, ZonedDateTime | момент и пояс; сутки в 23 и 25 часов; мост от Date |
+| 25 | Intl | локаль и настройки; числа, валюты, даты для людей; localeCompare |
+
+Модуль «Числа и даты» закончен. С дня 26 — модуль I8 «Ошибки и асинхронность»: `Error` и его виды,
+свойство `cause` и свои классы ошибок — а за ними промисы и `async` изнутри.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Internationalization](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Internationalization) | учебник: локали, форматирование, сравнение, выбор локали, проверка вывода | <Full /> |
+| [Intl.NumberFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat) | стили, валюты, единицы, цифры, запись | <Full /> |
+| [format()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/format), [formatToParts()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/formatToParts), [resolvedOptions()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/resolvedOptions) | строка, части, принятые правила | <Full /> |
+| [Intl.DateTimeFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/DateTimeFormat) | части и стили, пояс, календарь | <Full /> |
+| [format()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/format), [formatToParts()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/formatToParts), [resolvedOptions()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/resolvedOptions) | строка, части, пояс устройства | <Full /> |
+| [Number.prototype.toLocaleString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toLocaleString), [Date.prototype.toLocaleString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toLocaleString) | короткая запись форматировщика | <Full /> |
+| [String.prototype.localeCompare()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/localeCompare) | сравнение по правилам языка, настройки | <Full /> |
+| ECMA-402, 16.1 и 11.1 | шаги конструкторов NumberFormat и DateTimeFormat | <Full /> |
+| `formatRange`, `formatRangeToParts`, `supportedLocalesOf`, `toLocaleString` массива и `BigInt`, `toLocaleLowerCase`, `toLocaleUpperCase` — 10 страниц | ссылки в таблице раздела 13 | <Brief /> |
+| остальные 73 раздела глав 11 и 16 ECMA-402 | обзор в разделе 15 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// new Intl.NumberFormat("ru-RU", { style: "currency", currency: "TMT" }).format(1250.5) — «1 250,50 ТМТ»
+// style: "decimal" | "percent" | "currency" | "unit"; maximumFractionDigits, notation: "compact", signDisplay
+// new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" }) — стили ИЛИ части (weekday, day, month, hour…), не вместе
+// timeZone: "Europe/Berlin", calendar: "persian", hour12: true; resolvedOptions().timeZone — пояс устройства
+// число.toLocaleString(локаль, настройки), дата.toLocaleString(…) — то же, но форматировщик каждый раз новый
+// в выводе неразрывные пробелы (код 160): не сравнивать с готовой строкой; разбирать — formatToParts
+// a.localeCompare(b, "ru", { numeric: true, sensitivity: "base" }) — порядок и равенство по правилам языка
+// неизвестная локаль ("tk" в Chrome) — тихо язык браузера; проверка — supportedLocalesOf
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `(1250.5).toLocaleString("ru-RU") === "1 250,5"` — `false`?
+   <Answer>Между разрядами стоит неразрывный пробел (код 160), а в строке в коде — обычный. Вывод
+   `Intl` не сравнивают с готовой строкой; разбирать его помогает `formatToParts`.</Answer>
+2. Чем `new Intl.NumberFormat(…).format` в цикле лучше `toLocaleString` в цикле?
+   <Answer>`toLocaleString` при каждом вызове создаёт форматировщик заново и ищет данные о локали;
+   созданный один раз объект делает это однажды.</Answer>
+3. Почему `{ dateStyle: "long", month: "long" }` — ошибка?
+   <Answer>Стили и отдельные части — два взаимоисключающих способа описать вывод. Спецификация (11.1.2) требует
+   `TypeError`.</Answer>
+4. Почему `["Ёлкин", "Абаев"].sort()` ставит «Ёлкин» первым?
+   <Answer>`sort` без функции сравнивает номера символов, а «Ё» в таблице стоит раньше «А».
+   `localeCompare(b, "ru")` ставит «ё» рядом с «е».</Answer>
+5. Что выведет `new Intl.DateTimeFormat("tk", { month: "long" })` в русском Chrome и почему без
+   ошибки?
+   <Answer>«октябрь» — туркменских данных в Chrome нет, и выбор локали тихо переходит к языку браузера. Узнать
+   это можно по `resolvedOptions().locale` или `supportedLocalesOf`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Internationalization" />

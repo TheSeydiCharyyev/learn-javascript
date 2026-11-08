@@ -86,9 +86,8 @@ function convert(file) {
       // each underscore not inside a word ("два __proto__": all four — escaping every other one left _proto_ italic)
       .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, '\\_')
       .replace(/~~/g, '\\~\\~')
-      .replace(/(https?|ftp):\/\//g, '$1\\://')
-      .replace(/\bwww\./g, 'www\\.')
-      .replace(/@/g, '\\@')
+      // (bare addresses and emails — "http://127.0.0.1:5500/…", «aman@mail.tm» — need nothing: of GFM the site reads
+      // only tables, no links are made of them, site/lib/mdx.ts)
       .replace(/ /g, '&nbsp;');
     if (table) s = s.replace(/\|/g, '\\|');
     return s;
@@ -134,10 +133,15 @@ function convert(file) {
       if (tag === 'a') {
         onlyAttrs(n, ['href']);
         const href = attr(n, 'href');
-        out += `[${inner()}](${/[\s()<>]/.test(href) ? `<${href}>` : href})`;
+        // Markdown percent-encodes a link's address except for these characters and a "%" with two letters or digits
+        // after it (micromark's normalizeUri): "…%symbol.toprimitive%" (day 21 of Intermediate) would end in "%25" —
+        // such a link is JSX
+        if (!/^(?:[!#$&-;=?-Z_a-z~]|%[\dA-Za-z]{2})*$/.test(href)) { out += `<a${jsxAttrs(n, ['href'])}>${inner()}</a>`; continue; }
+        out += `[${inner()}](${/[()]/.test(href) ? `<${href}>` : href})`;
         continue;
       }
-      if (tag === 'br') { onlyAttrs(n, []); out += '\\\n'; continue; }
+      // in a table cell the row is one line: <br /> (day 35 of Intermediate)
+      if (tag === 'br') { onlyAttrs(n, []); out += ctx.cell ? '<br />' : '\\\n'; continue; }
       if (tag === 'span' && cls(n).join(' ') === 'kbd') { onlyAttrs(n, ['class']); out += `<Kbd>${inner()}</Kbd>`; continue; }
       if (tag === 'span' && cls(n).includes('mark')) {
         const t = flat(textOf(n)), c = cls(n).join(' ');
@@ -277,12 +281,12 @@ function convert(file) {
     for (const c of [...cellsOf(thead), ...cellsOf(tbody)]) if (elems(c).some((e) => BLOCK.has(e.tagName))) fail(c, 'a block inside a table cell');
     if (!plain) {
       // a table with a style on a row, a colspan or a class: JSX, a line per row
-      const row = (tr) => `<tr${jsxAttrs(tr, ['style'])}>${elems(tr).map((c) => `<${c.tagName}${jsxAttrs(c, ['colspan', 'rowspan', 'style'])}>${inline(kids(c)).replace(/\s*\n\s*/g, ' ').trim()}</${c.tagName}>`).join('')}</tr>`;
+      const row = (tr) => `<tr${jsxAttrs(tr, ['style'])}>${elems(tr).map((c) => `<${c.tagName}${jsxAttrs(c, ['colspan', 'rowspan', 'style'])}>${inline(kids(c), { cell: true }).replace(/\s*\n\s*/g, ' ').trim()}</${c.tagName}>`).join('')}</tr>`;
       const sec = (el) => `<${el.tagName}>\n${elems(el).map(row).join('\n')}\n</${el.tagName}>`;
       onlyAttrs(thead, []); onlyAttrs(tbody, []);
       return `<table${jsxAttrs(n, ['class'])}>\n${sec(thead)}\n${sec(tbody)}\n</table>`;
     }
-    const rows = (sec) => elems(sec).map((tr) => elems(tr).map((c) => inline(kids(c), { table: true }).replace(/\s*\n\s*/g, ' ').trim()));
+    const rows = (sec) => elems(sec).map((tr) => elems(tr).map((c) => inline(kids(c), { table: true, cell: true }).replace(/\s*\n\s*/g, ' ').trim()));
     const headRows = rows(thead), bodyRows = rows(tbody);
     if (headRows.length !== 1) fail(n, 'not one header row');
     if (bodyRows.some((r) => r.length !== headRows[0].length)) fail(n, 'rows of different width');
@@ -365,7 +369,12 @@ function convert(file) {
     if (tag === 'table') return table(n);
     if (tag === 'figure' && k === 'scheme') return scheme(n);
     if (tag === 'div') {
-      if (TEXT_BOXES[k]) { onlyAttrs(n, ['class']); return jsx(TEXT_BOXES[k], flow(kids(n))); }
+      // data-phone (a result box checked on a phone 360 by tools/runs/intermediate/day-35.cjs) → <ResultBox phone>
+      if (TEXT_BOXES[k]) {
+        onlyAttrs(n, k === 'result-box' ? ['class', 'data-phone'] : ['class']);
+        if (attr(n, 'data-phone') !== undefined && attr(n, 'data-phone') !== '') fail(n, 'data-phone with a value');
+        return jsx(TEXT_BOXES[k], flow(kids(n)), attr(n, 'data-phone') !== undefined ? ' phone' : '');
+      }
       if (BLOCK_BOXES[k]) { onlyAttrs(n, ['class']); return jsx(BLOCK_BOXES[k], flow(kids(n))); }
       if (k === 'toc') return toc(n, h2List);
       if (k === 'sources') return sources(n);

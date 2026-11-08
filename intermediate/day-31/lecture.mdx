@@ -1,0 +1,687 @@
+---
+title: День 31 — динамический импорт, import.meta и JSON
+day: День 31 • урок 1
+heading: Динамический импорт, import.meta и JSON
+lead: Курс 2, Intermediate. Модуль «Модули и JSON» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #64748b; }
+  h2 { color: #334155; background: #f8fafc; border-left-color: #64748b; }
+  h3 { color: #1e293b; }
+  .step-number { background: #64748b; }
+  .toc a { color: #334155; }
+---
+
+<Goals>
+- загружать модуль по требованию через `import()` — по кнопке, по условию, по вычисленному пути;
+- узнавать адрес модуля через `import.meta` и разрешать пути через `import.meta.resolve`;
+- импортировать JSON модулем с атрибутом `with { type: "json" }`;
+- знать порядок работы `JSON.parse` и `JSON.stringify` по спецификации (25.5.2 и 25.5.4) —
+  reviver, replacer, `toJSON`, `context.source`;
+- сохранять в JSON `Map`, даты `Temporal` и большие числа без потерь.
+</Goals>
+
+<Toc />
+
+## 1. Обещания, накопленные за курс {#debts}
+
+День 30 оставил три долга: загрузку модуля по условию (`import` внутри `if` давал
+`SyntaxError`), сведения о самом модуле — `import.meta` — и JSON модулем. День 21 записал, что
+большое число в JSON округляется, а дни 14, 15 и 22 сохраняли `Map`, `Set` и даты
+`Temporal` обходными путями. День 23 Essentials дал основы: что теряет `JSON.stringify`, отступы,
+список полей, reviver. Сегодня — то же изнутри. Начнём с первого долга. В скобках слово `import` работает
+как вызов:
+
+```js
+// quiz.js
+console.log("quiz.js выполняется");
+export const questions = ["book", "water", "bread"];
+```
+
+```js
+// main.js
+const wantQuiz = true;
+if (wantQuiz) {
+  const quiz = await import("./quiz.js");
+  console.log("вопросов:", quiz.questions.length);
+}
+```
+
+<ResultBox>
+quiz.js выполняется\
+вопросов: 3
+</ResultBox>
+
+Это [`import()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import)
+— динамический импорт. Справочник подчёркивает: он похож на вызов функции, но `import` — ключевое слово, а
+не функция. Модуль грузится, только когда до этой строки дошло выполнение.
+
+## 2. Практика: модуль по кнопке {#button}
+
+Практика плана, по примеру справочника «загрузка в ответ на действие пользователя». Викторина нужна не каждому
+ученику — пусть её код грузится, только когда нажали кнопку. Нажмём её дважды:
+
+```html
+<!-- index.html -->
+<button id="start">Начать викторину</button>
+<script type="module" src="main.js"></script>
+```
+
+```js
+// quiz.js
+console.log("quiz.js выполняется");
+export const questions = ["book", "water", "bread"];
+export default function start() {
+  return `викторина: ${questions.length} вопроса`;
+}
+```
+
+```js
+// main.js
+console.log("main.js: страница готова");
+document.querySelector("#start").addEventListener("click", async () => {
+  const quiz = await import("./quiz.js");
+  console.log(quiz.default(), Object.keys(quiz));
+});
+```
+
+<ResultBox>
+main.js: страница готова\
+quiz.js выполняется\
+викторина: 3 вопроса (2) \['default', 'questions'\]\
+викторина: 3 вопроса (2) \['default', 'questions'\]
+</ResultBox>
+
+До щелчка браузер даже не запрашивал `quiz.js`. Первый щелчок загрузил и выполнил модуль, второй взял
+его из кеша: модуль выполняется один раз (день 30), и справочник подчёркивает, что повторный импорт не делает даже
+сетевого запроса. `await import()` отдал **объект модуля** раздела 8 дня 30 — экспорт по
+умолчанию в нём лежит под ключом `default`. Справочник показывает и деструктуризацию:
+`const { default: start, questions } = await import("./quiz.js")` — `default` приходится
+переименовать, это зарезервированное слово.
+
+<Scheme src="scheme-button.svg">Статический импорт — при открытии, динамический — когда дошло выполнение</Scheme>
+
+## 3. Что возвращает import() {#promise}
+
+Всегда промис — того же объекта модуля, что дал бы `import * as`. Справочник обещает, что
+`import()` **никогда не бросает синхронно**: любая неудача — отклонённый промис. Модуль,
+упавший при выполнении, запоминается с ошибкой; модуль, который не загрузился, браузер может попробовать загрузить
+снова:
+
+```js
+// broken.js
+console.log("broken.js выполняется");
+throw new Error("модуль сломан");
+```
+
+```js
+// main.js
+for (const path of ["./broken.js", "./broken.js", "./missing.js"]) {
+  try {
+    await import(path);
+  } catch (e) {
+    console.log(path, "—", e.name, e.message);
+  }
+}
+```
+
+<ResultBox>
+broken.js выполняется\
+./broken.js — Error модуль сломан\
+./broken.js — Error модуль сломан\
+./missing.js — TypeError Failed to fetch dynamically imported module: http://127.0.0.1:5500/missing.js
+</ResultBox>
+
+`broken.js` выполнился один раз, а ошибка пришла дважды — вторая из записи модуля, без повторного
+выполнения. Для `missing.js` консоль покажет ещё и сетевое сообщение о 404. И предупреждение справочника:
+не экспортируйте функцию с именем `then`. Объект модуля с ней станет «thenable» дня 27, и
+`await import()` вызовет её вместо того, чтобы отдать сам модуль.
+
+Путь может быть любым выражением, а сам `import()` работает даже в обычном скрипте без
+`type="module"`. Пример справочника со строкой-шаблоном и `Promise.all` дня 27 — языки
+интерфейса по выбору:
+
+```html
+<!-- index.html -->
+<script src="classic.js"></script>
+```
+
+```js
+// lang/ru.js
+export default { hello: "Привет" };
+```
+
+```js
+// lang/tk.js
+export default { hello: "Salam" };
+```
+
+```js
+// classic.js
+const code = "tk";
+import(`./lang/${code}.js`).then((module) => console.log("обычный скрипт:", module.default.hello));
+Promise.all(["ru", "tk"].map((c) => import(`./lang/${c}.js`))).then((modules) => console.log(modules.map((m) => m.default.hello).join(", ")));
+```
+
+<ResultBox>
+обычный скрипт: Salam\
+Привет, Salam
+</ResultBox>
+
+## 4. Статический или динамический {#when}
+
+Справочник перечисляет, когда нужен `import()`, и советует брать его, только если без него не
+обойтись:
+
+| Задача | Чем |
+| --- | --- |
+| модули, без которых программа не работает | `import … from` — его видят инструменты сборки |
+| тяжёлый код, который нужен редко или потом | `import()` по требованию |
+| путь вычисляется (язык, тема, номер урока) | ``import(`./lang/${code}.js`)`` |
+| побочный эффект нужен только при условии | `if (…) await import("./m.js")` |
+| обычный скрипт без `type="module"` | только `import()` |
+| данные, которые меняются (новости, баллы) | не модуль, а `fetch` дня 31 Essentials — модуль закешируется |
+
+Кеш нельзя очистить. Справочник показывает обходной приём — параметр в адресе:
+``import(`./quiz.js?t=${Date.now()}`)``. Для браузера это другой адрес, а значит, другой модуль: он
+загрузится и выполнится заново. Но старые модули из памяти уже не уйдут, поэтому в долгоживущей программе так делать
+не стоит.
+
+## 5. import.meta {#meta}
+
+[`import.meta`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta)
+— объект со сведениями о текущем модуле. Справочник: его создаёт «хозяин», у браузера в нём два свойства —
+`url`, полный адрес модуля, и
+[`resolve`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta/resolve),
+который превращает путь в адрес так же, как `import`, но ничего не загружает:
+
+```js
+// lib/words.js
+export const here = import.meta.url;
+export const dataPath = import.meta.resolve("./data/cards.json");
+```
+
+```js
+// main.js
+import { here, dataPath } from "./lib/words.js";
+console.log(import.meta.url);
+console.log(here);
+console.log(dataPath);
+console.log(Object.getPrototypeOf(import.meta), Object.keys(import.meta));
+```
+
+<ResultBox>
+http://127.0.0.1:5500/main.js\
+http://127.0.0.1:5500/lib/words.js\
+http://127.0.0.1:5500/lib/data/cards.json\
+null (2) \['url', 'resolve'\]
+</ResultBox>
+
+У каждого модуля свой `import.meta`: путь `./data/cards.json` из `lib/words.js`
+разрешился относительно `lib/`. Файла `cards.json` нет, но `resolve` это не
+проверяет — справочник поэтому и называет его синхронным. Прототип `null`, свойства можно добавлять. Вне
+модуля `import.meta` — `SyntaxError: Cannot use 'import.meta' outside a module`; во встроенном
+`<script type="module">` `url` — адрес самой страницы. Справочник отмечает:
+`resolve` не входит в ECMAScript, его определяет стандарт HTML, а `new URL("./x.js",
+import.meta.url)` даёт похожий адрес, но карту импорта не знает.
+
+## 6. Практика: данные из JSON-модуля {#with}
+
+Практика плана. Данные в отдельном файле `words.json` — комментария в первой строке у него нет, JSON
+комментариев не знает:
+
+```js file="words.json"
+[
+  { "id": 1, "word": "book", "ru": "книга" },
+  { "id": 2, "word": "water", "ru": "вода" },
+  { "id": 3, "word": "bread", "ru": "хлеб" }
+]
+```
+
+```js
+// main.js
+import words from "./words.json" with { type: "json" };
+import * as all from "./words.json" with { type: "json" };
+console.log(words.length, words[1].word, Object.keys(all), Array.isArray(words));
+const again = await import("./words.json", { with: { type: "json" } });
+console.log(again.default === words);
+```
+
+<ResultBox>
+3 water (1) \['default'\] true\
+true
+</ResultBox>
+
+`with { type: "json" }` — [атрибут
+импорта](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/with). Справочник объясняет, зачем он: браузер узнаёт тип файла по ответу сервера, а не по расширению. Без
+атрибута сервер, отдавший «JSON» с типом JavaScript, заставил бы выполнить чужой код. С атрибутом файл обязан прийти
+как `application/json`. У JSON-модуля только экспорт по умолчанию — разобранное значение. Это один и тот же
+массив для всех импортёров, и он не заморожен: изменение увидят все.
+
+| Что не так | Что видно в Chrome |
+| --- | --- |
+| нет `with { type: "json" }` | `Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of "application/json"…` |
+| `import { book } from "./words.json" with …` | `SyntaxError: The requested module './words.json' does not provide an export named 'book'` |
+| `with { kind: "json" }` | `SyntaxError: Invalid attribute key "kind".` |
+| `with { type: "jsn" }` | `TypeError: "jsn" is not a valid module type.` |
+| `type: "json"` у файла `.js` | `Failed to load module script: Expected a JSON module script but the server responded with a MIME type of "text/javascript"…` |
+| в файле не JSON: `{ book: "книга" }` | `SyntaxError: Expected property name or '}' in JSON at position 2…` |
+
+Стандарт HTML знает ещё `type: "css"` — он даёт объект таблицы стилей, это курс 4. Справочник
+упоминает и `type: "text"`. Chrome 155 его не принимал — `"text" is not a valid module type.`, — а
+Chrome 156 принимает: `default` такого модуля — содержимое файла строкой.
+
+## 7. JSON.parse изнутри {#parse}
+
+Раздел [25.5.2](https://tc39.es/ecma262/2026/#sec-json.parse) начинается с проверки: текст должен
+точно соответствовать стандарту JSON (ECMA-404), расширять его запрещено. Потом текст выполняется как выражение
+JavaScript — JSON его подмножество. Два следствия, которые видно сразу:
+
+```js
+// main.js
+console.log(JSON.parse('{"a": "первое", "a": "второе"}').a);
+const fromJSON = JSON.parse('{"__proto__": {"admin": true}}');
+const literal = { "__proto__": { admin: true } };
+console.log(Object.keys(fromJSON), fromJSON.admin, "|", Object.keys(literal), literal.admin);
+```
+
+<ResultBox>
+второе\
+(1) \['\_\_proto\_\_'\] undefined | (0) \[\] true
+</ResultBox>
+
+Повтор ключа не ошибка — побеждает последний (примечание 2 раздела). А ключ `"__proto__"` в литерале
+объекта меняет прототип (день 7), но в JSON становится обычным собственным свойством: спецификация отключает
+особое правило для разбора JSON. Чужие данные не подменят прототип. Проверка по ECMA-404 идёт первой, поэтому всё,
+чего нет в JSON, отвергается, даже если это верный JavaScript: `JSON.parse("[1, 2,]")` — `SyntaxError:
+Unexpected token ']'`, хотя `[1, 2,]` в коде — обычный массив из двух элементов (висячая запятая дня
+23 Essentials).
+
+Теперь reviver дня 23 Essentials. Спецификация оборачивает результат в объект `{ "": значение }` и обходит
+его так: сначала внутренности, потом сам объект; корень с ключом `""` — последним:
+
+```js
+// main.js
+const order = [];
+const text = '{"name": "Аман", "marks": [5, 4], "group": {"title": "JS-1"}}';
+JSON.parse(text, function (key, value) {
+  order.push(key === "" ? '""' : key);
+  return value;
+});
+console.log(order.join(" → "));
+```
+
+<ResultBox>
+name → 0 → 1 → marks → title → group → ""
+</ResultBox>
+
+Когда reviver видит `marks`, обе оценки уже прошли через него, — поэтому можно «оживлять» снизу вверх.
+`this` в нём — объект-хозяин свойства (у стрелочной функции своего `this` нет, день 2).
+Вернуть `undefined` — удалить свойство; в массиве останется дырка дня 11. А в редакции 2026 года у reviver
+есть и третий аргумент — `context`. У примитива, которого reviver ещё не трогал, в нём есть
+`source` — исходный текст значения:
+
+```js
+// main.js
+const text = '{"id": 12345678901234567890, "score": 4.50}';
+console.log(JSON.parse(text).id);
+const exact = JSON.parse(text, (key, value, context) => (key === "id" ? BigInt(context.source) : value));
+console.log(exact.id, exact.score);
+JSON.parse(text, (key, value, context) => {
+  console.log(JSON.stringify(key), JSON.stringify(context));
+  return value;
+});
+```
+
+<ResultBox>
+12345678901234567000\
+12345678901234567890n 4.5\
+"id" \{"source":"12345678901234567890"\}\
+"score" \{"source":"4.50"\}\
+"" \{\}
+</ResultBox>
+
+Это ответ дню 21: число 12345678901234567890 в JSON не помещается в `Number` и округляется ещё при
+разборе, а `context.source` хранит его цифры как текст — `BigInt` получается точным. У объектов
+и массивов `source` нет.
+
+## 8. JSON.stringify изнутри {#stringify}
+
+Раздел [25.5.4](https://tc39.es/ecma262/2026/#sec-json.stringify) тоже оборачивает значение в
+`{ "": значение }`, но обходит его в обратном порядке: сначала объект, потом то, что внутри. И у каждого
+свойства сначала зовёт `toJSON`, а уже потом replacer:
+
+```js
+// main.js
+const lesson = { day: 31, when: new Date(Date.UTC(2026, 9, 26)), marks: [5, 4] };
+const calls = [];
+JSON.stringify(lesson, function (key, value) {
+  calls.push(key === "" ? '""' : key);
+  if (key === "when") console.log("replacer видит:", typeof value, "| в объекте:", this[key] instanceof Date);
+  return value;
+});
+console.log(calls.join(" → "));
+```
+
+<ResultBox>
+replacer видит: string | в объекте: true\
+"" → day → when → marks → 0 → 1
+</ResultBox>
+
+Это объясняет наблюдение дня 21: replacer получает дату уже строкой — `toJSON` даты сработал раньше. Узнать
+исходное значение можно через `this[key]`: `this` — объект-хозяин, а в нём ещё лежит настоящая
+дата. Остальные правила раздела:
+
+```js
+// main.js
+console.log(JSON.stringify([new Number(5), new String("x"), new Boolean(false)]));
+console.log(JSON.stringify({ a: 1, b: 2, c: 3 }, ["c", "a", "c"]));
+console.log(JSON.stringify({ a: 1 }, null, 20).split("\n")[1].length, JSON.stringify({ a: 1 }, null, "--------------->").split("\n")[1]);
+console.log(JSON.stringify("🙂"[0]), JSON.stringify("🙂"));
+const group = { title: "JS-1", students: [] };
+group.students.push({ name: "Аман", group });
+try {
+  JSON.stringify(group);
+} catch (e) {
+  const lines = e.message.split("\n");
+  console.log(e.name, lines[0], "/", lines.at(-1).trim());
+}
+```
+
+<ResultBox>
+\[5,"x",false\]\
+\{"c":3,"a":1\}\
+16 ----------"a": 1\
+"\\ud83d" "🙂"\
+TypeError Converting circular structure to JSON / --- property 'group' closes the circle
+</ResultBox>
+
+По строкам. Объекты-обёртки дня 5 Essentials разворачиваются в примитивы. Список полей задаёт и порядок, повторы
+отбрасываются. Отступ — не больше 10: число 20 дало 10 пробелов (плюс 6 символов `"a": 1`), строка
+обрезалась до 10 символов. Одинокая половинка суррогатной пары дня 20 записывается кодом `\ud83d`, а
+целый смайлик — как есть. Для цикла Chrome пишет путь до свойства, которое замыкает круг. Порядок шагов — на
+схеме:
+
+<Scheme src="scheme-stringify.svg">25.5.4.2 SerializeJSONProperty: что происходит с каждым свойством</Scheme>
+
+## 9. JSON.rawJSON и большие числа {#raw}
+
+Раздел 7 точно прочитал большое число. Записать его обратно помогает
+[`JSON.rawJSON(текст)`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/rawJSON)
+— «сырой JSON»: объект, который `stringify` вставит в результат дословно. Тот же приём предлагает страница
+ошибки [«BigInt
+value can't be serialized in JSON»](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/BigInt_not_serializable) — replacer, который превращает `BigInt` в сырой JSON:
+
+```js
+// main.js
+const raw = JSON.rawJSON("12345678901234567890");
+console.log(JSON.stringify({ id: raw }), JSON.stringify({ id: 12345678901234567890 }));
+console.log(raw.rawJSON, Object.getPrototypeOf(raw), Object.isFrozen(raw), JSON.isRawJSON(raw), JSON.isRawJSON({ rawJSON: "1" }));
+const big = { id: 12345678901234567890n };
+const text = JSON.stringify(big, (key, value) => (typeof value === "bigint" ? JSON.rawJSON(String(value)) : value));
+const back = JSON.parse(text, (key, value, context) => (key === "id" ? BigInt(context.source) : value));
+console.log(text, back.id === big.id);
+try {
+  JSON.rawJSON("[1, 2]");
+} catch (e) {
+  console.log(e.name, e.message);
+}
+```
+
+<ResultBox>
+\{"id":12345678901234567890\} \{"id":12345678901234567000\}\
+12345678901234567890 null true true false\
+\{"id":12345678901234567890\} true\
+SyntaxError Unexpected token '\[', "\[1, 2\]" is not valid JSON
+</ResultBox>
+
+Круг замкнулся без потерь: `BigInt` → сырой JSON → текст → `context.source` →
+`BigInt`. Справочник объясняет устройство: прототип `null`, объект заморожен, у него одно
+свойство `rawJSON` и внутренняя метка. По метке его и узнаёт
+[`JSON.isRawJSON`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/isRawJSON),
+поэтому подделка с таким же свойством — `false`. Сырым бывает только примитив: строка в кавычках, число,
+`true`, `false`, `null`. Объекты и массивы — `SyntaxError`, пробел по
+краям — тоже.
+
+## 10. Практика: Map и даты Temporal в JSON {#practice}
+
+Практика плана. `Map` в JSON становится пустым объектом: собственных перечисляемых свойств у неё нет.
+Дата `Temporal` — строкой через свой `toJSON` (день 22), и обратно её не узнать. Модуль
+`storage.js` записывает их помеченными объектами и оживляет при разборе:
+
+```js
+// storage.js
+export function save(data) {
+  return JSON.stringify(data, function (key, value) {
+    const original = this[key];
+    if (original instanceof Map) return { $map: [...original] };
+    if (original instanceof Temporal.PlainDate) return { $date: value };
+    return value;
+  });
+}
+export function load(text) {
+  return JSON.parse(text, (key, value) => {
+    if (value !== null && typeof value === "object" && "$map" in value) return new Map(value.$map);
+    if (value !== null && typeof value === "object" && "$date" in value) return Temporal.PlainDate.from(value.$date);
+    return value;
+  });
+}
+```
+
+```js
+// main.js
+import { save, load } from "./storage.js";
+const journal = {
+  group: "JS-1",
+  lastLesson: new Map([
+    ["Аман", Temporal.PlainDate.from("2026-10-23")],
+    ["Мерет", Temporal.PlainDate.from("2026-10-26")],
+  ]),
+};
+console.log(JSON.stringify(journal));
+const text = save(journal);
+console.log(text);
+const back = load(text);
+console.log(back.lastLesson instanceof Map, back.lastLesson.get("Мерет").dayOfWeek, back.lastLesson.get("Аман").until(back.lastLesson.get("Мерет")).toString());
+```
+
+<ResultBox>
+\{"group":"JS-1","lastLesson":\{\}\}\
+\{"group":"JS-1","lastLesson":\{"$map":\[\["Аман",\{"$date":"2026-10-23"\}\],\["Мерет",\{"$date":"2026-10-26"\}\]\]\}\}\
+true 1 P3D
+</ResultBox>
+
+Здесь работают оба порядка разделов 7–8. replacer — обычная функция, а не стрелка, чтобы `this[key]`
+дал хозяина: `value` даты уже стал строкой. Reviver идёт снизу вверх, поэтому к моменту, когда он видит
+`$map`, даты внутри уже оживлены, и `new Map` получает настоящие `PlainDate`. Метки
+`$map` и `$date` — договор, как `$bigint` дня 21: обычные данные с такими ключами
+разбор примет за свои.
+
+## 11. Ошибки дня {#errors}
+
+| Код | Что видно в Chrome | Что не так |
+| --- | --- | --- |
+| `await import("./missing.js")` | `TypeError: Failed to fetch dynamically imported module: http://…/missing.js` | путь; отказ, а не бросок |
+| `const load = import;` | `SyntaxError: Unexpected token ';'` | `import` — не функция |
+| `import("./m.js", 5)` | `TypeError: The second argument to import() must be an object` | второй аргумент — `{ with: { … } }` |
+| `import("./m.js", { with: { foo: "bar" } })` | `TypeError: Invalid attribute key "foo".` | Chrome знает только `type` |
+| `import.meta` в обычном скрипте | `SyntaxError: Cannot use 'import.meta' outside a module` | только в модуле |
+| `import.meta.resolve("cards")` без карты | `TypeError: Failed to resolve module specifier cards: …` | «голое» имя (день 30) |
+| JSON-модуль без `with` | `Failed to load module script: … MIME type of "application/json"` | `with { type: "json" }` |
+| именованный импорт из JSON | `does not provide an export named …` | только по умолчанию |
+| `JSON.rawJSON("[1, 2]")`, `JSON.rawJSON("")` | `SyntaxError: Unexpected token '['…`, `Invalid value for JSON.rawJSON` | только примитив без пробелов |
+| `JSON.stringify({ a: 1n })` | `TypeError: Do not know how to serialize a BigInt` | replacer с `JSON.rawJSON` |
+| объект с циклом | `TypeError: Converting circular structure to JSON …` | разорвать цикл или replacer |
+| `new JSON()` | `TypeError: JSON is not a constructor` | пространство имён, как `Math` |
+| replacer-стрелка с `this[key]` в модуле | `TypeError: Cannot read properties of undefined (reading '')` | обычная функция |
+| `export function then` в модуле | без ошибки: `import()` отдаёт не модуль | не называть экспорт `then` |
+
+Страница справочника про `BigInt` приводит три текста — V8, Firefox и Safari; заголовок у неё — текст
+Firefox, а Chrome пишет «Do not know how to serialize a BigInt», как на дне 21.
+
+## 12. Что говорит спецификация {#spec}
+
+Подробно — `JSON.parse` и `JSON.stringify`; оба алгоритма разобраны в разделах 7–8, здесь —
+шаги одной строкой каждый.
+
+- [25.5.2 JSON.parse](https://tc39.es/ecma262/2026/#sec-json.parse): ToString(text) — отсюда
+  «"undefined" is not valid JSON» дня 23 Essentials; ParseJSON (25.5.2.1) — проверка по ECMA-404 и выполнение как
+  выражения; если reviver — функция, корень кладётся в объект под ключом `""`, CreateJSONParseRecord
+  (25.5.2.3) запоминает исходный текст каждого значения, InternalizeJSONProperty (25.5.2.4) идёт рекурсией:
+  сначала свойства, потом Call(reviver, holder, «name, val, context»); `undefined` — удалить, иначе
+  CreateDataProperty. `context.source` дают, только если значение — примитив и всё ещё то же
+  (SameValue), что разобрано.
+- [25.5.4 JSON.stringify](https://tc39.es/ecma262/2026/#sec-json.stringify): replacer-функция или
+  список (строки и числа, повторы отброшены); `space` — min(10, число) пробелов или первые 10 символов
+  строки; корень в обёртке; JSON Serialization Record (таблица 76) с полем `[[Stack]]` для поиска
+  циклов; SerializeJSONProperty (25.5.4.2) — схема раздела 8; QuoteJSONString (25.5.4.3) экранирует кавычку,
+  обратную черту, управляющие символы и одинокие половинки пар.
+- Кратко: [25.5](https://tc39.es/ecma262/2026/#sec-json-object) — объект JSON обычный, ни
+  конструктор, ни функция, формат — ровно ECMA-404 без расширений;
+  [25.5.1 isRawJSON](https://tc39.es/ecma262/2026/#sec-json.israwjson) — проверка внутреннего слота
+  `[[IsRawJSON]]`; [25.5.3 rawJSON](https://tc39.es/ecma262/2026/#sec-json.rawjson) —
+  пустая строка и неподходящий первый или последний символ сразу `SyntaxError`, затем ParseJSON, объект
+  с прототипом `null` заморожен (SetIntegrityLevel дня 6);
+  <a href="https://tc39.es/ecma262/2026/#sec-json-%symbol.tostringtag%">25.5.5</a> — `[object JSON]`.
+- [13.3.10 Import Calls](https://tc39.es/ecma262/2026/#sec-import-calls): EvaluateImportCall (13.3.10.2)
+  сразу создаёт промис, и каждая неудача — неверный второй аргумент, атрибут не строкой, неизвестный ключ
+  ([16.2.1.12](https://tc39.es/ecma262/2026/#sec-AllImportAttributesSupported)), ошибка ToString пути
+  — отклоняет его (IfAbruptRejectPromise дня 29). Поэтому `import()` не бросает.
+- [13.3.12 Meta Properties](https://tc39.es/ecma262/2026/#sec-meta-properties):
+  `import.meta` создаётся при первом обращении — объект без прототипа, свойства даёт хозяин
+  (HostGetImportMetaProperties, 13.3.12.1.1; по умолчанию — ни одного), — и запоминается в записи модуля.
+- [16.2.1.8.2 ParseJSONModule](https://tc39.es/ecma262/2026/#sec-parse-json-module): JSON-модуль —
+  синтетическая запись модуля с одним экспортом по умолчанию — значением ParseJSON. Спецификация требует от
+  хозяина поддержать `type: "json"`; `"text"` в тексте 2026 года нет.
+
+<Scheme src="scheme-spec.svg">Два обхода одного дерева: оранжевые номера — replacer, зелёные — reviver</Scheme>
+
+## 13. «Карточки»: колода из JSON, урок по кнопке {#cards}
+
+Соберём всё вместе. Колода — JSON-модуль `words.json`, прогресс — `Map` «номер карточки → дата
+повторения» через `storage.js` раздела 10, вопросы урока — модуль, который грузится по кнопке. Файл
+`words.json`:
+
+```js file="words.json"
+[
+  { "id": 1, "word": "book", "ru": "книга" },
+  { "id": 2, "word": "water", "ru": "вода" },
+  { "id": 3, "word": "bread", "ru": "хлеб" },
+  { "id": 4, "word": "apple", "ru": "яблоко" }
+]
+```
+
+```html
+<!-- index.html -->
+<button id="lesson">Урок</button>
+<script type="module" src="main.js"></script>
+```
+
+```js
+// ask.js
+console.log("ask.js загружен");
+export default function ask(card) {
+  return `Как перевести «${card.word}»?`;
+}
+```
+
+```js
+// main.js
+import words from "./words.json" with { type: "json" };
+import { save, load } from "./storage.js";
+const today = Temporal.PlainDate.from("2026-10-26");
+const next = new Map(words.map((card) => [card.id, today.add({ days: card.id })]));
+const stored = save({ next });
+console.log(stored);
+const progress = load(stored);
+const limit = today.add({ days: 2 });
+const due = words.filter((card) => Temporal.PlainDate.compare(progress.next.get(card.id), limit) <= 0);
+console.log(`к повторению до ${limit}:`, due.map((card) => card.word).join(", "));
+document.querySelector("#lesson").addEventListener("click", async () => {
+  const { default: ask } = await import("./ask.js");
+  console.log(ask(due[0]));
+});
+```
+
+<ResultBox>
+\{"next":\{"$map":\[\[1,\{"$date":"2026-10-27"\}\],\[2,\{"$date":"2026-10-28"\}\],\[3,\{"$date":"2026-10-29"\}\],\[4,\{"$date":"2026-10-30"\}\]\]\}\}\
+к повторению до 2026-10-28: book, water\
+ask.js загружен\
+Как перевести «book»?
+</ResultBox>
+
+Строка из первой строки вывода — то, что легло бы в `localStorage` дня 31 Essentials. Номера карточек в
+ней — ключи `Map`, числа, и после `load` они остаются числами: `progress.next.get(card.id)`
+находит дату. `ask.js` загрузился только после щелчка по «Уроку».
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Уберите `with { type: "json" }` у импорта колоды. Что скажет консоль и
+выполнится ли хоть одна строка?
+\
+\
+**Второй.** В `storage.js` замените `function (key, value)` у replacer на
+стрелку. Какая ошибка появится и почему — по разделу 8 и дню 30 (`this` в модуле)?
+\
+\
+**Третий.** Нажмите «Урок» три раза. Сколько раз напечатается «ask.js загружен»?
+</TryIt>
+
+## 14. Итоги модуля I9 и что дальше {#next}
+
+| День | Тема | Главное |
+| --- | --- | --- |
+| 30 | Модули: import и export | своя область у файла; формы экспорта и импорта; живые привязки; загрузка, связывание, выполнение |
+| 31 | import(), import.meta, JSON | модуль по требованию; JSON-модуль; reviver снизу вверх, replacer сверху вниз; `context.source` и `JSON.rawJSON` |
+
+Модуль «Модули и JSON» закончен, а с ним — все темы курса, модули I1–I9. День 32 — мини-проект «Расписание
+занятий на модулях», проектный день по образцу дня 16.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [import()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import) | модуль по требованию, промис объекта модуля, кеш, ловушка `then` | <Full /> |
+| [import.meta](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta) | `url`, объект без прототипа | <Full /> |
+| [Import attributes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import/with) | `with { type: "json" }`, зачем он, ошибки | <Full /> |
+| ECMA-262, 25.5.2 и 25.5.4 | `JSON.parse` и `JSON.stringify` по шагам | <Full /> |
+| [import.meta.resolve()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import.meta/resolve) | путь в адрес без загрузки | <Brief /> |
+| [JSON.rawJSON()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/rawJSON), [JSON.isRawJSON()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/isRawJSON) | сырой JSON для точных чисел | <Brief /> |
+| [TypeError: BigInt value can't be serialized in JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/BigInt_not_serializable) | четыре выхода, среди них `JSON.rawJSON` | <Brief /> |
+| 25.5, 25.5.1, 25.5.3, 25.5.5 | раздел 12 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// const mod = await import("./m.js"); — промис объекта модуля; default — mod.default; выполняется один раз
+// путь — любое выражение: import(`./lang/${code}.js`); работает и в обычном скрипте; неудача — отклонённый промис
+// import.meta.url — адрес модуля; import.meta.resolve("./x.js") — адрес без загрузки; только в модуле
+// import data from "./data.json" with { type: "json" }; — только экспорт по умолчанию, кешируется, не заморожен
+// JSON.parse(text, function (key, value, context) {}) — снизу вверх, корень "" последним, this — хозяин, undefined — удалить
+// context.source — исходный текст примитива: BigInt(context.source) без потерь
+// JSON.stringify(v, function (key, value) {}, 2) — сверху вниз; toJSON раньше replacer; исходное — this[key]
+// JSON.rawJSON("12345678901234567890") — текст как есть, только примитив; JSON.isRawJSON(x)
+// Map → { $map: [...map] }, Temporal → { $date: value }; обратно — reviver
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем `import("./m.js")` отличается от `import * as m from "./m.js"`?
+   <Answer>Статический импорт грузит модуль при открытии страницы и только на верхнем уровне модуля. `import()`
+   — выражение: грузит, когда до него дошло выполнение, путь может вычисляться, работает и в обычном
+   скрипте, возвращает промис того же объекта модуля.</Answer>
+2. Почему без `with { type: "json" }` JSON-файл не импортируется?
+   <Answer>Браузер по умолчанию ждёт JavaScript и проверяет тип ответа сервера. Атрибут говорит: здесь JSON — и
+   файл обязан прийти как `application/json`, так что выполнить чужой код под видом данных
+   нельзя.</Answer>
+3. В каком порядке reviver видит ключи `{"a": {"b": 1}}`?
+   <Answer>`b`, `a`, `""`: снизу вверх, корень последним (InternalizeJSONProperty).</Answer>
+4. Replacer получил дату строкой. Как узнать, что это была дата?
+   <Answer>Посмотреть `this[key]`: `this` — объект-хозяин, в нём лежит исходная дата.
+   `toJSON` сработал раньше replacer. Replacer должен быть обычной функцией.</Answer>
+5. Как прочитать и записать число 12345678901234567890 из JSON без потерь?
+   <Answer>Читать — reviver с `BigInt(context.source)`, записывать — replacer, который превращает
+   `BigInt` в `JSON.rawJSON(String(value))`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import" />

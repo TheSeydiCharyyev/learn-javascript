@@ -1,0 +1,606 @@
+---
+title: "День 18 — Группы и проверки позиции: exec, match, matchAll"
+day: День 18 • урок 1
+heading: "Группы и проверки позиции: exec, match, matchAll"
+lead: Курс 2, Intermediate. Модуль «Строки и регулярные выражения» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f43f5e; }
+  h2 { color: #be123c; background: #fff1f2; border-left-color: #f43f5e; }
+  h3 { color: #9f1239; }
+  .step-number { background: #f43f5e; }
+  .toc a { color: #be123c; }
+---
+
+<Goals>
+- проверять всю строку якорями `^` и `$` и знать, где `\b` не работает;
+- вынимать части совпадения группами — по номеру и по имени — и ссылаться на них в шаблоне;
+- смотреть вперёд и назад проверками позиции, не забирая символов;
+- получать найденное через `exec`, `match`, `matchAll` и понимать `lastIndex`;
+- работать с многострочным текстом флагом `m`.
+</Goals>
+
+<Toc />
+
+## 1. Что именно нашлось {#what}
+
+Вчера шаблоны отвечали «есть ли» (`test`) и «где начинается» (`search`). Задание 7 дня 17
+собирало номера всех цифр циклом из `search` и `slice`, а лекция обещала: найденный текст,
+жадность квантификаторов и разгадка флага `g` — сегодня. Вот метод, который возвращает само совпадение:
+
+```js
+const m = /(\d{2})\.(\d{2})\.(\d{4})/.exec("Сдача: 12.10.2026");
+console.log(m);
+console.log(m[0], m[1], m[2], m[3], m.index);   // 12.10.2026 12 10 2026 7
+console.log("Мары 744000, Ашхабат 744000".match(/\d+/g));   // ['744000', '744000']
+```
+
+`exec` вернул массив: на месте 0 — всё совпадение, дальше — части в круглых скобках, и у массива есть
+свойства `index` (с какого символа), `input` (где искали) и `groups`. Так дата
+«12.10.2026» разобрана по частям — первая практика плана дня. Последняя строка — все числа текста одним вызовом,
+без цикла дня 17. Разберём по порядку: сначала новые части шаблона, потом методы.
+
+## 2. Якоря ^ и $ {#anchors}
+
+`^` — «начало строки», `$` — «конец строки». Это **проверки позиции**:
+символов они не забирают, а только требуют, чтобы шаблон стоял у края. Вчерашние проверки ввода становятся одной
+строкой:
+
+```js
+const isIndex = (text) => /^\d{6}$/.test(text);
+const isGroup = (text) => /^[A-Z]{2,3}-\d{1,2}$/.test(text);
+console.log(["744000", "7440001", "индекс 744000", " 744000"].map(isIndex));   // [true, false, false, false]
+console.log(["JS-1", "1JS-1", "JS-123"].map(isGroup));                         // [true, false, false]
+console.log(/^A/.test("an A"), /^A/.test("An A"), /t$/.test("eater"), /^[^A]/.test("Orange"));   // false true false true
+```
+
+«7440001» и «1JS-1» — те самые строки, которые вчерашние проверки пропускали (раздел 10 и задание 4 дня 17). С якорями
+шаблон обязан занять строку целиком. У `^` два значения: снаружи скобок — начало строки, сразу после
+`[` — «кроме» (день 17); `/^[^A]/` из справочника MDN — «начинается не с A».
+
+## 3. Граница слова \\b {#boundary}
+
+`\b` — ещё одна проверка позиции: место между символом слова и не-словом. Справочник MDN:
+`/\bm/` находит «m» в «moon», а `/oo\b/` — нет, потому что после «oo» стоит буква.
+
+```js
+console.log(/\bcat\b/.test("a cat!"), /\bcat\b/.test("cats"), /\bкот\b/.test("кот"));   // true false false
+console.log("мой кот".search(/\b/), "мой кот".search(/\B/));                            // -1 0
+```
+
+<Mistake>
+«Символ слова» для `\b` — то же, что `\w`: только латиница, цифры и `_` (день 17).
+Для русского текста `\b` не работает никогда: в строке «мой кот» нет ни одной границы слова, и
+`search` отвечает -1. Своя граница для кириллицы строится проверками позиции — раздел 7.
+</Mistake>
+
+`\B` — «не граница»: `/\Bon/` находит «on» внутри «noon». Справочник предупреждает и о
+языках без пробелов между словами — для них есть `Intl.Segmenter` (курс 3).
+
+## 4. Группы {#groups}
+
+Круглые скобки делают из части шаблона один элемент. Отсюда два применения: квантификатор и `|` на
+целую часть — и запомнить, что в этой части совпало.
+
+```js
+console.log(/(ab)+/.exec("ababab")[0], /\.(png|jpe?g)$/i.exec("photo.JPEG")[1]);   // ababab JPEG
+console.log(/(ab)|(cd)/.exec("cd")[1], /([ab])+/.exec("abc")[1]);                    // undefined b
+console.log(/\.(?:png|jpe?g)$/i.exec("photo.jpg").length);                          // 1
+```
+
+<Scheme src="scheme-groups.svg">Группы даты и массив, который вернул `exec`</Scheme>
+
+Группы нумеруются по открывающим скобкам слева направо. Группа, которая не участвовала в совпадении (её вариант
+`|` не подошёл), даёт `undefined`; группа с квантификатором помнит *последнее*
+повторение — в «abc» это «b». Если запоминать не нужно, пишут **незахватывающую группу**
+`(?:…)`: она только группирует, и в массиве для неё места нет. Справочник MDN советует её по
+умолчанию — так номера нужных групп не съезжают, когда шаблон меняется. Вот и ответ дню 17: с группой выбор
+`|` больше не растягивается на весь шаблон — `\.(?:png|jpe?g)$`.
+
+```js
+const parseIso = (s) => /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)?.slice(1).map(Number) ?? null;
+console.log(parseIso("2026-10-12"), parseIso("12.10.2026"));                                  // [2026, 10, 12] null
+const hasThanks = (s) => /\b(?:thanks|thank you)\b/i.test(s);
+console.log(hasThanks("Thanks! You helped me."), hasThanks("Thanksgiving is near."));   // true false
+```
+
+Два примера MDN. «Matching date»: `slice(1)` отрезает всё совпадение и оставляет группы, а
+`map(Number)` делает из строк числа; `?.` дня 22 Essentials защищает от `null`.
+И граница слова вокруг группы: в «Thanksgiving» после «thanks» идёт буква — границы нет.
+
+## 5. Именованные группы {#named}
+
+```js
+const m = /(?<day>\d{2})\.(?<month>\d{2})\.(?<year>\d{4})/.exec("Сдача: 12.10.2026");
+console.log(m.groups, m.groups.year === m[3], Object.getPrototypeOf(m.groups));   // {day: '12', month: '10', year: '2026'} true null
+const { day, month, year } = m.groups;
+console.log(new Date(year, month - 1, day).getMonth(), day + "/" + month);   // 9 12/10
+```
+
+`(?<имя>…)` — та же группа, но ещё и с именем: её значение лежит и под номером, и в объекте
+`groups`. Объект создан без прототипа (день 7) — в нём только имена групп. Деструктуризация дня 22
+Essentials раскладывает его сразу, а `new Date` дня 17 Essentials собирает дату — месяц там с нуля,
+поэтому `month - 1`, и `getMonth()` даёт 9. Группы — всегда строки: склейка
+`day + "/" + month` не складывает числа.
+Справочник MDN называет три выгоды имён: смысл вместо номера, не нужно помнить порядок, перестановка групп ничего
+не ломает. Имена в одном шаблоне уникальны; повторить имя можно только в разных вариантах `|`, где
+совпасть может лишь один.
+
+## 6. Обратные ссылки {#backref}
+
+**Обратная ссылка** `\1` требует ещё раз тот же текст, что совпал с группой 1;
+`\k<имя>` — то же по имени.
+
+```js
+console.log(/\b(\w+)\s+\1\b/i.exec("Hello hello world")[1], /\b(\w+)\s+\1\b/i.exec("Hello hellos"));   // Hello null
+const parseTitle = (s) => s.match(/title=(["'])(.*?)\1/)[2];
+console.log(parseTitle('title="foo"'), parseTitle("title='foo' lang='en'"));   // foo foo
+console.log(/title=(?<quote>["'])(.*?)\k<quote>/.exec("title='x'").groups.quote);   // '
+```
+
+Первая строка — пример MDN «повторённое слово», частая опечатка; с флагом `i` ссылка совпадает и
+при другом регистре. Вторая — «закрывающая кавычка та же, что открывающая». Обещанный вчера пример учебника MDN
+— телефон, где разделитель повторяется ссылкой:
+
+```js
+const phone = /^(?:\d{3}|\(\d{3}\))([-/.])\d{3}\1\d{4}$/;
+console.log(["123-456-7890", "123-456.7890", "123/456/7890", "1234567890"].map((s) => phone.test(s)));
+// [true, false, true, false]
+```
+
+Якоря, незахватывающая группа для выбора «три цифры или три цифры в скобках», захватывающая группа для
+разделителя и `\1`: разделители «-» и «.» вперемешку не пройдут.
+
+Ссылки по номеру хрупкие. Справочник MDN показывает, как `parseTitle` ломается от одной добавленной
+группы:
+
+```js
+const parseAttr = (s) => s.match(/(title|name)=(["'])(.*?)\1/)?.[3];
+const parseAttr2 = (s) => s.match(/(?:title|name)=(["'])(.*?)\1/)?.[2];
+console.log(parseAttr('name="foo"'), parseAttr2('name="foo"'));   // undefined foo
+```
+
+Группа `(title|name)` стала первой, и `\1` теперь требует в конце слово «name», а не
+кавычку. Незахватывающая группа или имена `\k<quote>` от этого защищают.
+
+## 7. Проверки позиции {#look}
+
+Иногда нужно проверить, что стоит рядом, но не включать это в найденное. Для этого — четыре проверки, которые,
+как `^` и `\b`, символов не забирают:
+
+| Запись | Смысл |
+| --- | --- |
+| `x(?=y)` | x, если справа y — опережающая |
+| `x(?!y)` | x, если справа не y |
+| `(?<=y)x` | x, если слева y — ретроспективная |
+| `(?<!y)x` | x, если слева не y |
+
+```js
+console.log("100 манат и 20 тенге".match(/\d+(?= манат)/)[0], "Цена: TMT 250".match(/(?<=TMT )\d+/)[0], /\d+(?!\.)/.exec("3.141")[0]);
+// 100 250 141
+const strong = (p) => /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/.test(p);
+console.log(["Aman2010x", "aman2010x", "Aman2010", "Amanxxxxx"].map(strong));   // [true, false, true, false]
+```
+
+<Scheme src="scheme-look.svg">Опережающая проверка на строке «100 манат»</Scheme>
+
+Проверка пароля — несколько опережающих подряд с одной позиции, начала строки: «где-то дальше есть цифра»,
+«есть строчная», «есть заглавная», и только потом `.{8,}$` забирает всю строку. «Aman2010» прошёл: в нём
+ровно восемь символов.
+
+```js
+const firstPart = (s) => /^.*?(?=[,.])/.exec(s)?.[0];
+console.log(firstPart("Привет, мир!"), firstPart("Спасибо."), firstPart("Без точки"));   // Привет Спасибо undefined
+```
+
+Пример MDN «до первой запятой или точки»: ленивое `.*?` идёт, пока справа не окажется знак, а сам знак
+в найденное не входит. Того же можно добиться группой — но проверка честнее говорит «посмотри, но не бери».
+
+А вот обещанная граница слова для кириллицы: «слева не русская буква, справа не русская буква». Так же —
+практика плана «повторённые слова»:
+
+```js
+const word = (w) => new RegExp(`(?<![а-яё])${w}(?![а-яё])`, "i");
+console.log(word("кот").test("Кот спит"), word("кот").test("котлета"), word("кот").test("скот"));   // true false false
+const twice = /(?<![а-яё])([а-яё]+)\s+\1(?![а-яё])/i;
+console.log(twice.exec("Мы мы пошли домой")[1], twice.exec("я не не знаю")[1], twice.exec("кот котлета"));   // Мы не null
+```
+
+Ретроспективную проверку движок сопоставляет справа налево — справочник MDN показывает, как это меняет
+захват групп внутри неё. Для наших примеров важно другое: проверки ничего не забирают, поэтому «Мы» и «мы» найдены
+словами, а «кот котлета» — нет: после второго «кот» стоит буква.
+
+## 8. exec и lastIndex {#exec}
+
+`exec` — главный метод: справочник MDN называет его «примитивом», через который работают все
+остальные. Без флага `g` он всегда ищет с начала строки. С флагом `g` он начинает с места,
+записанного в свойстве `lastIndex` самого объекта, и после удачи записывает туда конец совпадения:
+
+```js
+const re = /fo+/g;
+const str = "table football, foosball";
+let found;
+while ((found = re.exec(str)) !== null) {
+  console.log(found[0], found.index, re.lastIndex);
+}
+console.log(re.lastIndex);
+```
+
+<ResultBox>
+foo 6 9\
+foo 16 19\
+0
+</ResultBox>
+
+<Scheme src="scheme-exec.svg">Цикл `exec` с флагом `g` и свойство `lastIndex`</Scheme>
+
+Правила справочника MDN: удача — `lastIndex` становится концом совпадения; неудача — 0;
+`lastIndex` больше длины строки — сразу `null` и 0. Вот и разгадка вчерашней ловушки:
+
+```js
+const g = /fo+/g;
+console.log(g.test("table football"), g.lastIndex, g.test("table football"), g.lastIndex, g.test("table football"));
+// true 9 false 0 true
+const r = /foo/g;
+console.log(r.test("foo bar"), r.test("foo baz"));   // true false
+r.lastIndex = 0;
+console.log(r.test("foo baz"));   // true
+```
+
+`test` внутри — тот же `exec`. Второй вызов искал с девятого символа, «foo» дальше нет —
+`false` и сброс в 0; третий снова нашёл. `lastIndex` можно записать вручную — так «чинят» шаблон
+между строками, — но надёжнее для `test` вообще не ставить `g`.
+
+<Mistake>
+Два способа устроить бесконечный цикл, о которых предупреждает MDN. Литерал внутри условия —
+`while ((found = /fo+/g.exec(str)))`: каждый проход создаёт новый объект с `lastIndex` 0, и
+находится одно и то же. И шаблон, который может совпасть с пустой строкой, например `/x*/g`: после
+пустого совпадения `lastIndex` не сдвигается. В обоих случаях спасает `matchAll`.
+</Mistake>
+
+Второй случай — на примере справочника MDN. Шаблон `/(hi)?/g` может совпасть с пустой строкой:
+группа необязательна.
+
+```js
+const hi = /(hi)?/g;
+console.log([...hi.exec("hi")], hi.lastIndex);   // ['hi', 'hi'] 2
+console.log([...hi.exec("hi")], hi.lastIndex);   // ['', undefined] 2
+console.log([...hi.exec("hi")], hi.lastIndex);   // ['', undefined] 2
+```
+
+Первый вызов забрал «hi» и поставил `lastIndex` на 2 — конец строки. Второй искал с 2 и нашёл пустое
+совпадение: группа не участвовала — `undefined`, а конец пустого совпадения — та же позиция 2. Третий
+повторяет второй, и так без конца: цикл `while` этого раздела не кончился бы никогда. Spread дня 22
+Essentials оставляет от результата только элементы, без `index` и `input`.
+
+Справочник предлагает и защиту от побочных действий `lastIndex`: держать свою копию шаблона в
+замыкании (день 1) и ставить `lastIndex` перед каждым поиском.
+
+```js
+function createMatcher(pattern) {
+  const regex = new RegExp(pattern, "g");   // копия: исходный шаблон не меняется
+  return (input, offset) => {
+    regex.lastIndex = offset;
+    return regex.exec(input);
+  };
+}
+const foo = /foo/;
+const matchFoo = createMatcher(foo);
+console.log(matchFoo("foo bar", 0)[0], matchFoo("foo baz", 0)[0], matchFoo("foo baz", 1), foo.lastIndex);   // foo foo null 0
+```
+
+Второй вызов снова нашёл «foo», хотя после первого `lastIndex` копии был 3: функция сама задаёт начало
+поиска. С места 1 «foo» дальше нет — `null`. А сам `foo` не тронут: `new RegExp(re, "g")`
+дня 17 создаёт новый объект.
+
+## 9. match, жадность и лень {#match}
+
+`строка.match(re)` ведёт себя по-разному в зависимости от флага `g`:
+
+```js
+const text = "Мары 744000, Ашхабат 744000";
+console.log(text.match(/\d+/).index, text.match(/\d+/g), text.match(/\d+/g).index, text.match(/x/g));   // 5 ['744000', '744000'] undefined null
+const html = "<b>Аман</b> и <b>Айна</b>";
+console.log(html.match(/<b>.+<\/b>/)[0], "|", html.match(/<b>.+?<\/b>/)[0]);
+// <b>Аман</b> и <b>Айна</b> | <b>Аман</b>
+```
+
+Без `g` `match` — то же, что `exec`: первое совпадение с группами,
+`index` и `input`. С `g` — массив всех совпадений строками, без групп и без
+`index`. Ничего не нашлось — `null`, не пустой массив, поэтому пишут
+`text.match(re) ?? []`. Строку и даже число `match` превращает в шаблон, как `search`
+дня 17, а вызов без аргумента ищет пустую строку:
+
+```js
+const digits = (s) => (s.match(/\d/g) ?? []).length;
+console.log(digits("Мары 744000"), digits("без цифр"), "65 лет".match(65)[0], "Nothing".match()[0] === "");   // 6 0 65 true
+```
+
+Вторая строка — обещанная жадность. `.+` берёт как можно больше и отступает лишь настолько, чтобы
+после него нашлось `</b>`, — поэтому захватил от первого тега до последнего. Ленивый
+`.+?` берёт как можно меньше и останавливается на первом `</b>`. Справочник MDN
+предлагает и третий путь, без лени: `<b>[^<]+<\/b>` — «всё, кроме начала следующего
+тега».
+
+## 10. matchAll {#matchall}
+
+У `match` с `g` пропадают группы, у цикла `exec` — ловушки раздела 8.
+`matchAll` даёт и то и другое без ловушек: итератор (день 11) по результатам, каждый — как у
+`exec`.
+
+```js
+const text = "Сдали: 12.10.2026, 19.10.2026 и 26.10.2026";
+const re = /(?<day>\d{2})\.(?<month>\d{2})/g;
+for (const m of text.matchAll(re)) console.log(m.groups.day, m.groups.month, m.index);
+console.log(text.matchAll(re).map((m) => m.groups.day).toArray(), re.lastIndex);
+console.log(Array.from("a1b22".matchAll(/\d/g), (m) => m.index), [..."12 345".matchAll(/\d+/g)].map((m) => m[0]));
+const post = "Сдали #экзамен по #JS! Завтра #каникулы";
+console.log(post.match(/#\w+/g), post.match(/#[\wа-яё]+/gi));
+```
+
+<ResultBox>
+12 10 7\
+19 10 19\
+26 10 32\
+(3) \['12', '19', '26'\] 0\
+(3) \[1, 3, 4\] (2) \['12', '345'\]\
+(1) \['#JS'\] (3) \['#экзамен', '#JS', '#каникулы'\]
+</ResultBox>
+
+Итератор `matchAll` наследует `Iterator.prototype`, поэтому у него сразу есть
+`map` и `toArray` дня 13. Шаблон он копирует: `re.lastIndex` после перебора — по-прежнему
+0\. Третья строка закрывает задание 7 дня 17: номера всех цифр — одной строкой, а с `\d+` — целые числа,
+а не каждая цифра. Последняя строка — практика «все хэштеги»: `\w` не знает кириллицы, поэтому в класс
+добавлены `а-яё`. Флаг `g` обязателен: без него `matchAll` бросает
+`TypeError`, чтобы не выдать молча одно совпадение.
+
+Пять методов дня 17 и сегодняшнего вместе. Справочник MDN советует брать тот, что точнее говорит о намерении:
+
+| Нужно | Метод | Ответ |
+| --- | --- | --- |
+| есть ли совпадение | `re.test(s)` | `true` / `false` |
+| где первое | `s.search(re)` | номер или -1 |
+| первое с группами | `s.match(re)` без `g`, `re.exec(s)` | массив или `null` |
+| все найденные строки | `s.match(re)` с `g` | массив строк или `null` |
+| все с группами и местами | `s.matchAll(re)` | итератор |
+| самому двигать `lastIndex` | `re.exec(s)` в цикле | массив или `null` |
+
+`exec` — самый быстрый, но по нему хуже всего видно, чего хотел автор, поэтому его оставляют для
+последней строки таблицы. И ещё одно отличие: `matchAll` копирует шаблон, так что правка
+`re.lastIndex` посреди перебора на него не влияет. Строку `matchAll`, как и `match`,
+превращает в шаблон — сам, с флагом `g`: `"a.b".matchAll(".")` находит три символа.
+
+## 11. Флаги m, s, y, d и модификаторы {#flags}
+
+```js
+const list = "book — книга\nwater — вода";
+console.log(/^water/.test(list), /^water/m.test(list), list.match(/^\w+/gm), list.match(/[а-я]+$/gm));
+// false true ['book', 'water'] ['книга', 'вода']
+console.log(/a.c/.test("a\nc"), /a.c/s.test("a\nc"), /(?i:Hello) world/.test("HELLO world"), /(?i:Hello) world/.test("HELLO WORLD"));
+// false true true false
+```
+
+**`m`** (multiline, свойство `multiline`) — `^` и `$`
+срабатывают у начала и конца каждой строки текста, а не только всего текста. С `g` он перебирает
+многострочный текст построчно — без `split`, которого у нас ещё нет. Остальное кратко:
+
+- `s` (`dotAll`) — точка берёт и перенос строки (долг дня 17);
+- `y` (`sticky`) — искать строго с `lastIndex`, не дальше: основа разборщиков
+  текста;
+- `d` (`hasIndices`) — у результата появляется `indices`: начало и конец
+  каждой группы;
+- модификатор `(?i:…)` включает или выключает `i`, `m`, `s` только
+  для части шаблона;
+- `\A`, `\z`, `\Z` — края всего текста даже при `m`; на MDN они
+  экспериментальные, требуют флага `u`, и в Chrome 155 их нет.
+
+Чем `y` отличается от `g`, видно на примере справочника MDN: разборщик ищет строку в
+кавычках ровно с текущего места.
+
+```js
+const stringPattern = /"[^"]*"/y;
+const input = `const message = "Hello world";`;
+stringPattern.lastIndex = 6;
+console.log(stringPattern.exec(input), stringPattern.lastIndex);      // null 0
+stringPattern.lastIndex = 16;
+console.log(stringPattern.exec(input)[0], stringPattern.lastIndex);   // "Hello world" 29
+const fooAt = /foo/dg;
+console.log(fooAt.exec("foo bar foo").indices[0], fooAt.exec("foo bar foo").indices[0], /foo/.exec("foo").indices);
+// [0, 3] [8, 11] undefined
+```
+
+С места 6 стоит «message», а не кавычка, и `y` сразу сдаётся; `g` пошёл бы дальше и нашёл
+строку на месте 16. Флаг `d` добавил `indices`: у совпадения — пара «начало, конец», и конец,
+как у `slice`, не включается. Без флага свойства нет. А если у шаблона оба флага, `g` и
+`y`, — `exec` ищет как `y`.
+
+## 12. Ошибки дня {#errors}
+
+| Код | Текст Chrome |
+| --- | --- |
+| `/(?1)/` | `Invalid regular expression: /(?1)/: Invalid group` |
+| `/(?<1>x)/` | `…: Invalid capture group name` |
+| `/(?<a>x)(?<a>y)/` | `…: Duplicate capture group name` |
+| `/(?<x>a)\k<y>/` | `…: Invalid named capture referenced` |
+| `"abc".matchAll(/./)` | `TypeError: String.prototype.matchAll called with a non-global RegExp argument` |
+
+Первые четыре — `SyntaxError` при разборе шаблона: после `(?` движок ждёт одно из
+`:`, `=`, `!`, `<` или модификатор; имя группы — правильное имя
+переменной; имена не повторяются; ссылка — только на существующее имя. Последняя — `TypeError` при
+вызове. Тонкость дня 17: без флага `u` и без именованных групп `\k<x>` — не ошибка,
+а просто буква «k» (приложение B).
+
+## 13. Раздел 22.2.7 спецификации {#spec}
+
+Прочитаем [22.2.7 Abstract
+Operations for RegExp Matching](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-regexp-matching) — то, что вчера осталось за словом RegExpExec.
+
+[RegExpExec](https://tc39.es/ecma262/2026/#sec-regexpexec) (22.2.7.1): прочитать у объекта свойство
+`exec`; если это функция — вызвать её. Только если её нет — встроенный алгоритм. Значит,
+`test`, `match` и остальные зовут `exec` через обычный поиск свойства, и подмена
+видна сразу:
+
+```js
+const re = /a/;
+re.exec = () => null;
+console.log(re.test("a"), "a".search(re), Object.getOwnPropertyDescriptor(/x/g, "lastIndex"));
+// false -1 {value: 0, writable: true, enumerable: false, configurable: false}
+```
+
+Примечание объясняет зачем: совместимость с кодом, написанным под прошлые редакции.
+[RegExpBuiltinExec](https://tc39.es/ecma262/2026/#sec-regexpbuiltinexec) (22.2.7.2) — сердце дня. Пересказ:
+
+1. Прочитать `lastIndex`; если флагов `g` и `y` нет — считать его нулём (не
+   записывая).
+2. Повторять: если `lastIndex` больше длины строки — при `g`/`y` записать 0 и
+   вернуть `null`. Иначе приложить сопоставитель с этой позиции. Неудача: при `y` — 0 и
+   `null` сразу; иначе сдвинуться на символ (AdvanceStringIndex, 22.2.7.3) и пробовать дальше —
+   это перебор позиций со схемы дня 17.
+3. Удача: при `g`/`y` записать в `lastIndex` конец совпадения. Собрать массив:
+   `index`, `input`, на месте 0 — подстрока по Match Record (22.2.7.5–6: начало и конец),
+   `groups` — объект без прототипа, если в шаблоне есть имена, иначе `undefined`, затем
+   группы по номерам; при флаге `d` — ещё `indices`.
+
+Две мелочи из соседних пунктов. AdvanceStringIndex без флагов `u`/`v` — просто «плюс один»;
+с ними — перешагнуть пару 16-битных частей целиком (день 20). А `indices` собирается из тех же Match
+Record: для каждой — пара «начало, конец» (GetMatchIndexPair, 22.2.7.7): у
+`/(\d{2})\.(\d{2})/d.exec("Дата: 12.10")` `indices[1]` — `[6, 8]`.
+
+Кратко о соседях. [22.2.8](https://tc39.es/ecma262/2026/#sec-properties-of-regexp-instances):
+`lastIndex` — единственное собственное свойство объекта, записываемое, но неперечисляемое и
+ненастраиваемое (день 5); примечание напоминает, что до ES2015 `source` и `global` тоже
+были собственными. [22.2.9](https://tc39.es/ecma262/2026/#sec-regexp-string-iterator-objects) —
+итератор `matchAll`: хранит копию шаблона и строку, а его `next` зовёт RegExpExec и после пустого
+совпадения сам сдвигает `lastIndex` — поэтому `matchAll` не зацикливается.
+[22.2.2](https://tc39.es/ecma262/2026/#sec-pattern-semantics) описывает, как шаблон превращается в
+сопоставитель: без флагов `u`/`v` он видит строку как 16-битные части — отсюда два
+«символа» в смайлике (день 20).
+
+## 14. «Карточки»: импорт слов из текста {#cards}
+
+Учитель присылает слова списком: «слово — перевод (тема)» по строке. Разберём его одним шаблоном с именованными
+группами, флагами `g` и `m` — без `split`. Неправильная строка просто не совпадёт.
+
+```js
+const text = `book — книга (школа)
+teacher — учитель (школа)
+bread — хлеб (еда)
+плохая строка
+water — вода (еда)`;
+const LINE = /^(?<word>[a-z]+) — (?<translation>[а-яё ]+) \((?<topic>[а-яё]+)\)$/gm;
+const cards = [...text.matchAll(LINE)].map((m, i) => ({ id: i + 1, ...m.groups }));
+console.log(cards.length, cards.map((c) => c.word), cards[1]);
+
+function highlight(word, query) {
+  const m = word.match(new RegExp(query, "i"));
+  return m ? `${word.slice(0, m.index)}[${m[0]}]${word.slice(m.index + m[0].length)}` : word;
+}
+console.log(highlight("teacher", "EA"), highlight("bread", "ea"), highlight("book", "x"));
+```
+
+<ResultBox>
+4 (4) \['book', 'teacher', 'bread', 'water'\] \{id: 2, word: 'teacher', translation: 'учитель', topic: 'школа'\}\
+t\[ea\]cher br\[ea\]d book
+</ResultBox>
+
+**Строка 1 — импорт.** `^` и `$` с флагом `m` требуют, чтобы шаблон
+занял строку текста целиком, поэтому «плохая строка» пропущена. Скобки темы экранированы — они буквальные, а
+именованные группы — служебные. Spread дня 22 Essentials раскладывает `groups` в объект карточки.
+
+**Строка 2 — подсветка.** `match` без `g` дал и найденный текст, и
+`index`: этого хватает, чтобы обернуть совпадение скобками. Регистр в выводе — как в слове, а не как в
+запросе.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Уберите из `LINE` флаг `m`. Сколько карточек станет и почему?
+\
+\
+**Второй.** Добавьте в текст строку «book — книжка (школа)». Как найти слова, которые встретились
+дважды, обратной ссылкой или через `Map.groupBy` дня 14?
+\
+\
+**Третий.** Вызовите `highlight("teacher", "e")`. Почему подсвечена только первая «e» и
+что нужно, чтобы подсветить обе (подсказка — `matchAll`)?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+За два дня шаблон научился проверять, искать, разбирать и смотреть по сторонам. Не хватает одного — менять
+текст. Завтра, на дне 19, — `replace` и `replaceAll` с `$1`, `$<имя>`
+и функцией замены, `split` по шаблону и `RegExp.escape` — экранирование запроса человека,
+обещанное вчера. День 20 — Юникод: флаги `u` и `v` и буквы любого алфавита.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Assertions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Assertions) | учебник: якоря, граница слова, проверки позиции | <Full /> |
+| [Groups and backreferences](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Groups_and_backreferences) | учебник: группы, имена, ссылки | <Full /> |
+| [Input boundary assertion](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Input_boundary_assertion) | `^` и `$` | <Full /> |
+| [Word boundary assertion](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Word_boundary_assertion) | `\b`, `\B` — только ASCII | <Full /> |
+| [Capturing group](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Capturing_group) | `(…)`, номера, `undefined` | <Full /> |
+| [Named capturing group](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Named_capturing_group) | `(?<имя>…)`, `groups` | <Full /> |
+| [Non-capturing group](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Non-capturing_group) | `(?:…)` | <Full /> |
+| [Backreference](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Backreference) | `\1`, `\2` | <Full /> |
+| [Named backreference](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Named_backreference) | `\k<имя>` | <Full /> |
+| [Lookahead assertion](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Lookahead_assertion) | `(?=…)`, `(?!…)` | <Full /> |
+| [Lookbehind assertion](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Lookbehind_assertion) | `(?<=…)`, `(?<!…)` | <Full /> |
+| [RegExp.prototype.exec()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/exec) | массив-результат; цикл с `g` | <Full /> |
+| [RegExp: lastIndex](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/lastIndex) | откуда искать дальше; правила | <Full /> |
+| [RegExp.prototype.multiline](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/multiline) | флаг `m` | <Full /> |
+| [String.prototype.match()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/match) | с `g` и без | <Full /> |
+| [String.prototype.matchAll()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll) | итератор совпадений с группами | <Full /> |
+| [ECMA-262, 22.2.7](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-regexp-matching) | RegExpExec, RegExpBuiltinExec, Match Record | <Full /> |
+| [RegExp.prototype.dotAll](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/dotAll) | флаг `s` | <Brief /> |
+| [RegExp.prototype.sticky](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/sticky) | флаг `y` | <Brief /> |
+| [RegExp.prototype.hasIndices](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/hasIndices) | флаг `d`, `indices` | <Brief /> |
+| [Modifier](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Modifier) | `(?i:…)`, `(?-i:…)` | <Brief /> |
+| [Buffer boundary assertion](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Buffer_boundary_assertion) | `\A \z \Z` — экспериментальные | <Brief /> |
+| [Ошибка: invalid regexp group](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_group) | `Invalid group` | <Brief /> |
+| [Ошибка: invalid capture group name](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_capture_group_name) | `Invalid capture group name` | <Brief /> |
+| [Ошибка: duplicate capture group name](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_duplicate_capture_group_name) | `Duplicate capture group name` | <Brief /> |
+| [Ошибка: invalid named capture reference](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_named_capture_reference) | `Invalid named capture referenced` | <Brief /> |
+| [Ошибка: matchAll must be called with a global RegExp](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Requires_global_RegExp) | без флага `g` | <Brief /> |
+| [ECMA-262, 22.2.2](https://tc39.es/ecma262/2026/#sec-pattern-semantics) | как шаблон становится сопоставителем | <Brief /> |
+| [ECMA-262, 22.2.8](https://tc39.es/ecma262/2026/#sec-properties-of-regexp-instances) | `lastIndex`: атрибуты | <Brief /> |
+| [ECMA-262, 22.2.9](https://tc39.es/ecma262/2026/#sec-regexp-string-iterator-objects) | итератор `matchAll` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// ^ $ — начало и конец строки (с m — каждой строки текста): /^\d{6}$/ — ровно шесть цифр
+// \b \B — граница слова; только латиница! для кириллицы: (?<![а-яё])слово(?![а-яё])
+// (…) — группа: квантификатор, |, запомнить;  (?:…) — без запоминания;  номера — по «(»
+// (?<имя>…) → m.groups.имя;   \1, \k<имя> — тот же текст ещё раз
+// x(?=y) x(?!y) (?<=y)x (?<!y)x — смотрят вправо/влево, символов не забирают
+// re.exec(s) → [всё, группы…, index, input, groups] или null; с g — с lastIndex
+// lastIndex: удача — конец совпадения, неудача — 0; test с g чередует ответы
+// s.match(re) — без g как exec; с g — строки без групп; ничего — null (?? [])
+// s.matchAll(re) — итератор exec-результатов; только с g; шаблон копирует; .map().toArray()
+// .+ жадный, .+? ленивый: разница видна в найденном тексте
+// флаги: m — построчно, s — точка и перенос, y — строго с lastIndex, d — indices
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `/\d{6}/.test("7440001")` — `true`, а `/^\d{6}$/.test("7440001")` —
+   `false`?
+   <Answer>Без якорей шаблон ищется где-то в строке. С `^` и `$` он обязан начаться в начале
+   и закончиться в конце — ровно шесть цифр.</Answer>
+2. Почему `/\bкот\b/` не находит «кот»?
+   <Answer>`\b` — граница между `\w` и не-`\w`, а кириллица для `\w` —
+   не символы слова. Для русского — `(?<![а-яё])кот(?![а-яё])`.</Answer>
+3. Чем `"a1b2".match(/\d/g)` отличается от `[..."a1b2".matchAll(/\d/g)]`?
+   <Answer>`match` с `g` — массив строк `['1', '2']` без групп и номеров.
+   `matchAll` — результаты как у `exec`: с группами, `index` и
+   `input`.</Answer>
+4. Почему `/fo+/g.test` на одной строке отвечает `true`, потом `false`?
+   <Answer>С флагом `g` поиск идёт с `lastIndex`. После первой удачи он стал 9, дальше «foo» нет —
+   `false` и сброс в 0.</Answer>
+5. Зачем писать `(?:png|jpe?g)`, а не `(png|jpe?g)`?
+   <Answer>Если текст группы не нужен, незахватывающая группа не занимает номер: номера нужных групп и ссылки
+   `\1` не съезжают.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Groups_and_backreferences" />

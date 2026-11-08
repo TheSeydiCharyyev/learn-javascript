@@ -1,0 +1,79 @@
+---
+title: День 21 — конспект
+css: |
+  h1 { border-bottom-color: #06b6d4; }
+  h2 { color: #0e7490; background: #ecfeff; border-left-color: #06b6d4; }
+---
+
+# День 21. BigInt и Date целиком: разбор строк, UTC, сеттеры
+
+<Subtitle>Выжимка лекции: целые любого размера, дата как один момент, разбор строк, сеттеры с переносом и превращения даты. Примеры — для пояса Ашхабада (UTC+5).</Subtitle>
+
+## Главное
+
+```js
+9007199254740993n + 2n;                            // 9007199254740995n — точно
+BigInt("9007199254740993") === 9007199254740993n;   // true — большое число строкой
+5n / 2n;                                            // 2n — дробь отбрасывается
+new Date("2026-10-12").getHours();                  // 5 — дата без времени читается как UTC
+new Date(2026, 2, 0).getDate();                     // 28 — последний день февраля
+new Date(2026, 9, 12) - new Date(2026, 9, 11);      // 86400000 — сутки в миллисекундах
+```
+
+## BigInt
+
+| Правило | Пример |
+| --- | --- |
+| литерал или функция без `new` | `10n`, `BigInt("10")`, `BigInt(10)` |
+| с `Number` в арифметике не смешивать | `1n + 1` — `TypeError`; `1n + BigInt(1)` |
+| сравнивать можно | `0n == 0`, `1n < 2`; но `0n === 0` — `false` |
+| деление целое, на ноль — ошибка | `-5n / 2n` — `-2n`; `1n / 0n` — `RangeError` |
+| в JSON — строкой | replacer и reviver; `stringify` без них падает |
+| обрезать до N бит | `BigInt.asIntN(64, x)`, `BigInt.asUintN(64, x)` |
+
+## Дата
+
+<Definition>
+Дата — **одно число**: миллисекунды от 1970-01-01T00:00Z. Пояс в ней не хранится — его берут с
+устройства. `get…`/`set…` читают и пишут по местному времени, `getUTC…`/`setUTC…`
+— по UTC. `getTimezoneOffset()` — разница в минутах, минус значит «восточнее UTC»: Ашхабат — −300.
+`getDay()` — день недели, 0 — воскресенье.
+</Definition>
+
+| Строка | Как читается |
+| --- | --- |
+| `"2026-10-12"` | полночь UTC — 5 утра в Ашхабаде |
+| `"2026-10-12T00:00"` | полночь по-местному |
+| `"2026-10-12T00:00Z"`, `"…+03:00"` | с явным поясом — как написано |
+| `"12.10.2026"` и прочее | как решит движок: Chrome — 10 декабря; разбирайте сами |
+
+<KeyPoint>
+Сеттеры **меняют дату на месте** и переносят лишнее: `setDate(32)` — следующий месяц,
+`setDate(0)` — последний день прошлого, 31 января плюс месяц — 3 марта. Перед сеттером делайте копию
+`new Date(date)`. `Date.UTC(…)` возвращает число по UTC, `new Date(2026)` — это
+2026 миллисекунд.
+</KeyPoint>
+
+<Remember>
+`d + 1` — строка (дата превращается в текст), `d - 1` и `d < e` — числа.
+`JSON.stringify` пишет дату ISO-строкой по UTC через `toJSON`; неверная дата — `null`.
+Обратно — reviver: `key === "when" ? new Date(value) : value`.
+</Remember>
+
+<NoteBox>
+Строки: `toString` (местное время и пояс на языке браузера), `toDateString`,
+`toTimeString`, `toUTCString`, `toISOString`; для людей — `toLocaleDateString`.
+Ошибки BigInt: `Division by zero`, `Exponent must be positive`, «not an integer»,
+`Cannot convert a BigInt value to a number`, `Cannot convert … to a BigInt`.
+</NoteBox>
+
+<Homework>
+1. Найдите в своём коде, где дата приходит строкой, и проверьте, в каком она формате и как её читает Chrome.
+2. Напишите `daysInMonth(year, month)` через нулевое число следующего месяца.
+3. Прочитайте на странице
+   [BigInt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt)
+   раздел «Use within JSON» и объясните, почему reviver пишут под форму данных.
+4. Найдите в спецификации MakeDay (21.4.1.28) и объясните по шагам, почему месяц 12 — это январь следующего года.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Representing_dates_times" />

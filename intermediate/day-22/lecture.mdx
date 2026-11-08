@@ -1,0 +1,599 @@
+---
+title: "День 22 — Temporal: PlainDate, PlainTime, PlainDateTime и Now"
+day: День 22 • урок 1
+heading: "Temporal: PlainDate, PlainTime, PlainDateTime и Now"
+lead: "Курс 2, Intermediate. Модуль «Числа и даты: Date, Temporal, основы Intl» — второй день. 45 минут."
+css: |
+  h1 { border-bottom-color: #06b6d4; }
+  h2 { color: #0e7490; background: #ecfeff; border-left-color: #06b6d4; }
+  h3 { color: #155e75; }
+  .step-number { background: #06b6d4; }
+  .toc a { color: #0e7490; }
+---
+
+<Goals>
+- знать, зачем появился `Temporal` и как устроена семья его классов;
+- создавать дату, время и дату со временем без пояса и читать их поля;
+- прибавлять месяцы и дни, находить расстояние между датами, сравнивать и сортировать их;
+- сохранять даты `Temporal` в JSON и брать «сегодня» из `Temporal.Now`.
+</Goals>
+
+<Toc />
+
+## 1. Обещания дня 21 {#debts}
+
+День 21 закончился списком претензий к `Date`: месяцы с нуля, дата меняется на месте, строки
+разбираются «как решит движок», поясом управляет устройство, а не программа. Справочник MDN называет
+`Temporal` полной заменой `Date`. Первое обещание — «31 января плюс месяц» одной строкой:
+
+```js
+const jan31 = Temporal.PlainDate.from("2026-01-31");
+const next = jan31.add({ months: 1 });
+console.log(next.toString(), jan31.toString(), jan31.month, next === jan31);   // 2026-02-28 2026-01-31 1 false
+```
+
+Вчера на ту же задачу ушла целая функция `addMonths`, а простой `setMonth` дал 3
+марта. Здесь сразу 28 февраля. Видны и остальные обещания: `jan31` осталась 31 января —
+`add` не меняет дату, а возвращает новую (неизменяемость дня 8); январь — месяц 1, а не 0. В Chrome
+`Temporal` есть с версии 144, в Node 22 его нет — код курса, как всегда, запускаем в Chrome.
+
+## 2. Temporal: пространство имён и семья классов {#family}
+
+```js
+console.log(typeof Temporal, Object.prototype.toString.call(Temporal), Object.getOwnPropertyNames(Temporal));
+// object [object Temporal] (9) ['Now', 'PlainDate', 'PlainTime', 'PlainDateTime', 'ZonedDateTime', 'Duration', 'Instant', 'PlainYearMonth', 'PlainMonthDay']
+new Temporal();   // TypeError: Temporal is not a constructor
+```
+
+`Temporal` — не конструктор, а **пространство имён**, как `Math` дня 18
+Essentials. Восемь его свойств — классы, девятое, `Now`, — пространство имён с функциями «который сейчас
+час».
+
+Зачем столько классов? По справочнику MDN, `Date` «носит две шляпы»: это и момент — миллисекунды от
+эпохи, — и набор частей: год, месяц, число, часы. Поясов у частей только два, местный и UTC; «дата без пояса», как у
+будильника на 8:00 или дня рождения, невозможна; календарь один; сеттеры меняют объект. Поэтому
+`Temporal` написали заново и раздали роли разным классам.
+
+<Scheme src="scheme-family.svg">Классы Temporal: что сегодня, что в днях 23 и 24</Scheme>
+
+Сегодня — три класса с приставкой `Plain`: дата, время и то и другое вместе. Момент
+(`Instant`) и момент с поясом (`ZonedDateTime`) — день 24, длительность и «неполные» даты —
+день 23.
+
+## 3. PlainDate: как создать дату {#create}
+
+```js
+const a = Temporal.PlainDate.from("2026-10-12");
+const b = Temporal.PlainDate.from({ year: 2026, month: 10, day: 12 });
+const c = new Temporal.PlainDate(2026, 10, 12);
+const d = Temporal.PlainDate.from(a);
+console.log(a.toString(), b.toString(), c.toString(), d.toString(), a.equals(c), a === d);   // 2026-10-12 2026-10-12 2026-10-12 2026-10-12 true false
+console.log(a);                                            // PlainDate {era: undefined, eraYear: undefined, calendarId: 'iso8601', year: 2026, month: 10, …}
+console.log(new Temporal.PlainDate(2026, 9, 12).toString());   // 2026-09-12
+```
+
+Способов три: `from` со строкой, с объектом полей или с другой датой (тогда это копия) и конструктор
+с числами. Справочник советует `from`. Консоль Chrome показывает дату полями и обрывает их на пятом,
+поэтому в примерах печатаем `toString()`. Главная ловушка: месяц здесь **с единицы**, и
+привычное по дню 17 Essentials «9 — это октябрь» молча дало 12 сентября.
+
+```js
+const tryFrom = (text) => {
+  try {
+    return Temporal.PlainDate.from(text).toString();
+  } catch (e) {
+    return e.name;
+  }
+};
+console.log(["2026-10-12", "20261012", "2026-10-12T14:30+03:00", "12.10.2026", "2026-02-30", "12 октября 2026"].map(tryFrom));
+// (6) ['2026-10-12', '2026-10-12', '2026-10-12', 'RangeError', 'RangeError', 'RangeError']
+```
+
+Обещание дня 21 о разборе строк. Формат один — RFC 9557, расширение ISO 8601: `YYYY-MM-DD` или краткое
+`YYYYMMDD`; время и смещение дата отбросит. Остальное — `RangeError` без догадок: «12.10.2026»
+не станет 10 декабря, «30 февраля» — 2 марта. В одном примере MDN «2021-02-29» становится 28 февраля, но Chrome, как
+и спецификация, бросает ошибку: строка проверяется строго.
+
+```js
+console.log(Temporal.PlainDate.from({ year: 2026, month: 2, day: 30 }).toString(), Temporal.PlainDate.from({ year: 2026, month: 13, day: 1 }).toString());   // 2026-02-28 2026-12-01
+Temporal.PlainDate.from({ year: 2026, month: 2, day: 30 }, { overflow: "reject" });   // RangeError: Temporal error: day value is not in a valid range.
+```
+
+С объектом мягче. Настройка `overflow` во втором аргументе по умолчанию равна
+`"constrain"` — «подогнать»: месяц 13 становится 12-м, 30 февраля — последним днём февраля;
+`"reject"` вместо подгонки бросает `RangeError`. Конструктор не подгоняет никогда.
+
+```js
+const old = new Date(2026, 9, 12, 14, 30);
+const day = Temporal.PlainDate.from({ year: old.getFullYear(), month: old.getMonth() + 1, day: old.getDate() });
+console.log(day.toString());   // 2026-10-12
+Temporal.PlainDate.from(old);  // TypeError: Temporal error: Invalid PlainDate fields provided.
+```
+
+Для `from` старая дата — объект без нужных полей, поэтому части переносим руками, не забыв «+ 1» у
+месяца. Прямой мост — `toTemporalInstant` дня 24.
+
+## 4. Поля даты {#fields}
+
+```js
+const d = Temporal.PlainDate.from("2026-10-12");
+console.log(d.year, d.month, d.day, d.dayOfWeek, d.daysInMonth);   // 2026 10 12 1 31
+console.log(d.dayOfYear, d.daysInYear, d.inLeapYear, d.monthCode, d.weekOfYear, d.yearOfWeek, d.era, d.calendarId);   // 285 365 false M10 42 2026 undefined iso8601
+console.log(Temporal.PlainDate.from("2026-10-18").dayOfWeek, new Date(2026, 9, 18).getDay());   // 7 0
+```
+
+Вместо методов `get…` — свойства. `dayOfWeek` считает от понедельника (1) до воскресенья
+(7), а `getDay` даёт воскресенью 0. `daysInMonth` заменяет «нулевое число следующего месяца»
+дня 21. Остальное — для календарных задач; `era` у календаря ISO — `undefined` (раздел 14).
+
+| Что нужно | Date | PlainDate |
+| --- | --- | --- |
+| месяц | `getMonth()`: 0–11 | `month`: 1–12 |
+| число | `getDate()` | `day` |
+| день недели | `getDay()`: 0 — воскресенье … 6 — суббота | `dayOfWeek`: 1 — понедельник … 7 — воскресенье |
+| дней в месяце | `new Date(год, месяц + 1, 0).getDate()` | `daysInMonth` |
+| високосный год | считать самим | `inLeapYear`, `daysInYear` |
+| день года, неделя | считать самим | `dayOfYear`, `weekOfYear` и `yearOfWeek` |
+
+```js
+"use strict";
+const d = Temporal.PlainDate.from("2026-10-12");
+console.log(Object.getOwnPropertyNames(d), Object.isFrozen(d), typeof Object.getOwnPropertyDescriptor(Temporal.PlainDate.prototype, "year").get);   // (0) [] false function
+d.year = 2027;   // TypeError: Cannot set property year of [object Temporal.PlainDate] which has only a getter
+```
+
+Своих свойств у даты нет: поля — геттеры прототипа без сеттеров, как `size` у `Map` дня 14,
+а значение лежит во внутреннем слоте. Присваивание в строгом режиме даёт ошибку дня 5, в обычном молча ничего не
+делает. Это не `Object.freeze` дня 6: объект не заморожен, но саму дату поменять нечем.
+
+## 5. with: новая дата вместо сеттера {#with}
+
+```js
+const d = Temporal.PlainDate.from("2026-10-12");
+const first = d.with({ day: 1 });
+const last = d.with({ day: d.daysInMonth });
+console.log(first.toString(), last.toString(), d.with({ month: 2, day: 31 }).toString(), d.with({ year: 2028, month: 2, day: 29 }).toString(), d.toString());
+// 2026-10-01 2026-10-31 2026-02-28 2028-02-29 2026-10-12
+d.with({ month: 2, day: 31 }, { overflow: "reject" });   // RangeError: Temporal error: day value is not in a valid range.
+```
+
+Справочник называет `with` «сеттером» `Temporal`: заменяет указанные поля, остальные копирует
+и возвращает новую дату; `d` не изменилась. 31 февраля подогналось к 28-му — та же настройка
+`overflow`. Для последнего дня месяца MDN советует `with({ day: Number.MAX_VALUE })`: в редких
+календарях номер последнего дня не равен `daysInMonth`. Календарь меняет `withCalendar`, а день
+недели через `with` не задать — только сдвигом через `add`.
+
+## 6. add и subtract {#add}
+
+```js
+const start = Temporal.PlainDate.from("2026-10-12");
+console.log(start.add({ days: 20 }).toString(), start.add({ weeks: 12 }).toString(), start.subtract({ months: 1 }).toString(), start.add({ years: 1, months: 2, weeks: 3, days: 4 }).toString());
+// 2026-11-01 2027-01-04 2026-09-12 2028-01-06
+const feb = Temporal.PlainDate.from("2026-02-14");
+const days = [];
+for (let day = feb.with({ day: 1 }); day.month === feb.month; day = day.add({ days: 1 })) days.push(day.day);
+console.log(days.length, days.at(-1));   // 28 28
+```
+
+`add` принимает длительность — объект с ключами во множественном числе: `years`,
+`months`, `weeks`, `days`; `subtract` сдвигает назад. Каждый шаг цикла
+по дням месяца из примера MDN — новый объект, исходная дата цела. Теперь трудный случай:
+
+```js
+const jan31 = Temporal.PlainDate.from("2026-01-31");
+console.log(jan31.add({ months: 1 }).toString(), Temporal.PlainDate.from("2028-01-31").add({ months: 1 }).toString(), Temporal.PlainDate.from("2026-05-31").subtract({ months: 3 }).toString());   // 2026-02-28 2028-02-29 2026-02-28
+console.log(jan31.add({ months: 1, days: 31 }).toString(), jan31.add({ days: 31 }).add({ months: 1 }).toString());   // 2026-03-31 2026-04-03
+console.log(jan31.add({ hours: 25 }).toString(), jan31.add({ hours: 23 }).toString());   // 2026-02-01 2026-01-31
+jan31.add({ months: 1 }, { overflow: "reject" });   // RangeError: Temporal error: not a valid ISO date.
+```
+
+<Scheme src="scheme-add.svg">Порядок шагов внутри add: один вызов и два вызова подряд дают разные даты</Scheme>
+
+Порядок внутри одного `add` постоянный: годы и месяцы, подгонка числа, недели и дни. Поэтому
+`{ months: 1, days: 31 }` — 28 февраля плюс 31 день, а два вызова в обратном порядке дают 3 апреля.
+`Date` на дне 21 переносил лишние дни в следующий месяц, `Temporal` их отрезает, а с
+`overflow: "reject"` — бросает ошибку. Часы двигают дату только целыми сутками: 25 часов — плюс день, 23
+— ничего. Ключ в единственном числе, `{ month: 1 }`, — `TypeError`; разные знаки в одной
+длительности — `RangeError`; строку вида `"P1M"` разберём на дне 23.
+
+## 7. since и until: сколько между датами {#until}
+
+```js
+const start = Temporal.PlainDate.from("2026-10-12");
+const end = Temporal.PlainDate.from("2027-01-01");
+const left = start.until(end);
+console.log(left.days, end.since(start).days, start.since(end).days, String(left));   // 81 81 -81 P81D
+const parts = start.until(end, { largestUnit: "months" });
+console.log(parts.months, parts.days, start.until(end, { largestUnit: "weeks" }).weeks);   // 2 20 11
+const age = Temporal.PlainDate.from("2000-02-29").until("2026-10-12", { largestUnit: "years" });
+console.log(age.years, age.months, age.days);   // 26 7 13
+```
+
+Практика плана — сколько дней до конца курса. `a.until(b)` — «`b` минус `a`»,
+`a.since(b)` — «`a` минус `b`». Результат — длительность,
+`Temporal.Duration` дня 23; сегодня хватит её полей `days`, `weeks`,
+`months`, `years` и строки `P81D` — «период в 81 день» в записи ISO 8601.
+
+<Scheme src="scheme-until.svg">since и until на шкале: знак, дни и месяцы</Scheme>
+
+По умолчанию ответ — в днях; `largestUnit` разрешает единицы крупнее: «2 месяца 20 дней», возраст «26
+лет, 7 месяцев, 13 дней». Месяцы и годы бывают разной длины, поэтому, предупреждает справочник, такой ответ имеет
+смысл только вместе с датой, от которой считали. Часов у `PlainDate` нет — `largestUnit:
+"hours"` даёт `RangeError`.
+
+```js
+const courseEnd = Temporal.PlainDate.from("2027-01-01");
+const daysLeft = (today) => today.until(courseEnd).days;
+console.log(daysLeft(Temporal.PlainDate.from("2026-10-12")), daysLeft(Temporal.PlainDate.from("2026-12-31")), daysLeft(courseEnd), daysLeft(Temporal.PlainDate.from("2027-01-10")));   // 81 1 0 -9
+```
+
+«Сегодня» функция получает параметром: так её легко проверить на любых датах, а в программе передать
+`Temporal.Now.plainDateISO()` (раздел 13). Вчера для разницы мы брали `Date.UTC` от частей,
+чтобы не помешал перевод часов; у `PlainDate` пояса нет, мешать нечему. Ещё одно обещание дня 21 —
+расписание задания 7, пн/ср/пт на 12 недель:
+
+```js
+function lessons(start, weeks) {
+  const result = [];
+  for (let i = 0; i < weeks * 7; i++) {
+    const day = start.add({ days: i });
+    if ([1, 3, 5].includes(day.dayOfWeek)) result.push(day);
+  }
+  return result;
+}
+const list = lessons(Temporal.PlainDate.from("2026-10-12"), 12);
+console.log(list.length, list.slice(0, 3).map((d) => d.day), list.at(-1).toString(), list.at(-1).dayOfWeek, list[0].until(list.at(-1)).days);   // 36 (3) [12, 14, 16] 2027-01-01 5 81
+```
+
+Те же 36 занятий и последнее — пятница 1 января, но без копии даты, без `getDay` с воскресеньем-нулём
+и без `Date.UTC` для разницы.
+
+## 8. Сравнение и сортировка {#compare}
+
+```js
+const a = Temporal.PlainDate.from("2026-10-12");
+const b = Temporal.PlainDate.from("2026-10-20");
+console.log(a.equals("2026-10-12"), a === Temporal.PlainDate.from("2026-10-12"), Temporal.PlainDate.compare(a, b), Temporal.PlainDate.compare(b, a), Temporal.PlainDate.compare(a, "2026-10-12"));   // true false -1 1 0
+const dates = ["2026-12-31", "2026-10-12", "2027-01-01", "2026-11-05"].map((s) => Temporal.PlainDate.from(s));
+dates.sort(Temporal.PlainDate.compare);
+console.log(dates.join(", "), `${a}`);   // 2026-10-12, 2026-11-05, 2026-12-31, 2027-01-01 2026-10-12
+console.log(a < b);   // TypeError: Do not use Temporal.PlainDate.prototype.valueOf; use Temporal.PlainDate.prototype.compare for comparison.
+```
+
+`equals` сравнивает значения, `===` — ссылки. `compare` возвращает −1, 0 или 1 —
+ровно то, чего ждёт функция сравнения `sort` дня 20 Essentials, поэтому его передают прямо. Оба
+принимают и строки.
+
+А `<`, `-` и `+` не работают: `valueOf` нарочно бросает
+`TypeError`. Без этого `a < b` молча сравнило бы строки — обычно верно, но не всегда
+(задание 9). Шаблонная строка работает: ToPrimitive дня 6 для неё зовёт сначала `toString`. А
+`a + ""` начинает с `valueOf` — и падает.
+
+## 9. Строки и JSON {#strings}
+
+```js
+const d = Temporal.PlainDate.from("2026-10-12");
+console.log(d.toString({ calendarName: "always" }), d.toJSON(), JSON.stringify({ next: d }), d.toLocaleString("ru-RU"));   // 2026-10-12[u-ca=iso8601] 2026-10-12 {"next":"2026-10-12"} 12.10.2026
+const back = JSON.parse('{"next":"2026-10-12"}', (key, value) => (key === "next" ? Temporal.PlainDate.from(value) : value));
+console.log(back.next.add({ days: 1 }).toString());   // 2026-10-13
+```
+
+`toString` пишет формат RFC 9557; `calendarName` решает, добавлять ли пометку календаря:
+`"auto"` (не для ISO), `"always"`, `"never"`, `"critical"`.
+`toJSON` возвращает то же, и его зовёт `JSON.stringify`. На дне 21 полночь 12 октября в JSON
+стала «2026-10-11T19:00Z», а здесь дата остаётся датой. Обратно — reviver дня 23 Essentials.
+`toLocaleString` пишет дату для людей, его настройки — день 25.
+
+<table>
+<thead>
+<tr><th>Строка</th><th>PlainDate</th><th>PlainTime</th><th>PlainDateTime</th></tr>
+</thead>
+<tbody>
+<tr><td>`"2026-10-12"`</td><td>дата</td><td>`RangeError`</td><td>дата, 00:00</td></tr>
+<tr><td>`"14:30"`</td><td>`RangeError`</td><td>время</td><td>`RangeError`</td></tr>
+<tr><td>`"2026-10-12T14:30"`, `"2026-10-12 14:30"`</td><td>дата, время отброшено</td><td>время, дата отброшена</td><td>дата и время</td></tr>
+<tr><td>`"2026-10-12T14:30+03:00"`</td><td colSpan="3">смещение отброшено — без пересчёта часов</td></tr>
+<tr><td>`"2026-10-12T14:30Z"`</td><td colSpan="3">`RangeError`: `Z` означает момент по UTC, а не «время на часах»</td></tr>
+</tbody>
+</table>
+
+## 10. PlainTime: время без даты {#time}
+
+```js
+const lesson = Temporal.PlainTime.from("09:00");
+const bell = lesson.add({ minutes: 45 });
+const gap = lesson.until("10:30");
+console.log(lesson.toString(), bell.toString(), bell.hour, bell.minute, gap.hours, gap.minutes, new Temporal.PlainTime(14, 30).toString());   // 09:00:00 09:45:00 9 45 1 30 14:30:00
+const late = Temporal.PlainTime.from("22:45");
+console.log(late.add({ minutes: 90 }).toString(), late.add({ hours: 48 }).toString(), late.with({ minute: 0 }).toString(), late.round("hour").toString());   // 00:15:00 22:45:00 22:00:00 23:00:00
+console.log(Temporal.PlainTime.compare("09:00", "10:30"), Temporal.PlainTime.from({ hour: 25 }).toString(), lesson.toString({ smallestUnit: "minute" }));   // -1 23:00:00 09:00
+Temporal.PlainTime.from("24:00");   // RangeError: Temporal error: Invalid character while parsing hour value.
+```
+
+`PlainTime` — время, которое повторяется каждый день: начало урока, звонок, будильник. Строка —
+`"ЧЧ"`, `"ЧЧ:ММ"` или `"ЧЧ:ММ:СС.ддддддддд"`, часы двумя цифрами; у конструктора
+все аргументы необязательны, без них — полночь. Шесть полей, от `hour` до `nanosecond`:
+точность до наносекунды, у `Date` была миллисекунда.
+
+Время **ходит по кругу**: 22:45 плюс полтора часа — 00:15, плюс двое суток — снова 22:45.
+`round` округляет (22:45 до часа — 23:00), `until` даёт часы и минуты, час 25 подгоняется к
+23-му. Строка «24:00», которую `Date` на дне 21 читал как конец суток, здесь — ошибка.
+`toString({ smallestUnit: "minute" })` убирает секунды.
+
+## 11. PlainDateTime: дата и время вместе {#datetime}
+
+```js
+const dt = Temporal.PlainDateTime.from("2026-10-12T14:30");
+console.log(dt.toString(), dt.toPlainDate().toString(), dt.toPlainTime().toString(), dt.dayOfWeek, dt.hour);   // 2026-10-12T14:30:00 2026-10-12 14:30:00 1 14
+const lesson = Temporal.PlainDate.from("2026-10-12").toPlainDateTime("09:00");
+console.log(lesson.toString(), lesson.add({ hours: 16 }).toString(), lesson.withPlainTime("18:00").toString(), new Temporal.PlainDateTime(2026, 10, 12, 14, 30).toString());
+// 2026-10-12T09:00:00 2026-10-13T01:00:00 2026-10-12T18:00:00 2026-10-12T14:30:00
+const a = Temporal.PlainDateTime.from("2026-10-12T09:00");
+const b = Temporal.PlainDateTime.from("2026-10-14T10:30");
+const gap = a.until(b);
+console.log(gap.days, gap.hours, gap.minutes, a.until(b, { largestUnit: "hours" }).hours, Temporal.PlainDateTime.compare(a, b));   // 2 1 30 49 -1
+```
+
+`PlainDateTime` — `PlainDate` и `PlainTime` вместе, с полями обоих. Разобрать —
+`toPlainDate()` и `toPlainTime()`; собрать — `date.toPlainDateTime(время)`, без
+аргумента это полночь; заменить время — `withPlainTime`. Сложение здесь не ходит по кругу: 9:00 плюс 16
+часов — час ночи следующего дня. Разница — в днях и часах, с `largestUnit: "hours"` — только в часах.
+
+```js
+console.log(Temporal.PlainDateTime.from("2026-10-12T14:30+03:00").toString(), new Date("2026-10-12T14:30+03:00").getHours(), Temporal.PlainDateTime.from("2026-10-12T14:30").round({ smallestUnit: "day" }).toString());   // 2026-10-12T14:30:00 16 2026-10-13T00:00:00
+Temporal.PlainDateTime.from("2026-10-12T14:30Z");   // RangeError: Temporal error: UTC designator is not valid for DateTime parsing.
+```
+
+Здесь ловушка. `Date` пересчитал «14:30 по Москве» в 16:30 по Ашхабаду, а
+`PlainDateTime` смещение просто выбросил: нет пояса — нет и пересчёта. `Z` запрещён вовсе: он
+означает момент по UTC. Совет справочника: если событие — один момент для всех поясов (созвон Ашхабада и Берлина),
+берите `ZonedDateTime` дня 24, а `PlainDateTime` — для «времени на часах». `round`
+до суток округлил 14:30 до полуночи 13 октября: это уже вторая половина дня.
+
+## 12. Одни методы у трёх классов {#shared}
+
+У классов `Temporal` общий набор методов — справочник MDN сводит его в одну таблицу на странице
+`Temporal`. Выучив `PlainDate`, вы знаете и остальные; отличия — в полях и в том, что у
+`PlainDate` нет `round`. Ссылки ведут на страницы справочника.
+
+| Группа | PlainDate | PlainTime | PlainDateTime |
+| --- | --- | --- | --- |
+| создать | [`from`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/from), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/PlainDate) | [`from`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/from), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/PlainTime) | [`from`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/from), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/PlainDateTime) |
+| заменить части | [`with`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/with), [`withCalendar`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/withCalendar) | [`with`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/with) | [`with`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/with), [`withCalendar`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/withCalendar), [`withPlainTime`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/withPlainTime) |
+| сдвинуть | [`add`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/add), [`subtract`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/subtract) | [`add`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/add), [`subtract`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/subtract) — по кругу | [`add`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/add), [`subtract`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/subtract) |
+| разница | [`since`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/since), [`until`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/until) | [`since`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/since), [`until`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/until) | [`since`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/since), [`until`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/until) |
+| округлить | — | [`round`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/round) | [`round`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/round) |
+| сравнить | [`equals`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/equals), [`compare`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/compare) | [`equals`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/equals), [`compare`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/compare) | [`equals`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/equals), [`compare`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/compare) |
+| в строку | [`toString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toString), [`toJSON`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toJSON), [`toLocaleString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toLocaleString) | [`toString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/toString), [`toJSON`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/toJSON), [`toLocaleString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/toLocaleString) | [`toString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toString), [`toJSON`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toJSON), [`toLocaleString`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toLocaleString) |
+| в число — никогда | [`valueOf`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/valueOf) — `TypeError` | [`valueOf`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/valueOf) — `TypeError` | [`valueOf`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/valueOf) — `TypeError` |
+| поля даты | [`year`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/year), [`month`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/month), [`day`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/day), [`dayOfWeek`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/dayOfWeek), [`daysInMonth`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/daysInMonth) | — | [`year`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/year), [`month`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/month), [`day`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/day), [`dayOfWeek`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/dayOfWeek), [`daysInMonth`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/daysInMonth) |
+| поля времени | — | [`hour`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/hour), [`minute`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/minute), [`second`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/second), [`millisecond`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/millisecond), [`microsecond`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/microsecond), [`nanosecond`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/nanosecond) | [`hour`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/hour), [`minute`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/minute), [`second`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/second), [`millisecond`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/millisecond), [`microsecond`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/microsecond), [`nanosecond`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/nanosecond) |
+| календарные поля (раздел 14) | [`calendarId`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/calendarId), [`era`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/era), [`eraYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/eraYear), [`monthCode`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/monthCode), [`dayOfYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/dayOfYear), [`daysInWeek`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/daysInWeek), [`daysInYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/daysInYear), [`monthsInYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/monthsInYear), [`inLeapYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/inLeapYear), [`weekOfYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/weekOfYear), [`yearOfWeek`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/yearOfWeek) | — | [`calendarId`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/calendarId), [`era`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/era), [`eraYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/eraYear), [`monthCode`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/monthCode), [`dayOfYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/dayOfYear), [`daysInWeek`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/daysInWeek), [`daysInYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/daysInYear), [`monthsInYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/monthsInYear), [`inLeapYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/inLeapYear), [`weekOfYear`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/weekOfYear), [`yearOfWeek`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/yearOfWeek) |
+| в другой класс | [`toPlainDateTime`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toPlainDateTime); [`toPlainYearMonth`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toPlainYearMonth), [`toPlainMonthDay`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toPlainMonthDay) — день 23; [`toZonedDateTime`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toZonedDateTime) — день 24 | — | [`toPlainDate`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toPlainDate), [`toPlainTime`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toPlainTime); [`toZonedDateTime`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toZonedDateTime) — день 24 |
+
+## 13. Temporal.Now: сегодня и сейчас {#now}
+
+```js
+console.log(Temporal.Now.timeZoneId(), Temporal.Now.plainDateISO() instanceof Temporal.PlainDate, typeof Temporal.Now.plainTimeISO().hour);   // Asia/Ashgabat true number
+const today = Temporal.Now.plainDateISO();
+const now = new Date();
+console.log(today.year === now.getFullYear(), today.month === now.getMonth() + 1, today.day === now.getDate());   // true true true
+```
+
+`Temporal.Now` — шесть функций, которые читают часы устройства и его пояс: `timeZoneId()` в
+Ашхабаде — `"Asia/Ashgabat"`. Сегодняшняя дата у `Temporal` и `Date` одна; само число
+не печатаем — у вас оно своё, как у `new Date()` в дне 17 Essentials. ISO в именах — календарь по
+умолчанию.
+
+| Функция | Что возвращает | Когда разбираем |
+| --- | --- | --- |
+| [`plainDateISO(пояс?)`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now/plainDateISO) | сегодняшняя дата, `PlainDate` | сегодня |
+| [`plainTimeISO(пояс?)`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now/plainTimeISO) | время сейчас, `PlainTime` | сегодня |
+| [`plainDateTimeISO(пояс?)`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now/plainDateTimeISO) | дата и время сейчас, `PlainDateTime` | сегодня |
+| [`timeZoneId()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now/timeZoneId) | имя пояса устройства, строка | сегодня |
+| [`instant()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now/instant) | момент, `Temporal.Instant` | день 24 |
+| [`zonedDateTimeISO(пояс?)`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now/zonedDateTimeISO) | момент с поясом, `Temporal.ZonedDateTime` | день 24 |
+
+Аргумент — имя пояса: `Temporal.Now.plainDateISO("America/New_York")` даст дату в Нью-Йорке, где ранним
+утром по Ашхабаду ещё вчера; несуществующий пояс — `RangeError`. Точность «сейчас» браузер, по
+справочнику, нарочно огрубляет (в Chrome до 0,1 мс) — защита от атак по времени. И совет раздела 7:
+`Temporal.Now` зовут в одном месте, а «сегодня» передают параметром.
+
+## 14. Календари {#calendars}
+
+```js
+const d = Temporal.PlainDate.from("2026-10-12");
+const persian = d.withCalendar("persian");
+console.log(persian.year, persian.month, persian.day, persian.era, persian.toString(), d.equals(persian), Temporal.PlainDate.compare(d, persian));   // 1405 7 20 ap 2026-10-12[u-ca=persian] false 0
+const hebrew = d.withCalendar("hebrew");
+console.log(hebrew.year, hebrew.monthsInYear, hebrew.inLeapYear, d.withCalendar("gregory").era, d.era);   // 5787 13 true ce undefined
+console.log(Temporal.PlainDate.from("2027-01-01").weekOfYear, Temporal.PlainDate.from("2027-01-01").yearOfWeek);   // 53 2026
+```
+
+Каждая дата знает свой календарь, по умолчанию — ISO 8601: григорианский плюс правила нумерации недель.
+`withCalendar` читает тот же день в другом: по персидскому календарю соседнего Ирана 12 октября 2026 года
+— 20-е число 7-го месяца 1405 года. День один, поэтому `compare` даёт 0, а `equals` —
+`false`: он сравнивает и календарь. Еврейский 5787 год високосный, в нём 13 месяцев; эры есть у
+григорианского календаря, у ISO — нет.
+
+Правила справочника: `era` с `eraYear` и `weekOfYear` с `yearOfWeek`
+берут только парой — 1 января 2027 года, пятница, по правилу ISO относится к 53-й неделе 2026 года. Не считайте, что в
+году 12 месяцев, а в неделе 7 дней, — есть `monthsInYear` и `daysInWeek`.
+`monthCode` отличается от `month` в календарях с високосным месяцем (день 23), а названия
+месяцев дают не массивы, а `toLocaleString` (день 25).
+
+## 15. Ошибки дня {#errors}
+
+Тексты ошибок `Temporal` в Chrome почти все начинаются словами «Temporal error:»; примеры на
+страницах MDN часто из Firefox, там формулировки другие. Ошибки `"reject"`, «24:00» и `Z` —
+в комментариях разделов 3, 10 и 11.
+
+| Код | Ошибка в Chrome | Что не так |
+| --- | --- | --- |
+| `new Temporal()` | `TypeError: Temporal is not a constructor` | пространство имён, не класс |
+| `Temporal.PlainDate(2026, 10, 12)` | `TypeError: Method invoked on an object that is not Temporal.PlainDate.` | конструктор без `new` |
+| `new Temporal.PlainDate(2026, 2, 30)` | `RangeError: Temporal error: Invalid ISO date.` | конструктор не подгоняет |
+| `from("12.10.2026")` | `RangeError: Temporal error: Invalid character while parsing year value.` | не формат RFC 9557 |
+| `from("2026-02-30")` | `RangeError: Temporal error: Parsed day value not in a valid range.` | строка проверяется строго |
+| `from({ year: 2026, month: 10 })`, `from(new Date())` | `TypeError: Temporal error: Invalid PlainDate fields provided.` | не хватает полей |
+| `add({ month: 1 })` | `TypeError: Temporal error: Did not provide any valid Duration fields.` | ключи — во множественном числе |
+| `add({ months: 1, days: -1 })` | `RangeError: Temporal error: Duration was not valid.` | разные знаки |
+| `a < b`, `a - b`, `a + ""` | `TypeError: Do not use Temporal.PlainDate.prototype.valueOf; use Temporal.PlainDate.prototype.compare for comparison.` | сравнивать — `compare` |
+| `d.year = 2027` (строгий режим) | `TypeError: Cannot set property year of [object Temporal.PlainDate] which has only a getter` | менять — `with` |
+| `until(…, { largestUnit: "hours" })` у даты | `RangeError: Temporal error: Unit was not part of the date unit group.` | у даты нет часов |
+
+Две ошибки молчаливы, их не видно в консоли. `new Temporal.PlainDate(2026, 9, 12)` по привычке
+`Date` даёт сентябрь, а строка `d.add({ days: 1 });` без присваивания не делает ничего:
+результат `add` надо сохранить.
+
+## 16. Что говорит спецификация {#spec}
+
+В тексте ECMA-262 2026 `Temporal` нет: стадию 4, последнюю, предложение получило в марте 2026 года и в
+выпуск 2026 года не успело. Его текст — на сайте предложения
+[tc39.es/proposal-temporal](https://tc39.es/proposal-temporal/) («Stage 4 Draft»), устроен как обычная
+глава спецификации:
+
+- [1 The Temporal Object](https://tc39.es/proposal-temporal/#sec-temporal-objects): обычный объект без
+  \[\[Construct\]\] и \[\[Call\]\] — отсюда «is not a constructor».
+- [3.1.1 Temporal.PlainDate ( isoYear, isoMonth,
+  isoDay \[ , calendar \] )](https://tc39.es/proposal-temporal/#sec-temporal.plaindate): без `new` — `TypeError`; числа обрезаются до целых
+  (`new Temporal.PlainDate(2026.9, 10.5, 12.99)` — 12 октября 2026); если IsValidISODate говорит «нет»,
+  — `RangeError`.
+- [3.4 Properties of
+  Temporal.PlainDate Instances](https://tc39.es/proposal-temporal/#sec-properties-of-temporal-plaindate-instances): внутренние слоты \[\[ISODate\]\] (год, месяц, число) и \[\[Calendar\]\]; поля читают
+  их через геттеры.
+- [3.5.7 RegulateISODate](https://tc39.es/proposal-temporal/#sec-temporal-regulateisodate) — подгонка:
+  при `constrain` месяц зажимается между 1 и 12, потом число — между 1 и длиной месяца; при
+  `reject` — `RangeError`.
+- [12.3.7 CalendarDateAdd](https://tc39.es/proposal-temporal/#sec-temporal-calendardateadd) — порядок
+  схемы 2: годы и месяцы, RegulateISODate для числа, потом дни и недели, умноженные на 7.
+- [3.5.13 CompareISODate](https://tc39.es/proposal-temporal/#sec-temporal-compareisodate): год, потом
+  месяц, потом число; календарь не участвует — отсюда 0 для персидской даты.
+- [3.3.33
+  Temporal.PlainDate.prototype.valueOf](https://tc39.es/proposal-temporal/#sec-temporal.plaindate.prototype.valueof) — один шаг: бросить `TypeError`; примечание: иначе
+  `>` сравнивал бы строки, и ответ был бы верным лишь «иногда».
+- [13.35 ParseISODateTime](https://tc39.es/proposal-temporal/#sec-temporal-parseisodatetime): строка
+  разбирается по грамматике формата, несуществующая дата отвергается.
+- [2.2.5 Temporal.Now.plainDateISO](https://tc39.es/proposal-temporal/#sec-temporal.now.plaindateiso)
+  через [SystemDateTime](https://tc39.es/proposal-temporal/#sec-temporal-systemdatetime): текущие
+  наносекунды от эпохи, прочитанные в поясе устройства или в заданном.
+
+## 17. «Карточки»: повтор по датам {#cards}
+
+Вчера даты повтора жили в `Date` и уезжали в JSON на «11 октября, 19:00 по UTC». Дню повтора время и
+пояс не нужны — это `PlainDate`. Добавим шаг: после повтора интервал удваивается.
+
+```js
+const cards = [
+  { word: "book", next: Temporal.PlainDate.from("2026-10-12"), step: 1 },
+  { word: "water", next: Temporal.PlainDate.from("2026-10-15"), step: 1 },
+  { word: "bread", next: Temporal.PlainDate.from("2026-10-13"), step: 2 },
+];
+const save = (list) => JSON.stringify(list);
+const load = (text) => JSON.parse(text, (key, value) => (key === "next" ? Temporal.PlainDate.from(value) : value));
+const review = (card, today) => ({ ...card, next: today.add({ days: card.step * 2 }), step: card.step * 2 });
+
+const text = save(cards);
+const back = load(text);
+const today = Temporal.PlainDate.from("2026-10-13");
+const due = back.filter((c) => Temporal.PlainDate.compare(c.next, today) <= 0);
+const after = due.map((c) => review(c, today));
+console.log(text);
+console.log(due.map((c) => c.word), after.map((c) => `${c.word} → ${c.next}`), today.until(back[1].next).days, today.toString());
+```
+
+<ResultBox>
+\[\{"word":"book","next":"2026-10-12","step":1\},\{"word":"water","next":"2026-10-15","step":1\},\{"word":"bread","next":"2026-10-13","step":2\}\]\
+(2) \['book', 'bread'\] (2) \['book → 2026-10-15', 'bread → 2026-10-17'\] 2 2026-10-13
+</ResultBox>
+
+**Строка 1 — сохранение.** Replacer больше не нужен: `toJSON` записал каждую дату как
+есть, «2026-10-12», без сдвига на пояс.
+
+**Строка 2 — повтор.** Reviver вернул даты, `compare` отобрал book (вчерашнюю) и bread
+(сегодняшнюю). `review` собирает новую карточку через spread дня 22 Essentials: book придёт через 2 дня,
+bread — через 4; до water — 2 дня. «Сегодня» не сдвинулось, и копия, как в `addDays` дня 21, не нужна.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Замените `Temporal.PlainDate.compare(c.next, today) <= 0` на
+`c.next <= today`. Какая ошибка и почему у `Date` такое сравнение работало?
+\
+\
+**Второй.** Уберите из `load` второй аргумент `JSON.parse` и выведите
+`back[0].next.dayOfWeek` и отобранные карточки. Почему `compare` по-прежнему отобрал
+правильно, а `dayOfWeek` — `undefined`?
+\
+\
+**Третий.** Перед `filter` напишите отдельной строкой `today.add({ days: 1 });`.
+Изменится ли список? Как сдвинуть «сегодня» на день по-настоящему?
+</TryIt>
+
+## 18. Что дальше {#next}
+
+Сегодня `Temporal` закрыл почти все претензии к `Date`: месяцы с единицы, неизменяемость,
+строгий разбор строк, «плюс месяц» без переноса. Завтра, на дне 23, — `Duration` (что такое
+`P81D` и как посчитать курс в часах), `PlainYearMonth` и `PlainMonthDay`. Пояса и
+моменты — день 24.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Temporal](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal) | зачем, классы, общий набор методов, календари, RFC 9557 | <Full /> |
+| [Temporal.Now](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now), [plainDateISO()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/Now/plainDateISO) | сегодня и сейчас; точность | <Full /> |
+| [Temporal.PlainDate](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/PlainDate), [from()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/from) | дата без пояса; подгонка `overflow` | <Full /> |
+| [year](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/year), [month](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/month), [day](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/day), [dayOfWeek](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/dayOfWeek), [daysInMonth](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/daysInMonth) | поля даты; месяц и день недели с 1 | <Full /> |
+| [with()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/with) | новая дата с заменёнными полями | <Full /> |
+| [add()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/add), [subtract()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/subtract) | сдвиг; порядок шагов; подгонка числа | <Full /> |
+| [since()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/since), [until()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/until) | разница; знак; `largestUnit` | <Full /> |
+| [equals()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/equals), [PlainDate.compare()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/compare) | равенство; −1, 0, 1 для `sort` | <Full /> |
+| [toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toString), [toPlainDateTime()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDate/toPlainDateTime) | строка RFC 9557; дата + время | <Full /> |
+| [Temporal.PlainTime](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/PlainTime), [from()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/from), [hour](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/hour), [minute](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainTime/minute) | время без даты; ходит по кругу | <Full /> |
+| [Temporal.PlainDateTime](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime), [конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/PlainDateTime), [from()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/from) | дата и время без пояса; смещение отбрасывается | <Full /> |
+| [toPlainDate()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toPlainDate), [toPlainTime()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal/PlainDateTime/toPlainTime) | разобрать на дату и время | <Full /> |
+| остальное `Temporal.Now` — 5 страниц | ссылки в таблице раздела 13 | <Brief /> |
+| календарные поля и прочие методы `PlainDate` — 18 страниц | ссылки в таблице раздела 12 | <Brief /> |
+| те же методы и поля у `PlainTime` — 16 страниц | ссылки в таблице раздела 12 | <Brief /> |
+| те же методы и поля у `PlainDateTime` — 37 страниц | ссылки в таблице раздела 12 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// Temporal.PlainDate.from("2026-10-12"), from({ year, month, day }), new Temporal.PlainDate(2026, 10, 12) — месяц с 1
+// строка — только RFC 9557 (YYYY-MM-DD), иначе RangeError; объект подгоняется: overflow "constrain" или "reject"
+// поля: year, month, day, dayOfWeek (1 — пн … 7 — вс), daysInMonth, dayOfYear, weekOfYear; только чтение
+// d.with({ day: 1 }), d.add({ months: 1 }), d.subtract({ days: 7 }) — всегда новая дата; результат сохраняйте
+// add: годы и месяцы → подгонка числа → недели и дни; 2026-01-31 + 1 месяц = 2026-02-28
+// a.until(b).days — b минус a; a.since(b) — a минус b; { largestUnit: "months" } — месяцы и дни
+// a.equals(b), Temporal.PlainDate.compare(a, b) → -1 / 0 / 1; list.sort(Temporal.PlainDate.compare); a < b — TypeError
+// JSON.stringify(d) → "2026-10-12"; обратно — reviver с Temporal.PlainDate.from
+// PlainTime: "09:00", ходит по кругу; PlainDateTime: дата + время, без пояса; toPlainDate(), toPlainTime()
+// Temporal.Now.plainDateISO(), plainTimeISO(), plainDateTimeISO(), timeZoneId()
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Что напечатает `new Temporal.PlainDate(2026, 9, 12).toString()` и почему?
+   <Answer>«2026-09-12» — 12 сентября. В `Temporal` месяцы считаются с единицы, 9 — это сентябрь.
+   Привычка «месяц минус один» из `Date` здесь даёт ошибку на месяц, и молча.</Answer>
+2. Почему `jan31.add({ months: 1, days: 31 })` и `jan31.add({ days: 31 }).add({ months: 1 })`
+   дают разные даты?
+   <Answer>Внутри одного `add` сначала прибавляются месяцы и число подгоняется: 28 февраля, потом 31
+   день — 31 марта. Во втором случае сначала 31 день — 3 марта, потом месяц — 3 апреля.</Answer>
+3. Чем `a.until(b)` отличается от `a.since(b)`?
+   <Answer>`until` считает от `a` до `b` (`b` минус `a`),
+   `since` — наоборот. Если `b` позже, `until` положителен, а
+   `since` отрицателен.</Answer>
+4. Почему `a < b` для двух `PlainDate` — ошибка, а не `true` или `false`?
+   <Answer>`valueOf` у дат `Temporal` всегда бросает `TypeError`. Иначе
+   `<` сравнил бы строки, и это иногда давало бы неверный ответ. Сравнивают через
+   `Temporal.PlainDate.compare` или `equals`.</Answer>
+5. Когда брать `PlainDateTime`, а когда ждать `ZonedDateTime`?
+   <Answer>`PlainDateTime` — «время на часах»: урок в 9:00 по местному времени, где бы он ни шёл.
+   Если событие — один момент для всех поясов, например созвон Ашхабада и Берлина, нужен
+   `ZonedDateTime` (день 24).</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Temporal" />

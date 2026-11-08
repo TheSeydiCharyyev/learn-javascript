@@ -40,8 +40,11 @@ function unwrap(children: ReactNode): ReactNode[] {
   return out;
 }
 
+// phone: data-phone, the mark of a result box that tools/runs/intermediate/day-35.cjs checks on a phone 360
 const textBox = (className: string) => {
-  const Box = ({ children }: Kids) => <div className={className}>{unwrap(children)}</div>;
+  const Box = ({ children, phone }: Kids & { phone?: boolean }) => (
+    <div className={className} {...(phone && { "data-phone": "" })}>{unwrap(children)}</div>
+  );
   Box.displayName = className;
   return Box;
 };

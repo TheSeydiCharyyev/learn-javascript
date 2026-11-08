@@ -1,0 +1,83 @@
+---
+title: День 31 — конспект
+css: |
+  h1 { border-bottom-color: #64748b; }
+  h2 { color: #334155; background: #f8fafc; border-left-color: #64748b; }
+---
+
+# День 31. Динамический импорт, import.meta и JSON
+
+<Subtitle>Выжимка лекции: import(), import.meta, JSON-модули, порядок reviver и replacer, context.source, JSON.rawJSON.</Subtitle>
+
+## Главное
+
+```js
+// ask.js
+export default (word) => `Как перевести «${word}»?`;
+```
+
+```js
+// main.js
+import words from "./words.json" with { type: "json" };
+console.log(import.meta.url);                              // http://127.0.0.1:5500/main.js
+const { default: ask } = await import("./ask.js");         // модуль по требованию
+console.log(ask(words[0].word));
+const text = '{"id": 12345678901234567890}';
+const exact = JSON.parse(text, (key, value, context) => (key === "id" ? BigInt(context.source) : value));
+console.log(JSON.stringify(exact, (key, value) => (typeof value === "bigint" ? JSON.rawJSON(String(value)) : value)));
+```
+
+```js file="words.json"
+[{ "id": 1, "word": "book" }]
+```
+
+## Модули по требованию
+
+| Что | Как работает |
+| --- | --- |
+| `await import("./m.js")` | промис объекта модуля; грузит, когда дошло выполнение; один раз; путь — любое выражение; работает и в обычном скрипте |
+| неудача `import()` | всегда отклонённый промис: 404 — `Failed to fetch dynamically imported module` |
+| `import.meta.url` | адрес текущего модуля; объект без прототипа; вне модуля — `SyntaxError` |
+| `import.meta.resolve("./x.js")` | адрес без загрузки, знает карту импорта |
+| `import d from "./d.json" with { type: "json" }` | только экспорт по умолчанию; файл обязан прийти как `application/json` |
+
+<Definition>
+**Reviver** (`JSON.parse`) обходит данные снизу вверх: сначала вложенное, корень с ключом
+`""` — последним. **Replacer** (`JSON.stringify`) — сверху вниз, корень первым.
+У обоих `this` — объект-хозяин свойства, поэтому пишут обычную функцию, а не стрелку. Вернуть
+`undefined` — убрать свойство.
+</Definition>
+
+<KeyPoint>
+`toJSON` срабатывает раньше replacer: дату replacer видит строкой, а настоящая лежит в
+`this[key]`. Третий аргумент reviver — `context`: у нетронутого примитива
+`context.source` — его исходный текст, отсюда точный `BigInt`. Обратно —
+`JSON.rawJSON(текст)`: его `stringify` вставляет дословно.
+</KeyPoint>
+
+<Remember>
+`Map` и `Set` в JSON — пустые объекты, даты `Temporal` — строки. Записывают их
+помеченными объектами (`{ $map: [...map] }`, `{ $date: value }`), а reviver оживляет: он идёт
+снизу вверх, и внутренности к этому моменту уже готовы. В JSON повтор ключа — побеждает последний, а
+`"__proto__"` — обычное свойство. Отступ — не больше 10.
+</Remember>
+
+<NoteBox>
+Ошибки: `const f = import;` — `Unexpected token ';'`; JSON без `with` —
+`Expected a JavaScript-or-Wasm module script…`; `import { x } from "./d.json"` — «does not
+provide an export named»; `JSON.rawJSON("[1]")` — `SyntaxError`. Спецификация: 25.5.2
+(InternalizeJSONProperty), 25.5.4 (SerializeJSONProperty), 13.3.10 (`import()` только отклоняет промис),
+16.2.1.8.2 (JSON-модуль — один экспорт по умолчанию).
+</NoteBox>
+
+<Homework>
+1. Найдите в своём проекте тяжёлый модуль, который нужен не сразу, и загрузите его по кнопке.
+2. Вынесите данные проекта в `.json` и импортируйте их атрибутом `with`.
+3. Прочитайте на странице
+   [import()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import)
+   раздел «Module namespace object» и проверьте пример с `then`.
+4. Найдите в ECMA-262 раздел 25.5.2.4 InternalizeJSONProperty и выпишите, когда в `context` есть
+   `source`.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import" />

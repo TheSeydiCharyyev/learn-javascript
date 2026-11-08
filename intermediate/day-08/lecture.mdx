@@ -1,0 +1,821 @@
+---
+title: "День 8 — Классы: конструктор, методы, поля"
+day: День 8 • урок 1
+heading: "Классы: конструктор, методы, поля"
+lead: Курс 2, Intermediate. Модуль «Прототипы и классы» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+  h3 { color: #9a3412; }
+  .step-number { background: #f97316; }
+  .toc a { color: #c2410c; }
+---
+
+<Goals>
+- переписывать функцию-конструктор на класс и видеть под классом ту же цепочку прототипов;
+- писать конструктор, методы, геттеры и сеттеры класса;
+- объявлять публичные поля и знать, в каком порядке они создаются;
+- не терять `this` у методов класса: поле со стрелочной функцией и `bind`;
+- перечислять, чем класс отличается от функции-конструктора, и показывать каждое отличие
+  в коде.
+</Goals>
+
+<Toc />
+
+## 1. Конструктор дня 7 — на классе {#rewrite}
+
+Вчера мы собрали студента из функции-конструктора и метода в `Student.prototype`.
+Тот же код, записанный классом:
+
+```js
+class Student {
+  constructor(name, marks) {
+    this.name = name;
+    this.marks = marks;
+  }
+
+  average() {
+    return this.marks.reduce((a, b) => a + b, 0) / this.marks.length;
+  }
+}
+
+const aman = new Student("Аман", [5, 4, 5]);
+const meret = new Student("Мерет", [4, 4]);
+
+console.log(aman.average(), meret.average());   // 4.666666666666667 4
+console.log(aman.average === meret.average);    // true — метод один на всех
+console.log(aman);                              // Student {name: 'Аман', marks: Array(3)}
+```
+
+Вывод тот же, что вчера, до последнего знака. Изменилась только запись: всё, что относится
+к студенту, стоит в одних фигурных скобках — конструктор и методы вместе. Метод пишется так же,
+как метод объекта (день 5): имя, скобки, тело, — но без запятых между методами.
+
+Классы появились в языке в 2015 году. В обзоре языка на дне 3 Essentials уже был класс
+`class Person` — с пометкой «под классами скрывается механизм прототипов». Механизм
+вы разобрали вчера; сегодня — запись, которая на нём построена.
+
+## 2. Класс — та же функция {#same}
+
+Учебник MDN называет классы «особыми функциями». Проверим это вчерашними инструментами:
+
+```js
+class Student {
+  constructor(name) {
+    this.name = name;
+  }
+  greet() {
+    return `Салам, ${this.name}!`;
+  }
+}
+
+const aman = new Student("Аман");
+console.log(typeof Student);                                      // function
+console.log(Object.getPrototypeOf(aman) === Student.prototype);   // true
+console.log(aman instanceof Student, aman.constructor === Student);   // true true
+console.log(Object.getOwnPropertyNames(Student.prototype));       // ['constructor', 'greet']
+```
+
+Все ответы — как у функции-конструктора. `Student` — функция,
+`Student.prototype` — объект с `constructor` и методом `greet`,
+цепочка `aman` → `Student.prototype` → `Object.prototype` →
+`null`. Класс не придумал нового наследования: он пишет за вас то, что вчера писалось
+вручную.
+
+<Scheme src="scheme-same.svg">Одно объявление класса делает всё, что вчера писалось вручную</Scheme>
+
+## 3. constructor {#constructor}
+
+`constructor` — особый метод: при `new` выполняется его тело с
+`this` — новым объектом. Это шаги 2 и 3 вчерашнего `new`. Параметры у него
+обычные, с умолчаниями и деструктуризацией:
+
+```js
+class Student {
+  constructor(name = "без имени") {
+    this.name = name;
+  }
+}
+
+console.log(new Student("Аман"), new Student());   // Student {name: 'Аман'} Student {name: 'без имени'}
+```
+
+Три правила. **Конструктор необязателен:** у класса без него язык подставит
+пустой, и `new Empty()` даст пустой объект с прототипом `Empty.prototype`.
+**Конструктор один:** второй — `SyntaxError: A class may only have one
+constructor`. **Вернуть свой объект можно**, как у функции-конструктора
+вчера: `return { b: 2 }` заменит новый объект. Пользуются этим так же редко.
+
+Когда полей много, конструктору часто дают один параметр — объект — и разбирают его
+деструктуризацией дня 22 Essentials:
+
+```js
+class Card {
+  constructor({ word, translation, topic = "все" }) {
+    this.word = word;
+    this.translation = translation;
+    this.topic = topic;
+  }
+}
+
+const card = new Card({ word: "book", translation: "книга" });
+const water = new Card(JSON.parse('{"word":"water","translation":"вода","topic":"еда"}'));
+console.log(card.topic, water.topic);   // все еда
+```
+
+Порядок аргументов больше не важен, умолчания видны в одной строке, а объект из JSON можно
+передать прямо в `new`. Одна ловушка: `new Card()` без аргумента разбирает
+`undefined` и падает с ошибкой дня 22 Essentials — `Cannot destructure property
+'word' of 'undefined' as it is undefined.` Лечится умолчанием для всего параметра:
+`constructor({ word, topic = "все" } = {})`.
+
+А вот обычные методы с одинаковыми именами ошибкой не считаются: побеждает последний, как
+повторный ключ в литерале объекта. MDN отмечает это как отличие от приватных элементов дня 9,
+где повтор запрещён.
+
+## 4. Методы, геттеры и сеттеры {#methods}
+
+Всё, что в теле класса записано как метод, — обычные методы, геттеры, сеттеры — попадает
+в `Student.prototype`. Геттеры и сеттеры пишутся так же, как в литерале дня 5:
+
+```js
+class Student {
+  constructor(name, marks) {
+    this.name = name;
+    this.marks = marks;
+  }
+
+  get average() {
+    return this.marks.reduce((a, b) => a + b, 0) / this.marks.length;
+  }
+
+  greet() {
+    return `Салам, ${this.name}!`;
+  }
+}
+
+const aman = new Student("Аман", [5, 4, 5]);
+console.log(aman.average, aman.greet());                       // 4.666666666666667 Салам, Аман!
+console.log(Object.keys(Student.prototype), Object.keys(aman));   // [] ['name', 'marks']
+for (const key in aman) {
+  console.log("for...in:", key);                               // name, marks — и ничего из прототипа
+}
+```
+
+Обратите внимание на `Object.keys(Student.prototype)` — пустой массив. Методы
+класса **неперечисляемые**: спецификация создаёт их операцией
+[DefineMethodProperty](https://tc39.es/ecma262/2026/#sec-definemethodproperty) (10.2.8)
+с `enumerable: false`. Поэтому вчерашняя беда `for...in` — перебор
+унаследованных методов — у классов не случается. У функции-конструктора метод, добавленный
+присваиванием `Student.prototype.greet = …`, перечисляемый (день 5), и
+`for...in` его покажет.
+
+Методы класса — определения методов дня 5: у них нет `prototype`, и
+`new aman.greet()` бросит `TypeError: aman.greet is not a constructor`.
+
+### Геттер и сеттер с проверкой
+
+Пара геттер плюс сеттер — учебник MDN называет её «accessor field» — в классе особенно удобна:
+проверка оценки из дня 5 работает для всех студентов сразу, и даже при создании.
+
+```js
+class Student {
+  constructor(name, mark) {
+    this.name = name;
+    this.mark = mark;   // уже через сеттер
+  }
+
+  get mark() {
+    return this._mark;
+  }
+
+  set mark(value) {
+    if (!Number.isInteger(value) || value < 2 || value > 5) {
+      throw new RangeError(`оценка ${value} не принята`);
+    }
+    this._mark = value;
+  }
+}
+
+const aman = new Student("Аман", 5);
+aman.mark = 4;
+console.log(aman.mark, Object.keys(aman));   // 4 ['name', '_mark']
+try {
+  new Student("Мерет", 7);
+} catch (error) {
+  console.log(`${error.name}: ${error.message}`);   // RangeError: оценка 7 не принята
+}
+```
+
+Строка `this.mark = mark` в конструкторе — обычное присваивание. Поиск по цепочке
+(день 7) находит сеттер в `Student.prototype`, и проверка срабатывает уже при
+создании: Мерет с оценкой 7 не родилась вовсе. Вместо сообщения в консоль сеттер бросает
+`RangeError` (день 11 Essentials) — неверные данные не пройдут молча. Слабое место
+прежнее, из дня 5: служебное `_mark` видно в `Object.keys` и его можно
+испортить снаружи. Завтра его заменит настоящее приватное поле `#mark`.
+
+И одно отличие от геттеров дня 5. Там геттер литерала был **своим** перечисляемым
+свойством, и `JSON.stringify` его вызывал. Геттер класса живёт в прототипе, поэтому
+`JSON.stringify(aman)` даёт `{"name":"Аман","_mark":4}` — без `mark`.
+Сохраняются только свои данные объекта.
+
+### Цепочка вызовов
+
+Если метод ничего не должен возвращать, полезно вернуть `this` — тогда вызовы можно
+писать один за другим:
+
+```js
+class Deck {
+  cards = [];
+
+  add(word) {
+    this.cards.push(word);
+    return this;
+  }
+
+  remove(word) {
+    this.cards = this.cards.filter((w) => w !== word);
+    return this;
+  }
+}
+
+const deck = new Deck().add("book").add("water").add("bread").remove("water");
+console.log(deck.cards);   // ['book', 'bread']
+```
+
+Похоже на цепочки методов строк из дня 16 Essentials, `text.trim().toLowerCase()`, но
+есть разница: методы строк каждый раз возвращают **новую** строку, а здесь каждый
+вызов возвращает тот же объект `deck`.
+
+### Свой toString и сравнение
+
+Два метода, которые часто пишут любому классу, — превращение в строку и сравнение по смыслу:
+
+```js
+class Card {
+  constructor(word, translation) {
+    this.word = word;
+    this.translation = translation;
+  }
+
+  toString() {
+    return `${this.word} — ${this.translation}`;
+  }
+
+  equals(other) {
+    return other instanceof Card && other.word === this.word;
+  }
+}
+
+const a = new Card("book", "книга");
+const b = new Card("book", "книга");
+console.log(`${a}`, a === b, a.equals(b), a.equals({ word: "book" }));
+// book — книга false true false
+```
+
+`toString` в `Card.prototype` стоит в цепочке раньше общего
+`Object.prototype.toString` (день 7), и шаблон находит его первым — вместо
+`[object Object]` дня 6. `a === b` — `false`: это два разных
+объекта, а `===` сравнивает ссылки (день 6). `equals` сравнивает по смыслу,
+а `instanceof` внутри отсекает то, что карточкой не является.
+
+## 5. Публичные поля {#fields}
+
+Свойства, которые есть у каждого объекта с самого начала, можно объявить прямо в теле класса —
+это **поля** (fields). Запись: имя, знак `=`, начальное значение, точка
+с запятой:
+
+```js
+class Group {
+  title = "1-А";
+  students = [];
+  note;
+
+  add(name) {
+    this.students.push(name);
+  }
+}
+
+const a = new Group();
+const b = new Group();
+a.add("Аман");
+console.log(a.students, b.students, a.students === b.students);   // ['Аман'] [] false
+console.log(Object.keys(a), a.note);                              // ['title', 'students', 'note'] undefined
+```
+
+Главное в этом примере — последнее `false`. Начальное значение поля вычисляется
+**заново для каждого объекта**, поэтому у каждой группы свой массив. Сравните
+с заданием 4 дня 7: массив в `prototype` был общим на все группы, и
+`push` в одну группу менял все. Поле без значения (`note;`) тоже создаётся —
+со значением `undefined`.
+
+Поля — свои свойства объекта, а не прототипа. Спецификация создаёт их операцией
+[DefineField](https://tc39.es/ecma262/2026/#sec-definefield) (7.3.32) — как
+свойства литерала, со всеми признаками `true`. Значит, поля перечисляемые: видны
+в `Object.keys`, JSON и `for...in`, в отличие от методов. Имя поля может быть
+вычисляемым, как в литерале: `[key] = "еда"`.
+
+<Mistake>
+Поле **определяет** свойство, а не присваивает его — и сеттер в прототипе при этом
+не вызывается. Если в классе со сеттером `mark` из раздела 4 объявить ещё и поле
+`mark = 7;`, у объекта появится своё свойство-данные `mark` со значением 7.
+Оно затенит геттер и сеттер прототипа (день 7), и проверка не сработает ни при создании, ни потом:
+`s.mark = 9` тоже пройдёт. Поле и аксессор с одним именем в одном классе не пишут.
+</Mistake>
+
+### Сначала поля, потом тело конструктора
+
+Порядок создания объекта у класса с полями — ещё один шаг вчерашнего `new`:
+
+```js
+class Order {
+  first = (console.log("поле 1"), 1);
+  second = (console.log("поле 2"), this.first + 1);
+
+  constructor() {
+    console.log("конструктор видит second =", this.second);
+  }
+}
+
+new Order();
+// поле 1
+// поле 2
+// конструктор видит second = 2
+```
+
+Сначала поля — сверху вниз, причём в начальном значении работает `this` нового
+объекта, — потом тело `constructor`. (Запятая внутри скобок — оператор «запятая» дня 7
+Essentials: выполнить левое, вернуть правое.) Из порядка следует ловушка: поле не видит того, что
+конструктор запишет позже.
+
+```js
+class Order {
+  total = this.items.length;
+
+  constructor(items) {
+    this.items = items;
+  }
+}
+
+new Order([1, 2]);
+// TypeError: Cannot read properties of undefined (reading 'length')
+```
+
+Когда вычислялось `total`, `this.items` ещё не было. Значение, которое
+зависит от данных конструктора, считают в самом конструкторе — или делают геттером, который
+посчитает в момент чтения.
+
+<Scheme src="scheme-fields.svg">Поля создаются раньше, чем выполняется тело конструктора</Scheme>
+
+Если поле и конструктор пишут одно и то же свойство, побеждает конструктор — он позже.
+Поэтому поле часто служит «значением по умолчанию», а конструктор его заменяет.
+
+## 6. Внутри класса — строгий режим {#strict}
+
+На дне 3 мы обещали: тело класса строгое всегда, без всякой директивы. Так записано
+в спецификации, в разделе
+[11.2.2 Strict Mode Code](https://tc39.es/ecma262/2026/#sec-strict-mode-code):
+«все части объявления и выражения класса — код строгого режима». Последствие — метод, отделённый
+от объекта, всегда падает:
+
+```js
+class Quiz {
+  position = 0;
+
+  next() {
+    this.position = this.position + 1;
+    return this.position;
+  }
+}
+
+const quiz = new Quiz();
+const next = quiz.next;   // метод без объекта, как на дне 2
+next();
+// TypeError: Cannot read properties of undefined (reading 'position')
+```
+
+У функции-конструктора дня 7 в обычном скрипте такой вызов молча прочитал бы
+`window.position`. У класса `this` — `undefined`, и ошибка
+указывает прямо на потерянный объект. Колбэк, таймер, обработчик события дня 2 — все они
+теряют `this` у метода класса точно так же.
+
+### this в колбэке внутри метода
+
+Та же ловушка внутри самого метода — в обычной функции, которую отдали `filter`:
+
+```js
+class Topic {
+  constructor(name, words) {
+    this.name = name;
+    this.words = words;
+  }
+
+  count() {
+    return this.words.filter(function (w) {
+      return w.topic === this.name;
+    }).length;
+  }
+}
+
+const food = new Topic("еда", [{ topic: "еда" }, { topic: "дом" }]);
+food.count();
+// TypeError: Cannot read properties of undefined (reading 'name')
+```
+
+`filter` вызывает колбэк по имени, без объекта, и в строгом теле класса
+`this` — `undefined`. Лечение из дня 2 — стрелочная функция:
+`(w) => w.topic === this.name` берёт `this` метода, и `count()`
+даёт 1. Сравните с функцией-конструктором в обычном скрипте: там тот же код не упал бы, а прочитал
+`window.name` — пустую строку — и тихо вернул 0. Класс превратил неверный ответ
+в ошибку.
+
+## 7. Поле со стрелочной функцией {#arrow}
+
+Классы дали новый способ не терять `this` — поле, значение которого — стрелочная
+функция:
+
+```js
+class Quiz {
+  position = 0;
+
+  next = () => {
+    this.position = this.position + 1;
+    return this.position;
+  };
+}
+
+const quiz = new Quiz();
+const next = quiz.next;
+console.log(next(), next(), quiz.position);   // 1 2 2
+console.log(quiz.next === new Quiz().next, Object.keys(quiz));   // false ['position', 'next']
+```
+
+Почему работает: начальное значение поля вычисляется с `this` — новым объектом,
+а стрелочная функция своего `this` не имеет и берёт его снаружи (день 2). Так каждая
+такая функция навсегда «приклеена» к своему объекту, как после `bind`.
+
+Вторая строка показывает цену. Поле — своё свойство, значит, у каждого объекта своя копия
+функции (`false`), и она видна в `Object.keys`. Это вчерашний «метод
+в конструкторе».
+
+<Scheme src="scheme-arrow.svg">Где живёт `next`: в прототипе или в каждом объекте</Scheme>
+
+Все способы рядом:
+
+| Способ | Где функция | Отделённый метод | Когда брать |
+| --- | --- | --- | --- |
+| обычный метод `next() {}` | одна в `prototype` | теряет `this` | по умолчанию |
+| поле `next = () => {}` | своя в каждом объекте | работает | метод отдают колбэком |
+| `this.next = this.next.bind(this)` в конструкторе | своя копия + оригинал в `prototype` | работает | в старом коде |
+| обёртка в месте вызова: `() => quiz.next()` | одна в `prototype` | не отделяется | один обработчик |
+
+Обычные методы — для всего, что вызывают через точку. Поле со стрелкой — для методов, которые
+отдают кнопке или таймеру как есть.
+
+## 8. Без new — ошибка {#no-new}
+
+Вчера забытый `new` у функции-конструктора молча записал имя в `window.name`.
+С классом так не выйдет:
+
+```js
+class Student {
+  constructor(name) {
+    this.name = name;
+  }
+}
+
+Student("Аман");
+// TypeError: Class constructor Student cannot be invoked without 'new'
+```
+
+MDN называет эту ошибку «class constructors must be invoked with 'new'». Причина в спецификации,
+в самом начале обычного вызова функции —
+[10.2.1
+\[\[Call\]\]](https://tc39.es/ecma262/2026/#sec-ecmascript-function-objects-call-thisargument-argumentslist): «если функция — конструктор класса, бросить `TypeError`». Тело класса даже
+не начинает выполняться.
+
+## 9. Объявление и выражение класса {#expression}
+
+Класс, как и функцию, можно записать выражением — в переменную, аргументом, в
+`return`:
+
+```js
+const Rect = class {
+  constructor(w) {
+    this.w = w;
+  }
+};
+const Named = class Inner {
+  who() {
+    return Inner.name;
+  }
+};
+
+console.log(Rect.name, Named.name, new Named().who(), typeof Inner);   // Rect Inner Inner undefined
+```
+
+Имя выводится по правилам дня 4: безымянный класс в переменной получает имя переменной,
+класс со своим именем — своё, и это имя видно только внутри класса, как у функции-выражения
+с именем.
+
+Отличие от функций — во времени. Объявление функции работает и до своей строки (день 12
+Essentials), а класс — как `let`: до объявления к нему обращаться нельзя.
+
+```js
+const card = new Card("book");
+
+class Card {
+  constructor(word) {
+    this.word = word;
+  }
+}
+// ReferenceError: Cannot access 'Card' before initialization
+```
+
+Это та же «временная мёртвая зона», что у `let` на дне 4 Essentials. И как
+`let`, класс верхнего уровня ложится в декларативную часть глобальной записи (день 3):
+`globalThis.Card` — `undefined`, хотя класс виден во всех скриптах
+страницы.
+
+Раз класс — значение, функция может его вернуть. Каждый вызов фабрики даёт новый класс
+со своими настройками в замыкании (день 1):
+
+```js
+function makeCounter(step) {
+  return class {
+    count = 0;
+
+    add() {
+      this.count = this.count + step;
+      return this.count;
+    }
+  };
+}
+
+const ByTen = makeCounter(10);
+const counter = new ByTen();
+counter.add();
+console.log(counter.add(), JSON.stringify(ByTen.name));   // 20 ""
+```
+
+Имя у такого класса пустое: класс вернули из `return`, и вывести имя не из чего —
+та же строка таблицы дня 4, что у безымянной обёртки `memo`.
+
+## 10. arguments в полях {#arguments}
+
+Начальное значение поля — не функция, и своего `arguments` (день 4) у него нет.
+Обратиться к нему — синтаксическая ошибка, даже если класс написан внутри обычной функции:
+
+```js
+class Log {
+  args = arguments;
+}
+// SyntaxError: 'arguments' is not allowed in class field initializer or static initialization block
+```
+
+MDN называет её «arguments is not valid in fields». Стрелочная функция в поле тоже не спасёт:
+она берёт `arguments` снаружи, а снаружи — поле. Обычная функция в поле свой
+`arguments` имеет и работает. «Статический блок инициализации» из текста ошибки —
+тема дня 9.
+
+## 11. Класс или функция-конструктор {#diff}
+
+Соберём отличия. Все проверены в Chrome, и каждое найдёт своё место в заданиях:
+
+|  | Функция-конструктор (день 7) | Класс |
+| --- | --- | --- |
+| вызов без `new` | работает, `this` — окно или `undefined` | `TypeError` всегда |
+| режим внутри | как у скрипта | всегда строгий |
+| методы в `prototype` | перечисляемые, если добавлены присваиванием | неперечисляемые |
+| до своей строки | объявление уже работает | `ReferenceError`, как `let` |
+| в `globalThis` | да, у объявления верхнего уровня | нет |
+| поля | нет, только `this.x = …` | да |
+| свойство `prototype` | можно заменить | только для чтения |
+
+Последняя строка закрывает вчерашнюю ловушку с потерянным `constructor`. У класса
+`Student.prototype` — `writable: false`, и заменить его целиком нельзя:
+
+```js
+"use strict";
+class Student {}
+Student.prototype = { greet() {} };
+// TypeError: Cannot assign to read only property 'prototype' of function 'class Student {}'
+```
+
+В обычном скрипте присваивание молча пропадёт — тишина дня 5. Добавлять методы по одному
+по-прежнему можно, но у классов так не делают: методы пишут в теле класса.
+
+## 12. Когда класс, а когда объект {#when}
+
+Учебник MDN «Using classes» заканчивается вопросом «зачем вообще классы?» и честно отвечает:
+«зависит от задачи». Класс — способ организовать код: данные и действия над ними в одном месте,
+проверка — в одном сеттере, а не в каждой функции. Учебник показывает это на цвете: без класса
+`Color` пришлось бы держать десяток отдельных функций вроде `isRed(color)`
+и `isValidColor(color)`, и каждая проверяла бы данные заново.
+
+Но у классов есть и обратная сторона, и учебник показывает её на `Date` из дня 17
+Essentials. Объект класса обычно **изменяемый**: функция, которой отдали дату, может
+поменять её «изнутри», и дата изменится у всех, кто на неё ссылается. Код с таким общим изменяемым
+состоянием труднее понимать. Поэтому новый `Temporal` (день 22) сделан неизменяемым:
+каждый его метод возвращает новый объект.
+
+| Задача | Что взять | Пример из курса |
+| --- | --- | --- |
+| один объект с действиями | литерал с методами | викторина `quiz` дня 2 |
+| много однотипных объектов с поведением | класс | `Card` сегодня |
+| данные из JSON и обратно, без поведения | простые объекты и функции | `words.json` в Essentials |
+| скрытое состояние одного механизма | замыкание | `makeProgress` дня 1 |
+
+Essentials обходился без классов — и это было правильно: данных было мало, а простой объект
+легче проверить и сохранить (день 21 Essentials). Класс нужен, когда однотипных объектов много
+и у них есть общее поведение, которое надо держать в одном месте.
+
+## 13. Как класс создаётся {#spec}
+
+Классам в спецификации посвящён раздел
+[15.7 Class Definitions](https://tc39.es/ecma262/2026/#sec-class-definitions), а главный
+алгоритм — [15.7.14
+ClassDefinitionEvaluation](https://tc39.es/ecma262/2026/#sec-runtime-semantics-classdefinitionevaluation). Он длинный, и справочник MDN «Classes» пересказывает его порядком
+из семи шагов. Без шагов о наследовании (день 10) и `static` (день 9) остаются четыре:
+
+1. Взять `constructor`, а если его нет — подставить пустой.
+2. Вычислить имена всех элементов по порядку — у вычисляемых имён выполняется выражение
+   в квадратных скобках.
+3. Положить методы, геттеры и сеттеры в `prototype`.
+4. Запомнить начальные значения полей — но не вычислять. Они вычисляются при каждом
+   `new`, в начале конструктора.
+
+Пока все шаги не закончены, имя класса недоступно: обращение к нему внутри вычисляемого
+имени даст `ReferenceError`. А поле, наоборот, вычисляется позже всех — уже при создании
+объекта. Отсюда разница, которую стоит запомнить: выражение в `[ключе]` выполняется
+один раз, при объявлении класса, а значение поля — для каждого объекта заново.
+
+## 14. «Карточки»: класс Card {#cards}
+
+Перепишем вчерашнюю карточку на класс. Данные — поля и конструктор, методы — в теле класса,
+а для кнопки — поле со стрелочной функцией, чтобы обработчик не терял карточку.
+
+```js
+class Card {
+  flipped = false;
+  handleFlip = () => {
+    console.log(`кнопка: ${this.flip()}`);
+  };
+
+  constructor(id, word, translation, topic) {
+    this.id = id;
+    this.word = word;
+    this.translation = translation;
+    this.topic = topic;
+  }
+
+  flip() {
+    this.flipped = !this.flipped;
+    return this.text();
+  }
+
+  text() {
+    return this.flipped ? this.translation : this.word;
+  }
+
+  get label() {
+    return `${this.word} (${this.topic})`;
+  }
+}
+
+const card = new Card(4, "bread", "хлеб", "еда");
+const button = document.createElement("button");
+button.textContent = "Перевернуть";
+document.body.append(button);
+button.addEventListener("click", card.handleFlip);
+
+button.click();
+button.click();
+console.log(card.label, Object.keys(card));
+console.log(Object.getOwnPropertyNames(Card.prototype));
+console.log(JSON.stringify(card));
+
+const saved = JSON.parse(JSON.stringify(card));
+const restored = new Card(saved.id, saved.word, saved.translation, saved.topic);
+restored.flipped = saved.flipped;
+console.log(restored instanceof Card, restored.text(), typeof restored.handleFlip);
+```
+
+<ResultBox>
+кнопка: хлеб\
+кнопка: bread\
+bread (еда) (6) \['flipped', 'handleFlip', 'id', 'word', 'translation', 'topic'\]\
+(4) \['constructor', 'flip', 'text', 'label'\]\
+\{"flipped":false,"id":4,"word":"bread","translation":"хлеб","topic":"еда"\}\
+true bread function
+</ResultBox>
+
+**Строки 1–2 — кнопка.** В обработчик отдали `card.handleFlip` без
+`bind`, а карточка не потерялась: стрелочная функция в поле знает свой объект. С обычным
+методом — `addEventListener("click", card.flip)` — внутри оказалась бы кнопка (день 2),
+и `this.text` не нашёлся бы.
+
+**Строка 3 — свои свойства.** Сначала два поля — они создаются раньше тела
+конструктора, — потом четыре свойства из конструктора. `label` — геттер в прототипе,
+своим свойством он не стал.
+
+**Строка 4 — прототип.** Конструктор, два метода и геттер — всё, что записано
+в теле класса как метод.
+
+**Строка 5 — JSON.** Функцию `handleFlip` JSON пропустил, как любую
+функцию (день 23 Essentials), а поле `flipped` сохранил — это данные.
+
+**Строка 6 — восстановление.** Вчера мы возвращали прототип через
+`Object.create(Card.prototype)`. С классом так нельзя: поле `handleFlip`
+создаётся только при `new`, и без конструктора у карточки не было бы обработчика.
+Поэтому восстанавливают через конструктор. Завтра это станет одним вызовом —
+`Card.fromJSON(saved)`, статическим методом.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Отдайте кнопке обычный метод: `button.addEventListener("click",
+card.flip)`. Какая ошибка появится при нажатии? Чему равен `this` внутри
+`flip` — по таблице дня 2?
+\
+\
+**Второй.** Восстановите карточку по-вчерашнему:
+`Object.assign(Object.create(Card.prototype), saved)`. Что вернёт
+`restored.text()` и что — `typeof restored.handleFlip`?
+\
+\
+**Третий.** Добавьте полю значение, которое зависит от конструктора:
+`title = this.word.toUpperCase();`. Что случится при `new Card(...)` и как
+это исправить?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+Класс — короткая и строгая запись функции-конструктора: `new` обязателен, режим
+строгий, методы неперечисляемые, поля создаются у каждого объекта. Под записью — вчерашний
+механизм прототипов.
+
+Но у сегодняшних классов два недостатка. Данные открыты: `quiz.position = 99`
+сработает, как у объекта дня 2, — спрятать их могло только замыкание дня 1, а оно не дружит
+с прототипом. И нет места для того, что относится к классу целиком, а не к одному объекту:
+счётчик созданных карточек, восстановление из JSON. Завтра — приватные поля `#`
+и `static`.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Guide: Using classes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_classes) | классы с нуля: объявление, конструктор, методы, поля | <Full /> |
+| [Classes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes) | справочник: тело класса, виды элементов, порядок создания | <Full /> |
+| [class](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/class) | объявление класса; временная мёртвая зона | <Full /> |
+| [class expression](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/class) | класс-выражение, своё имя внутри | <Full /> |
+| [constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/constructor) | один на класс; необязателен; возврат объекта | <Full /> |
+| [Public class fields](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Public_class_fields) | поля: у каждого объекта свои, до тела конструктора | <Full /> |
+| [Ошибка: class constructors must be invoked with 'new'](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Class_ctor_no_new) | `Class constructor X cannot be invoked without 'new'` | <Brief /> |
+| [Ошибка: arguments is not valid in fields](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Arguments_not_allowed) | `'arguments' is not allowed in class field initializer…` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// class Card {
+//   flipped = false;                 // поле: своё у КАЖДОГО объекта, перечисляемое
+//   handle = () => this.flip();      // поле-стрелка: this навсегда этот объект
+//   constructor(word) {              // тело — при new, ПОСЛЕ полей; один на класс
+//     this.word = word;
+//   }
+//   flip() { … }                     // метод: один в Card.prototype, неперечисляемый
+//   get label() { … }                // геттер/сеттер — тоже в Card.prototype
+// }
+
+// typeof Card → "function"; Object.getPrototypeOf(new Card()) === Card.prototype
+// Card() без new — TypeError: Class constructor Card cannot be invoked without 'new'
+// тело класса — строгий режим: отделённый метод — TypeError (this undefined)
+// до объявления — ReferenceError (как let); в globalThis класса нет
+// Card.prototype только для чтения — целиком не заменить
+// const C = class {} — выражение; class Inner {} в выражении — имя видно только внутри
+// поле не видит того, что запишет конструктор; arguments в поле — SyntaxError
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Что вернёт `typeof` класса и где лежат его методы?
+   <Answer>`"function"`. Методы — в `Класс.prototype`, один на все объекты,
+   неперечисляемые.</Answer>
+2. Чем поле `students = []` отличается от массива в `prototype`?
+   <Answer>Значение поля вычисляется для каждого объекта заново — у каждого свой массив.
+   Массив в прототипе один на всех, и изменения одного объекта видны всем.</Answer>
+3. Почему `total = this.items.length` падает, если `items` пишет
+   конструктор?
+   <Answer>Поля создаются раньше, чем выполняется тело конструктора. Когда считалось
+   `total`, `this.items` было `undefined`.</Answer>
+4. Зачем методу поле со стрелочной функцией и чем за это платят?
+   <Answer>Стрелочная функция в поле берёт `this` нового объекта и не теряет его,
+   когда метод отдают кнопке или таймеру. Плата — своя копия функции в каждом объекте,
+   видимая в `Object.keys`.</Answer>
+5. Назовите три отличия класса от функции-конструктора.
+   <Answer>Любые три: без `new` — `TypeError`; внутри всегда строгий режим;
+   методы неперечисляемые; до объявления — `ReferenceError`; нет в
+   `globalThis`; есть поля; `prototype` только для чтения.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_classes" />

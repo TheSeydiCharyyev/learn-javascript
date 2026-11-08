@@ -1,0 +1,766 @@
+---
+title: День 28 — async-функции изнутри и очередь микрозадач
+day: День 28 • урок 1
+heading: async-функции изнутри и очередь микрозадач
+lead: Курс 2, Intermediate. Модуль «Ошибки и асинхронность» — третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #92400e; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #b45309; }
+---
+
+<Goals>
+- знать, в каком порядке выполняются синхронный код, `then`, продолжение после `await` и `setTimeout`, — и уметь предсказать вывод;
+- понимать, почему `then` никогда не срабатывает посреди текущего кода (раздел 27.2.2 спецификации);
+- видеть async-функцию как тело, разрезанное `await` на куски, и знать, что она возвращает и как бросает;
+- писать выражения `async function`, в том числе сразу вызванные, и знать, где `await` разрешён;
+- выбирать между ожиданием по очереди и всем сразу и не попадаться на `forEach` с `async`.
+</Goals>
+
+<Toc />
+
+## 1. Обещания, накопленные за курс {#debts}
+
+День 30 Essentials записал правило «функция таймера — всегда после текущего кода» и пообещал: «как устроена эта
+очередь, подробно разбирается в курсе 2». Там же было сказано, что `then` «никогда не срабатывает посреди
+вашего кода», даже у готового промиса. День 31 добавил, что `async`-функция выполняется сразу — до первого
+`await`, а потом отдаёт управление. День 27 курса 2 дважды отложил на сегодня вопрос «почему именно в таком
+порядке». Начнём с задачи — какие номера напечатаются по порядку?
+
+```js
+console.log("1: скрипт");
+setTimeout(() => console.log("6: таймер"), 0);
+Promise.resolve().then(() => console.log("4: then"));
+(async () => {
+  console.log("2: async до await");
+  await null;
+  console.log("5: async после await");
+})();
+console.log("3: скрипт, конец");
+```
+
+<ResultBox>
+1: скрипт\
+2: async до await\
+3: скрипт, конец\
+4: then\
+5: async после await\
+6: таймер
+</ResultBox>
+
+Номера идут подряд, хотя строки в коде — нет. Таймер с задержкой 0 оказался последним, `then` обогнал
+его, а продолжение после `await` встало между ними. Чтобы такие ответы получались не угадыванием, нужно
+знать, где каждая строка ждёт своей очереди. Помощники дня 30 Essentials (`wait`, `later`,
+`failLater`) стоят в начале `app.js`, как на дне 27.
+
+## 2. Один поток и две очереди {#queues}
+
+У страницы один поток: в каждый момент выполняется что-то одно (день 30 Essentials). Работа приходит порциями —
+**задачами**: весь скрипт целиком, сработавший таймер, щелчок. Задача выполняется до конца, никто её не
+прерывает. А между задачами браузер выполняет **микрозадачи** — так справочник MDN на странице
+`await` называет продолжения промисов. Правило одно:
+
+<Scheme src="scheme-queues.svg">Цикл событий: одна задача — потом все микрозадачи</Scheme>
+
+Отсюда ответ задачи раздела 1: строки 1–3 — сам скрипт, первая задача; 4 и 5 — микрозадачи, они идут сразу после
+скрипта; 6 — таймер, следующая задача. «Все микрозадачи» означает буквально все, даже появившиеся только что:
+
+```js
+setTimeout(() => console.log("таймер"), 0);
+let n = 0;
+function step() {
+  n++;
+  if (n < 1000) return Promise.resolve().then(step);
+  console.log("микрозадач подряд:", n);
+}
+Promise.resolve().then(step);
+```
+
+<ResultBox>
+микрозадач подряд: 1000\
+таймер
+</ResultBox>
+
+Каждый шаг добавлял новую микрозадачу, и таймер ждал, пока не пройдут все тысяча. Бесконечная цепочка микрозадач
+повесила бы страницу, как бесконечный цикл. Устройство цикла событий целиком описывает страница MDN «Execution model»
+— это курс 3.
+
+## 3. Почему then — после текущего кода {#then}
+
+Ответ даёт спецификация (раздел 13): `then` никогда не вызывает функцию сам. Он лишь ставит её в
+очередь — как задание промиса. Если промис уже выполнен, задание встаёт в очередь сразу; если ждёт — в момент
+выполнения. А задания начинаются, только когда текущий код закончен, и идут в том порядке, в каком их поставили:
+
+```js
+const p = Promise.resolve("готово");
+p.then(() => console.log("первый then"));
+p.then(() => console.log("второй then"));
+console.log("синхронный код");
+```
+
+<ResultBox>
+синхронный код\
+первый then\
+второй then
+</ResultBox>
+
+То же касается `catch` и `finally` дня 30 Essentials — это тоже `then`, только с
+другой функцией. А `then` вовсе без функции ничего не делает с значением и передаёт его дальше — но тоже
+через задание:
+
+```js
+Promise.resolve(1).then().then((v) => console.log("then() без функции пропустил:", v));
+Promise.reject(new Error("x")).then(() => console.log("не будет")).catch((e) => console.log("catch:", e.message)).finally(() => console.log("finally"));
+console.log("сначала скрипт");
+```
+
+<ResultBox>
+сначала скрипт\
+then() без функции пропустил: 1\
+catch: x\
+finally
+</ResultBox>
+
+Каждый следующий `then` цепочки ставится в очередь, только когда выполнился предыдущий. Поэтому две
+цепочки, начатые рядом, идут вперемешку, по шагу, — справочник называет это «переплетением» (intertwined):
+
+```js
+Promise.resolve().then(() => console.log("A1")).then(() => console.log("A2"));
+Promise.resolve().then(() => console.log("B1")).then(() => console.log("B2"));
+```
+
+<ResultBox>
+A1\
+B1\
+A2\
+B2
+</ResultBox>
+
+Отсюда и порядок строк дня 27, когда `all` и `race` отклонились в одну миллисекунду: кто
+подписался раньше, тот и напечатал раньше. Но есть тонкость, на которой строить программу нельзя. Если шаг возвращает
+промис, цепочка ждёт его через два лишних задания (раздел 13 объяснит почему):
+
+```js
+Promise.resolve().then(() => { console.log("A1"); return Promise.resolve(); }).then(() => console.log("A2"));
+Promise.resolve().then(() => console.log("B1")).then(() => console.log("B2")).then(() => console.log("B3")).then(() => console.log("B4"));
+```
+
+<ResultBox>
+A1\
+B1\
+B2\
+B3\
+A2\
+B4
+</ResultBox>
+
+Порядок внутри одной цепочки гарантирован всегда. Порядок между независимыми цепочками зависит от числа шагов в
+каждой — если он важен, свяжите их явно: `then`, `await` или `Promise.all`.
+
+## 4. Тело, разрезанное await {#split}
+
+Справочник предлагает смотреть на тело `async`-функции как на куски между `await`. Код до
+первого `await` выполняется сразу, синхронно. Код после каждого `await` — как будто внутри
+`then`: микрозадача. Без `await` функция работает синхронно целиком. Пример справочника — два
+вызова одной функции:
+
+```js
+async function foo(name) {
+  console.log(name, "start");
+  console.log(name, "middle");
+  console.log(name, "end");
+}
+foo("First");
+foo("Second");
+```
+
+<ResultBox>
+First start\
+First middle\
+First end\
+Second start\
+Second middle\
+Second end
+</ResultBox>
+
+Один `await` всё меняет: первый вызов доходит до него и уступает место второму, а «end» обоих откладывается
+в микрозадачи.
+
+```js
+async function foo(name) {
+  console.log(name, "start");
+  await console.log(name, "middle");
+  console.log(name, "end");
+}
+foo("First");
+foo("Second");
+```
+
+<ResultBox>
+First start\
+First middle\
+Second start\
+Second middle\
+First end\
+Second end
+</ResultBox>
+
+Справочник переписывает вторую версию на промисы — так видно, где проходит разрез:
+
+```js
+function foo(name) {
+  return new Promise((resolve) => {
+    console.log(name, "start");
+    resolve(console.log(name, "middle"));
+  }).then(() => {
+    console.log(name, "end");
+  });
+}
+foo("First");
+foo("Second");
+```
+
+<ResultBox>
+First start\
+First middle\
+Second start\
+Second middle\
+First end\
+Second end
+</ResultBox>
+
+<Scheme src="scheme-split.svg">Где `await` режет тело функции</Scheme>
+
+Совет справочника отсюда: пишите `await` там, где нужно значение промиса, и только там. Каждый лишний
+`await` — ещё один разрез, ещё одна микрозадача и лишняя возможность для гонки между функциями.
+
+## 5. await ждёт всегда {#await}
+
+Даже если ждать нечего. `await 5` или `await` уже выполненного промиса всё равно отдаёт
+управление и продолжает функцию микрозадачей — справочник: «выполнение не вернётся в функцию, пока не будут обработаны
+все уже поставленные микрозадачи».
+
+```js
+async function g() {
+  console.log("g: до await");
+  await 5;
+  console.log("g: после await");
+}
+Promise.resolve().then(() => console.log("then 1")).then(() => console.log("then 2"));
+g();
+console.log("скрипт");
+```
+
+<ResultBox>
+g: до await\
+скрипт\
+then 1\
+g: после await\
+then 2
+</ResultBox>
+
+Продолжение `g` встало в очередь после «then 1» — его поставили раньше — и перед «then 2», который
+поставят, только когда выполнится «then 1». `await` ждёт и любой «thenable» дня 27: его `then`
+вызывается тоже не сразу, а отдельным заданием:
+
+```js
+const thenable = { then(resolve) { console.log("then вызван"); resolve(7); } };
+(async () => {
+  console.log("ждём thenable");
+  console.log("получили", await thenable);
+})();
+console.log("скрипт");
+```
+
+<ResultBox>
+ждём thenable\
+скрипт\
+then вызван\
+получили 7
+</ResultBox>
+
+## 6. Что возвращает async-функция {#return}
+
+Всегда новый промис — день 31 Essentials. `return` его выполняет, брошенная ошибка — отклоняет. Важное
+следствие: ошибка в `async`-функции **не вылетает из вызова**, даже брошенная до первого
+`await`. Её увидит только тот, кто ждёт промис:
+
+```js
+async function broken() {
+  throw new Error("сразу");
+}
+let thrown = "нет";
+let result;
+try {
+  result = broken();
+} catch {
+  thrown = "да";
+}
+console.log("бросила при вызове:", thrown, "| вернула промис:", result instanceof Promise);
+result.catch((e) => console.log("промис отклонён:", e.message));
+```
+
+<ResultBox>
+бросила при вызове: нет | вернула промис: true\
+промис отклонён: сразу
+</ResultBox>
+
+Без `catch` такая ошибка станет красным «Uncaught (in promise)» дня 27, и только. Справочник
+сравнивает `async function foo() { return 1; }` с `Promise.resolve(1)`, но предупреждает, что
+это не одно и то же: `Promise.resolve(p)` возвращает сам `p` (день 27), а `async`-функция
+— всегда новый промис.
+
+```js
+const p = Promise.resolve(1);
+async function asyncReturn() { return p; }
+function basicReturn() { return Promise.resolve(p); }
+console.log(p === basicReturn(), p === asyncReturn());
+// true false
+```
+
+И самая частая ловушка — `return` промиса внутри `try`. Функция возвращает его, не дожидаясь,
+и `try` уже закончен, когда промис откажет. Чтобы `catch` поймал отказ, его нужно дождаться
+здесь же — `return await`:
+
+```js
+async function withoutAwait() {
+  try {
+    return failLater("нет связи", 100);
+  } catch {
+    return "запасной ответ";
+  }
+}
+async function withAwait() {
+  try {
+    return await failLater("нет связи", 100);
+  } catch {
+    return "запасной ответ";
+  }
+}
+withoutAwait().then((v) => console.log("return:", v), (e) => console.log("return: отклонён —", e.message));
+withAwait().then((v) => console.log("return await:", v));
+```
+
+<ResultBox>
+return: отклонён — нет связи\
+return await: запасной ответ
+</ResultBox>
+
+Справочник добавляет второй довод за `return await` — стек дня 26. Без `await` промис
+отклоняется, когда внешняя функция уже вернулась, и в стеке её нет. С `await` ошибка проходит через неё, и
+V8 пишет в стеке строку «at async» с её именем:
+
+```js
+async function lastAsyncTask() {
+  await null;
+  throw new Error("failed");
+}
+async function noAwait() {
+  return lastAsyncTask();
+}
+async function withAwait() {
+  return await lastAsyncTask();
+}
+const frames = (e) => e.stack.split("\n").slice(1).map((line) => line.trim().split(" (")[0]).join(" | ");
+noAwait().catch((e) => console.log("return:", frames(e)));
+withAwait().catch((e) => console.log("return await:", frames(e)));
+```
+
+<ResultBox>
+return: at lastAsyncTask\
+return await: at lastAsyncTask | at async withAwait
+</ResultBox>
+
+Вопреки распространённому мнению, пишет справочник, `return await` не медленнее `return`, и, кроме
+соображений стиля, он почти всегда предпочтительнее.
+
+## 7. Выражение async function {#expression}
+
+День 31 Essentials писал `async` перед объявлением функции и стрелкой. Есть и третья запись —
+[выражение
+`async function`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function), как функция-выражение дня 13 Essentials. Имя у выражения необязательно, а если есть,
+видно только внутри — для рекурсии:
+
+```js
+const load = async function loadDeck(attempt) {
+  return attempt < 3 ? loadDeck(attempt + 1) : `попытка ${attempt}`;
+};
+load(1).then((text) => console.log(text, "|", load.name, "|", typeof loadDeck));
+// попытка 3 | loadDeck | undefined
+```
+
+Главное применение выражения — сразу вызванная функция (IIFE), как в задаче раздела 1. В обычном скрипте
+`await` на верхнем уровне нельзя (раздел 10), а внутри `(async () => { … })()` — можно.
+Пример справочника показывает и цену лишнего ожидания из дня 27: функция `add` ждёт два числа по очереди,
+а сразу вызванная — запускает оба ожидания до первого `await`:
+
+```js
+const start = Date.now();
+const since = () => `${Math.round((Date.now() - start) / 100) * 100} мс`;
+const add = async function (x) {
+  const a = await later(20, 200);
+  const b = await later(30, 200);
+  return x + a + b;
+};
+add(10).then((v) => console.log("add:", v, since()));
+(async function (x) {
+  const p1 = later(20, 200);
+  const p2 = later(30, 200);
+  return x + (await p1) + (await p2);
+})(10).then((v) => console.log("IIFE:", v, since()));
+```
+
+<ResultBox>
+IIFE: 60 200 мс\
+add: 60 400 мс
+</ResultBox>
+
+Одно правило записи: строка кода не может *начинаться* со слов `async function` без имени — движок
+примет их за объявление и потребует имя. Поэтому сразу вызванную функцию берут в скобки. Кроме трёх записей, бывают
+`async`-методы объекта и класса (день 8): `async load() { … }`, `static async
+create() { … }`.
+
+## 8. Практика: предскажите порядок {#predict}
+
+Практика плана. Запишите буквы по порядку, прежде чем читать разбор под кодом:
+
+```js
+console.log("A");
+setTimeout(() => console.log("B"), 0);
+const p = new Promise((resolve) => {
+  console.log("C");
+  resolve();
+});
+p.then(() => console.log("D"));
+(async () => {
+  console.log("E");
+  await p;
+  console.log("F");
+  setTimeout(() => console.log("G"), 0);
+  await null;
+  console.log("H");
+})();
+Promise.resolve().then(() => console.log("I")).then(() => console.log("J"));
+console.log("K");
+```
+
+| Когда | Буквы | Почему |
+| --- | --- | --- |
+| задача «скрипт» | A, C, E, K | синхронный код; исполнитель промиса (C) и начало async-функции (E) — тоже синхронно (день 30 Essentials, раздел 4) |
+| микрозадачи | D, F, I | в порядке постановки: `p.then`, потом `await p`, потом `then` с I — `p` уже выполнен, поэтому все три встали в очередь ещё во время скрипта |
+| микрозадачи, добавленные по ходу | H, J | H поставил `await null` внутри F, J — выполненный I; F был раньше I, значит, и H раньше J |
+| задачи-таймеры | B, G | B поставлен в начале скрипта, G — внутри F, позже |
+
+Итог: A C E K D F I H J B G. Алгоритм на любой такой задаче: сначала выпишите весь синхронный код, включая начала
+async-функций до первого `await` и исполнители `new Promise`; затем микрозадачи в порядке
+постановки, дописывая новые в конец; таймеры — в самом конце, по времени, а при равном — по порядку
+`setTimeout`.
+
+### Щелчок мышью и click()
+
+Вторая задача — со слушателями дня 27 Essentials. У кнопки два слушателя, и каждый ставит микрозадачу:
+
+```js
+document.body.innerHTML = "<button>Ответить</button>";
+const button = document.querySelector("button");
+button.addEventListener("click", () => {
+  Promise.resolve().then(() => console.log("микрозадача 1"));
+  console.log("слушатель 1");
+});
+button.addEventListener("click", () => {
+  Promise.resolve().then(() => console.log("микрозадача 2"));
+  console.log("слушатель 2");
+});
+button.click();
+console.log("после click()");
+```
+
+<ResultBox>
+слушатель 1\
+слушатель 2\
+после click()\
+микрозадача 1\
+микрозадача 2
+</ResultBox>
+
+`button.click()` вызывает слушателей прямо внутри скрипта, как обычные функции, — микрозадачи ждут, пока
+скрипт закончится. Уберите две последние строки и щёлкните кнопку мышью: порядок станет «слушатель 1, микрозадача 1,
+слушатель 2, микрозадача 2». Щелчок человека — своя задача (день 26: стек кончается на обработчике), и после каждого
+слушателя стек пуст — а при пустом стеке браузер сразу выполняет микрозадачи. Один и тот же код, два порядка: программа,
+которая на это опирается, будет вести себя по-разному в проверке и в жизни.
+
+## 9. Практика: по очереди и все сразу {#sequence}
+
+Практика плана. День 27 сравнил время: три `await` подряд — 600 мс, `Promise.all` — 300. Взгляд
+со стороны очереди объясняет почему: важно, **когда начинается** каждая загрузка.
+
+```js
+const start = Date.now();
+const since = () => `${Math.round((Date.now() - start) / 100) * 100} мс`;
+function load(name, ms) {
+  console.log(`начали «${name}»`, since());
+  return later(name, ms);
+}
+async function oneByOne() {
+  const slow = await load("медленное", 200);
+  const fast = await load("быстрое", 100);
+  console.log("по очереди:", slow, fast, since());
+}
+oneByOne();
+```
+
+<ResultBox>
+начали «медленное» 0 мс\
+начали «быстрое» 200 мс\
+по очереди: медленное быстрое 300 мс
+</ResultBox>
+
+Второй вызов `load` стоит в коде после `await` — значит, в куске, который выполнится микрозадачей,
+когда первая загрузка закончится. Пока она шла, вторая даже не начиналась.
+
+```js
+const start = Date.now();
+const since = () => `${Math.round((Date.now() - start) / 100) * 100} мс`;
+function load(name, ms) {
+  console.log(`начали «${name}»`, since());
+  return later(name, ms);
+}
+async function allAtOnce() {
+  const [slow, fast] = await Promise.all([load("медленное", 200), load("быстрое", 100)]);
+  console.log("все сразу:", slow, fast, since());
+}
+allAtOnce();
+```
+
+<ResultBox>
+начали «медленное» 0 мс\
+начали «быстрое» 0 мс\
+все сразу: медленное быстрое 200 мс
+</ResultBox>
+
+Оба вызова — в одном куске до `await`, оба начались сразу. Правило выбора то же, что на дне 27: если вторая
+загрузка зависит от результата первой (например, по номеру группы — её расписание), — по очереди; если нет — все сразу.
+
+## 10. Где можно писать await {#where}
+
+Страница справочника
+[«await is only valid in async
+functions, async generators and modules»](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_await) объясняет запрет: `await` никогда не блокирует программу, он
+приостанавливает только свою асинхронную задачу. Поэтому в синхронной функции и на верхнем уровне скрипта ему нечего
+приостанавливать.
+
+| Где | `await` |
+| --- | --- |
+| `async`-функция в любой записи: объявление, выражение, стрелка, метод | можно |
+| асинхронный генератор `async function*` | можно — день 29 |
+| верхний уровень модуля `<script type="module">` | можно — день 30 |
+| консоль Chrome | можно — поблажка консоли (день 31 Essentials) |
+| обычная функция, генератор, верхний уровень обычного скрипта | `SyntaxError` |
+| обычный колбэк внутри `async`-функции: `items.forEach((x) => { await … })` | `SyntaxError`: колбэк — своя функция |
+
+Текст V8 — «await is only valid in async functions and the top level bodies of modules». Ошибка синтаксиса, а значит,
+по дню 26 не выполнится весь скрипт. Последняя строка таблицы — самая коварная: «починить» её словом
+`async` у колбэка легко, а работать правильно это не будет (раздел 14).
+
+## 11. AsyncFunction {#asyncfunction}
+
+Каждая `async`-функция — объект
+[`AsyncFunction`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction),
+наследника `Function`. Глобального имени у него нет — конструктор достают из любой `async`-функции:
+
+```js
+const AsyncFunction = async function () {}.constructor;
+const sum = new AsyncFunction("a", "b", "return a + b;");
+sum(2, 3).then((v) => console.log("sum:", v));
+console.log(AsyncFunction.name, Object.getPrototypeOf(AsyncFunction) === Function, Object.prototype.toString.call(sum), "prototype" in sum, sum.name);
+try {
+  new sum(1, 2);
+} catch (e) {
+  console.log(e.name, e.message);
+}
+```
+
+<ResultBox>
+AsyncFunction true \[object AsyncFunction\] false anonymous\
+TypeError sum is not a constructor\
+sum: 5
+</ResultBox>
+
+[Конструктор](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction/AsyncFunction)
+устроен как `Function()` дня 4: строки становятся кодом, окружения функция не видит, и справочник
+предупреждает о той же опасности — `new AsyncFunction` в обычном коде не пишут. У `async`-функций
+нет свойства `prototype`, и с `new` их не вызвать: спецификация прямо говорит, что они не
+конструкторы. А «\[object AsyncFunction\]» — работа `Symbol.toStringTag` (день 11) у
+`AsyncFunction.prototype`.
+
+## 12. Ошибки дня {#errors}
+
+| Код | Что видно в Chrome | Что не так |
+| --- | --- | --- |
+| `function f() { await x; }` | `SyntaxError: await is only valid in async functions and the top level bodies of modules` | нужно `async` |
+| `items.forEach((x) => { await save(x); })` | та же `SyntaxError` | колбэк — не `async` |
+| `items.forEach((x) => { list.push(await save(x)); })` | `SyntaxError: missing ) after argument list` | то же, но V8 прочитал `await` как имя — текст сбивает с толку |
+| `await` на верхнем уровне скрипта | та же `SyntaxError` | IIFE или модуль (день 30) |
+| `async function () {}` в начале строки | `SyntaxError: Function statements require a function name` | скобки вокруг выражения |
+| `const load = async function () {}; new load()` | `TypeError: load is not a constructor` | `async`-функции не конструкторы |
+| `AsyncFunction` без объявления | `ReferenceError: AsyncFunction is not defined` | не глобальный: `async function () {}.constructor` |
+| отказ без `catch` после `await` | `Uncaught (in promise) Error: …` | ждать результат или `catch` |
+| `try { return promise }` | отказ мимо `catch`, без ошибки | `return await promise` |
+| `await items.forEach(async …)` | ничего не дождался, без ошибки | `for...of` или `Promise.all(items.map(…))` |
+| бесконечная цепочка микрозадач | страница зависла | таймеры и щелчки ждут, пока очередь опустеет |
+
+Половина строк — тихие: без сообщения об ошибке, но с неверной программой. Их ловят только предсказанием порядка и
+проверкой результата.
+
+## 13. Что говорит спецификация {#spec}
+
+Подробно — раздел [27.2.2 Promise Jobs](https://tc39.es/ecma262/2026/#sec-promise-jobs), ради которого
+этот день и стоит в плане. Задание (Job) — в спецификации то, что браузер выполняет как микрозадачу.
+
+- [PerformPromiseThen](https://tc39.es/ecma262/2026/#sec-performpromisethen) (27.2.5.4.1) —
+  шаги `then`. Промис ждёт — реакция дописывается в его список. Промис уже выполнен или отклонён —
+  сразу NewPromiseReactionJob и HostEnqueuePromiseJob. Ветки «вызвать сейчас» нет вовсе — это и есть ответ на
+  вопрос дня. Когда ожидающий промис выполнится,
+  [TriggerPromiseReactions](https://tc39.es/ecma262/2026/#sec-triggerpromisereactions) (27.2.1.8)
+  ставит задания для всех его реакций по списку — в порядке, в каком вызывали `then`.
+- [27.2.2.1 NewPromiseReactionJob](https://tc39.es/ecma262/2026/#sec-newpromisereactionjob) — задание,
+  которое вызывает функцию `then` со значением, а её результат передаёт в `resolve` (или
+  ошибку — в `reject`) промиса, который вернул `then`. Нет функции — значение просто проходит
+  дальше.
+- [27.2.2.2 NewPromiseResolveThenableJob](https://tc39.es/ecma262/2026/#sec-newpromiseresolvethenablejob)
+  — когда промис решают объектом с `then`, этот `then` зовут отдельным заданием; примечание
+  объясняет: чтобы он выполнился после окружающего кода. Отсюда «then вызван» после «скрипт» в разделе 5 и два
+  лишних задания в разделе 3: одно — вызвать `then` возвращённого промиса, второе — его реакция.
+- [9.5 Jobs](https://tc39.es/ecma262/2026/#sec-jobs) и
+  [9.5.5 HostEnqueuePromiseJob](https://tc39.es/ecma262/2026/#sec-hostenqueuepromisejob): задание
+  начинается, только когда стек выполнения пуст; выполняется одно за раз и до конца; задания промисов идут в том
+  порядке, в каком их ставили. Как именно встраивать их между прочей работой, решает «хозяин» — примечание
+  говорит, что браузеры и Node.js ставят задания промисов выше остального. Это и есть «все микрозадачи — до
+  следующей задачи».
+- [27.7.5](https://tc39.es/ecma262/2026/#sec-async-functions-abstract-operations): AsyncFunctionStart
+  и AsyncBlockStart запускают тело и по его концу вызывают `resolve` (обычный конец или
+  `return`) или `reject` (брошенная ошибка) — поэтому ошибка не вылетает из вызова (раздел
+  6). Await (27.7.5.3) — схема ниже.
+- [27.7 AsyncFunction Objects](https://tc39.es/ecma262/2026/#sec-async-function-objects) кратко:
+  [27.7.1](https://tc39.es/ecma262/2026/#sec-async-function-constructor) — конструктор
+  `%AsyncFunction%`, работает как `Function`;
+  [27.7.2](https://tc39.es/ecma262/2026/#sec-async-function-constructor-properties) и
+  [27.7.3](https://tc39.es/ecma262/2026/#sec-async-function-prototype-properties) — его свойства и
+  прототип с `Symbol.toStringTag`;
+  [27.7.4](https://tc39.es/ecma262/2026/#sec-async-function-instances) — экземпляры не конструкторы и
+  без `prototype`.
+
+<Scheme src="scheme-spec.svg">Await (27.7.5.3): `await` — это `then` с продолжением функции</Scheme>
+
+## 14. «Карточки»: сохранить всю колоду {#cards}
+
+Ученик закончил занятие, и «Карточки» сохраняют прогресс каждой карточки на сервер. Сохранение одной —
+`later` с её временем. Первая мысль — `forEach` с `async`-колбэком, раз
+`await` в обычном колбэке запрещён:
+
+```js
+const cards = [{ word: "cat", ms: 100 }, { word: "kitap", ms: 200 }, { word: "suw", ms: 100 }];
+const saveCard = (card) => later(card.word, card.ms);
+async function saveWithForEach() {
+  const saved = [];
+  cards.forEach(async (card) => {
+    saved.push(await saveCard(card));
+  });
+  console.log("forEach: сохранено", saved.length);
+}
+async function saveOneByOne() {
+  const start = Date.now();
+  const saved = [];
+  for (const card of cards) saved.push(await saveCard(card));
+  console.log("for...of: сохранено", saved.length, "за", Math.round((Date.now() - start) / 100) * 100, "мс");
+}
+async function saveAllAtOnce() {
+  const start = Date.now();
+  const saved = await Promise.all(cards.map(saveCard));
+  console.log("Promise.all: сохранено", saved.length, "за", Math.round((Date.now() - start) / 100) * 100, "мс");
+}
+(async () => {
+  await saveWithForEach();
+  await saveOneByOne();
+  await saveAllAtOnce();
+})();
+```
+
+<ResultBox>
+forEach: сохранено 0\
+for...of: сохранено 3 за 400 мс\
+Promise.all: сохранено 3 за 200 мс
+</ResultBox>
+
+**Строка 1.** `forEach` вызвал три колбэка; каждый дошёл до своего `await` и вернул
+промис, а `forEach` эти промисы выбросил — он не умеет ждать. «Сохранено 0» напечатано раньше, чем
+закончилось первое сохранение. **Строка 2.** `for...of` с `await` внутри — по очереди:
+100 + 200 + 100. **Строка 3.** `map` запускает все сохранения сразу и отдаёт массив промисов, а
+`Promise.all` ждёт их: время самого долгого. Выбор между двумя последними — правило раздела 9: по очереди,
+если важен порядок или сервер не любит одновременных запросов.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Уберите `async` у колбэка `forEach`. Что напечатается и почему не
+выполнилась даже строка про `for...of`?
+\
+\
+**Второй.** Поставьте `await` перед `cards.forEach(…)`. Стало ли «сохранено 3»?
+Что вернул `forEach` и чего дождался `await`?
+\
+\
+**Третий.** Сделайте сохранение «kitap» неудачным: `saveCard` для неё —
+`failLater("kitap: нет связи", 200)`. Какие слова успеет сохранить `for...of` и что увидит
+консоль?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+Сегодня `await` стоял внутри `for...of` и ждал по одному элементу. День 29 делает следующий шаг:
+асинхронные итераторы и генераторы — `async function*`, которые отдают значения «потом», и цикл
+`for await...of`, который ждёт каждое.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [async function expression](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function) | выражение, имя внутри, IIFE | <Full /> |
+| ECMA-262, 27.2.2 Promise Jobs | задания промисов; почему `then` после текущего кода | <Full /> |
+| [AsyncFunction](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction), [AsyncFunction()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction/AsyncFunction) | не глобальный; конструктор опасен, как `Function` | <Brief /> |
+| [SyntaxError: await is only valid…](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_await) | где можно `await` | <Brief /> |
+| 27.7 с подразделами | раздел 13 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// порядок: синхронный код (с началами async-функций и исполнителями) → все микрозадачи → следующая задача (таймер, событие)
+// микрозадачи: then/catch/finally, продолжение после await; идут в порядке постановки, новые — в конец
+// then не вызывает функцию сразу даже у готового промиса; await ждёт всегда, даже await 5
+// async-функция: до первого await — сразу; return → выполнен, throw → отклонён (из вызова не вылетает)
+// try { return await p } — чтобы catch поймал отказ p
+// const f = async function name() {}; (async () => { await … })(); async-методы: async m() {}
+// await — только в async-функциях, async-генераторах и модулях; не в forEach-колбэке
+// по очереди: for...of + await; все сразу: await Promise.all(items.map(f)); forEach не ждёт
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `setTimeout(f, 0)` срабатывает позже `Promise.resolve().then(g)`, написанного ниже?
+   <Answer>Таймер — следующая задача, а `then` — микрозадача. Все микрозадачи выполняются сразу после
+   текущей задачи, раньше следующей.</Answer>
+2. Что напечатает `async function f() { console.log(1); await null; console.log(3); } f(); console.log(2);`?
+   <Answer>1, 2, 3: до `await` — синхронно, после — микрозадачей, когда скрипт закончится.</Answer>
+3. Вылетит ли ошибка из вызова `broken()`, если `async function broken() { throw new Error() }`?
+   <Answer>Нет. AsyncBlockStart превращает брошенную ошибку в отказ промиса; её увидит только тот, кто ждёт промис.</Answer>
+4. Чем `try { return p }` отличается от `try { return await p }`?
+   <Answer>Первый возвращает промис не дожидаясь, и его отказ проходит мимо `catch`. Второй ждёт
+   `p` внутри `try`, и отказ попадает в `catch`.</Answer>
+5. Почему `items.forEach(async (x) => await save(x))` не ждёт сохранений?
+   <Answer>`forEach` вызывает колбэки и выбрасывает их промисы. Ждать нужно в `for...of` или через
+   `Promise.all(items.map(save))`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/async_function" />

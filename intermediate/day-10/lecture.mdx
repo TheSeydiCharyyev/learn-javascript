@@ -1,0 +1,849 @@
+---
+title: "День 10 — Наследование: extends и super"
+day: День 10 • урок 1
+heading: "Наследование: extends и super"
+lead: Курс 2, Intermediate. Модуль «Прототипы и классы» — четвёртый, последний день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+  h3 { color: #9a3412; }
+  .step-number { background: #f97316; }
+  .toc a { color: #c2410c; }
+---
+
+<Goals>
+- строить класс на другом классе через `extends` и видеть под ним две цепочки
+  прототипов;
+- писать конструктор наследника с `super(...)` и знать порядок создания объекта;
+- переопределять методы и вызывать версию родителя через `super.method()`;
+- использовать `new.target`: ловить забытый `new` и запрещать создавать общий
+  класс;
+- наследовать от `Array` и решать, когда наследование уступает композиции.
+</Goals>
+
+<Toc />
+
+## 1. Цепочка дня 7 — одним словом {#chain}
+
+В задании 8 дня 7 мы вручную строили цепочку из трёх звеньев: базовая карточка, карточка
+с примером и сама карточка. Метод `text` второго звена звал текст первого длинной записью
+`cardBase.text.call(this)`, а `this.text()` уводил в бесконечную рекурсию.
+Тот же замысел на классах:
+
+```js
+class Card {
+  constructor(word, translation) {
+    this.word = word;
+    this.translation = translation;
+    this.flipped = false;
+  }
+
+  flip() {
+    this.flipped = !this.flipped;
+    return this.text();
+  }
+
+  text() {
+    return this.flipped ? this.translation : this.word;
+  }
+}
+
+class ExampleCard extends Card {
+  constructor(word, translation, example) {
+    super(word, translation);
+    this.example = example;
+  }
+
+  text() {
+    return `${super.text()} (${this.example})`;
+  }
+}
+
+const card = new ExampleCard("book", "книга", "I read a book");
+console.log(card.text(), "|", card.flip());   // book (I read a book) | книга (I read a book)
+console.log(Object.keys(card));               // ['word', 'translation', 'flipped', 'example']
+```
+
+Три новых слова делают всю работу. `extends Card` — «строится на `Card`»:
+`ExampleCard` получает всё, что умеет `Card`. `super(word, translation)`
+в конструкторе — вызов конструктора родителя. `super.text()` в методе — вызов метода
+родителя, без `call` и без рекурсии. Класс, от которого наследуют, называют
+**родительским** (базовым), а новый — **наследником** (производным).
+
+## 2. Что связывает extends {#extends}
+
+Учебник MDN говорит, что `extends` ставит прототип сразу двум объектам — и наследнику,
+и его `prototype`. Проверим вчерашними инструментами:
+
+```js
+class Card {}
+class ExampleCard extends Card {}
+
+const card = new ExampleCard();
+console.log(Object.getPrototypeOf(ExampleCard.prototype) === Card.prototype);   // true
+console.log(Object.getPrototypeOf(ExampleCard) === Card);                       // true
+console.log(card instanceof ExampleCard, card instanceof Card);                 // true true
+```
+
+Первая строка — цепочка объектов: `card` → `ExampleCard.prototype` →
+`Card.prototype` → `Object.prototype` → `null`. Это и есть
+наследование методов: чего нет у наследника, поиск дня 7 найдёт у родителя. Вторая строка — цепочка
+самих классов: прототип функции `ExampleCard` — функция `Card`. По ней
+наследуются статические элементы (раздел 7). Без `extends` прототип класса —
+`Function.prototype`, как у любой функции.
+
+<Scheme src="scheme-extends.svg">Одно слово `extends` — две цепочки</Scheme>
+
+Наследованием вы пользуетесь с дня 11 Essentials, где `instanceof` находил «потомков»
+вида ошибки. Встроенные виды ошибок устроены ровно так:
+
+```js
+console.log(Object.getPrototypeOf(RangeError) === Error, new RangeError("x") instanceof Error);
+// true true
+console.log(Object.hasOwn(RangeError.prototype, "name"), new RangeError("x").name, Error.prototype.name);
+// true RangeError Error
+```
+
+`RangeError` — наследник `Error` по обеим цепочкам. Своё свойство
+`name` в `RangeError.prototype` затеняет родительское `"Error"` —
+поэтому в `catch` видно `RangeError`. Свои классы ошибок вида
+`class ValidationError extends Error` — тема дня 26.
+
+Справа от `extends` может стоять любое выражение, которое даёт конструктор: класс,
+функция-конструктор дня 7, даже `class extends class {} {}`. Не подходит то, что нельзя
+вызвать с `new`: `class Child extends 5 {}` —
+`TypeError: Class extends value 5 is not a constructor or null`, со стрелочной функцией
+текст тот же.
+
+Раз появились семьи классов, у вопроса «какого класса объект» стало два ответа:
+
+```js
+class Card {}
+class ExampleCard extends Card {}
+
+const card = new ExampleCard();
+console.log(card instanceof Card, card.constructor === Card, card.constructor.name);   // true false ExampleCard
+```
+
+`instanceof Card` — «из семьи `Card`», `true` и для наследников.
+`constructor === Card` — «ровно `Card`»: свойство `constructor`
+нашлось раньше, в `ExampleCard.prototype`. Почти всегда нужна первая проверка: код,
+который работает с карточками, должен принимать и наследников, иначе каждый новый вид карточки
+придётся вписывать в проверку.
+
+## 3. Конструктор наследника и super() {#super-call}
+
+Главное правило наследника: в его конструкторе нужно вызвать `super(...)`, и вызвать
+**до** первого обращения к `this`. Нарушение — ошибка:
+
+```js
+class Base {
+  constructor(name) {
+    this.name = name;
+  }
+}
+
+class Child extends Base {
+  constructor(name) {
+    this.mark = 5;
+    super(name);
+  }
+}
+
+new Child("Аман");
+// ReferenceError: Must call super constructor in derived class before accessing 'this' or returning from derived constructor
+```
+
+Текст называет оба случая: обратились к `this` или вышли из конструктора, так и не
+вызвав `super`. Причина в том, что объект наследника **создаёт родитель**.
+До `super()` объекта ещё нет, и `this` не к чему привязать. MDN называет ошибку
+«must call super constructor before using 'this' in derived class constructor». Второй вызов
+`super()` — тоже ошибка: `ReferenceError: Super constructor may only be called
+once`, объект уже создан.
+
+Если наследнику свой конструктор не нужен, его можно не писать. Язык подставит такой:
+`constructor(...args) { super(...args); }` — все аргументы уходят родителю:
+
+```js
+class Base {
+  constructor(a, b) {
+    this.sum = a + b;
+  }
+}
+
+class Child extends Base {}
+
+console.log(new Child(2, 3).sum, Child.length);   // 5 0
+```
+
+`Child.length` — 0: подставленный конструктор объявлен с остаточным параметром, а он
+в `length` не считается (день 4).
+
+## 4. Порядок создания объекта {#order}
+
+На дне 8 порядок был «поля, потом тело конструктора». С наследованием он двухэтажный.
+Посмотрим по выводу:
+
+```js
+class Base {
+  base = (console.log("поле родителя"), 1);
+
+  constructor() {
+    console.log("тело родителя, класс:", this.constructor.name);
+  }
+}
+
+class Child extends Base {
+  child = (console.log("поле наследника"), 2);
+
+  constructor() {
+    console.log("начало конструктора наследника");
+    super();
+    console.log("после super:", this.base, this.child);
+  }
+}
+
+new Child();
+// начало конструктора наследника
+// поле родителя
+// тело родителя, класс: Child
+// поле наследника
+// после super: 1 2
+```
+
+<Scheme src="scheme-order.svg">Что происходит при `new Child()`</Scheme>
+
+Три вывода. Конструктор наследника начинается раньше всех, но до `super()` он может
+только считать аргументы. Объект создаёт родитель — и в нём `this.constructor.name` уже
+`"Child"`: прототип объекта сразу берётся у наследника. А поля наследника появляются
+только после возврата из `super()`. Отсюда ловушка: метод, переопределённый наследником
+и вызванный из конструктора родителя, ещё не увидит полей наследника.
+
+## 5. Переопределение и super.method() {#override}
+
+Метод наследника с тем же именем, что у родителя, **переопределяет** его: поиск
+по цепочке (день 7) находит метод в `ExampleCard.prototype` раньше, чем в
+`Card.prototype`. Это затенение дня 7, только для методов. Часто наследнику нужно не
+заменить, а дополнить поведение родителя, — для этого `super.method()`:
+
+```js
+class Base {
+  hello() {
+    return "привет от Base";
+  }
+}
+
+class Child extends Base {
+  hello() {
+    return `${super.hello()}, и от Child`;
+  }
+}
+
+console.log(new Child().hello(), new Base().hello());   // привет от Base, и от Child привет от Base
+```
+
+`super.hello()` ищет `hello` начиная с прототипа родителя, а
+`this` внутри оставляет прежним — объект наследника. Поэтому родительский метод работает
+с данными наследника, как `cardBase.text.call(this)` дня 7, только короче и без риска
+по ошибке позвать самого себя.
+
+### Полиморфизм
+
+Ради чего всё это? Код, который работает с карточками, может вообще не знать, какие они:
+
+```js
+class Card {
+  constructor(word) {
+    this.word = word;
+  }
+
+  text() {
+    return this.word;
+  }
+}
+
+class ExampleCard extends Card {
+  constructor(word, example) {
+    super(word);
+    this.example = example;
+  }
+
+  text() {
+    return `${super.text()} — ${this.example}`;
+  }
+}
+
+class ImageCard extends Card {
+  text() {
+    return `[картинка] ${super.text()}`;
+  }
+}
+
+const cards = [new Card("bread"), new ExampleCard("book", "I read a book"), new ImageCard("house")];
+for (const card of cards) {
+  console.log(card.text());
+}
+// bread
+// book — I read a book
+// [картинка] house
+```
+
+Один и тот же вызов `card.text()` — три разных поведения: каждая карточка отвечает
+по-своему. Это называют **полиморфизмом** («много форм»). Цикл не проверяет вид карточки
+через `if` и `instanceof`, и новый вид — скажем, `AudioCard` — не
+потребует менять ни цикл, ни остальной код, где карточки показывают. Без классов пришлось бы писать
+в каждом таком месте цепочку `if` по полю `kind` и дописывать её с каждым новым
+видом.
+
+## 6. Откуда super знает родителя {#home}
+
+`super` — не переменная и не `this`. Учебник MDN подчёркивает: куда смотрит
+`super`, решает класс или литерал, где метод **написан**, а не объект, у которого
+его вызвали. Метод запоминает своё место во внутреннем слоте `[[HomeObject]]` — у
+`Child.prototype.hello` это `Child.prototype`, — и `super` ищет в его
+прототипе. Поэтому `super` не меняется, даже если метод переставить в другой объект:
+
+```js
+const base = {
+  greet() {
+    return "салам";
+  },
+};
+
+const child = {
+  __proto__: base,
+  greet() {
+    return `${super.greet()}, Аман`;
+  },
+};
+
+const other = { greet: child.greet, __proto__: { greet() { return "другой"; } } };
+console.log(child.greet(), "|", other.greet());   // салам, Аман | салам, Аман
+```
+
+Пример заодно показывает, что `super` работает и в методах обычного литерала (день 5),
+если у литерала есть прототип. А `this` и `super` устроены противоположно:
+`this` решает способ вызова (день 2), `super` — место в тексте, как переменные
+дня 1. И ещё одна мелочь из MDN: запись `super.x = 5` пишет не в прототип родителя,
+а в `this`.
+
+## 7. Статические элементы по наследству {#static}
+
+Вторая цепочка схемы раздела 2 — у классов. По ней наследуются статические методы и поля, и внутри
+статического метода `this` — тот класс, у которого метод вызвали. Отсюда сильный приём —
+фабрика, которая создаёт объект «своего» класса:
+
+```js
+class Base {
+  static make() {
+    return new this();
+  }
+
+  static describe() {
+    return `класс ${this.name}`;
+  }
+}
+
+class Child extends Base {
+  static describe() {
+    return `${super.describe()}, наследник`;
+  }
+}
+
+console.log(Child.make() instanceof Child, Child.describe(), Object.hasOwn(Child, "make"));
+// true класс Child, наследник false
+```
+
+`make` лежит только в `Base`, но `Child.make()` нашёл его по цепочке
+классов, и `new this()` создал `Child`. Это и был ответ на вопрос задания 6
+дня 9 о `new this(...)`: такая фабрика работает и для наследников. В статических методах
+тоже есть `super` — он смотрит в класс-родитель.
+
+Со статическими полями осторожнее. Поле `static count = 0` у родителя одно; наследник
+его видит по цепочке, но первое же присваивание `this.count = …` внутри
+`Child.add()` создаст **своё** поле у `Child` — затенение дня 7.
+После этого у родителя и наследника два разных счётчика.
+
+## 8. Приватное и наследник {#private}
+
+Вчера обещали: наследник приватных полей родителя не видит. `#`-имя объявлено в теле
+`Base`, а тело `Child` — другой класс, и обращение к нему — синтаксическая
+ошибка дня 9:
+
+```js
+class Base {
+  #secret = 42;
+
+  reveal() {
+    return this.#secret;
+  }
+}
+
+class Child extends Base {
+  peek() {
+    return this.#secret;
+  }
+}
+// SyntaxError: Private field '#secret' must be declared in an enclosing class
+```
+
+Но приватное поле у объекта наследника **есть**: его поставил конструктор родителя
+на шаге 3 раздела 4. Поэтому методы родителя с ним работают: без метода `peek`
+`new Child().reveal()` вернёт 42, а `#secret in obj` в статическом методе
+`Base` ответит `true`. Приватное — для кода родителя; наследник пользуется им
+только через публичные методы родителя. Промежуточного уровня «видно наследникам, но не всем»,
+как `protected` в Java, в JavaScript нет — его иногда изображают подчёркиванием
+`_x` дня 5, то есть договорённостью.
+
+Отсюда ловушка для приватных **статических** полей. Счётчик дня 9 через
+`this.#created++` сломается у наследника:
+
+```js
+class Base {
+  static #created = 0;
+
+  static create() {
+    this.#created++;
+    return new this();
+  }
+}
+
+class Child extends Base {}
+
+Base.create();
+Child.create();
+// TypeError: Cannot read private member #created from an object whose class did not declare it
+```
+
+В `Child.create()` `this` — `Child`, а приватное статическое поле
+есть только у самого `Base`: статическое поле наследнику не копируется, а приватные
+не ищутся по цепочке (день 9). Лечение — имя класса: `Base.#created++`. Вот и ещё
+одна причина вчерашнего совета писать в статических методах имя класса.
+
+## 9. new.target {#new-target}
+
+Внутри функции или конструктора `new.target` отвечает, вызвали ли её с
+`new`, и если да — какой конструктор. Без `new` — `undefined`.
+Это лечит забытый `new` у функции-конструктора дня 7:
+
+```js
+function Student(name) {
+  if (new.target === undefined) {
+    throw new TypeError("вызовите Student через new");
+  }
+  this.name = name;
+}
+
+console.log(new Student("Аман").name);   // Аман
+Student("Аман");
+// TypeError: вызовите Student через new
+```
+
+В классах `new.target` пригодится по-другому. Конструктор класса без `new`
+и так не вызвать (день 8), зато в конструкторе родителя `new.target` — это класс, который
+создают на самом деле, то есть наследник. Так делают **общий класс** (его ещё называют
+абстрактным), объекты которого создавать нельзя — только объекты наследников:
+
+```js
+class Shape {
+  constructor() {
+    if (new.target === Shape) {
+      throw new TypeError("Shape — общий класс, создавайте его наследников");
+    }
+    console.log("создаётся", new.target.name);
+  }
+}
+
+class Circle extends Shape {}
+
+new Circle();   // создаётся Circle
+new Shape();
+// TypeError: Shape — общий класс, создавайте его наследников
+```
+
+Стрелочная функция своего `new.target` не имеет и берёт его снаружи, как
+`this` и `arguments` (дни 2 и 4). А вне функций его нет вовсе:
+`console.log(new.target)` на верхнем уровне скрипта —
+`SyntaxError: new.target expression is not allowed here`.
+
+## 10. Пять ошибок super {#errors}
+
+Три ошибки вы видели в разделах 3 и 9. Вот все пять страниц MDN дня:
+
+| Страница MDN | Текст Chrome | Когда |
+| --- | --- | --- |
+| must call super constructor before using 'this' | `Must call super constructor in derived class before accessing 'this' or returning from derived constructor` | `this` до `super()` или `super()` не вызван |
+| super() called twice | `Super constructor may only be called once` | второй `super()` |
+| derived class constructor returned invalid value | `Derived constructors may only return object or undefined` | `return 1` у наследника |
+| super() is only valid in derived class constructors | `'super' keyword unexpected here` | `super()` без `extends` или в методе |
+| use of super property/member accesses only valid within methods | `'super' keyword unexpected here` | `super.x` в обычной функции |
+
+Две последние строки у Chrome одним текстом: `super` оказался там, где его некому
+связать с родителем. Третья строка отличается от дня 7: родительский класс и функция-конструктор
+могут вернуть число — его просто проигнорируют, — а наследник обязан вернуть объект или ничего.
+
+```js
+class Base {}
+
+class Child extends Base {
+  constructor() {
+    super();
+    return 1;
+  }
+}
+
+new Child();
+// TypeError: Derived constructors may only return object or undefined
+```
+
+## 11. Наследник Array {#array}
+
+Наследовать можно и от встроенных классов. Сделаем массив слов со своими методами:
+
+```js
+class Words extends Array {
+  get last() {
+    return this[this.length - 1];
+  }
+
+  longest() {
+    return this.reduce((a, b) => (b.length > a.length ? b : a));
+  }
+}
+
+const words = Words.from(["book", "water", "bread"]);
+const short = words.filter((w) => w.length < 6);
+
+console.log(words.last, words.longest(), words.length, Array.isArray(words));   // bread water 3 true
+console.log(short instanceof Words, short.last, JSON.stringify(words));
+// true bread ["book","water","bread"]
+```
+
+Всё, что умеет массив, на месте: `length`, `filter`, JSON,
+`Array.isArray`. Статический `Words.from`, унаследованный от `Array`,
+создал `Words` — тот же `new this` раздела 7. И `filter` вернул
+не простой массив, а `Words`: встроенные методы, которые создают новый массив,
+спрашивают класс у самого объекта. Как именно — механизм `Symbol.species`, дни 14–15.
+В консоли такой массив подписан `Words(3) ['book', 'water', 'bread']`.
+
+Справочник MDN предупреждает: комитет, который развивает язык, теперь считает механизм наследования
+встроенных классов переусложнённым, и новые методы его не поддерживают. Это видно на месте:
+
+```js
+class Words extends Array {}
+const words = Words.from(["book", "water", "bread"]);
+
+console.log(words.filter(Boolean) instanceof Words, words.slice(1) instanceof Words);   // true true
+console.log(words.toSorted() instanceof Words);                                         // false
+```
+
+Старые `filter` и `slice` вернули `Words`, а `toSorted`
+из дня 20 Essentials, появившийся в 2023 году, — обычный массив, и методов `Words` у него
+уже нет. Наследник встроенного класса работает, но за его поведением приходится следить.
+
+Ещё одна ловушка досталась от самого `Array`: `new Words(3)` создаёт не
+массив из одного числа 3, а пустой массив длины 3 — так конструктор `Array` понимает
+единственный числовой аргумент. Поэтому наследников массива создают через `from`
+и `of`: `Words.of(3)` — массив `[3]`.
+
+## 12. Наследование или композиция {#composition}
+
+Справочник MDN заканчивает страницу `extends` разделом «Avoiding inheritance» —
+«как обойтись без наследования». Наследование — очень тесная связь: наследник получает
+**всё** поведение родителя, нужное и ненужное. `Words` из раздела 11 умеет
+`push`, `splice`, `sort` — и любой код может испортить колоду ими.
+Сделать «массив только для чтения» наследованием трудно: каждый лишний метод придётся
+переопределять, а функция, которая ждёт обычный массив, получит массив, который ведёт себя иначе.
+
+Учебник предлагает **композицию**: класс не *является* массивом, а
+*содержит* его — в приватном поле — и открывает только нужное:
+
+```js
+class ReadOnlyWords {
+  #items;
+
+  constructor(items) {
+    this.#items = [...items];
+  }
+
+  get length() {
+    return this.#items.length;
+  }
+
+  at(i) {
+    return this.#items.at(i);
+  }
+}
+
+const list = new ReadOnlyWords(["book", "water"]);
+console.log(list.length, list.at(-1), typeof list.push);   // 2 water undefined
+```
+
+Правило выбора короткое. Наследование — когда наследник действительно **является**
+родителем и может заменить его везде: карточка с примером — это карточка. Композиция — когда объект
+лишь **использует** другой: колода использует массив, но массивом с `splice`
+быть не обязана. В сомнении MDN советует композицию. Курсор колоды из задания 9 дня 9 был
+именно ею.
+
+<Scheme src="scheme-composition.svg">Два способа взять чужое поведение</Scheme>
+
+### Примесь
+
+Наследовать в JavaScript можно только от одного класса. Если одно и то же поведение нужно
+классам из разных семейств, справочник MDN показывает приём **примесь** (mix-in):
+функцию, которая принимает класс и возвращает его наследника. Справа от `extends` — любое
+выражение (раздел 2), а класс — значение (день 8):
+
+```js
+const Flippable = (Base) => class extends Base {
+  #flipped = false;
+
+  flip() {
+    this.#flipped = !this.#flipped;
+    return this.#flipped;
+  }
+};
+
+class Word {
+  constructor(text) {
+    this.text = text;
+  }
+}
+
+class FlipWord extends Flippable(Word) {}
+
+const word = new FlipWord("book");
+console.log(word.flip(), word.text, word instanceof Word);   // true book true
+```
+
+`Flippable(Word)` создал безымянный класс между `FlipWord` и
+`Word`, и умение переворачиваться можно так же вставить в любое другое семейство.
+Пользуются примесями осторожно: каждая — лишнее звено в цепочке.
+
+## 13. super в спецификации {#spec}
+
+Вызов `super(...)` описан в разделе
+[13.3.7.1](https://tc39.es/ecma262/2026/#sec-super-keyword-runtime-semantics-evaluation).
+Перескажем его шаги — каждый объясняет что-то из сегодняшнего:
+
+1. Узнать `new.target` — класс, который создают на самом деле (раздел 9).
+2. Найти родителя операцией
+   [GetSuperConstructor](https://tc39.es/ecma262/2026/#sec-getsuperconstructor)
+   (13.3.7.2): это **прототип самой функции-наследника** — вторая стрелка схемы
+   раздела 2. Её и ставит `extends`.
+3. Если родитель не конструктор — `TypeError`: так падает `extends null`
+   при создании объекта.
+4. Вызвать конструктор родителя, передав ему `new.target`: родитель создаёт объект
+   с прототипом наследника (шаг 2 схемы раздела 4).
+5. Привязать `this` операцией
+   [BindThisValue](https://tc39.es/ecma262/2026/#sec-bindthisvalue) (9.1.1.3.1). Если
+   `this` уже привязан — `ReferenceError`: это «Super constructor may only
+   be called once».
+6. Создать поля наследника — InitializeInstanceElements. Поэтому они появляются после
+   `super()`.
+
+Шаг 5 продолжает день 2. Там мы видели запись окружения функции (9.1.1.3) и её
+`HasThisBinding`. У этой записи есть поле `[[ThisBindingStatus]]` с тремя
+значениями: «нет своего `this`» — у стрелочных, «привязан» и «ещё не привязан». Обычная
+функция при вызове сразу получает привязанный `this`, а конструктор наследника стартует
+«ещё не привязанным» и остаётся таким до `super()`. Чтение `this` в таком
+состоянии —
+[GetThisBinding](https://tc39.es/ecma262/2026/#sec-function-environment-records-getthisbinding)
+(9.1.1.3.3) — бросает `ReferenceError`: это и есть ошибка «Must call super constructor»
+раздела 3.
+
+## 14. «Карточки»: семейство карточек {#cards}
+
+Соберём модуль в «Карточках». `Card` — общий класс с приватным состоянием и фабрикой;
+`WordCard` и `ExampleCard` — его наследники; колода `Deck` — наследник
+`Array` со своими методами.
+
+```js
+class Card {
+  #flipped = false;
+
+  constructor(word, translation) {
+    if (new.target === Card) {
+      throw new TypeError("Card — общий класс: создайте WordCard или ExampleCard");
+    }
+    this.word = word;
+    this.translation = translation;
+  }
+
+  static create(...args) {
+    return new this(...args);
+  }
+
+  get flipped() {
+    return this.#flipped;
+  }
+
+  flip() {
+    this.#flipped = !this.#flipped;
+    return this.text();
+  }
+
+  text() {
+    return this.#flipped ? this.translation : this.word;
+  }
+}
+
+class WordCard extends Card {}
+
+class ExampleCard extends Card {
+  constructor(word, translation, example) {
+    super(word, translation);
+    this.example = example;
+  }
+
+  text() {
+    return `${super.text()} — ${this.example}`;
+  }
+}
+
+class Deck extends Array {
+  byKind(Kind) {
+    return this.filter((card) => card instanceof Kind);
+  }
+
+  flipAll() {
+    return this.map((card) => card.flip());
+  }
+}
+
+const deck = Deck.of(
+  WordCard.create("bread", "хлеб"),
+  ExampleCard.create("book", "книга", "I read a book"),
+  new WordCard("water", "вода"),
+);
+
+console.log(deck.length, deck.byKind(ExampleCard).length, deck.byKind(Card).length);
+console.log(deck.flipAll());
+console.log(deck.flipAll() instanceof Deck, deck[1].flipped);
+try {
+  Card.create("house", "дом");
+} catch (error) {
+  console.log(`${error.name}: ${error.message}`);
+}
+```
+
+<ResultBox>
+3 1 3\
+Deck(3) \['хлеб', 'книга — I read a book', 'вода'\]\
+true false\
+TypeError: Card — общий класс: создайте WordCard или ExampleCard
+</ResultBox>
+
+**Строка 1 — instanceof по цепочке.** В колоде три карточки, одна из них —
+`ExampleCard`, и все три — `Card`: `Card.prototype` есть в цепочке
+каждой.
+
+**Строка 2 — переопределение.** `map` вызвал у каждой карточки один и тот же
+унаследованный `flip`, а тот — `this.text()`. Для `ExampleCard` поиск
+нашёл её собственный `text`, который через `super.text()` взял перевод у
+`Card` и добавил пример. Результат `map` — снова `Deck`.
+
+**Строка 3 — приватное у наследника.** Второй `flipAll` перевернул карточки
+обратно. `#flipped` объявлен в `Card`, и код `ExampleCard` не может
+к нему обратиться, но поле у карточки есть, и унаследованные `flip` и `flipped`
+с ним работают.
+
+**Строка 4 — общий класс.** `Card.create` унаследован всеми и создаёт объект
+«своего» класса. Вызванный у самого `Card`, он упёрся в проверку `new.target`.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** В конструкторе `ExampleCard` поставьте `this.example = example;`
+перед `super(...)`. Какая ошибка и в какой момент — при объявлении класса или при создании
+карточки?
+\
+\
+**Второй.** Замените `super.text()` на `this.text()`. Что случится и
+почему — по разделу 5?
+\
+\
+**Третий.** Добавьте в `ExampleCard` метод `peek() { return this.#flipped; }`.
+Что произойдёт со всем скриптом? Как узнать, перевёрнута ли карточка, не трогая `#flipped`?
+</TryIt>
+
+## 15. Итоги модуля и что дальше {#module}
+
+Модуль «Прототипы и классы» закончен. Четыре дня — от механизма к записи:
+
+| День | Главная мысль | В спецификации |
+| --- | --- | --- |
+| 7 | прототип и цепочка; `new` в четыре шага; `instanceof` | 10.1.8.1, 10.2.2, 7.3.21 |
+| 8 | класс — запись функции-конструктора; поля; строгий режим | 15.7, 10.2.1, 7.3.32 |
+| 9 | приватные элементы и `static` | 9.2 |
+| 10 | `extends`, `super`, `new.target`; композиция | 13.3.7, 9.1.1.3 |
+
+Следующий модуль — «Итераторы и генераторы». Мы много раз писали `for...of` по массивам,
+строкам и `arguments`, а на днях 4 и 7 обещали объяснить, почему одни объекты так перебираются,
+а другие нет. Ответ — **символы** и протокол итерации, день 11. Колода
+`ReadOnlyWords` из раздела 12 тогда научится работать в `for...of`, не становясь
+массивом.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [extends](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/extends) | две цепочки; наследник встроенного; как обойтись без наследования | <Full /> |
+| [super](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/super) | `super()` и `super.method()`; `[[HomeObject]]` | <Full /> |
+| [new.target](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/new.target) | вызвали ли с `new` и какой класс | <Full /> |
+| [Ошибка: must call super constructor before using 'this'](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Super_not_called) | `this` до `super()` | <Brief /> |
+| [Ошибка: super() called twice](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Super_called_twice) | `Super constructor may only be called once` | <Brief /> |
+| [Ошибка: derived class constructor returned invalid value](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_derived_return) | наследник вернул не объект | <Brief /> |
+| [Ошибка: super() is only valid in derived class constructors](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_super_call) | `'super' keyword unexpected here` | <Brief /> |
+| [Ошибка: use of super property accesses only valid within methods](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_super_prop) | `super.x` вне метода | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// class Child extends Base {
+//   child = 2;                       // поля наследника — ПОСЛЕ super()
+//   constructor(a, b, c) {
+//     super(a, b);                   // обязательно, до первого this; один раз
+//     this.c = c;
+//   }
+//   method() {
+//     return super.method() + 1;     // версия родителя, this — тот же
+//   }
+//   static make() { return new this(); }   // this — класс, у которого вызвали
+// }
+
+// extends: Child.prototype → Base.prototype (методы) и Child → Base (static)
+// без своего конструктора: constructor(...args) { super(...args); }
+// порядок new Child: начало Child → Base создаёт объект (прототип Child.prototype)
+//   → поля и тело Base → поля Child → остаток Child
+// super привязан к месту, где метод написан ([[HomeObject]]), а не к объекту вызова
+// наследник не видит #поля родителя, но они у объекта есть; static #x — пишите Base.#x
+// new.target: undefined без new; в конструкторе родителя — класс наследника
+// наследник Array: from/of/filter/map дают наследника; new Words(3) — пустой массив длины 3
+// «является» — наследование; «использует» — композиция (поле с объектом)
+// полиморфизм: один вызов obj.text() — у каждого класса свой ответ, без if по виду
+// примесь: const Flippable = (Base) => class extends Base { … } — родитель у класса один
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Какие две связи ставит `class Child extends Base`?
+   <Answer>Прототип `Child.prototype` — `Base.prototype` (методы для объектов)
+   и прототип функции `Child` — `Base` (статические элементы).</Answer>
+2. Почему в конструкторе наследника нельзя трогать `this` до `super()`?
+   <Answer>Объект наследника создаёт конструктор родителя. До `super()` объекта нет,
+   `this` «ещё не привязан», и чтение даёт `ReferenceError`.</Answer>
+3. Чем `super.text()` лучше `this.text()` в переопределённом методе
+   `text`?
+   <Answer>`this.text()` найдёт тот же метод наследника и вызовет его снова —
+   бесконечная рекурсия. `super.text()` ищет начиная с прототипа родителя
+   и оставляет прежний `this`.</Answer>
+4. Как запретить создавать объекты общего класса, но разрешить его наследникам?
+   <Answer>В конструкторе проверить `new.target === Общий` и бросить ошибку. При
+   создании наследника `new.target` — наследник, и проверка пропускает.</Answer>
+5. Когда выбрать композицию вместо наследования?
+   <Answer>Когда объект лишь использует другой, а не является им, и не должен получать всё его
+   поведение: колода хранит массив в приватном поле и открывает только нужные методы.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/extends" />

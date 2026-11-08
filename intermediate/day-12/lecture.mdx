@@ -1,0 +1,872 @@
+---
+title: "День 12 — Генераторы: function* и yield"
+day: День 12 • урок 1
+heading: "Генераторы: function* и yield"
+lead: Курс 2, Intermediate. Модуль «Итераторы и генераторы» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #14b8a6; }
+  h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+  h3 { color: #115e59; }
+  .step-number { background: #14b8a6; }
+  .toc a { color: #0f766e; }
+---
+
+<Goals>
+- писать генераторные функции во всех четырёх записях и объяснять, что делает
+  `yield`;
+- заменять итератор, написанный руками, генератором и знать, когда генератор одноразовый;
+- передавать значения внутрь генератора через `next(value)`;
+- закрывать генератор методами `return()` и `throw()` и прибираться
+  в `finally`;
+- собирать последовательности из других через `yield*`, в том числе обходить
+  дерево.
+</Goals>
+
+<Toc />
+
+## 1. Диапазон в три строки {#promise}
+
+Вчера диапазон `range` занял полтора десятка строк: счётчик в замыкании, метод
+`next`, объекты `{ value, done }`. Мы обещали, что завтра хватит трёх. Вот они:
+
+```js
+const range = {
+  from: 1,
+  to: 4,
+  *[Symbol.iterator]() {
+    for (let n = this.from; n <= this.to; n++) {
+      yield n;
+    }
+  },
+};
+
+console.log([...range], Math.max(...range));   // [1, 2, 3, 4] 4
+const [first, ...others] = range;
+console.log(first, others);                     // 1 [2, 3, 4]
+```
+
+Звёздочка перед именем метода делает его **генератором**, а слово `yield`
+(«выдать») отдаёт очередное значение. Ни `next`, ни `{ value, done }`, ни
+`return this` писать не нужно — протокол итерации дня 11 язык выполняет сам. Обычный
+цикл `for` стал источником значений для `for...of`, spread и деструктуризации.
+Как это возможно — сегодняшний день.
+
+## 2. Функция, которая останавливается {#pause}
+
+Обычная функция, начав, работает до конца. **Генераторная функция** (объявляется
+`function*`) умеет вставать на паузу и продолжать с того же места. Проследим по выводу:
+
+```js
+function* lessonDay() {
+  console.log("начало дня");
+  yield "лекция";
+  console.log("перемена");
+  yield "практика";
+  console.log("конец дня");
+}
+
+const day = lessonDay();
+console.log("генератор создан");
+console.log(day.next());
+console.log(day.next());
+console.log(day.next());
+console.log(day.next());
+```
+
+<ResultBox>
+генератор создан\
+начало дня\
+\{value: 'лекция', done: false\}\
+перемена\
+\{value: 'практика', done: false\}\
+конец дня\
+\{value: undefined, done: true\}\
+\{value: undefined, done: true\}
+</ResultBox>
+
+Четыре наблюдения. Вызов `lessonDay()` **не выполнил ни строчки тела** —
+«генератор создан» напечатан первым. Он вернул объект-**генератор**, итератор из дня 11:
+у него есть `next()`. Каждый `next()` выполняет тело до ближайшего
+`yield` и возвращает `{ value: выданное, done: false }`. Когда тело кончилось,
+приходит `done: true` — и дальше всегда только он.
+
+<Scheme src="scheme-pause.svg">Кто и когда работает: вызывающий код и генератор по очереди</Scheme>
+
+Четвёртое — пауза сохраняет всё: где остановились и значения переменных. Каждый вызов генераторной
+функции даёт новый, независимый генератор:
+
+```js
+function* counter() {
+  let n = 0;
+  while (true) {
+    yield ++n;
+  }
+}
+
+const a = counter();
+const b = counter();
+console.log(a.next().value, a.next().value, b.next().value, a.next().value);   // 1 2 1 3
+```
+
+У `a` и `b` свои `n`, как у двух вызовов `makeProgress`
+дня 1. Объявление `function*` поднимается, как обычное `function` (день 12
+Essentials), а с `new` генераторную функцию не вызвать: `new counter()` —
+`TypeError: counter is not a constructor`.
+
+## 3. Четыре записи {#forms}
+
+Генератор записывают так же, как обычную функцию, — только со звёздочкой:
+
+```js
+function* declared() { yield 1; }                 // объявление
+const expressed = function* () { yield 2; };     // выражение
+const quiz = { *questions() { yield 3; } };      // метод литерала
+class Box { *items() { yield 4; } }              // метод класса
+
+console.log([...declared(), ...expressed(), ...quiz.questions(), ...new Box().items()]);   // [1, 2, 3, 4]
+console.log(expressed.name, quiz.questions.name, typeof declared);   // expressed questions function
+```
+
+Звёздочка в методе — та самая «звёздочка генератора» из сокращённой записи методов дня 5; с вычисляемым
+именем получается `*[Symbol.iterator]()` раздела 1. Пробелы вокруг звёздочки не важны:
+`function* f` и `function *f` — одно и то же. А стрелочного генератора нет:
+`const g = *() => {}` — `SyntaxError: Unexpected token '*'`.
+
+Раз генератор — не стрелка, у него свои `this` и `arguments`, и подчиняются
+они правилам дней 2 и 4:
+
+```js
+const lesson = {
+  topic: "еда",
+  *cards() {
+    yield this.topic;
+    yield arguments.length;
+  },
+};
+
+console.log([...lesson.cards(1, 2, 3)]);   // ['еда', 3]
+const loose = lesson.cards;
+console.log(loose().next().value);         // undefined
+```
+
+Вызванный как метод, генератор видит объект в `this`; оторванный от объекта — теряет его,
+как метод дня 2: `this` стал окном, у которого нет `topic`.
+
+## 4. yield и return {#return}
+
+`yield` выдаёт значение и встаёт на паузу. `return` в генераторе тоже можно
+написать — он заканчивает генератор, и его значение приходит вместе с `done: true`:
+
+```js
+function* answers() {
+  yield "да";
+  yield "нет";
+  return "конец";
+}
+
+const it = answers();
+console.log(it.next(), it.next());   // {value: 'да', done: false} {value: 'нет', done: false}
+console.log(it.next(), it.next());   // {value: 'конец', done: true} {value: undefined, done: true}
+console.log([...answers()]);          // ['да', 'нет']
+```
+
+Spread «конец» не увидел — как и `for...of` с деструктуризацией: значение при
+`done: true` они отбрасывают (таблица 84, день 11). Поэтому то, что должен перебрать
+`for...of`, выдают через `yield`, а `return` оставляют для итога,
+который читают вручную, — как в примере учебника MDN, где диапазон в конце сообщает, сколько чисел выдал:
+
+```js
+function* makeRange(start, end, step = 1) {
+  let count = 0;
+  for (let i = start; i < end; i += step) {
+    count++;
+    yield i;
+  }
+  return count;
+}
+
+const iter = makeRange(1, 10, 2);
+let result = iter.next();
+while (!result.done) {
+  console.log(result.value);
+  result = iter.next();
+}
+console.log("всего чисел:", result.value);
+```
+
+<ResultBox>
+1\
+3\
+5\
+7\
+9\
+всего чисел: 5
+</ResultBox>
+
+Цикл — тот же `while`, которым вчера мы записали `for...of`, только последний
+результат не выброшен: в нём итог. `yield` без значения выдаёт `undefined`.
+
+И важное ограничение: `yield` работает только в самой генераторной функции, не во
+вложенных. `yield` внутри колбэка `forEach` — синтаксическая ошибка: для обычной
+функции это не команда, а просто имя (вспомните день 3: вне строгого режима `yield` —
+допустимое имя переменной). Тексты ошибок — в разделе 11.
+
+## 5. Генератор — одноразовый проход {#once}
+
+Генератор — перебираемый итератор из раздела 9 дня 11: его `[Symbol.iterator]()`
+возвращает его самого. Но есть отличие от итератора массива:
+
+```js
+function* letters() {
+  yield "a";
+  yield "b";
+  yield "c";
+}
+
+const gen = letters();
+console.log(gen[Symbol.iterator]() === gen);   // true
+for (const letter of gen) {
+  console.log("первый проход:", letter);
+  break;
+}
+console.log([...gen], [...letters()]);          // [] ['a', 'b', 'c']
+```
+
+<ResultBox>
+true\
+первый проход: a\
+(0) \[\] (3) \['a', 'b', 'c'\]
+</ResultBox>
+
+Вчера итератор массива после `break` продолжал с того же места. Генератор — нет: у него
+есть метод `return()` (раздел 8), `break` его вызвал, и генератор закончился.
+Отсюда правило. Генераторная функция — фабрика проходов: каждый вызов даёт свежий генератор. Сам
+генератор — один проход. Объект, который должен перебираться много раз, как `range`,
+хранит генератор в методе `*[Symbol.iterator]()`: каждый `for...of` вызывает
+его заново.
+
+## 6. Бесконечные последовательности {#infinite}
+
+Генератор считает значения, только когда их просят. Поэтому `while (true)` внутри него
+не вешает страницу: после каждого `yield` он ждёт. Так записывают бесконечные
+последовательности — числа Фибоначчи из учебника MDN:
+
+```js
+function* fibonacci() {
+  let [current, after] = [0, 1];
+  while (true) {
+    yield current;
+    [current, after] = [after, current + after];
+  }
+}
+
+const first = [];
+for (const n of fibonacci()) {
+  if (first.length === 10) {
+    break;
+  }
+  first.push(n);
+}
+console.log(first);   // [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+```
+
+Берёт ровно столько, сколько нужно, вызывающий код — `break` на десятом числе.
+Бесконечный счётчик `idMaker` из задания 8 дня 11 генератором записывается так же коротко,
+как `counter` раздела 2. Ловушка обратная: `[...fibonacci()]` никогда не закончится — spread хочет все
+значения, а их нет конца. Метод `take(10)`, который берёт первые N без цикла, — день 13.
+
+### Лениво — значит по частям
+
+Ленивость полезна и для конечных данных. Пример со страницы MDN о `next()` — разбить список
+на страницы: генератор режет следующую порцию, только когда её попросили. Возьмём восемь слов
+«Карточек»:
+
+```js
+function* pages(list, size) {
+  for (let start = 0; start < list.length; start += size) {
+    yield list.slice(start, start + size);
+  }
+}
+
+const words = ["book", "teacher", "lesson", "bread", "water", "apple", "house", "window"];
+const pager = pages(words, 3);
+console.log(pager.next().value);   // ['book', 'teacher', 'lesson']
+console.log(pager.next().value);   // ['bread', 'water', 'apple']
+console.log(pager.next().value);   // ['house', 'window']
+console.log(pager.next().done);    // true
+```
+
+Кнопка «Дальше» на странице просто вызывала бы `pager.next()`: генератор помнит, где
+остановился, и номер страницы хранить не нужно.
+
+## 7. Разговор через next(value) {#next-value}
+
+До сих пор значения шли из генератора наружу. Но `yield` — выражение, и у него есть
+результат: это аргумент **следующего** `next()`. Генератор может задавать
+вопросы и получать ответы:
+
+```js
+function* quiz() {
+  const first = yield "2 + 2?";
+  const second = yield "3 · 3?";
+  return `ответы: ${first}, ${second}`;
+}
+
+const q = quiz();
+console.log(q.next("потеряется"));   // {value: '2 + 2?', done: false}
+console.log(q.next(4));              // {value: '3 · 3?', done: false}
+console.log(q.next(9));              // {value: 'ответы: 4, 9', done: true}
+```
+
+MDN подчёркивает несимметричность `next`: он **отправляет** значение
+в тот `yield`, на котором генератор стоит, а **получает** значение следующего
+`yield`. Первый `next()` запускает тело с начала — никакой `yield`
+ещё не ждёт ответа, поэтому его аргумент «потеряется» молча. `for...of` и spread аргументов
+не передают (примечание 1 раздела 27.1.1), так что разговором управляют только вручную.
+
+Пауза может случиться даже посреди выражения — генератор остановится на первом `yield`,
+а сложение закончит, когда получит оба ответа:
+
+```js
+function* sum() {
+  return (yield "первое число?") + (yield "второе число?");
+}
+
+const s = sum();
+console.log(s.next().value, s.next(2).value, s.next(3));   // первое число? второе число? {value: 5, done: true}
+```
+
+## 8. return() и finally {#finally}
+
+У генератора есть необязательный метод итератора `return()` из раздела 12 дня 11 — и
+писать его не надо. Он действует так, будто на месте паузы выполнился `return`. А если
+`yield` стоит внутри `try...finally` (день 11 Essentials), блок
+`finally` выполнится — это место для уборки:
+
+```js
+function* lines() {
+  try {
+    yield "строка 1";
+    yield "строка 2";
+    yield "строка 3";
+  } finally {
+    console.log("finally: файл закрыт");
+  }
+}
+
+for (const line of lines()) {
+  console.log(line);
+  break;
+}
+const g = lines();
+g.next();
+console.log(g.return("рано"), g.next());
+console.log(lines().return("до старта"));
+```
+
+<ResultBox>
+строка 1\
+finally: файл закрыт\
+finally: файл закрыт\
+\{value: 'рано', done: true\} \{value: undefined, done: true\}\
+\{value: 'до старта', done: true\}
+</ResultBox>
+
+`break` позвал `return()`, тот выполнил `finally`. Ручной
+`g.return("рано")` — то же, и его аргумент стал `value` результата. А генератор,
+который ни разу не запускали, на `return()` просто закрывается: тело не начато, до
+`try` не дошли, и `finally` молчит. Так генераторы выполняют обещание
+дня 11 «итератор может прибраться», почти без кода. Тонкость из MDN: если в самом
+`finally` есть `yield`, `return()` вернёт его значение с
+`done: false` — уборка может выдать ещё что-то.
+
+## 9. throw() {#throw}
+
+Обещанный вчера метод `throw()` — пара `return()`: он действует так, будто на
+месте паузы выполнился `throw`. Генератор может ошибку поймать и продолжить:
+
+```js
+function* safe() {
+  while (true) {
+    try {
+      yield 42;
+    } catch (error) {
+      console.log("поймано внутри:", error.message);
+    }
+  }
+}
+
+const g = safe();
+console.log(g.next().value);                     // 42
+console.log(g.throw(new Error("сбой")).value);   // поймано внутри: сбой, затем 42
+```
+
+Не поймал — ошибка вылетает из вызова `throw()` к вызывающему коду, и генератор
+закончен:
+
+```js
+function* plain() {
+  yield 1;
+  yield 2;
+}
+
+const p = plain();
+p.next();
+try {
+  p.throw(new Error("сбой"));
+} catch (error) {
+  console.log("снаружи:", error.message);
+}
+console.log(p.next());   // {value: undefined, done: true}
+```
+
+Ошибка, брошенная в самом теле, ведёт себя так же: её выбросит `next()`, а генератор
+закроется. Встроенные потребители `throw()` не вызывают никогда — это инструмент для
+ручного управления.
+
+## 10. yield\* и обход дерева {#delegate}
+
+`yield*` (со звёздочкой) выдаёт по очереди все значения другого перебираемого объекта —
+генератора, массива, строки. Это **делегирование**: пока внутренний не кончился, внешний
+генератор просто передаёт его значения. Результат самого выражения `yield*` — то, что
+внутренний генератор вернул через `return`:
+
+```js
+function* inner() {
+  yield 2;
+  yield 3;
+  return "inner готов";
+}
+
+function* outer() {
+  yield 1;
+  const result = yield* inner();
+  console.log("yield* вернул:", result);
+  yield* [4, 5];
+  yield* "аб";
+}
+
+console.log([...outer()]);
+// yield* вернул: inner готов
+// [1, 2, 3, 4, 5, 'а', 'б']
+```
+
+Главное применение — рекурсия. Дерево разделов курса обходится генератором, который выдаёт свой узел
+и через `yield*` поручает детей самому себе:
+
+```js
+const course = {
+  title: "JavaScript",
+  children: [
+    { title: "Essentials", children: [{ title: "Переменные" }, { title: "Функции" }] },
+    { title: "Intermediate", children: [{ title: "Замыкания" }, { title: "Генераторы" }] },
+  ],
+};
+
+function* walk(node, depth = 0) {
+  yield "· ".repeat(depth) + node.title;
+  for (const child of node.children ?? []) {
+    yield* walk(child, depth + 1);
+  }
+}
+
+for (const line of walk(course)) {
+  console.log(line);
+}
+```
+
+<ResultBox>
+JavaScript\
+· Essentials\
+· · Переменные\
+· · Функции\
+· Intermediate\
+· · Замыкания\
+· · Генераторы
+</ResultBox>
+
+Точки показывают глубину узла. Без генератора пришлось бы собирать массив и передавать
+его в каждый рекурсивный вызов; здесь каждый уровень просто выдаёт своё, а `yield*` склеивает
+уровни в одну последовательность.
+
+`yield*` пробрасывает внутрь и `return()` с `throw()`: закрыли внешний
+генератор — закроется и внутренний, причём изнутри наружу:
+
+```js
+function* innerPart() {
+  try {
+    yield "внутренний 1";
+    yield "внутренний 2";
+  } finally {
+    console.log("закрыт внутренний");
+  }
+}
+
+function* outerPart() {
+  try {
+    yield* innerPart();
+  } finally {
+    console.log("закрыт внешний");
+  }
+}
+
+for (const part of outerPart()) {
+  console.log(part);
+  break;
+}
+// внутренний 1
+// закрыт внутренний
+// закрыт внешний
+```
+
+Справа от `yield*` должно стоять перебираемое: `yield* 5` —
+`TypeError: number 5 is not iterable (cannot read property Symbol(Symbol.iterator))`.
+
+## 11. Ошибки дня {#errors}
+
+У генераторов две свои страницы ошибок на MDN. Первая — генератор позвал сам себя, пока работает:
+
+```js
+let it;
+function* getNumbers(times) {
+  if (times <= 0) {
+    it.throw(new Error("times must be greater than 0"));
+  }
+  for (let i = 0; i < times; i++) {
+    yield i;
+  }
+}
+
+it = getNumbers(0);
+it.next();
+// TypeError: Generator is already running
+```
+
+Пока выполняется тело, генератор в состоянии «выполняется», и любой его метод бросает
+`TypeError`. Изнутри пишут обычный `throw new Error(…)` — MDN так и исправляет
+пример. Вторая — `yield` в параметре по умолчанию:
+
+```js
+function* gen(a = yield 1) {}
+// SyntaxError: Yield expression not allowed in formal parameter
+```
+
+Параметры вычисляются при вызове функции (раздел 13), когда вставать на паузу ещё некуда. MDN
+предлагает вынести умолчание в тело через `??=` дня 6: `a ??= yield 1;`.
+Остальные ошибки дня — одной таблицей:
+
+| Код | Текст Chrome |
+| --- | --- |
+| `new counter()` | `counter is not a constructor` |
+| `const g = *() => {}` | `Unexpected token '*'` |
+| `yield x` в колбэке внутри генератора | `Unexpected identifier 'x'` |
+| `yield 1` во вложенной обычной функции | `Unexpected number` |
+| `const yield = 5` в генераторе | `Unexpected identifier 'yield'` |
+| `yield* 5` | `number 5 is not iterable (cannot read property Symbol(Symbol.iterator))` |
+
+Третья и четвёртая строки сбивают с толку: Chrome ругает не `yield`, а то, что за ним.
+Во вложенной функции `yield` — обычное имя, и `yield x` для разбора — два имени
+подряд без оператора.
+
+## 12. Откуда у генератора методы {#chain}
+
+`next`, `return` и `throw` не лежат в самом генераторе — их даёт цепочка
+прототипов дня 7:
+
+```js
+function* genFunc() {
+  yield 1;
+}
+
+const gen = genFunc();
+const proto = Object.getPrototypeOf;
+const generatorProto = proto(proto(gen));
+
+console.log(proto(gen) === genFunc.prototype, Object.getOwnPropertyNames(genFunc.prototype));   // true []
+console.log(Object.getOwnPropertyNames(generatorProto), generatorProto[Symbol.toStringTag]);
+// ['constructor', 'next', 'return', 'throw'] Generator
+console.log(gen instanceof genFunc, String(gen));   // true [object Generator]
+```
+
+<Scheme src="scheme-chain.svg">Цепочки генератора и генераторной функции</Scheme>
+
+Каждая генераторная функция получает свой пустой объект `prototype` — он становится прототипом
+её генераторов, поэтому `instanceof` работает. Дальше — общий для всех
+`Generator.prototype` с тремя методами, потом `Iterator.prototype` дня 11 с
+`[Symbol.iterator]() { return this; }`. MDN отмечает, что «`Generator.prototype`» —
+условное имя: глобального `Generator` нет, и точнее этот объект называть
+`GeneratorFunction.prototype.prototype`. У `genFunc.prototype` нет даже своего
+`constructor` (примечание к 27.3.4.3), а унаследованный `gen.constructor` — объект
+`GeneratorFunction.prototype`, не функция.
+
+Сама генераторная функция — объект **GeneratorFunction**, наследника
+`Function`. Глобальной переменной для него тоже нет; достают через конструктор любой
+генераторной функции:
+
+```js
+const GeneratorFunction = function* () {}.constructor;
+const twice = new GeneratorFunction("a", "yield a * 2; yield a * 3;");
+
+function* letters() {}
+
+console.log([...twice(10)], twice.name, typeof globalThis.GeneratorFunction);   // [20, 30] anonymous undefined
+console.log(letters instanceof GeneratorFunction, letters instanceof Function);   // true true
+```
+
+Как конструктор `Function` дня 4, он собирает функцию из строк — и так же опасен: код из
+строки не видит окружения, а строка с чужими данными — дыра. В консоли генератор подписан
+именем своей функции и показывает внутренний слот: `genFunc {[[GeneratorState]]: 'suspended'}`.
+Этот слот — главное в спецификации.
+
+## 13. Раздел 27.5 спецификации {#spec}
+
+Прочитаем [27.5 Generator Objects](https://tc39.es/ecma262/2026/#sec-generator-objects).
+Первые две фразы: генератор создаётся вызовом генераторной функции и соответствует интерфейсам
+итератора и перебираемого объекта (27.1.1 вчерашнего дня); наследует он от `prototype`
+своей функции, а через него — от `%GeneratorPrototype%`. Раздел 27.5.1 описывает этот
+объект, и методы в нём короткие: `next(value)` — это операция GeneratorResume, а
+`return(value)` и `throw(exception)` — GeneratorResumeAbrupt с «завершением
+через return» и «завершением через throw».
+
+Таблица 89 (27.5.2) перечисляет внутренние слоты генератора. `[[GeneratorContext]]` —
+контекст выполнения: место, где тело остановилось, со всеми его переменными; так пауза «помнит всё»
+из раздела 2. `[[GeneratorState]]` — одно из четырёх состояний: *suspended-start*
+(создан, тело не начато), *executing* (выполняется), *suspended-yield* (стоит на
+`yield`), *completed* (закончен). DevTools называет их по-своему —
+`suspended`, `running`, `closed`.
+
+<Scheme src="scheme-spec.svg">Состояния `[[GeneratorState]]` и переходы между ними</Scheme>
+
+Операции раздела [27.5.3](https://tc39.es/ecma262/2026/#sec-generator-abstract-operations)
+объясняют всё, что мы видели сегодня:
+
+1. **GeneratorValidate** (27.5.3.2): если состояние *executing* —
+   `TypeError`. Это «Generator is already running» раздела 11.
+2. **GeneratorResume** (27.5.3.3): закончен — сразу `{value: undefined, done: true}`
+   (отсюда бесконечные `done: true`); иначе — состояние *executing* и продолжение
+   тела, причём аргумент `next` становится результатом остановившегося `yield`.
+3. **GeneratorYield** (27.5.3.6): состояние *suspended-yield*, контекст
+   генератора снимается со стека, и вызывающий код получает `{value, done: false}`.
+4. **GeneratorResumeAbrupt** (27.5.3.4): в *suspended-start* генератор
+   сразу становится *completed*, тело не трогают. Поэтому `return()` до старта
+   не выполнил `finally`, а `throw()` до старта поймать невозможно.
+5. **GeneratorStart** (27.5.3.1): когда тело кончилось — *completed* навсегда
+   («контекст больше никогда не возобновляется»), результат — `{value, done: true}`
+   со значением `return`.
+
+А что происходит при самом вызове генераторной функции, говорит раздел
+[15.5.2
+EvaluateGeneratorBody](https://tc39.es/ecma262/2026/#sec-runtime-semantics-evaluategeneratorbody): подготовить параметры, создать объект с прототипом из
+`genFunc.prototype`, поставить *suspended-start* и вернуть его. Параметры — значит,
+умолчания вычисляются сразу, до первого `next()`:
+
+```js
+function* greet(name = (console.log("параметр вычислен"), "Аман")) {
+  console.log("тело началось");
+  yield `салам, ${name}`;
+}
+
+const it = greet();
+console.log("генератор создан");
+console.log(it.next().value);
+// параметр вычислен
+// генератор создан
+// тело началось
+// салам, Аман
+```
+
+Сама генераторная функция описана в разделе
+[27.3 GeneratorFunction Objects](https://tc39.es/ecma262/2026/#sec-generatorfunction-objects):
+конструктор `%GeneratorFunction%`, его свойства, прототип со ссылкой на
+`%GeneratorPrototype%` и свойства `length`, `name`,
+`prototype` каждой генераторной функции — всё то, что мы видели в разделе 12.
+
+## 14. «Карточки»: викторина {#cards}
+
+Перепишем колоду дня 11 генераторами и добавим викторину. Итератор колоды — генератор-метод: три строки
+вместо прежнего `next` с `while`. Викторина `quiz()` — разговор через
+`next(answer)`: выдаёт вопрос, получает ответ, верный — помечает карточку выученной. Итог —
+через `return`, а `finally` сообщает, что сессия окончена, как бы она ни кончилась.
+
+```js
+const LEARNED = Symbol("learned");
+
+class Deck {
+  #cards;
+
+  constructor(cards) {
+    this.#cards = cards.map((card) => ({ ...card }));
+  }
+
+  learn(word) {
+    this.#cards.find((c) => c.word === word)[LEARNED] = true;
+  }
+
+  *[Symbol.iterator]() {
+    for (const card of this.#cards) {
+      if (!card[LEARNED]) yield card;                   // выученные пропускаем
+    }
+  }
+
+  *quiz() {
+    let right = 0;
+    try {
+      for (const card of this) {
+        const answer = yield `${card.word} — ?`;         // вопрос наружу, ответ внутрь
+        if (answer === card.translation) {
+          right++;
+          this.learn(card.word);
+        }
+      }
+    } finally {
+      console.log(`сессия окончена: верно ${right}`);
+    }
+    return right;
+  }
+}
+
+const deck = new Deck([
+  { word: "book", translation: "книга" },
+  { word: "teacher", translation: "учитель" },
+  { word: "bread", translation: "хлеб" },
+  { word: "water", translation: "вода" },
+  { word: "house", translation: "дом" },
+]);
+deck.learn("teacher");
+console.log([...deck].map((card) => card.word));
+
+const session = deck.quiz();
+console.log(session.next().value);
+console.log(session.next("книга").value);
+console.log(session.next("вода").value);
+console.log(session.next("вода").value);
+console.log(session.next("дом"));
+console.log([...deck].map((card) => card.word));
+
+const again = deck.quiz();
+console.log(again.next().value);
+console.log(again.return(0));
+```
+
+<ResultBox>
+(4) \['book', 'bread', 'water', 'house'\]\
+book — ?\
+bread — ?\
+water — ?\
+house — ?\
+сессия окончена: верно 3\
+\{value: 3, done: true\}\
+(1) \['bread'\]\
+bread — ?\
+сессия окончена: верно 0\
+\{value: 0, done: true\}
+</ResultBox>
+
+**Строка 1 — генератор-итератор.** Spread вызвал `*[Symbol.iterator]()`,
+и `teacher` пропущен. Каждый spread получает новый генератор, поэтому колода перебирается
+сколько угодно раз.
+
+**Строки 2–7 — разговор.** Первый `next()` запустил викторину до первого
+вопроса. Дальше каждый `next(ответ)` отдал ответ на прежний вопрос и получил новый:
+«книга» — верно, «вода» на `bread` — нет, «вода» и «дом» — верно. Вопросы кончились,
+`finally` напечатал итог, `return right` пришёл с `done: true`.
+
+**Строка 8 — побочный эффект.** Верные ответы пометили карточки, и в колоде осталось
+одно невыученное слово.
+
+**Строки 9–11 — ранний выход.** Вторую сессию закрыли после первого вопроса через
+`return(0)`: `finally` всё равно сработал, а результатом стал аргумент
+`return()`.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Уберите `try` и `finally`, оставив тело цикла. Какие
+строки пропадут из вывода — и чем это опасно, если бы викторина держала открытый ресурс?
+\
+\
+**Второй.** Передайте ответ уже в первый вызов: `session.next("книга")`. Изменится
+ли счёт? Почему — по разделу 7?
+\
+\
+**Третий.** Создайте две викторины одной колоды и вызывайте их `next` по очереди.
+Мешают ли они друг другу? Что общего у них, а что у каждой своё?
+</TryIt>
+
+## 15. Что дальше {#next}
+
+Генераторы закрыли модуль наполовину: любой перебор теперь пишется функцией со звёздочкой. Но
+чтобы взять первые десять чисел Фибоначчи, мы всё ещё пишем цикл с `break`. Завтра,
+на дне 13, — методы `Iterator`, которые есть у каждого генератора: `take`,
+`map`, `filter`, `reduce` прямо на последовательности, лениво, без
+промежуточных массивов. А асинхронные генераторы `async function*` ждут нас на дне 29.
+
+Историческая справка со страницы MDN о `function*`: когда-то генераторами писали
+асинхронный код — генератор вставал на паузу, пока данные грузятся, а внешний код будил его через
+`next(данные)`. Сегодня это делают проще — `async`/`await` из дня 31
+Essentials, и как они устроены внутри, разберём на дне 28. Генераторам осталась их основная работа —
+последовательности.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Iterators and generators](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators) | учебник: итератор руками и генератором; `next(x)`; Фибоначчи | <Full /> |
+| [function\*](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*) | объявление генераторной функции; пауза и продолжение | <Full /> |
+| [function\* expression](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/function*) | генератор-выражение | <Full /> |
+| [yield](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/yield) | выдать значение; результат — аргумент `next` | <Full /> |
+| [yield\*](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/yield*) | делегирование другому перебираемому; результат — его `return` | <Full /> |
+| [Generator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator) | объект-генератор; цепочка прототипов | <Full /> |
+| [Generator.prototype.next()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator/next) | шаг генератора; отправить значение внутрь | <Full /> |
+| [Generator.prototype.return()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator/return) | закрыть генератор; `finally` | <Full /> |
+| [Generator.prototype.throw()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator/throw) | бросить ошибку на месте паузы | <Full /> |
+| [ECMA-262, 27.5 Generator Objects](https://tc39.es/ecma262/2026/#sec-generator-objects) | четыре состояния; методы через GeneratorResume | <Full /> |
+| [GeneratorFunction](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction) | тип генераторной функции, не глобальный | <Brief /> |
+| [GeneratorFunction() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction/GeneratorFunction) | генератор из строк — как `Function`, опасно | <Brief /> |
+| [GeneratorFunction.prototype.prototype](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction/prototype) | общий прототип генераторов; свой `prototype` у каждой функции | <Brief /> |
+| [Ошибка: already executing generator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Already_executing_generator) | `Generator is already running` | <Brief /> |
+| [Ошибка: await/yield expression can't be used in parameter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/await_yield_in_parameter) | `Yield expression not allowed in formal parameter` | <Brief /> |
+| [ECMA-262, 27.3 GeneratorFunction Objects](https://tc39.es/ecma262/2026/#sec-generatorfunction-objects) | как устроен раздел о генераторных функциях | <Brief /> |
+| [ECMA-262, 27.3.1–27.3.4](https://tc39.es/ecma262/2026/#sec-generatorfunction-constructor) | конструктор, его свойства, прототип, экземпляры | <Brief /> |
+| [ECMA-262, 27.5.1–27.5.3](https://tc39.es/ecma262/2026/#sec-properties-of-generator-prototype) | `%GeneratorPrototype%`, слоты генератора, операции | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// function* gen() { … }   const g = function* () {};   { *method() {} }   *[Symbol.iterator]() {}
+// стрелочного генератора нет; new gen() — TypeError
+// gen() — тело НЕ выполняется, возвращается генератор (итератор + перебираемый)
+// next()          — выполнить до ближайшего yield: { value, done: false }
+// yield x         — выдать x и встать на паузу; результат yield — аргумент следующего next()
+// return x        — конец: { value: x, done: true }; for...of и spread x не видят
+// первый next(x)  — x теряется: ни один yield ещё не ждёт
+// генератор одноразовый: break зовёт return() и закрывает его
+// много раз перебирать — объект с *[Symbol.iterator]() { … }
+// g.return(x)     — return на месте паузы; finally выполнится (если тело начато)
+// g.throw(err)    — throw на месте паузы; можно поймать try...catch внутри
+// yield* iterable — выдать всё из другого; результат — его return; рекурсия по дереву
+// while (true) { yield … } — бесконечно, но лениво; [...бесконечный] — зависнет
+// [[GeneratorState]]: suspended-start, executing, suspended-yield, completed
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Что выполнится при вызове `const g = gen();`, если в начале тела генератора стоит
+   `console.log`?
+   <Answer>Ничего из тела: вызов только создаёт генератор в состоянии «не начат». Тело пойдёт с первым
+   `g.next()`. Вычислятся только параметры по умолчанию.</Answer>
+2. Почему `[...answers()]` не содержит значения из `return "конец"`?
+   <Answer>Оно приходит вместе с `done: true`, а spread, `for...of` и деструктуризация
+   такое значение отбрасывают. Перебираемое выдают через `yield`.</Answer>
+3. Куда попадает аргумент `next(5)`?
+   <Answer>Он становится результатом того `yield`, на котором генератор стоит. Аргумент первого
+   `next` теряется — ни один `yield` ещё не ждёт.</Answer>
+4. Почему генератор после `break` не продолжить, а итератор массива — можно?
+   <Answer>У генератора есть `return()`, и `break` его вызывает — генератор
+   закрывается. У итератора массива `return` нет.</Answer>
+5. Как обойти дерево любой глубины генератором?
+   <Answer>Выдать свой узел через `yield`, а для каждого ребёнка вызвать себя же через
+   `yield* walk(child)`: значения всех уровней сольются в одну последовательность.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators" />

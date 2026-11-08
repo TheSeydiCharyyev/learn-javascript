@@ -1,0 +1,522 @@
+---
+title: "День 17 — Регулярные выражения: шаблон, флаги, классы, квантификаторы"
+day: День 17 • урок 1
+heading: "Регулярные выражения: шаблон, флаги, классы, квантификаторы"
+lead: Курс 2, Intermediate. Модуль «Строки и регулярные выражения» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f43f5e; }
+  h2 { color: #be123c; background: #fff1f2; border-left-color: #f43f5e; }
+  h3 { color: #9f1239; }
+  .step-number { background: #f43f5e; }
+  .toc a { color: #be123c; }
+---
+
+<Goals>
+- создавать регулярное выражение литералом и конструктором и читать его `source` и `flags`;
+- проверять строку через `test` и находить позицию через `search`;
+- писать шаблоны из букв, классов `[...]`, `\d \w \s`, точки, квантификаторов и `|`;
+- пользоваться флагами `i` и `g` и знать ловушку `g` в `test`;
+- проверять ввод — индекс, логин, телефон — и понимать, чего сегодняшним шаблонам не хватает.
+</Goals>
+
+<Toc />
+
+## 1. Ошибка про регулярное выражение {#promise}
+
+День 4 Essentials оставил загадку: вложенный комментарий `/* … /* … */ … */` давал
+`SyntaxError: Invalid regular expression: missing /`. Комментарий кончился на первом `*/`,
+дальше движок увидел `/` — и решил, что начинается **регулярное выражение**: шаблон для
+поиска в тексте, записанный между двумя косыми чертами. Второй черты не нашлось — отсюда «missing /».
+
+Обещаний накопилось и больше. День 16 Essentials: два пробела внутри имени и невидимый символ, которого не
+видит `trim`, — «задача для регулярных выражений». День 19 Essentials: `split` «вместе с
+регулярными выражениями». А вчера журнал обещал проверить имя ученика одним шаблоном. Вот разница:
+
+```js
+const student = "Гүлнар";
+const letters = "абвгдеёжзийклмнопрстуфхцчшщъыьэюяүңәөҗ";
+console.log([...student.toLowerCase()].every((ch) => letters.includes(ch)));   // true
+console.log(/[^\u0400-\u04FF]/.test(student), /[^\u0400-\u04FF]/.test("Гүлнар2"));   // false true
+```
+
+Без шаблона — перебор символов и строка разрешённых букв. С шаблоном — одна проверка «есть ли хоть один
+символ не из кириллицы». К концу дня вы прочитаете `/[^\u0400-\u04FF]/` без подсказки. Сегодня —
+как *писать* шаблон и проверять им строку. Завтра, на дне 18, — как узнать, что *именно* нашлось;
+на дне 19 — заменять и делить строки; на дне 20 — буквы любых алфавитов.
+
+## 2. Литерал и конструктор {#create}
+
+Справочник MDN: регулярное выражение — объект `RegExp`, и создать его можно двумя способами.
+
+```js
+const re1 = /ab+c/i;
+const re2 = new RegExp("ab+c", "i");
+console.log(re1, re2, re1 === re2);                              // /ab+c/i /ab+c/i false
+console.log(re1.source, re1.flags, String(re2), typeof re1);     // ab+c i /ab+c/i object
+console.log(/\d+/.source, new RegExp("\\d+").source, new RegExp("\d+").source);   // \d+ \d+ d+
+```
+
+**Литерал** `/шаблон/флаги` разбирается, когда загружается скрипт; ошибка в нём —
+`SyntaxError` ещё до запуска, как у любой опечатки в коде. **Конструктор**
+`new RegExp(строка, флаги)` строит шаблон во время работы — нужен, когда шаблон приходит из данных:
+из поля ввода, из списка слов. `source` — текст шаблона без косых черт, `flags` — строка флагов,
+`toString` собирает их обратно в литерал.
+
+Главная ловушка конструктора — третья строка вывода. В строке JavaScript обратная косая черта уже занята
+(`"\n"` — перенос строки, день 16 Essentials), поэтому `"\d"` — просто «d», и шаблон стал
+`d+`. Чтобы до конструктора дошла косая черта, её пишут дважды: `"\\d+"`.
+
+Регулярное выражение — обычный объект: каждый литерал при каждом выполнении создаёт новый, поэтому
+`re1 === re2` ложно, как у двух объектов дня 6. `RegExp` — из старых конструкторов, которые
+день 14 называл работающими без `new`; а получив готовое регулярное выражение без флагов, он просто
+возвращает его же.
+
+## 3. test и search {#test}
+
+```js
+const re = /fo+/;
+console.log(re.test("table football"), re.test("table tennis"));          // true false
+console.log("table football".search(re), "table tennis".search(re));      // 6 -1
+console.log(/und/.test(), "5.0".search("."), "5.0".search(/\./));         // true 0 1
+```
+
+`re.test(строка)` отвечает `true` или `false`: нашлось ли где-нибудь.
+`строка.search(re)` — метод строки — возвращает номер символа, с которого началось первое
+совпадение, или `-1`, как `indexOf` дня 19 Essentials. Справочник MDN советует: нужен только
+ответ «есть ли» — `test`; нужен и номер — `search`.
+
+<Scheme src="scheme-test.svg">Как `/fo+/` ищется в строке «table football»</Scheme>
+
+Две странности третьей строки — из справочника. `test()` без аргумента превращает
+`undefined` в строку `"undefined"` и находит в ней «und». А `search` со
+*строкой* сам строит из неё `new RegExp`: точка в шаблоне значит «любой символ», и
+`"5.0".search(".")` находит «5» на месте 0. А `includes`, `startsWith` и
+`endsWith` дня 16 Essentials шаблон не принимают — бросают ошибку:
+
+```js
+console.log("file.png".includes("png"), /png/.test("file.png"));   // true true
+"file.png".includes(/png/);
+// TypeError: First argument to String.prototype.includes must not be a regular expression
+```
+
+## 4. Буквы, экранирование, особые символы {#literal}
+
+Большинство символов шаблона — **буквальные**: `/кот/` ищет ровно «кот», подряд и в
+этом порядке. Особый смысл у четырнадцати символов: `^ $ \ . * + ? ( ) [ ] { } |`. Чтобы искать
+такой символ как есть, перед ним ставят обратную косую черту — **экранируют**:
+
+```js
+console.log(/a\*b/.test("a*b"), /a\*b/.test("ab"), /a*b/.test("ab"));               // true false true
+console.log(/\/docs\//.test("/docs/web"), /[/]/.test("a/b"), /C:\\/.test("C:\\Users"));   // true true true
+console.log(/\u200B/.test("Аман\u200B"), "Аман\u200B".length, /\t/.test("a\tb"));      // true 5 true
+```
+
+Без черты `*` значит «ноль или больше раз», и `/a*b/` находит «b» и там, где звёздочки нет
+вовсе. Косая черта `/` в литерале закрыла бы шаблон, поэтому `\/`; внутри квадратных скобок
+можно и без черты. Сама черта — `\\`.
+
+Третья строка — долг дня 16 Essentials. `\u200B` — **экранированный символ** с
+номером: пробел нулевой ширины, который не видно на экране и не снимает `trim`. Строка «Аман» с ним
+длиной 5, а шаблон находит его сразу. Так же записываются `\n` (перенос строки — буквально в литерал
+его не вставить), `\t` (табуляция) и любой символ по номеру: `\uHHHH`, четыре
+шестнадцатеричные цифры.
+
+## 5. Классы символов {#class}
+
+**Класс** `[...]` — один символ из набора. Внутри — отдельные символы и диапазоны через
+дефис; `^` сразу после скобки переворачивает набор: «любой, кроме».
+
+```js
+console.log(/[аеиоуы]/.test("шкф"), /[0-9]/.test("Мары 744000"), /[^0-9]/.test("744000"), /[^0-9]/.test("7440O0"));
+// false true false true
+console.log(/[.]/.test("5,0"), /[-+]/.test("+993"), /[a^b]/.test("^"));   // false true true
+```
+
+Внутри скобок почти всё буквально: точка — просто точка, `+` — плюс, `^` не в начале —
+крышка. Дефис по краю — буквальный. Экранировать нужно только `\`, `]` и дефис посередине.
+В четвёртой проверке первой строки буква O стоит вместо нуля — `[^0-9]` поймал её. Такие проверки
+«есть ли запрещённое» станут главным приёмом раздела 10.
+
+Диапазон — это промежуток **номеров** символов в Юникоде, а не алфавит. Отсюда два сюрприза:
+
+```js
+console.log(/[а-я]/.test("ё"), /[а-яё]/.test("ё"), /[а-я]/.test("ү"), /[\u0400-\u04FF]/.test("ү"));
+// false true false true
+```
+
+<Scheme src="scheme-class.svg">Классы `[а-я]` и `[\u0400-\u04FF]` на оси номеров</Scheme>
+
+Буква «ё» в Юникоде стоит после «я», а туркменская «ү» из «Гүлнар» — ещё дальше. Пример справочника MDN
+берёт весь блок кириллицы — `[\u0400-\u04FF]`: там и «ё», и «ү», и «ң». Так и устроена проверка имени
+из раздела 1. Туркменские буквы латиницы ä, ç, ň, ö, ş, ü, ý, ž в `[a-z]` тоже не входят; удобный способ
+сказать «любая буква любого алфавита» появится на дне 20.
+
+Та же природа у частой опечатки — `[A-z]` вместо `[A-Za-z]`:
+
+```js
+console.log(/[A-z]/.test("_"), /[A-Za-z]/.test("_"), /[А-я]/.test("Ж"), /[А-я]/.test("ё"));   // true false true false
+```
+
+Между «Z» и «a» в таблице Юникода стоят шесть знаков — `` [ \ ] ^ _ ` ``, и диапазон их захватил. С
+кириллицей `[А-я]` работает, потому что заглавные и строчные идут подряд, — но «ё» снова мимо.
+
+## 6. \\d, \\w, \\s и точка {#escapes}
+
+Частые классы имеют короткие имена — **экранированные классы**:
+
+| Запись | Что значит | Отрицание |
+| --- | --- | --- |
+| `\d` | цифра 0–9, то же, что `[0-9]` | `\D` — не цифра |
+| `\w` | «символ слова»: `[A-Za-z0-9_]` — только латиница! | `\W` |
+| `\s` | пробел, табуляция, переносы строк, неразрывный пробел и другие пробельные | `\S` |
+| `.` | любой символ, кроме переноса строки | — |
+
+```js
+console.log(/\w/.test("Аман"), /\w/.test("Aman_1"), /\W/.test("Аман"));               // false true true
+console.log(/\s/.test("Аман Мерет"), /\s/.test("\u00A0"), /\s/.test("\u200B"));       // true true false
+console.log(/a.c/.test("abc"), /a.c/.test("a\nc"), /../.test("😄"));                   // true false true
+```
+
+Главная ловушка — `\w`: для него «Аман» — ни одного символа слова. Он годится для логинов и имён
+переменных, но не для русского текста. `\s` находит неразрывный пробел из Word (день 16 Essentials), но
+не пробел нулевой ширины — тот не пробельный, а «невидимый». Точка не берёт перенос строки (флаг, который это
+меняет, — день 18). И `/../` нашёл два символа в одном смайлике: смайлик в строке — две 16-битные части,
+подробно — день 20.
+
+## 7. Квантификаторы {#quantifiers}
+
+**Квантификатор** ставят после символа, класса или `\d`, и он говорит, сколько раз
+тот повторяется:
+
+| Запись | Сколько раз | Пример |
+| --- | --- | --- |
+| `?` | 0 или 1 | `colou?r` — color и colour |
+| `*` | 0 и больше | `ab*c` — ac, abc, abbbc |
+| `+` | 1 и больше | `\d+` — хотя бы одна цифра |
+| `{n}` | ровно n | `\d{6}` — шесть цифр подряд |
+| `{n,}` | n и больше | `\s{2,}` — два пробела подряд и больше |
+| `{n,m}` | от n до m | `\d{2,4}` |
+
+```js
+console.log(/colou?r/.test("color"), /colou?r/.test("colour"), /colou?r/.test("colouur"));   // true true false
+console.log(/\d{3}-\d{2}-\d{2}/.test("тел. 123-45-67"), /\d{6}/.test("74400"), /\s{2,}/.test("Аман  Мерет"));   // true false true
+console.log(/a{1, 3}/.test("aa"), /a{1, 3}/.test("a{1, 3}"), /\d*/.test("без цифр"));   // false true true
+```
+
+Квантификатор действует на *один* предыдущий элемент: в `colou?r` необязательна только «u».
+`\s{2,}` — второй долг дня 16 Essentials: два пробела внутри имени найдены. Две ловушки в третьей
+строке. Пробел в фигурных скобках ломает квантификатор, и `a{1, 3}` становится буквальным текстом
+«a\{1, 3\}» — пример справочника MDN. А `*` разрешает ноль повторов: `/\d*/` находит пустую
+строку в любом тексте, и `test` всегда отвечает `true`. Для «есть ли цифры» нужен
+`+`.
+
+Квантификаторы **жадные**: берут столько повторов, сколько могут, — `o+` на схеме взял обе
+«o». Знак `?` после квантификатора (`+?`, `*?`) делает его ленивым: как можно
+меньше. На ответ `test` это не влияет; разница видна, когда достают найденный текст, — день 18.
+
+## 8. Выбор: | {#or}
+
+```js
+console.log(/кот|кошка/.test("кошка"), "мой кот".search(/кошка|кот/));   // true 4
+console.log(/\.png|jpg/.test("ajpgb"), /\.png|\.jpg/.test("ajpgb"), /\.png|\.jpg/.test("photo.jpg"));   // true false true
+```
+
+`|` разделяет **варианты**: подходит любой. Их пробуют слева направо на каждой позиции.
+У `|` самый низкий приоритет: `\.png|jpg` — это не «точка, потом png или jpg», а «.png» или
+просто «jpg» где угодно. Поэтому каждый вариант пока пишут целиком. Скобки, которые ограничивают выбор частью
+шаблона, — группы дня 18.
+
+## 9. Флаги i и g {#flags}
+
+**Флаги** пишут после второй косой черты или вторым аргументом конструктора. Сегодня — два:
+
+```js
+const re = /мары/i;
+console.log(re.test("Город МАРЫ"), re.ignoreCase, re.global, re.flags, /x/ig.flags);   // true true false i gi
+console.log(/гүлнар/i.test("ГҮЛНАР"), /[а-я]/i.test("Ё"), /[а-яё]/i.test("Ё"));       // true false true
+```
+
+`i` — «ignore case», без учёта регистра; работает и для кириллицы, и для туркменских букв, но
+только для тех, что входят в класс: «Ё» не нашлась, пока «ё» нет в скобках. У каждого флага — свойство только
+для чтения: `ignoreCase`, `global`; `flags` собирает их в строку по алфавиту,
+поэтому `ig` печатается как `gi`. Поменять флаги у готового объекта нельзя — только создать
+новый: `new RegExp(re, "gi")`.
+
+`g` — «global», искать все совпадения, а не первое. Он нужен методам дней 18–19. С
+`test` он даёт ловушку из справочника MDN:
+
+```js
+const g = /fo+/g;
+console.log(g.test("table football"), g.test("table football"), g.test("table football"));   // true false true
+console.log("table football".search(g), "table football".search(g));                        // 6 6
+```
+
+<Mistake>
+Объект с флагом `g` помнит, где остановился, и следующий `test` продолжает с того места —
+даже на другой строке. Второй вызов искал после «foo», ничего не нашёл и начал заново. Как это устроено — день 18.
+Правило на сегодня: для `test` флаг `g` не ставят. `search` флаг `g`
+не замечает.
+</Mistake>
+
+## 10. Проверка ввода: индекс, логин, телефон {#input}
+
+Практика плана дня — проверить, что ввёл человек. Сегодняшний приём — искать *запрещённое*: класс с
+`^`, `\D`, `\W`, — и отдельно проверять длину.
+
+```js
+const isIndex = (text) => text.length === 6 && !/\D/.test(text);
+const isLogin = (text) => text.length >= 3 && text.length <= 16 && !/\W/.test(text);
+const phoneDigits = (text) => [...text].filter((ch) => /\d/.test(ch)).length;
+const isPhone = (text) => !/[^\d\s+()-]/.test(text) && phoneDigits(text) === 11;
+
+console.log(isIndex("744000"), isIndex("74400"), isIndex("7440O0"));                    // true false false
+console.log(isLogin("aman_2010"), isLogin("am"), isLogin("аман"), isLogin("a b"));       // true false false false
+console.log(isPhone("+993 65 12-34-56"), isPhone("+993 65 12-34-5"), isPhone("+993 65 12-34-5x"));   // true false false
+console.log(/\d{6}/.test("7440001"), /\d{6}/.test("индекс 744000, дом 5"));              // true true
+```
+
+Индекс — шесть символов и ни одного не-цифры. Логин — от 3 до 16 символов слова; «аман» не пройдёт, потому что
+`\w` не знает кириллицы, — для логина это даже правильно. Телефон: только цифры, пробелы, плюс, скобки и
+дефис, а цифр ровно 11 — 993 и восемь цифр номера; цифры считает `filter` с `test` на каждом
+символе.
+
+Почему не проще — `/\d{6}/.test(text)`? Последняя строка отвечает: `test` ищет «где-то в
+строке» (схема раздела 3), и шесть цифр подряд нашлись и в семизначном числе, и внутри фразы. Чтобы сказать «вся
+строка, от начала до конца», нужны **якоря** `^` и `$` — с них начнётся день 18,
+и эти проверки станут короче. Пример учебника MDN проверяет телефон вида «123-456-7890» одним шаблоном — в нём
+якоря, группа и обратная ссылка: всё это тоже день 18.
+
+## 11. Поиск по запросу человека {#query}
+
+Вторая практика плана — поиск без учёта регистра. Запрос приходит из поля ввода, поэтому шаблон строит
+конструктор:
+
+```js
+const cities = "Ашхабат, Мары, Дашогуз";
+const query = "МАРЫ";
+console.log(new RegExp(query, "i").test(cities), cities.search(new RegExp(query, "i")));   // true 9
+console.log(new RegExp("5.0").test("540"), new RegExp("5\\.0").test("540"));              // true false
+new RegExp("c++", "i");
+// SyntaxError: Invalid regular expression: /c++/i: Nothing to repeat
+```
+
+Опасность — во второй и третьей строке. Человек не знает, что точка, плюс и скобки — особые символы. Запрос
+«5.0» нашёл «540», а «c++» вовсе не стал шаблоном. Нужно экранировать каждый особый символ запроса; готовая функция
+для этого, `RegExp.escape`, — день 19. До тех пор: если нужен простой поиск подстроки, шаблон не нужен —
+хватит `toLowerCase` и `includes` дня 16 Essentials. Если шаблон всё же строится из ввода,
+конструктор оборачивают в `try...catch` (день 11 Essentials) и показывают человеку понятное
+сообщение.
+
+## 12. Ошибки дня {#errors}
+
+| Код | Текст Chrome |
+| --- | --- |
+| `/x/gg` | `Invalid regular expression flags` |
+| `new RegExp("x", "b")` | `Invalid flags supplied to RegExp constructor 'b'` |
+| `/[9-1]/` | `Invalid regular expression: /[9-1]/: Range out of order in character class` |
+| `new RegExp("\\")` | `Invalid regular expression: /\/: \ at end of pattern` |
+| `new RegExp("*a")`, `"c++"` | `Invalid regular expression: /*a/: Nothing to repeat` |
+| `/a{3,2}/` | `Invalid regular expression: /a{3,2}/: numbers out of order in {} quantifier` |
+| вложенный `/* … */` | `Invalid regular expression: missing /` |
+
+Все — `SyntaxError`. Ошибка в литерале останавливает весь скрипт ещё до запуска, как опечатка; ошибка
+в конструкторе бросается в момент вызова — её можно поймать `try...catch`. Отсюда `/*a/` в
+таблице не написать: в коде это начало комментария, поэтому «нечего повторять» показан конструктором. Справочник
+MDN разбирает каждый текст отдельной страницей; общее в них одно — повторить можно только то, что стоит перед
+квантификатором, а у диапазонов и чисел в `{}` меньшее пишут первым.
+
+## 13. Раздел 22.2 спецификации {#spec}
+
+Прочитаем [22.2 RegExp (Regular
+Expression) Objects](https://tc39.es/ecma262/2026/#sec-regexp-regular-expression-objects). Вступление — одна фраза: объект RegExp содержит регулярное выражение и его флаги; а
+примечание напоминает, откуда всё взялось: форма и возможности повторяют регулярные выражения языка Perl 5.
+
+Раздел [22.2.1 Patterns](https://tc39.es/ecma262/2026/#sec-patterns) — грамматика шаблона, по тем же
+правилам, что грамматика самого языка. Шаблон (Pattern) — это выбор (Disjunction): варианты (Alternative) через
+`|`. Вариант — цепочка элементов (Term). Элемент — либо проверка позиции (Assertion: `^ $ \b`
+и другие — день 18), либо атом (Atom) с необязательным квантификатором. Атомы — буквальный символ, точка,
+экранирование, класс и группа. Отдельно перечислены «синтаксические символы» — те самые четырнадцать из раздела 4.
+
+<Scheme src="scheme-spec.svg">Шаблон `colou?r|цвет` по грамматике 22.2.1</Scheme>
+
+Там же, в 22.2.1.1, — **ранние ошибки**: первое число в `{n,m}` больше второго, начало
+диапазона в классе больше конца. Это те самые тексты раздела 12. Приложение B спецификации ослабляет правила для
+шаблонов без флага `u` ради старых сайтов: поэтому `/]/` и `/a{1, 3}/` не ошибка, а
+буквальный текст. Справочник MDN называет это устаревшим синтаксисом, на который не стоит полагаться.
+
+Наборы `\d \w \s` спецификация задаёт в 22.2.2.9 явно. `\d` — «десять символов от 0 до 9»,
+поэтому арабско-индийские и другие цифры в него не входят. `\w` — «символы слова ASCII». А
+`\s` — все символы правил WhiteSpace и LineTerminator из грамматики самого языка: ровно те, что
+снимает `trim` дня 16 Essentials. Поэтому неразрывный пробел `trim` снимает и
+`\s` находит, а пробел нулевой ширины не делает ни тот ни другой.
+
+[22.2.3](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-regexp-creation) — как объект
+создаётся. RegExpInitialize: превратить шаблон и флаги в строки; если во флагах есть что-то, кроме
+`d g i m s u v y`, или буква повторяется — `SyntaxError`; разобрать шаблон по грамматике —
+не вышло, тоже `SyntaxError`; запомнить исходный текст и флаги во внутренних слотах; построить
+«сопоставитель» (matcher) и поставить объекту собственное свойство `lastIndex`, равное 0. Это свойство и
+есть «память» флага `g` из раздела 9 — подробно на дне 18.
+[22.2.4](https://tc39.es/ecma262/2026/#sec-regexp-constructor) — конструктор: без `new`, без
+флагов и с готовым RegExp он возвращает его же; из RegExp берёт `source` и `flags`.
+Примечание к нему — про двойную косую черту в строке.
+
+```js
+const re = /x/g;
+console.log(Object.getOwnPropertyNames(re), RegExp(re) === re, RegExp(re, "i") === re);   // ['lastIndex'] true false
+console.log(new RegExp("/").source, new RegExp("").source, String(new RegExp("a/b", "ig")));   // \/ (?:) /a\/b/gi
+```
+
+Свойства прототипа (22.2.6) — геттеры. `flags` (22.2.6.4) по очереди спрашивает геттеры
+`hasIndices`, `global`, `ignoreCase` и остальные и дописывает буквы в порядке
+`dgimsuvy`. `source` (22.2.6.13) экранирует так, чтобы из него снова получался литерал:
+`/` становится `\/`, пустой шаблон — `(?:)`. `test` (22.2.6.16)
+по шагам: убедиться, что `this` — объект; превратить аргумент в строку (отсюда «undefined»); вызвать
+RegExpExec и вернуть `false`, если он дал `null`, иначе `true`. Сам RegExpExec — день 18. `toString` (22.2.6.17)
+склеивает `"/"`, `source`, `"/"` и `flags`.
+
+## 14. «Карточки»: поиск и проверка слова {#cards}
+
+Две задачи сразу. Поиск карточек по запросу — в слове и в переводе, без учёта регистра. И проверка новой
+карточки: слово — строчные латинские буквы, перевод — русские буквы и пробел, без двойных пробелов.
+
+```js
+const cards = [
+  { id: 1, word: "book", translation: "книга", topic: "школа" },
+  { id: 2, word: "teacher", translation: "учитель", topic: "школа" },
+  { id: 3, word: "bread", translation: "хлеб", topic: "еда" },
+  { id: 4, word: "water", translation: "вода", topic: "еда" },
+  { id: 5, word: "house", translation: "дом", topic: "дом" },
+];
+
+function findCards(query) {
+  const re = new RegExp(query, "i");
+  return cards.filter((c) => re.test(c.word) || re.test(c.translation)).map((c) => c.word);
+}
+
+const NOT_ENGLISH = /[^a-z]/;
+const NOT_RUSSIAN = /[^а-яё ]/;
+function checkCard(word, translation) {
+  if (NOT_ENGLISH.test(word)) return "слово: только строчные латинские буквы";
+  if (NOT_RUSSIAN.test(translation)) return "перевод: только русские буквы и пробел";
+  if (/ {2}/.test(translation)) return "перевод: два пробела подряд";
+  return "ок";
+}
+
+console.log(findCards("ea"), findCards("ХЛ"), findCards("o{2}"), findCards("в|д"));
+console.log(checkCard("apple", "яблоко"), "|", checkCard("Apple", "яблоко"), "|", checkCard("tea", "чай2"));
+console.log(checkCard("milk", "молоко\u200B"), "|", checkCard("ice", "сухой  лёд"));
+```
+
+<ResultBox>
+(2) \['teacher', 'bread'\] (1) \['bread'\] (1) \['book'\] (2) \['water', 'house'\]\
+ок | слово: только строчные латинские буквы | перевод: только русские буквы и пробел\
+перевод: только русские буквы и пробел | перевод: два пробела подряд
+</ResultBox>
+
+**Строка 1 — поиск.** Запрос — уже шаблон: «ea» нашлось в двух словах, «ХЛ» с флагом
+`i` — в «хлеб», `o{2}` — две «o» подряд в «book», `в|д` — переводы «вода» и «дом».
+Один объект `re` на все карточки — без флага `g`, иначе раздел 9 испортил бы
+`test`.
+
+**Строки 2 и 3 — проверка.** Каждое правило — «есть ли запрещённое». Заглавная «A» не входит в
+`[a-z]`, цифра «2» — в `[а-яё ]`. Невидимый символ `\u200B` пойман тем же классом:
+он не русская буква. Двойной пробел классу не мешает — для него своё правило `/ {2}/`. В классе стоит
+«ё», иначе «лёд» не прошёл бы.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Вызовите `findCards(".")` и `findCards("c++")`. Почему первый вернул все
+пять карточек, а второй упал? Оберните тело `findCards` в `try...catch` так, чтобы при
+плохом запросе он возвращал пустой массив.
+\
+\
+**Второй.** Уберите «ё» из `NOT_RUSSIAN` и проверьте `checkCard("ice", "лёд")`.
+\
+\
+**Третий.** Замените в `findCards` флаги `"i"` на `"gi"` и вызовите
+`findCards("a")`. Какая карточка пропала? Объясните по разделу 9, с какого места искал
+`test` в её слове.
+</TryIt>
+
+## 15. Что дальше {#next}
+
+Сегодняшние шаблоны отвечают «есть ли» и «где начинается». Завтра, на дне 18, — что именно нашлось и как его
+разобрать: якоря `^` и `$` (проверки раздела 10 станут одной строкой), группы — дата
+«12.10.2026» по частям, `exec`, `match`, `matchAll` и `lastIndex`, то есть
+разгадка ловушки флага `g`. День 19 — `replace` и `split`: убрать двойные пробелы
+и разбить строку; день 20 — Юникод и буквы любого алфавита.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Regular expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions) | учебник: создание, особые символы, флаги | <Full /> |
+| [Character classes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Character_classes) | учебник: классы и экранированные классы | <Full /> |
+| [Quantifiers](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Quantifiers) | учебник: повторы, жадные и ленивые | <Full /> |
+| [Cheatsheet](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Cheatsheet) | вся запись шаблонов одной таблицей | <Full /> |
+| [Regular expressions (справочник)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions) | вся запись по видам; экранирование | <Full /> |
+| [Literal character](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Literal_character) | буквальные и синтаксические символы | <Full /> |
+| [Character escape](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Character_escape) | `\n`, `\t`, `\uHHHH`, `\.` | <Full /> |
+| [Character class](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Character_class) | `[...]`, `[^...]`, диапазоны | <Full /> |
+| [Character class escape](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Character_class_escape) | `\d \w \s` и отрицания | <Full /> |
+| [Wildcard](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Wildcard) | точка: любой символ, кроме переноса | <Full /> |
+| [Quantifier](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Quantifier) | `? * + {n} {n,} {n,m}` | <Full /> |
+| [Disjunction](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Disjunction) | `\|`, самый низкий приоритет | <Full /> |
+| [RegExp](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp) | литерал и конструктор; свойства | <Full /> |
+| [RegExp() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/RegExp) | шаблон из строки; двойная косая черта | <Full /> |
+| [RegExp.prototype.test()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/test) | `true` / `false`; ловушка `g` | <Full /> |
+| [String.prototype.search()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/search) | номер первого совпадения или `-1` | <Full /> |
+| [RegExp.prototype.flags](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/flags) | строка флагов по алфавиту | <Full /> |
+| [RegExp.prototype.global](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/global) | флаг `g` | <Full /> |
+| [RegExp.prototype.ignoreCase](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/ignoreCase) | флаг `i` | <Full /> |
+| [ECMA-262, 22.2 RegExp Objects](https://tc39.es/ecma262/2026/#sec-regexp-regular-expression-objects) | грамматика, создание, `flags`, `test` | <Full /> |
+| [RegExp.prototype.source](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/source) | текст шаблона, экранированный | <Brief /> |
+| [RegExp.prototype.toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/toString) | `/source/flags` | <Brief /> |
+| [Ошибка: invalid regular expression flag](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_regexp_flag) | `Invalid regular expression flags` | <Brief /> |
+| [Ошибка: \\ at end of pattern](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_backslash_at_end_of_pattern) | одна косая черта в конструкторе | <Brief /> |
+| [Ошибка: invalid range in character class](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_invalid_range_in_character_class) | `Range out of order in character class` | <Brief /> |
+| [Ошибка: nothing to repeat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_nothing_to_repeat) | квантификатор без атома | <Brief /> |
+| [Ошибка: numbers out of order in \{\} quantifier](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Regex_numbers_out_of_order_in_quantifier) | `{3,2}` | <Brief /> |
+| [ECMA-262, 22.2.1 Patterns](https://tc39.es/ecma262/2026/#sec-patterns) | грамматика шаблона, ранние ошибки | <Brief /> |
+| [ECMA-262, 22.2.3](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-regexp-creation) | RegExpCreate, RegExpInitialize: проверка флагов | <Brief /> |
+| [ECMA-262, 22.2.4](https://tc39.es/ecma262/2026/#sec-regexp-constructor) | конструктор `RegExp` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// /шаблон/флаги   new RegExp("шаблон", "флаги")   — в строке \ пишут дважды: "\\d"
+// re.test(str) — true/false;   str.search(re) — номер начала или -1;   includes(/x/) — TypeError
+// особые: ^ $ \ . * + ? ( ) [ ] { } |   — буквально: \.  \*  \/  \\
+// [абв] [а-яё] [0-9] — один символ из набора;   [^0-9] — любой, кроме
+// диапазон — номера Юникода: [а-я] без ё; вся кириллица — [\u0400-\u04FF]
+// \d — цифра,  \w — [A-Za-z0-9_] (только латиница!),  \s — пробельные;  \D \W \S — наоборот
+// . — любой, кроме переноса строки;   \n \t \u200B — символы по имени и номеру
+// ? 0–1   * 0+   + 1+   {n}   {n,}   {n,m} — к одному предыдущему элементу; без пробелов в {}
+// a|b — варианты целиком, самый низкий приоритет
+// i — без учёта регистра;  g — все совпадения (с test не ставить!);  re.flags — "gi"
+// test ищет «где-то в строке»: для «вся строка» — ^ и $ (день 18)
+// шаблон из ввода: "5.0" найдёт "540", "c++" — SyntaxError (RegExp.escape — день 19)
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем `/\d+/` отличается от `new RegExp("\d+")`?
+   <Answer>В строке `"\d"` — просто «d», и шаблон получится `d+`. В конструктор нужно
+   передать `"\\d+"`.</Answer>
+2. Почему `/[а-я]/.test("ё")` — `false`?
+   <Answer>Диапазон — промежуток номеров Юникода, а «ё» стоит после «я». Пишут `[а-яё]` или берут весь
+   блок `[\u0400-\u04FF]`.</Answer>
+3. Почему `/\d*/.test("без цифр")` — `true`?
+   <Answer>`*` разрешает ноль повторов: пустая строка подходит в любом месте. Для «есть ли цифры» —
+   `\d+` или просто `\d`.</Answer>
+4. Почему `/\d{6}/.test("7440001")` — `true`, хотя цифр семь?
+   <Answer>`test` ищет совпадение где-то в строке, а шесть цифр подряд там есть. «Вся строка — ровно
+   шесть цифр» пишут с якорями `^` и `$` (день 18) или проверяют длину и
+   `\D`.</Answer>
+5. Что не так с `const re = /x/g;` для проверок через `test`?
+   <Answer>С флагом `g` объект помнит, где остановился, и следующий `test` продолжит оттуда:
+   ответы начинают чередоваться. Для `test` флаг `g` не ставят.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions" />

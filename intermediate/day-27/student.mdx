@@ -1,0 +1,78 @@
+---
+title: День 27 — конспект
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+---
+
+# День 27. Промисы целиком: all, allSettled, any, race, withResolvers, try
+
+<Subtitle>Выжимка лекции: четыре способа ждать несколько промисов, AggregateError, таймаут, withResolvers и try.</Subtitle>
+
+## Главное
+
+```js
+Promise.all([Promise.resolve(1), 2]);                                  // выполнится: [1, 2] — в порядке входа
+Promise.allSettled([Promise.reject(new Error("x"))]);                  // выполнится: [{ status: "rejected", reason }]
+Promise.any([Promise.reject(new Error("x")), Promise.resolve("ok")]);  // выполнится: "ok" — отказы пропущены
+Promise.race([new Promise(() => {}), "сразу"]);                         // выполнится: "сразу" — первый завершившийся
+Promise.any([]).catch((e) => e.name);                                  // "AggregateError" — все (ноль) отказали
+Promise.try(() => JSON.parse("{")).catch((e) => e.name);               // "SyntaxError" — промис, а не throw
+```
+
+## Четыре способа ждать
+
+<table>
+<thead>
+<tr><th>Метод</th><th>Выполняется</th><th>Отклоняется</th></tr>
+</thead>
+<tbody>
+<tr><td>`all`</td><td>все выполнились — массив значений в порядке входа</td><td>первый же отказ</td></tr>
+<tr><td>`allSettled`</td><td>все завершились — отчёты `{ status, value | reason }`</td><td>никогда</td></tr>
+<tr><td>`any`</td><td>первый успех</td><td>все отказали — `AggregateError`</td></tr>
+<tr><td>`race`</td><td colSpan="2">как первый завершившийся, успехом или отказом</td></tr>
+</tbody>
+</table>
+
+<KeyPoint>
+Независимые загрузки запускают **все сразу**: `const [a, b] = await Promise.all([fa(), fb()])`
+— время как у самой долгой. Три `await` подряд складывают времена. В `all` передают вызовы, а не
+функции. Запущенные заранее промисы не ждут по одному: отказ второго, пока ждём первого, — «Uncaught (in promise)».
+</KeyPoint>
+
+<Remember>
+`AggregateError` — наследник `Error` для нескольких ошибок: `new AggregateError(errors,
+message, { cause })`, причины — в неперечисляемом массиве `errors`, в порядке входа. От
+`Promise.any` в Chrome текст — «All promises were rejected». Одна поломка с пояснением — `cause`,
+несколько независимых — `AggregateError`.
+</Remember>
+
+<NoteBox>
+Таймаут: `Promise.race([задача, таймер]).finally(() => clearTimeout(timer))`. Ни один метод не
+отменяет проигравших — они доработают сами. `Promise.withResolvers()` отдаёт `{ promise, resolve,
+reject }` — выполнить промис можно из обработчика события. `Promise.try(f, ...args)` вызывает
+`f` сразу и любой исход превращает в промис. `Promise.race([])` не завершится никогда.
+</NoteBox>
+
+## Частые ошибки
+
+| Код | Что будет |
+| --- | --- |
+| `Promise.all(5)` | не бросает, а отклоняет промис: `TypeError: number 5 is not iterable…` |
+| `const { all } = Promise; all([])` | `TypeError: Promise.all called on non-object` — потерян `this` |
+| `Promise.all([f, g])` | функции вместо значений, без ошибки — нужны вызовы `f()`, `g()` |
+| `Promise.any([])` | отклонён: `AggregateError: All promises were rejected` |
+| `new AggregateError()` | `TypeError`: список ошибок обязателен |
+| `Promise.try(5)` | отклонён: `TypeError: number 5 is not a function` |
+
+<Homework>
+1. Найдите в своём проекте два `await` подряд, которые не зависят друг от друга, и соедините их
+   через `Promise.all`; запишите, сколько времени выиграли.
+2. Напишите `withTimeout` по памяти и проверьте на быстрой и медленной загрузке.
+3. Прочитайте на странице
+   [Promise.all()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all)
+   раздел «Using Promise.all() with async functions» и выпишите три записи, которые там сравниваются.
+4. Найдите в ECMA-262 раздел 27.2.4.1.2 PerformPromiseAll и выпишите, зачем счётчик начинается с 1.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise" />

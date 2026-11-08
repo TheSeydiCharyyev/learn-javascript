@@ -1,0 +1,768 @@
+---
+title: День 15 — Set, WeakSet и операции над множествами
+day: День 15 • урок 1
+heading: Set, WeakSet и операции над множествами
+lead: "Курс 2, Intermediate. Модуль «Коллекции: Map, Set, WeakMap, WeakSet» — второй, последний день. 45 минут."
+css: |
+  h1 { border-bottom-color: #84cc16; }
+  h2 { color: #4d7c0f; background: #f7fee7; border-left-color: #84cc16; }
+  h3 { color: #3f6212; }
+  .step-number { background: #84cc16; }
+  .toc a { color: #4d7c0f; }
+---
+
+<Goals>
+- хранить уникальные значения в `Set`: `add`, `has`, `delete`,
+  `size`, `clear`;
+- убирать повторы, переводить `Set` в массив и обратно и выбирать между ними;
+- объединять, пересекать и вычитать множества и проверять, входит ли одно в другое;
+- понимать, какие объекты годятся в операции над множествами, кроме самого `Set`;
+- отмечать объекты через `WeakSet`: «уже обработан», «уже подписан».
+</Goals>
+
+<Toc />
+
+## 1. Три долга дня 36 Essentials {#debts}
+
+На дне 36 Essentials проверки «Карточек» нашли три слабых места. Одно слово попадало в `learned`
+дважды — `[2, 2]`, и счётчик считал его за два. Две вкладки затирали прогресс друг друга. А на десяти
+тысячах слов `learned.includes` становился заметно медленным — «ускорить можно коллекцией
+`Set`, её проходят в курсе 2». И был приём «без повторов» дней 32–34: добавлять, только если
+`includes` ещё не нашёл. Сегодня всё это делает одна коллекция:
+
+```js
+const learned = [2, 2];
+const names = [];
+["роман", "повесть", "роман"].forEach((g) => {
+  if (!names.includes(g)) names.push(g);
+});
+console.log(learned.length, names);   // 2 ['роман', 'повесть']
+
+const learnedSet = new Set([2, 2]);
+const genres = new Set(["роман", "повесть", "роман"]);
+console.log(learnedSet.size, genres);   // 1 Set(2) {'роман', 'повесть'}
+```
+
+`Set` — **множество**: коллекция, в которой каждое значение встречается не больше
+одного раза. Справочник MDN описывает его так: `Set` хранит уникальные значения любого типа —
+примитивы и ссылки на объекты — и перебирает их в порядке добавления. Вчерашний `Map` хранил пары,
+у `Set` — только сами элементы. Скорость и вкладки — в разделах 6 и 14.
+
+## 2. Пять операций {#basics}
+
+```js
+const topics = new Set();
+topics.add("циклы").add("массивы").add("циклы");
+console.log(topics.size, topics.has("циклы"), topics.has("классы"));      // 2 true false
+console.log(topics.delete("массивы"), topics.delete("массивы"), topics);   // true false Set(1) {'циклы'}
+topics.clear();
+console.log(topics.size);   // 0
+```
+
+| Операция | Что делает | Возвращает |
+| --- | --- | --- |
+| `add(value)` | добавить, если такого ещё нет | само множество — можно сцеплять |
+| `has(value)` | есть ли значение | `true` / `false` |
+| `delete(value)` | убрать значение | `true`, если было что убирать |
+| `size` | число элементов — свойство, не метод | число |
+| `clear()` | убрать всё | `undefined` |
+
+Повторный `add` ничего не меняет и ошибки не даёт: проверять «а нет ли уже» не нужно. Метода
+`get` нет: элемент и есть то, что ищут, а на вопрос «есть ли» отвечает `has`.
+`size` — геттер без сеттера (день 5): в строгом режиме `topics.size = 10` даст
+`Cannot set property size of #<Set> which has only a getter`. Конструктор принимает любой
+перебираемый объект (день 11): `new Set(["циклы", "массивы"])`; без `new` —
+`Constructor Set requires 'new'`, как у `Map`. В консоли множество видно как
+`Set(1) {'циклы'}` — без стрелок.
+
+## 3. Что считается одинаковым {#same}
+
+```js
+const s = new Set([NaN, NaN, 0, -0, 1, "1"]);
+console.log(s);   // Set(4) {NaN, 0, 1, '1'}
+
+const point = { x: 10 };
+s.add(point).add({ x: 10 }).add(point);
+console.log(s.size, s.has(point), s.has({ x: 10 }));   // 6 true false
+```
+
+Правило то же, что у ключей `Map`: алгоритм **SameValueZero** дня 6. Второй
+`NaN` не добавился, хотя `NaN !== NaN`; `-0` совпал с `0`;
+число `1` и строка `"1"` — разные элементы. Объект сравнивается по ссылке: второй
+литерал `{ x: 10 }` — другой объект, он добавился, а `has` с третьим таким литералом его
+не находит.
+
+Отсюда совет MDN: удалить объект можно только той же ссылкой. Если ссылки нет, объект ищут перебором по
+его свойствам — пример со страницы `delete`:
+
+```js
+const points = new Set([{ x: 10, y: 20 }, { x: 20, y: 30 }]);
+points.forEach((p) => {
+  if (p.x > 10) points.delete(p);
+});
+console.log(points.size, [...points][0].x);   // 1 10
+```
+
+Удалять текущий элемент внутри `forEach` можно — почему, увидим в спецификации.
+
+## 4. Из массива и обратно {#convert}
+
+Массив превращается в множество конструктором, множество в массив — spread дня 22 Essentials или
+`Array.from` дня 19 — тот самый «результат `Set`», который день 19 Essentials обещал
+передавать в `Array.from`. Самый частый приём — убрать повторы:
+
+```js
+const numbers = [2, 13, 4, 4, 2, 13, 13, 4, 5];
+const unique = [...new Set(numbers)];
+console.log(unique, Array.from(new Set("банан")).join(""));   // [2, 13, 4, 5] бан
+console.log(new Set(numbers).size === numbers.length);       // false — повторы есть
+```
+
+Порядок первых появлений сохраняется, повторы выпадают. Строка перебирается по символам (день 11), поэтому
+`new Set("банан")` — набор разных букв. Сравнение `size` с `length` — пример
+MDN «гарантировать, что значения уникальны». Оно заменяет проверку дня 34 Essentials
+`learned.filter((id, i) => learned.indexOf(id) !== i).length`.
+
+С объектами этот приём не работает: одинаковые по содержимому объекты — разные элементы. Для них нужен
+вчерашний `Map` с ключом-номером:
+
+```js
+const cards = [{ id: 1, word: "book" }, { id: 2, word: "bread" }, { id: 1, word: "book" }];
+console.log(new Set(cards).size);   // 3 — три разных объекта
+const byId = new Map(cards.map((c) => [c.id, c]));
+console.log([...byId.values()].map((c) => c.word));   // ['book', 'bread']
+```
+
+И JSON — та же история, что у `Map`: `JSON.stringify` элементов множества не видит.
+
+```js
+const topics = new Set(["циклы", "классы"]);
+const text = JSON.stringify([...topics]);
+console.log(JSON.stringify(topics), text, new Set(JSON.parse(text)).has("классы"));   // {} ["циклы","классы"] true
+```
+
+Сохраняем массивом `[...topics]`, читаем обратно через `new Set(JSON.parse(text))`.
+Если в сохранённом массиве были повторы, при чтении они исчезнут сами.
+
+## 5. Перебор и порядок {#iterate}
+
+```js
+const topics = new Set(["циклы", "массивы", "классы"]);
+for (const t of topics) console.log(t);
+topics.forEach((value, key, set) => console.log(value, key, set === topics));
+console.log([...topics.entries()][0], topics.keys === topics.values, topics[Symbol.iterator] === topics.values);
+console.log(topics.values().filter((t) => t.length > 6).toArray());
+```
+
+<ResultBox>
+циклы\
+массивы\
+классы\
+циклы циклы true\
+массивы массивы true\
+классы классы true\
+(2) \['циклы', 'циклы'\] true true\
+(1) \['массивы'\]
+</ResultBox>
+
+Колбэк `forEach` получает элемент **дважды**, третьим аргументом — само множество:
+так, объясняет MDN, колбэк выглядит как у `forEach` массива и `Map`. По той же причине
+`keys` — та же функция, что `values`, а `entries` выдаёт пары
+`[v, v]`: для перебора `Set` выглядит как `Map`, у которого ключ равен значению.
+`[Symbol.iterator]` у `Set` — это `values` (у `Map` был
+`entries`). Итераторы — с методами дня 13.
+
+Порядок — порядок первого добавления. Повторный `add` место не меняет, а удалённый и
+добавленный заново элемент уходит в конец — пример MDN:
+
+```js
+const s = new Set([1, 5, "текст"]);
+s.add(1);
+console.log([...s]);   // [1, 5, 'текст']
+s.delete(1);
+s.add(1);
+console.log([...s]);   // [5, 'текст', 1]
+console.log(new Set([...new Set(["water", "book", "bread"])].toSorted()));   // Set(3) {'book', 'bread', 'water'}
+```
+
+Сортировки у множества нет — собирают новое из отсортированного массива. Перебор «живой», как у
+`Map`: добавленные во время перебора элементы будут пройдены, удалённые до своей очереди — нет.
+
+## 6. Set или массив {#vs-array}
+
+Второй долг дня 36 — скорость. Повторим его опыт: десять тысяч слов, пять тысяч выученных номеров.
+
+```js
+const big = [];
+for (let i = 1; i <= 10000; i++) big.push({ id: i, word: `word${i}` });
+const learned = [];
+for (let i = 1; i <= 5000; i++) learned.push(i);
+const learnedSet = new Set(learned);
+
+let start = Date.now();
+const left1 = big.filter((w) => !learned.includes(w.id)).length;
+const arrayMs = Date.now() - start;
+start = Date.now();
+const left2 = big.filter((w) => !learnedSet.has(w.id)).length;
+const setMs = Date.now() - start;
+console.log(left1, left2, arrayMs > setMs);   // 5000 5000 true
+```
+
+Ответ одинаковый, время — нет: в наших прогонах `includes` занимал 5–6 мс, `has` — 0–1
+мс. Причина — в спецификации: `includes` (23.1.3.16) идёт по массиву с начала и сравнивает каждый
+элемент, а от `Set` раздел 24.2 требует доступа «в среднем быстрее перебора», например
+хеш-таблицей.
+
+Учебник MDN «Keyed collections» добавляет ещё три довода: удалять из массива по значению —
+`splice(indexOf(…), 1)` — медленно; `indexOf` не находит `NaN`; повторы в
+`Set` не надо отслеживать вручную.
+
+```js
+const deck = ["book", "bread", "water"];
+deck.splice(deck.indexOf("house"), 1);
+console.log(deck, [NaN].indexOf(NaN));   // ['book', 'bread'] -1
+const deckSet = new Set(["book", "bread", "water"]);
+console.log(deckSet.delete("house"), deckSet.size, new Set([NaN]).has(NaN));   // false 3 true
+```
+
+<Mistake>
+Ловушка дня 19 Essentials: слова `"house"` в колоде нет, `indexOf` вернул
+`-1`, а `splice(-1, 1)` считает отрицательное начало с конца и молча удаляет
+**последнее** слово. Там спасала проверка `i !== -1`; `delete` у множества
+в таком случае просто отвечает `false`.
+</Mistake>
+
+|  | Массив | Set |
+| --- | --- | --- |
+| повторы | хранит | отбрасывает |
+| доступ по номеру | `arr[i]`, `at` | нет, только перебор |
+| «есть ли значение» | `includes` — перебором | `has` — быстро |
+| удалить по значению | `splice(indexOf(x), 1)` | `delete(x)` |
+| сортировка, `map`, `filter` | есть | через массив или итератор |
+| JSON | сразу | через `[...set]` |
+
+Правило: важны номер и повторы — массив; главный вопрос «есть ли» — `Set`. Часто нужны оба:
+колода — массив, выученное — множество.
+
+## 7. Четыре операции над множествами {#ops}
+
+Возьмём темы, которые прошли две группы, — пример для общего занятия:
+
+```js
+const groupA = new Set(["циклы", "массивы", "объекты", "классы"]);
+const groupB = new Set(["классы", "Map", "циклы"]);
+
+console.log(groupA.union(groupB));
+console.log(groupA.intersection(groupB));
+console.log(groupA.difference(groupB), groupB.difference(groupA));
+console.log(groupA.symmetricDifference(groupB));
+```
+
+<ResultBox>
+Set(5) \{'циклы', 'массивы', 'объекты', 'классы', 'Map'\}\
+Set(2) \{'классы', 'циклы'\}\
+Set(2) \{'массивы', 'объекты'\} Set(1) \{'Map'\}\
+Set(3) \{'массивы', 'объекты', 'Map'\}
+</ResultBox>
+
+<Scheme src="scheme-ops.svg">Четыре операции на кругах Венна</Scheme>
+
+| Метод | Что в результате | Порядок результата |
+| --- | --- | --- |
+| `a.union(b)` | всё, что есть хотя бы в одном | сначала `a`, потом новое из `b` |
+| `a.intersection(b)` | то, что есть в обоих | как у меньшего из двух |
+| `a.difference(b)` | то, что есть в `a`, но нет в `b` | как у `a` |
+| `a.symmetricDifference(b)` | то, что есть ровно в одном | сначала `a`, потом `b` |
+
+На языке задачи: `union` — все темы обеих групп; `intersection` — общие, с них начнём
+занятие; `difference` — что группе B надо догнать, а в обратную сторону — чего не прошла A;
+`symmetricDifference` — в чём группы расходятся. `difference`, как вычитание чисел, от
+перестановки меняется.
+
+Пересечение оказалось в порядке `groupB`, а не `groupA`: метод перебирает меньшее из двух
+множеств. Нагляднее на числах:
+
+```js
+const big = new Set([4, 3, 2, 1]);
+const small = new Set([1, 2, 3]);
+console.log(big.intersection(small), small.intersection(big));   // Set(3) {1, 2, 3} Set(3) {1, 2, 3}
+```
+
+До этих методов пересечение и разность писали руками — пример MDN:
+
+```js
+const a = new Set([1, 2, 3, 4]);
+const c = new Set([3, 4, 5, 6]);
+const common = new Set([...a].filter((x) => c.has(x)));
+const onlyA = new Set([...a].filter((x) => !c.has(x)));
+const all = new Set([...a, ...c]);
+console.log(common, onlyA, all.size);   // Set(2) {3, 4} Set(2) {1, 2} 6
+```
+
+Работает, но строит промежуточный массив и всегда перебирает `a`, даже когда `c` в сто
+раз меньше. Встроенные методы выбирают сторону сами и принимают не только `Set` (раздел 9).
+
+## 8. Подмножество, надмножество, без общих {#relations}
+
+Ещё три метода не строят нового множества, а отвечают `true` или `false`:
+
+```js
+const basics = new Set(["циклы", "массивы"]);
+const groupA = new Set(["циклы", "массивы", "объекты", "классы"]);
+console.log(basics.isSubsetOf(groupA), groupA.isSupersetOf(basics), groupA.isSubsetOf(basics));   // true true false
+console.log(basics.isDisjointFrom(new Set(["Map", "классы"])), basics.isSubsetOf(basics));       // true true
+
+const same = (x, y) => x.size === y.size && x.isSubsetOf(y);
+console.log(new Set([1, 2, 3]) === new Set([3, 2, 1]), same(new Set([1, 2, 3]), new Set([3, 2, 1])));   // false true
+```
+
+- `a.isSubsetOf(b)` — **подмножество**: каждый элемент `a` есть в
+  `b`. «Прошла ли группа всё, что нужно для новой темы?» —
+  `required.isSubsetOf(passed)`.
+- `a.isSupersetOf(b)` — **надмножество**: то же отношение с другой стороны, всё из
+  `b` есть в `a`.
+- `a.isDisjointFrom(b)` — **без общих элементов**: пересечение пустое. «Не
+  повторяет ли новый модуль ничего из пройденного?»
+
+Подмножество здесь нестрогое, подчёркивает MDN: множества с одинаковыми элементами — подмножества друг друга.
+Метода «равны ли» нет, а `===` сравнивает ссылки (день 6). Одинаковые множества — это одинаковый
+размер плюс `isSubsetOf`; порядок не важен.
+
+## 9. Похожие на множество {#setlike}
+
+Аргумент этих семи методов не обязан быть `Set`. Алгоритм берёт у него три вещи: число
+`size`, метод `has` и метод `keys`. MDN называет такие объекты
+**set-like** — «похожими на множество». `Map` — похож: у него есть и `size`, и
+`has(key)`, и `keys()`. В операциях он ведёт себя как множество своих ключей:
+
+```js
+const present = new Set(["Аман", "Мерет", "Айна"]);
+const marks = new Map([["Аман", 5], ["Сапар", 4], ["Айна", 3]]);
+console.log(present.intersection(marks), present.difference(marks));   // Set(2) {'Аман', 'Айна'} Set(1) {'Мерет'}
+present.union(["Сапар"]);
+// TypeError: The .size property is NaN
+```
+
+Мерет пришёл, но оценки не получил — разность нашла его без единого цикла. Почему алгоритм зовёт
+`keys()`, а не `[Symbol.iterator]`? Ради `Map`: его итератор выдаёт пары, а
+`has` принимает ключ, объясняет MDN. Массив не годится: у него нет `size` и
+`has` (`undefined` превращается в `NaN` — отсюда текст ошибки), а
+`keys()` выдаёт номера. Массив сначала превращают в множество:
+`present.union(new Set(["Сапар"]))`.
+
+Похожий объект можно написать самому. Вот «все чётные числа» — бесконечное множество:
+
+```js
+const evens = {
+  size: Infinity,
+  has: (n) => n % 2 === 0,
+  *keys() {
+    for (let n = 0; ; n += 2) yield n;
+  },
+};
+const grades = new Set([5, 4, 3, 2]);
+console.log(grades.intersection(evens), grades.difference(evens), grades.isSubsetOf(evens));   // Set(2) {4, 2} Set(2) {5, 3} false
+```
+
+`grades` меньше, поэтому алгоритм перебрал его и спрашивал `evens.has`; бесконечный
+генератор `keys` (день 12) даже не был вызван. А `grades.union(evens)` перебирает
+`keys` всегда и не закончится никогда — вкладка зависнет, как от `[...бесконечный]`
+дня 12.
+
+## 10. WeakSet: отметка без следов {#weak}
+
+`WeakSet` («слабое множество») относится к `Set` так же, как `WeakMap` дня 14
+к `Map`. Он держит свои элементы слабо: если до объекта больше никак не добраться, сборщик мусора
+забирает его, и элемент исчезает из коллекции.
+
+```js
+const ws = new WeakSet();
+const aman = { name: "Аман" };
+const meret = { name: "Мерет" };
+ws.add(aman).add(meret);
+console.log(ws.has(aman), ws.delete(aman), ws.has(aman), ws.has(meret));   // true true false true
+console.log(ws.has("Аман"), ws.size, typeof ws.forEach);                   // false undefined undefined
+ws.add(1);
+// TypeError: Invalid value used in weak set
+```
+
+- **Элемент — только объект или символ не из реестра.** Причина та же, что у ключей
+  `WeakMap`: у строки и числа нет «времени жизни», за которым следить. `Symbol("x")`
+  можно, и даже встроенный `Symbol.iterator`; `Symbol.for("x")` — нельзя.
+  `has` и `delete` с примитивом не падают, а отвечают `false`.
+- **Нет `size`, перебора и `clear`.** Список элементов зависел бы от
+  того, успел ли поработать сборщик. Своих методов у прототипа три: `add`, `has`,
+  `delete`.
+- **Сравнение — по ссылке.** MDN замечает: для объектов и символов SameValueZero — то же,
+  что `===`.
+
+`WeakMap` хранит *данные* об объекте — попытки, кеш расчёта; `WeakSet` — один
+бит: отмечен объект или нет. Применений у него немного, говорит учебник MDN: отмечать объекты, не держа их в
+памяти, например элементы страницы.
+
+## 11. «Уже обработан» {#seen}
+
+День 23 Essentials предупреждал: в настоящих данных цикл получается легко — «студент знает свою группу, а
+группа — список студентов». `JSON.stringify` на таком падает, а обход вложенных объектов ходит по кругу
+без конца. Пример MDN «Detecting circular references» на наших данных:
+
+```js
+const group = { title: "JS-1", students: [] };
+const aman = { name: "Аман", group };
+const meret = { name: "Мерет", group };
+group.students.push(aman, meret);
+
+function walk(value, visit, seen = new WeakSet()) {
+  if (typeof value !== "object" || value === null || seen.has(value)) return;
+  seen.add(value);
+  visit(value);
+  for (const inner of Object.values(value)) walk(inner, visit, seen);
+}
+
+let count = 0;
+walk(group, () => count++);
+console.log(count);   // 4 — группа, массив, Аман, Мерет
+```
+
+<Scheme src="scheme-seen.svg">Обход по кругу и отметки `seen`</Scheme>
+
+Без строки `seen.has(value)` обход пошёл бы по кругу и упал бы с `RangeError: Maximum call
+stack size exceeded`. Параметр по умолчанию `seen = new WeakSet()` создаёт множество отметок
+при первом вызове, рекурсивные вызовы передают его дальше. `deepFreeze` дня 6 решал ту же задачу
+проверкой `isFrozen`, но та отметка меняла сам объект; `WeakSet` отмечает снаружи. Число
+отметок и их порядок не нужны, нужен только ответ «был ли» — поэтому MDN и советует здесь
+`WeakSet`.
+
+Второе применение — «уже подписан». День 32 Essentials предупреждал, что функция, вызванная из
+`render`, дописывает кнопки после каждого действия; с подпиской на события то же самое — второй
+`addEventListener` на ту же кнопку, и один щелчок считается дважды:
+
+```js
+const bound = new WeakSet();
+let clicks = 0;
+function bindOnce(button) {
+  if (bound.has(button)) return false;
+  bound.add(button);
+  button.addEventListener("click", () => clicks++);
+  return true;
+}
+
+const button = document.createElement("button");
+console.log(bindOnce(button), bindOnce(button));   // true false
+button.click();
+console.log(clicks);   // 1 — один слушатель, а не два
+```
+
+Когда кнопку уберут со страницы и забудут, её отметка уйдёт вместе с ней — это тот случай, о котором учебник
+MDN говорит «не будет утечки памяти».
+
+## 12. Ошибки дня и Symbol.species {#errors}
+
+| Код | Текст Chrome |
+| --- | --- |
+| `Set()`, `WeakSet()` | `Constructor Set requires 'new'` |
+| `new Set(5)` | `number 5 is not iterable (cannot read property Symbol(Symbol.iterator))` |
+| `ws.add(1)`, `ws.add(Symbol.for("x"))`, `new WeakSet([1])` | `Invalid value used in weak set` |
+| `for (const x of ws)` | `ws is not iterable` |
+| `s.union([1, 2])`, `s.union(new WeakSet())` | `The .size property is NaN` |
+| `s.union({ size: -1, … })` | `RangeError: '-1' is an invalid size` |
+| `s.union("ab")` | `Set.prototype.union argument must be an object` |
+| `s.size = 10` в строгом режиме | `Cannot set property size of #<Set> which has only a getter` |
+
+Ошибку `WeakSet` разбирает та же страница ошибок MDN, что и ошибку ключа `WeakMap` на
+дне 14. Все ошибки, кроме `'-1' is an invalid size`, — `TypeError`.
+
+`Set[Symbol.species]` — геттер, который возвращает сам конструктор, как у `Map`. MDN
+отмечает: ни один метод `Set` его не использует. Операции над множествами создают результат
+напрямую — обычный `Set`, даже у наследника:
+
+```js
+class TopicSet extends Set {
+  add(value) {
+    console.log("add", value);
+    return super.add(value);
+  }
+}
+const t = new TopicSet(["циклы", "классы"]);
+const u = t.union(new Set(["Map"]));
+console.log(u instanceof TopicSet, u);
+```
+
+<ResultBox>
+add циклы\
+add классы\
+false Set(3) \{'циклы', 'классы', 'Map'\}
+</ResultBox>
+
+Конструктор наследника вызвал переопределённый `add` для каждого элемента — так же, как
+конструктор `Map` звал `set` на дне 14. А `union` не позвал ни
+`add`, ни `species`: результат — не `TopicSet`. По-настоящему
+`Symbol.species` работает у массивов (день 10).
+
+## 13. Раздел 24.2 спецификации {#spec}
+
+Прочитаем [24.2 Set Objects](https://tc39.es/ecma262/2026/#sec-set-objects). Вводная часть
+повторяет вчерашнюю: каждое различное значение встречается не больше одного раза, различаются они по
+SameValueZero, доступ — быстрее перебора, а структура данных в тексте описывает поведение, а не способ
+программировать.
+
+Эта структура — слот `[[SetData]]`: **список значений**, без пар — в отличие от
+`[[MapData]]`. Методы — пересказом:
+
+- [add](https://tc39.es/ecma262/2026/#sec-set.prototype.add) (24.2.4.1): превратить
+  `-0` в `+0` (CanonicalizeKeyedCollectionKey дня 14); пройти список — нашлось равное
+  по SameValue, вернуть множество; нет — дописать значение **в конец**. После замены
+  `-0` сравнение SameValue и даёт поведение SameValueZero.
+- [delete](https://tc39.es/ecma262/2026/#sec-set.prototype.delete) (24.2.4.4) помечает
+  найденный элемент особым значением *empty*, а
+  [clear](https://tc39.es/ecma262/2026/#sec-set.prototype.clear) (24.2.4.2) помечает так все.
+  Примечание к `clear`: сам список сохраняется, потому что посреди него могут стоять на паузе
+  итераторы. `size` (24.2.4.14) считает непустые элементы.
+- `forEach` (24.2.4.7) и итераторы идут по списку номером, пропуская *empty*, и на каждом
+  шаге заново смотрят длину — отсюда «живой» перебор. Итератор `Set` (24.2.6) — снова генератор
+  спецификации, с меткой `%SetIteratorPrototype%` и `Iterator.prototype` в цепочке.
+  `keys` и `[Symbol.iterator]` (24.2.4.13, 24.2.4.18) — та же функция, что
+  `values`; `entries` выдаёт `[e, e]`.
+
+Опыт с примечанием к `clear`: итератор на паузе переживает очистку и видит новый элемент.
+
+```js
+const s = new Set([1, 2, 3]);
+const it = s.values();
+console.log(it.next().value);   // 1
+s.clear();
+s.add(4);
+console.log(it.next().value, it.next().done);   // 4 true
+```
+
+Теперь операции над множествами. Раздел
+[24.2.1](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-set-objects) вводит
+**Set Record** — запись с четырьмя полями: `[[SetObject]]` (сам объект),
+`[[Size]]`, `[[Has]]`, `[[Keys]]`. Её строит операция
+[GetSetRecord](https://tc39.es/ecma262/2026/#sec-getsetrecord) (24.2.1.2): аргумент не объект —
+`TypeError`; прочитать `size` и превратить в число, `NaN` —
+`TypeError`; меньше нуля — `RangeError`; прочитать `has` и `keys`,
+не функции — `TypeError`. Это и есть все ошибки раздела 12 про аргумент. А `this` должен
+быть настоящим `Set` со слотом `[[SetData]]`, иначе `Method Set.prototype.union called
+on incompatible receiver`.
+
+<Scheme src="scheme-spec.svg">Как `groupA.intersection(groupB)` выбирает, что перебирать</Scheme>
+
+Алгоритм [intersection](https://tc39.es/ecma262/2026/#sec-set.prototype.intersection) (24.2.4.9)
+сравнивает размеры. Если `this` не больше — идёт по своему списку и для каждого элемента зовёт
+`other.has`; иначе перебирает `other.keys()` и проверяет каждый ключ в своём списке.
+Так устроены и `difference`, и `isDisjointFrom`; `isSubsetOf` при
+`this` больше `other` сразу отвечает `false`, `isSupersetOf` — наоборот.
+А `union` и `symmetricDifference` копируют список `this` и всегда перебирают
+`other.keys()` — потому `union` с бесконечными `evens` и не кончается. Результат
+создаётся напрямую с прототипом `%Set.prototype%` — вот почему наследник получил обычный
+`Set`. Подглядим, что именно зовёт алгоритм:
+
+```js
+const calls = [];
+const other = {
+  size: 2,
+  has(x) {
+    calls.push(`has(${x})`);
+    return x === 1;
+  },
+  keys() {
+    calls.push("keys()");
+    return [1, 9].values();
+  },
+};
+new Set([1]).intersection(other);
+new Set([1, 2, 3]).intersection(other);
+new Set([1]).union(other);
+console.log(calls);   // ['has(1)', 'keys()', 'keys()']
+```
+
+Множество из одного элемента меньше — вызван `has`; из трёх больше — `keys`;
+`union` — `keys` всегда.
+
+Раздел [24.4](https://tc39.es/ecma262/2026/#sec-weakset-objects) про `WeakSet` короче.
+Его вводная часть объясняет, почему нет перебора: движок может удалять недостижимые элементы с любой задержкой,
+и если бы программа могла это заметить, её поведение стало бы непредсказуемым. Поэтому узнать про элемент
+можно, только предъявив его самого. `add` при значении, которое нельзя держать слабо
+(CanBeHeldWeakly дня 14), бросает `TypeError`, а `has` и `delete` — просто
+возвращают `false`.
+
+Для сравнения — как спецификация описывает массив (раздел
+[23.1](https://tc39.es/ecma262/2026/#sec-array-objects), кратко). Массив — особый (exotic) объект, у
+которого по-особому ведут себя свойства-номера (10.4.2): элементы — это свойства с именами
+`"0"`, `"1"`…, а `length` экземпляра (23.1.4.1) — свойство-данные, которое нельзя
+перечислить и удалить. Конструктор (23.1.1) работает и без `new` — `Array(3)` то же, что
+`new Array(3)` дня 19 Essentials. `Array.prototype` сам — массив, ради совместимости со
+старым кодом. Итераторы массива (23.1.5) мы читали на дне 11.
+
+```js
+console.log(Object.keys(["a", "b"]), Array(3).length, Array.isArray(Array.prototype));   // ['0', '1'] 3 true
+console.log(Object.getOwnPropertyDescriptor(["a"], "length"));
+// {value: 1, writable: true, enumerable: false, configurable: false}
+```
+
+У множества нет ни номеров, ни `length`: только «есть или нет» — и потому быстрый
+`has`.
+
+## 14. «Карточки»: выученное как множество {#cards}
+
+Закроем долги дня 36. Номера выученных — множество: повтор невозможен. Колода — разность «все минус
+выученные». Прогресс двух вкладок не затирается, а объединяется. Темы — множества номеров, и «тема выучена» —
+это `isSubsetOf`. Карточки, показанные в этой сессии, отмечаем в `WeakSet`.
+
+```js
+const cards = [
+  { id: 1, word: "book", translation: "книга", topic: "школа" },
+  { id: 2, word: "teacher", translation: "учитель", topic: "школа" },
+  { id: 3, word: "bread", translation: "хлеб", topic: "еда" },
+  { id: 4, word: "water", translation: "вода", topic: "еда" },
+  { id: 5, word: "house", translation: "дом", topic: "дом" },
+];
+const allIds = new Set(cards.map((card) => card.id));
+const topicIds = new Map(Map.groupBy(cards, (card) => card.topic).entries().map(([topic, list]) => [topic, new Set(list.map((c) => c.id))]));
+
+const learnedA = new Set([1, 3]);                 // память вкладки A
+learnedA.add(3);                                   // «Знаю» дважды — номер один
+const savedB = new Set(JSON.parse("[1,4]"));       // что записала в хранилище вкладка B
+
+const learned = learnedA.union(savedB);            // не затираем, а объединяем
+const deck = allIds.difference(learned);           // что ещё учить
+console.log(learnedA, learned, deck);
+console.log(learnedA.symmetricDifference(savedB), JSON.stringify([...learned]));
+console.log(new Map(topicIds.entries().map(([topic, ids]) => [topic, `${ids.intersection(learned).size} из ${ids.size}`])));
+console.log([...topicIds.keys()].filter((topic) => topicIds.get(topic).isSubsetOf(learned)));
+
+const shown = new WeakSet();                       // показано в этой сессии
+function nextCard() {
+  const card = cards.find((c) => deck.has(c.id) && !shown.has(c));
+  if (!card) return "колода пройдена";
+  shown.add(card);
+  return card.word;
+}
+console.log(nextCard(), nextCard(), nextCard());
+```
+
+<ResultBox>
+Set(2) \{1, 3\} Set(3) \{1, 3, 4\} Set(2) \{2, 5\}\
+Set(2) \{3, 4\} \[1,3,4\]\
+Map(3) \{'школа' => '1 из 2', 'еда' => '2 из 2', 'дом' => '0 из 1'\}\
+(1) \['еда'\]\
+teacher house колода пройдена
+</ResultBox>
+
+**Строка 1 — без повторов и без потерь.** Второй `add(3)` ничего не добавил. Запись
+вкладки B `[1, 4]` раньше затёрла бы память A, а `union` сохранил и то и другое. Колода —
+всё, чего нет в выученном.
+
+**Строка 2 — где вкладки расходятся.** `symmetricDifference` — номера, о которых знает
+только одна вкладка. Оговорка: если в B нажали «Начать сначала», `union` вернёт стёртый прогресс из
+A — объединение не умеет «удалять».
+
+**Строки 3 и 4 — темы.** Пересечение темы с выученным даёт «сколько из скольких»,
+`isSubsetOf` — выучена ли тема целиком.
+
+**Строка 5 — показанные.** `nextCard` берёт первую карточку колоды, которой нет в
+`shown`, и отмечает её; сами карточки не меняются.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Замените `learnedA.union(savedB)` на `savedB` — так работала
+запись дня 36. Какие строки изменились и какой выученный номер пропал?
+\
+\
+**Второй.** Добавьте после `learnedA.add(3)` строку `learnedA.add("3")` —
+так бывает, когда номер пришёл из `dataset` кнопки (день 25 Essentials). Каким стал
+`learnedA` и почему?
+\
+\
+**Третий.** Замените `new WeakSet()` на `new Set()`. Вывод тот же — когда
+разница всё-таки появится?
+</TryIt>
+
+## 15. Итоги модуля и что дальше {#module}
+
+Модуль «Коллекции: Map, Set, WeakMap, WeakSet» закончен. Два дня — две пары коллекций:
+
+| День | Главная мысль | В спецификации |
+| --- | --- | --- |
+| 14 | `Map` — ключи любых типов, порядок вставки; `WeakMap` — данные об объекте, пока он жив | 24.1 |
+| 15 | `Set` — уникальные значения и операции над множествами; `WeakSet` — отметка об объекте | 24.2 |
+
+День 16 — мини-проект «журнал группы»: весь день руками. Ученик и группа — классы с приватными полями и
+геттерами дней 8–9, ученики — в `Map`, темы — в `Set`, группа перебирается
+`for...of` через генератор дня 12, настройки заморожены (день 6). С дня 17 начинается модуль «Строки и
+регулярные выражения».
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Set](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set) | уникальные значения; операции; похожие на множество; примеры | <Full /> |
+| [Set() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/Set) | из перебираемого объекта; только с `new` | <Full /> |
+| [Set.prototype.add()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/add) | добавить, если нет; возвращает множество | <Full /> |
+| [Set.prototype.has()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/has) | есть ли значение | <Full /> |
+| [Set.prototype.delete()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/delete) | убрать; `true`, если было | <Full /> |
+| [Set.prototype.clear()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/clear) | убрать всё | <Full /> |
+| [Set.prototype.size](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/size) | число элементов; только для чтения | <Full /> |
+| [Set.prototype.forEach()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/forEach) | колбэк (элемент, элемент, множество) | <Full /> |
+| [Set.prototype.union()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/union) | объединение | <Full /> |
+| [Set.prototype.intersection()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/intersection) | пересечение; порядок меньшего | <Full /> |
+| [Set.prototype.difference()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/difference) | разность | <Full /> |
+| [Set.prototype.symmetricDifference()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/symmetricDifference) | то, что ровно в одном | <Full /> |
+| [Set.prototype.isSubsetOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/isSubsetOf) | подмножество, нестрогое | <Full /> |
+| [Set.prototype.isSupersetOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/isSupersetOf) | надмножество | <Full /> |
+| [Set.prototype.isDisjointFrom()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/isDisjointFrom) | нет общих элементов | <Full /> |
+| [WeakSet](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet) | слабые элементы; отметки; обход с циклами | <Full /> |
+| [WeakSet() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/WeakSet) | из перебираемого объекта; только с `new` | <Full /> |
+| [WeakSet.prototype.add()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/add) | объект или символ не из реестра | <Full /> |
+| [WeakSet.prototype.has()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/has) | отмечен ли объект | <Full /> |
+| [WeakSet.prototype.delete()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet/delete) | снять отметку | <Full /> |
+| [ECMA-262, 24.2 Set Objects](https://tc39.es/ecma262/2026/#sec-set-objects) | `[[SetData]]`; GetSetRecord; выбор стороны | <Full /> |
+| [Set.prototype.values()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/values) | итератор элементов | <Brief /> |
+| [Set.prototype.keys()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/keys) | другое имя `values` | <Brief /> |
+| [Set.prototype.entries()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/entries) | итератор пар `[v, v]` | <Brief /> |
+| [Set.prototype\[Symbol.iterator\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/Symbol.iterator) | то же, что `values`; `for...of` | <Brief /> |
+| [Set\[Symbol.species\]](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/Symbol.species) | конструктор для производных; методами `Set` не используется | <Brief /> |
+| [ECMA-262, 24.2.1–24.2.6](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-set-objects) | Set Record, конструктор, его свойства, прототип, экземпляры, итераторы | <Brief /> |
+| [ECMA-262, 24.4 и 24.4.1–24.4.4](https://tc39.es/ecma262/2026/#sec-weakset-objects) | `WeakSet`: почему нет перебора; CanBeHeldWeakly | <Brief /> |
+| [ECMA-262, 23.1 и 23.1.1–23.1.5](https://tc39.es/ecma262/2026/#sec-array-objects) | массив: особый объект, конструктор, прототип, `length`, итераторы | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// const s = new Set([1, 2, 2]);   // Set(2) {1, 2}; без new — TypeError
+// s.add(x).add(y)   s.has(x)   s.delete(x)   s.size   s.clear()   — get нет
+// одинаковые — по SameValueZero: NaN находится, -0 = 0, объект — по ссылке
+// [...new Set(arr)] — без повторов;   new Set(arr).size === arr.length — повторов нет
+// for (const x of s)   s.forEach((x) => …)   keys = values = [Symbol.iterator]; entries — [x, x]
+// JSON.stringify(s) — "{}";  сохранять JSON.stringify([...s]), читать new Set(JSON.parse(text))
+// a.union(b)  a.intersection(b)  a.difference(b)  a.symmetricDifference(b) — новый Set
+// a.isSubsetOf(b)  a.isSupersetOf(b)  a.isDisjointFrom(b) — true / false
+// равны: a.size === b.size && a.isSubsetOf(b);   a === b — сравнение ссылок
+// b — Set или похожий: size, has(), keys(); Map подходит, массив — нет
+// WeakSet: только объекты и Symbol() (не Symbol.for); add / has / delete; нет size и перебора
+// WeakSet — отметка «уже был»: обход с циклами, кнопка, подписанная один раз
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Как одной строкой убрать повторы из массива и как проверить, были ли они?
+   <Answer>`[...new Set(arr)]` — без повторов, в порядке первых появлений. Повторов не было, если
+   `new Set(arr).size === arr.length`.</Answer>
+2. Почему `new Set([{ id: 1 }, { id: 1 }]).size` — 2?
+   <Answer>Объекты сравниваются по ссылке, а это два разных объекта. Убрать повторы по содержимому помогает
+   `Map` с ключом `id`.</Answer>
+3. Чем `a.difference(b)` отличается от `a.symmetricDifference(b)`?
+   <Answer>Разность — то, что есть в `a` и нет в `b`; от перестановки результат меняется.
+   Симметричная разность — то, что есть ровно в одном из двух, с обеих сторон.</Answer>
+4. Можно ли передать в `union` массив? А `Map`?
+   <Answer>Массив — нет: у него нет `size` и `has`, будет `The .size property is
+   NaN`. `Map` — да: у него есть `size`, `has` и `keys`,
+   и он работает как множество своих ключей.</Answer>
+5. Зачем обходу объектов `WeakSet`, если можно ставить отметку свойством на самом объекте?
+   <Answer>Отметка-свойство меняет чужие объекты и попадает в JSON и `Object.keys`.
+   `WeakSet` отмечает снаружи и не держит объекты в памяти.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set" />

@@ -1,0 +1,85 @@
+---
+title: День 26 — конспект
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #b45309; background: #fffbeb; border-left-color: #f59e0b; }
+---
+
+# День 26. Ошибки: Error, его виды, cause и свои классы ошибок
+
+<Subtitle>Выжимка лекции: справочник ошибок, устройство Error, виды, cause, свои классы, Error.isError и стек.</Subtitle>
+
+## Главное
+
+```js
+new Error("колода пуста", { cause: "no-cards" });          // message и cause — свои, неперечисляемые
+String(new RangeError("оценка 9"));                        // "RangeError: оценка 9"
+JSON.stringify(new Error("x"));                            // "{}"
+"cause" in new Error("x", { cause: undefined });           // true — важен ключ, а не значение
+Error.isError(Object.create(Error.prototype));             // false — клейма [[ErrorData]] нет
+new Error("где я").stack;                                  // кадры на момент создания, не стандарт
+```
+
+## Справочник ошибок MDN
+
+<Definition>
+**Справочник ошибок** — 131 страница, по одной на сообщение; заголовок — `name` и
+`message` (обычно в формулировке Firefox). На странице: Message — тексты разных движков, Error type,
+What went wrong?, Examples. Текст из Chrome ищут поисковиком со словом MDN, без своих имён (`'length'`
+→ «x»); нет точного текста — по смыслу.
+</Definition>
+
+| Вид | Когда |
+| --- | --- |
+| `TypeError` | значение не того типа, нельзя изменить, не по назначению |
+| `RangeError` | значение не из допустимых — число или строка не из списка |
+| `SyntaxError` | разбор: в тексте скрипта не ловится; ловится у `JSON.parse`, `new RegExp` |
+| `ReferenceError` | нет имени, мёртвая зона, `this` до `super` |
+| `URIError`, `EvalError` | `decodeURIComponent("%")`; `EvalError` больше не бросают |
+| `InternalError` | только Firefox; в Chrome рекурсия — `RangeError` |
+
+## Свой класс ошибки
+
+```js
+class AppError extends Error {
+  constructor(message, options) {
+    super(message, options);        // первым; options — чтобы не потерять cause
+    this.name = new.target.name;    // имя сразу для всех наследников
+  }
+}
+class ValidationError extends AppError {}
+String(new ValidationError("нет имени"));   // "ValidationError: нет имени"
+```
+
+<KeyPoint>
+`name` класс сам не задаёт: без строки с `this.name` ошибка выглядит как «Error: …».
+`this.name` и поля — свои перечисляемые свойства, их видит `JSON.stringify`, а
+`message` — нет. Сохранять ошибку — по полям: `{ name, message, cause }`.
+</KeyPoint>
+
+<Remember>
+В `catch`: свои ошибки — по `instanceof` от частного к общему, чужие — `throw e`.
+Пояснить ошибку — бросить новую с `{ cause: err }`, цепочку читать по ссылкам `cause`.
+Пойманное значение (бросить можно и строку) приводить к ошибке через `Error.isError`: он проверяет
+слот, а не цепочку прототипов, и узнаёт ошибки из другого окна.
+</Remember>
+
+<NoteBox>
+`stack` в Chrome — «Вид: текст», затем кадры «at имя (адрес:строка:столбец)», сверху — где ошибку
+создали. Событие от человека и таймер начинают новую цепочку. `Error.stackTraceLimit` — 10 кадров,
+`Error.captureStackTrace(obj, fn)` кладёт стек на любой объект без кадров `fn`.
+`fileName`, `lineNumber`, `columnNumber` — только Firefox.
+</NoteBox>
+
+<Homework>
+1. Возьмите три ошибки из своих прошлых заданий и найдите их страницы в справочнике MDN; выпишите заголовок и
+   раздел What went wrong?.
+2. Замените в своём проекте одно `throw new Error` на свой класс с полем, которое пригодится в
+   `catch`.
+3. Прочитайте на странице
+   [cause](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause)
+   раздел «Providing structured data as the error cause» и запишите, чем данные лучше текста.
+4. Найдите в ECMA-262 раздел 20.5.1.1 и выпишите, в каком шаге появляется `cause`.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error" />

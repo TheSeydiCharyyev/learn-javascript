@@ -1,0 +1,933 @@
+---
+title: День 11 — Символы и протоколы итерации
+day: День 11 • урок 1
+heading: Символы и протоколы итерации
+lead: Курс 2, Intermediate. Модуль «Итераторы и генераторы» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #14b8a6; }
+  h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+  h3 { color: #115e59; }
+  .step-number { background: #14b8a6; }
+  .toc a { color: #0f766e; }
+---
+
+<Goals>
+- создавать символы, читать их описание и использовать их как ключи свойств, которых не видят
+  `Object.keys`, `for...in` и JSON;
+- различать символы из `Symbol()` и общие символы реестра `Symbol.for`;
+- объяснять два протокола итерации: перебираемый объект и итератор с методом `next()`;
+- делать свой объект перебираемым через `[Symbol.iterator]` и проходить итератор
+  вручную;
+- пользоваться итераторами массива `keys`, `values`, `entries`
+  и знать, что они читают массив на каждом шаге.
+</Goals>
+
+<Toc />
+
+## 1. Почему одно перебирается, а другое нет {#question}
+
+На дне 11 Essentials таблица «что можно перебрать» называла массив, строку и `NodeList`,
+а обычный объект давал `TypeError: user is not iterable`. Потом список рос:
+на дне 4 курса `for...of` прошёл по `arguments`, хотя это не массив. А вчера
+стопка `Stack` из задания 7 перебираться отказалась, и про колоду `ReadOnlyWords`
+из раздела 12 мы обещали, что она научится работать в `for...of`. Посмотрим на разницу:
+
+```js
+class ReadOnlyWords {
+  #items;
+
+  constructor(items) {
+    this.#items = [...items];
+  }
+}
+
+const list = new ReadOnlyWords(["book", "water"]);
+console.log(typeof [][Symbol.iterator], typeof "Мары"[Symbol.iterator], typeof list[Symbol.iterator]);
+for (const word of list) {
+  console.log(word);
+}
+// function function undefined
+// TypeError: list is not iterable
+```
+
+У массива и строки есть метод под странным ключом `[Symbol.iterator]`, у нашего класса —
+нет. Этот метод и делает объект перебираемым. Ключ у него не строка, а **символ** —
+значение седьмого примитивного типа. Поэтому день устроен так: сначала символы, потом договор,
+по которому работает `for...of`, — его называют **протоколом итерации**.
+К концу дня `ReadOnlyWords` и колода «Карточек» будут перебираться, не становясь
+массивами.
+
+## 2. Символ — значение-ключ {#symbol}
+
+На дне 5 Essentials символ мелькнул одной строкой: `Symbol("id") === Symbol("id")` —
+`false`. Это главное его свойство. Каждый вызов `Symbol()` создаёт новое
+значение, которое не равно ничему, кроме самого себя:
+
+```js
+const id = Symbol("id");
+const other = Symbol("id");
+
+console.log(typeof id, id === other, id === id);         // symbol false true
+console.log(id, id.description, Symbol().description);   // Symbol(id) id undefined
+console.log(Symbol(42).description, typeof Symbol(42).description);   // 42 string
+```
+
+Строка в скобках — **описание**, подпись для отладки. Она не делает символ «символом
+по имени id»: два символа с одним описанием — разные значения, как два ученика с одинаковым именем.
+Прочитать описание можно свойством `description`; без аргумента оно
+`undefined`, а число превращается в строку `"42"`. Спецификация в разделе
+[6.1.5](https://tc39.es/ecma262/2026/#sec-ecmascript-language-types-symbol-type) говорит
+коротко: символ — значение, которое не строка, но годится в ключ свойства; каждый символ уникален
+и неизменяем, а описание хранится во внутреннем слоте `[[Description]]`.
+
+Создают символ только вызовом без `new`:
+
+```js
+const id = new Symbol("id");
+// TypeError: Symbol is not a constructor
+```
+
+Первый шаг алгоритма
+[20.4.1.1 Symbol ( \[ description \] )](https://tc39.es/ecma262/2026/#sec-symbol-description)
+— проверить вчерашний `new.target` и при вызове с `new` бросить `TypeError`.
+Так символу запретили объект-обёртку вроде `new Number(5)`, от которой предостерегал
+день 5 Essentials.
+
+<Important>
+Слово «символ» в русском занято. На дне 11 Essentials строка перебиралась «по символам» — то есть
+по буквам. Сегодня **символ** — значение типа `symbol`, а буквы строки мы
+будем называть **знаками**.
+</Important>
+
+## 3. Символ и строки {#convert}
+
+Символ охотно показывает себя, но сам в строку не превращается:
+
+```js
+const id = Symbol("id");
+
+console.log(id.toString(), String(id), id.description);   // Symbol(id) Symbol(id) id
+console.log(id.valueOf() === id, typeof Object(id));      // true object
+console.log("ключ: " + id);
+// TypeError: Cannot convert a Symbol value to a string
+```
+
+Явно — можно: `toString()` и `String(id)` дают `"Symbol(id)"`,
+`description` — одно описание. Неявно — нельзя: сложение со строкой и шаблон
+`` `${id}` `` бросают ту же ошибку, а `+id` и `id * 2` —
+`Cannot convert a Symbol value to a number`. Так язык не даёт по ошибке склеить из символа
+строковый ключ. Сравнение `id == "Symbol(id)"` ничего не преобразует и даёт
+`false`; в логическом контексте символ всегда `true`.
+
+`valueOf()` возвращает сам символ, а `Object(id)` из дня 6 даёт объект-обёртку —
+ту, которую нельзя получить через `new`. Методы символ одалживает у
+`Symbol.prototype`, как строка у `String.prototype` (день 7). Там же лежит
+`description` — геттер без сеттера, как на дне 5: присваивание `id.description = "x"`
+тихо пропадёт, а в строгом режиме упадёт с `Cannot set property description of [object Symbol]
+which has only a getter`.
+
+## 4. Символ как ключ свойства {#keys}
+
+Ради этого символы и придуманы. Ключом свойства может быть строка или символ. Символьный ключ
+пишут в квадратных скобках — как вычисляемое имя метода из дня 5:
+
+```js
+const id = Symbol("id");
+const student = { name: "Аман", [id]: 7 };
+
+student.id = "A-7";
+console.log(student[id], student.id, student);
+// 7 A-7 {name: 'Аман', id: 'A-7', Symbol(id): 7}
+```
+
+`student[id]` и `student.id` — два разных свойства: первое под символом,
+второе под строкой `"id"`. Достать символьное свойство можно только тем же символом,
+поэтому его хранят в переменной. Зачем это нужно? Представьте, что объект ученика метят два куска кода,
+написанные разными людьми, — журнал и кружок. Оба хотят свойство «id». Со строками второй затрёт
+первого. С символами они не встретятся:
+
+```js
+const user = { name: "Аман" };
+const journalId = Symbol("id");   // код журнала
+const clubId = Symbol("id");      // код кружка
+
+user[journalId] = 101;
+user[clubId] = "K-7";
+console.log(user[journalId], user[clubId], Object.keys(user));   // 101 K-7 ['name']
+```
+
+### Кто видит символьный ключ
+
+Обратите внимание на `Object.keys(user)` — в нём только `name`. Вспомним
+таблицу учебника MDN «Enumerability and ownership of properties» из дня 5. Тогда мы смотрели
+в ней на перечисляемость, а теперь у неё появляется вторая ось — строка или символ:
+
+```js
+const id = Symbol("id");
+const student = { name: "Аман", [id]: 7 };
+
+const seen = [];
+for (const key in student) {
+  seen.push(key);
+}
+console.log(Object.keys(student), seen, JSON.stringify(student));
+// ['name'] ['name'] {"name":"Аман"}
+console.log(Object.getOwnPropertyNames(student), Object.getOwnPropertySymbols(student));
+// ['name'] [Symbol(id)]
+console.log({ ...student }[id], Object.assign({}, student)[id], id in student, Object.hasOwn(student, id));
+// 7 7 true true
+```
+
+| Инструмент | строковый ключ | ключ-символ |
+| --- | --- | --- |
+| `Object.keys`, `values`, `entries` | да | нет |
+| `for...in`, `JSON.stringify` | да | нет |
+| `Object.getOwnPropertyNames` | да | нет |
+| `Object.getOwnPropertySymbols` | нет | да |
+| spread `{...obj}`, `Object.assign` | да, если перечисляемый | да, если перечисляемый |
+| `in`, `Object.hasOwn`, `propertyIsEnumerable` | да | да |
+
+Это ответ на домашнее задание дня 5: `getOwnPropertyNames` и
+`getOwnPropertySymbols` — пара, первый отдаёт все свои строковые ключи, второй — все свои
+символьные. Порядок ключей задаёт раздел
+[10.1.11.1 OrdinaryOwnPropertyKeys](https://tc39.es/ecma262/2026/#sec-ordinaryownpropertykeys):
+сначала номера по возрастанию, потом строки в порядке создания, в самом конце символы — тоже
+в порядке создания:
+
+```js
+const second = Symbol("второй");
+const first = Symbol("первый");
+const lesson = { b: 1, [second]: 2, 10: 3, a: 4, [first]: 5, 2: 6 };
+
+console.log(Object.getOwnPropertyNames(lesson), Object.getOwnPropertySymbols(lesson));
+// ['2', '10', 'b', 'a'] [Symbol(второй), Symbol(первый)]
+```
+
+### Спрятано, но не заперто
+
+MDN называет это «слабой инкапсуляцией»: символьное свойство не попадёт в JSON и не столкнётся
+с чужим ключом, но его найдёт любой через `getOwnPropertySymbols`. Сравним с подчёркиванием
+дня 5 и решёткой дня 9:
+
+|  | `_mark` | `[MARK]` | `#mark` |
+| --- | --- | --- | --- |
+| видно в `keys`, `for...in`, JSON | да | нет | нет |
+| чужой код может случайно затереть | да | нет | нет |
+| можно достать снаружи нарочно | да | да, через `getOwnPropertySymbols` | нет |
+| работает для любого объекта, не только своего класса | да | да | нет |
+
+Последняя строка — главное отличие от `#`: символьный ключ можно повесить на
+**чужой** объект — карточку из JSON, элемент страницы — и он никому не помешает.
+
+## 5. Общие символы: Symbol.for и keyFor {#registry}
+
+Уникальность бывает неудобной. Пусть карточки метят два куска кода, которые не знают переменных друг
+друга: библиотека и ваша программа или два модуля (день 30) — у каждого своя область видимости.
+`Symbol("learned")`, вызванный в каждом, даст два разных символа. А передать один символ
+через глобальную переменную — значит вернуться к столкновению имён, от которого символы спасали.
+Для этого есть **глобальный реестр символов**:
+
+```js
+const learned = Symbol.for("cards.learned");
+const again = Symbol.for("cards.learned");
+const local = Symbol("cards.learned");
+
+console.log(learned === again, learned === local, learned.description);   // true false cards.learned
+console.log(Symbol.keyFor(learned), Symbol.keyFor(local));                // cards.learned undefined
+```
+
+`Symbol.for(key)` ищет в реестре символ с таким строковым ключом. Нашёл — возвращает
+его, нет — создаёт, записывает в реестр и возвращает (шаги раздела
+[20.4.2.2](https://tc39.es/ecma262/2026/#sec-symbol.for)). Ключ становится и описанием.
+`Symbol.keyFor(sym)` — обратная операция: ключ символа из реестра или `undefined`
+для обычного символа. Не символ в аргументе — ошибка: `Symbol.keyFor("cards.learned")`
+даёт `TypeError: cards.learned is not a symbol`.
+
+Реестр общий на всю страницу и даже на окна внутри неё. Поэтому если один кусок кода пишет
+`card[Symbol.for("cards.learned")] = true`, другой своим `Symbol.for("cards.learned")`
+найдёт ту же метку. Плата — уникальность: такой символ получит любой, кто знает строку. MDN советует
+ставить перед ключом приставку своей программы, как `"cards."` здесь, чтобы не столкнуться
+с ключами чужих библиотек.
+
+## 6. Встроенные символы {#well-known}
+
+У конструктора `Symbol` есть статические свойства, которые сами символы. Один из них —
+наш знакомый:
+
+```js
+console.log(typeof Symbol.iterator, Symbol.iterator.description, Symbol.keyFor(Symbol.iterator));
+// symbol Symbol.iterator undefined
+console.log(Symbol.iterator === Symbol.for("Symbol.iterator"));   // false
+```
+
+Это **встроенные** (well-known) символы: язык создаёт их заранее и сам ищет у объекта
+метод под таким ключом. В реестре их нет, а свойство `Symbol.iterator` только для чтения
+и неудаляемое (дни 5–6). В спецификации их пишут со знаками процента — `%Symbol.iterator%`,
+в старых текстах — `@@iterator`. Таблица 1 раздела
+[6.1.5.1](https://tc39.es/ecma262/2026/#sec-well-known-symbols) перечисляет 13 символов;
+Chrome и MDN знают ещё два — `Symbol.dispose` и `Symbol.asyncDispose`
+для объявления `using` (курс 3).
+
+| Символ | Кто его спрашивает | Где в курсе |
+| --- | --- | --- |
+| `Symbol.iterator` | `for...of`, spread, деструктуризация | сегодня |
+| `Symbol.asyncIterator` | `for await...of` | день 29 |
+| `Symbol.hasInstance` | `instanceof` (день 7) | пример ниже, подробно — курс 3 |
+| `Symbol.species` | какой класс создают `filter` и `map` (день 10) | дни 14–15 кратко, курс 3 |
+| `toPrimitive`, `toStringTag` и ещё семь | ToPrimitive и `[object …]` дня 6, методы строк с регулярными выражениями, `concat`, `with` | курс 3 |
+
+На дне 7 мы обещали: алгоритм `instanceof`
+([13.10.2](https://tc39.es/ecma262/2026/#sec-instanceofoperator)) начинается с вопроса,
+нет ли у правого операнда метода `%Symbol.hasInstance%`. Вот он в деле — только для
+знакомства, в своём коде так не делают:
+
+```js
+class Even {
+  static [Symbol.hasInstance](value) {
+    return value % 2 === 0;
+  }
+}
+
+console.log(4 instanceof Even, 5 instanceof Even);             // true false
+console.log(typeof Function.prototype[Symbol.hasInstance]);   // function
+```
+
+У каждой функции такой метод уже есть — в `Function.prototype`, он делает проверку
+цепочки дня 7. А почему протоколы спрятаны под символами, а не под словами вроде
+`"iterator"`? MDN объясняет: раньше язык брал строковые имена — `toJSON`,
+`toString`, `valueOf`. Но новое «волшебное» имя могло совпасть со свойством
+в чьём-то старом коде и сломать его. Символ ни с чем не совпадёт.
+
+## 7. Протокол итерации: два договора {#protocol}
+
+«Протокол» — не класс и не конструкция, а договорённость: кто её соблюдает, тот работает
+с `for...of`. Договоров два.
+
+- **Перебираемый объект** (iterable) — у него, своим или по цепочке прототипов, есть
+  метод `[Symbol.iterator]()` без аргументов, который возвращает итератор.
+- **Итератор** (iterator) — объект с методом `next()`. Каждый вызов
+  возвращает объект-результат `{ value, done }`: `value` — очередное
+  значение, `done` — кончились ли значения.
+
+Пройдём массив вручную — так, как его проходит `for...of`:
+
+```js
+const marks = [5, 4];
+const iterator = marks[Symbol.iterator]();
+
+console.log(iterator.next());   // {value: 5, done: false}
+console.log(iterator.next());   // {value: 4, done: false}
+console.log(iterator.next());   // {value: undefined, done: true}
+console.log(iterator.next());   // {value: undefined, done: true}
+```
+
+Итератор помнит, где остановился. Кончились значения — на каждый вызов `done: true`.
+Сам цикл `for...of` через `while` дня 10 Essentials:
+
+```js
+const marks = [5, 4, 3];
+const iterator = marks[Symbol.iterator]();   // 1. взять итератор
+let step = iterator.next();                  // 2. первый шаг
+while (!step.done) {                         // 3. пока не конец
+  console.log(step.value);                   // 4. тело цикла
+  step = iterator.next();
+}
+// 5
+// 4
+// 3
+```
+
+<Scheme src="scheme-protocol.svg">Два договора протокола итерации</Scheme>
+
+## 8. Свой перебираемый объект: диапазон {#range}
+
+Раз протокол — просто договорённость, его может выполнить любой объект. Сделаем
+**диапазон** чисел от `from` до `to`, которого нет в памяти массивом:
+числа появляются по одному, когда их просят.
+
+```js
+const range = {
+  from: 1,
+  to: 4,
+  [Symbol.iterator]() {
+    let current = this.from;   // this — сам range: метод вызван у него
+    const last = this.to;
+    return {
+      next() {
+        if (current <= last) {
+          return { value: current++, done: false };
+        }
+        return { value: undefined, done: true };
+      },
+    };
+  },
+};
+
+for (const n of range) {
+  console.log(n);
+}
+console.log([...range], Math.max(...range), Array.from(range));
+const [first, second, ...others] = range;
+console.log(first, second, others, Object.keys(range));
+```
+
+<ResultBox>
+1\
+2\
+3\
+4\
+(4) \[1, 2, 3, 4\] 4 (4) \[1, 2, 3, 4\]\
+1 2 (2) \[3, 4\] (2) \['from', 'to'\]
+</ResultBox>
+
+Один метод — и `range` работает везде, где язык перебирает: в `for...of`,
+в spread внутри массива и вызова, в `Array.from` дня 19 Essentials, в деструктуризации
+дня 22. Это потребители одного протокола, и каждый получает свежий итератор — диапазон можно
+перебирать сколько угодно раз. `Object.keys` ключа-символа не видит.
+
+Два места с `this`. В `[Symbol.iterator]()` он — `range`: метод
+вызван у объекта (день 2). В `next()` `this` был бы итератором, поэтому границы
+взяты в замыкание дня 1. Ловушка: стрелка `[Symbol.iterator]: () => {…}` возьмёт
+`this` снаружи — окно без `from`, — и `[...range]` молча станет пустым.
+
+## 9. Итератор одноразовый {#once}
+
+Перебираемый объект и итератор — разные роли, но один объект может играть обе. У итераторов
+массива метод `[Symbol.iterator]()` возвращает **сам итератор**. Такой объект
+MDN называет перебираемым итератором (iterable iterator). Отсюда следствие:
+
+```js
+const marks = [5, 4, 3];
+const iterator = marks[Symbol.iterator]();
+
+console.log(iterator[Symbol.iterator]() === iterator);
+for (const mark of iterator) {
+  console.log("первый проход:", mark);
+  if (mark === 4) {
+    break;
+  }
+}
+for (const mark of iterator) {
+  console.log("второй проход:", mark);
+}
+for (const mark of iterator) {
+  console.log("третий проход:", mark);
+}
+```
+
+<ResultBox>
+true\
+первый проход: 5\
+первый проход: 4\
+второй проход: 3
+</ResultBox>
+
+Второй цикл продолжил с места, где первый вышел, третьему не досталось ничего. Массив же
+каждый `for...of` перебирает с начала. **Перебираемый объект — источник,
+итератор — одноразовый проход** по нему.
+
+<Scheme src="scheme-once.svg">Источник и проход</Scheme>
+
+Итератор нашего диапазона так не умеет: `const it = range[Symbol.iterator]();` и затем
+`for (const n of it)` дадут `it is not iterable`. MDN советует добавлять итератору `[Symbol.iterator]() { return this; }`:
+почти всё в языке ждёт перебираемый объект. Встроенные итераторы получают этот метод по цепочке:
+
+```js
+const iterator = [5, 4][Symbol.iterator]();
+const arrayIteratorProto = Object.getPrototypeOf(iterator);
+
+console.log(iterator, String(iterator));                       // Array Iterator {} [object Array Iterator]
+console.log(Object.getOwnPropertyNames(arrayIteratorProto));   // ['next']
+```
+
+Прототип итераторов массива хранит один `next`, а следующее звено —
+`Iterator.prototype`, общий для всех встроенных итераторов: там лежат
+`[Symbol.iterator]() { return this; }`
+([27.1.3.3.13](https://tc39.es/ecma262/2026/#sec-iterator.prototype-%25symbol.iterator%25))
+и методы дня 13. Подпись `[object Array Iterator]` вместо `[object Object]`
+дня 6 дал `Symbol.toStringTag`.
+
+## 10. Итераторы массива: keys, values, entries {#array}
+
+Массив выдаёт итераторы не только через `[Symbol.iterator]`. Три метода дают три вида
+прохода:
+
+```js
+const words = ["book", "water", "bread"];
+
+console.log([...words.keys()], [...words.values()]);   // [0, 1, 2] ['book', 'water', 'bread']
+console.log(words.entries().next().value);              // [0, 'book']
+for (const [index, word] of words.entries()) {
+  console.log(`${index + 1}. ${word}`);
+}
+console.log(words.values === words[Symbol.iterator], words[Symbol.iterator].name);   // true values
+console.log(words.keys().length);                       // undefined
+```
+
+<ResultBox>
+(3) \[0, 1, 2\] (3) \['book', 'water', 'bread'\]\
+(2) \[0, 'book'\]\
+1\. book\
+2\. water\
+3\. bread\
+true values\
+undefined
+</ResultBox>
+
+`keys()` отдаёт номера, `values()` — значения, `entries()` — пары
+`[номер, значение]`. Запись `for (const [index, mark] of marks.entries())` дня 11
+Essentials теперь разобрана целиком: `entries()` возвращает итератор пар, а деструктуризация
+дня 22 раскладывает каждую пару по двум переменным. `values` и `[Symbol.iterator]` —
+одна функция. `length` у итератора нет: это проход, а не массив; массив из него дают
+`[...]` и `Array.from`.
+
+Первая особенность — дырки: `Object.keys` видит только существующие номера, а итератор
+проходит все от 0 до `length - 1`:
+
+```js
+const marks = [5, , 3];
+console.log(Object.keys(marks), [...marks.keys()], [...marks.values()]);
+// ['0', '2'] [0, 1, 2] [5, undefined, 3]
+```
+
+Вторая — итератор не копирует массив: он помнит массив и следующий номер, а значение читает
+в момент шага:
+
+```js
+const words = ["book", "water", "bread"];
+const iterator = words.values();
+
+console.log(iterator.next().value);   // book
+words[1] = "tea";
+console.log(iterator.next().value);   // tea
+words.push("house");
+console.log(iterator.next().value, iterator.next().value, iterator.next().done);   // bread house true
+words.push("window");
+console.log(iterator.next().done);    // true
+```
+
+Правка второго слова видна, добавленное в конец — тоже: длину итератор проверяет на каждом шаге.
+Поэтому `for (const x of arr) { arr.push(x); }` сам не кончится: на каждом шаге длина растёт
+на один, и итератор её не догонит — MDN приводит этот пример как ловушку. Но последняя строка показывает, что исчерпанный итератор не оживает: после
+первого `done: true` он забывает массив. Почему — увидим в спецификации, раздел 14.
+
+И последнее: эти методы **обобщённые**, как `slice` на дне 7. Им нужен только
+`length` и номера, поэтому их можно одолжить объекту, похожему на массив:
+
+```js
+const arrayLike = { length: 2, 0: "a", 1: "b" };
+
+console.log([...Array.prototype.values.call(arrayLike)], Array.from(arrayLike));   // ['a', 'b'] ['a', 'b']
+for (const x of arrayLike) {
+  console.log(x);
+}
+// TypeError: arrayLike is not iterable
+```
+
+Номера и `length` ещё не делают объект перебираемым. А `Array.from` принимает
+и перебираемый объект, и похожий на массив — поэтому `Array.from({ name: "Аман" })` не падает,
+а молча даёт пустой массив: `length` у объекта нет.
+
+## 11. Кто ещё перебирается {#who}
+
+**Строка.** Её метод `[Symbol.iterator]` отдаёт по одному знаку:
+
+```js
+const city = "Мары";
+const iterator = city[Symbol.iterator]();
+
+console.log(iterator.next(), [...city]);    // {value: 'М', done: false} ['М', 'а', 'р', 'ы']
+console.log("😀".length, [..."😀"].length);   // 2 1
+```
+
+Во второй строке — тонкость. `length` смайлика 2: внутри строки он занимает две ячейки,
+и `"😀"[0]` — половинка, которая сама по себе ничего не значит. Итератор строки идёт
+не по ячейкам, а по кодовым точкам Unicode и отдаёт смайлик целиком. Поэтому `[...str]`
+честнее, чем перебор по номерам. Что такое кодовые точки — день 20.
+
+**`arguments`.** Долг дня 4:
+
+```js
+function show() {
+  console.log(Object.hasOwn(arguments, Symbol.iterator), arguments[Symbol.iterator] === Array.prototype.values);
+  for (const value of arguments) {
+    console.log("перебор:", value);
+  }
+}
+
+show("a", "b");
+// true true
+// перебор: a
+// перебор: b
+```
+
+Объект `arguments` получает **своё** свойство `[Symbol.iterator]`,
+и это та же функция `Array.prototype.values` — её одолжили объекту, похожему на массив,
+как в прошлом примере. Так записано в разделах
+[10.4.4.6](https://tc39.es/ecma262/2026/#sec-createunmappedargumentsobject) и
+[10.4.4.7](https://tc39.es/ecma262/2026/#sec-createmappedargumentsobject) — для строгого
+и обычного режимов. `NodeList` из дня 24 Essentials устроен так же: его
+`[Symbol.iterator]` в `NodeList.prototype` — тоже `values` массива.
+
+Проверить, перебирается ли значение, можно тем же путём, что и язык: есть ли функция под ключом
+`Symbol.iterator`. Необязательная цепочка дня 22 защищает от `null`:
+
+```js
+function isIterable(value) {
+  return typeof value?.[Symbol.iterator] === "function";
+}
+
+console.log(isIterable([5]), isIterable("Мары"), isIterable({}), isIterable(42), isIterable(null));
+// true true false false false
+```
+
+| Перебирается | Не перебирается |
+| --- | --- |
+| массив и его итераторы, строка, `arguments` | обычный объект — нет порядка значений |
+| `NodeList`, `HTMLCollection` (день 24 Essentials) | число, `true`/`false` |
+| `Map` и `Set` (дни 14–15), генераторы (день 12) | `null` и `undefined` |
+| любой объект со своим `[Symbol.iterator]` | похожий на массив без `[Symbol.iterator]` |
+
+## 12. Перебор бросили: метод return {#close}
+
+У итератора, кроме `next`, может быть необязательный метод `return()`. Язык
+вызывает его, когда перебор бросили, не дойдя до конца, — чтобы итератор мог прибраться: закрыть
+файл, отпустить ресурс. Посмотрим, когда это происходит:
+
+```js
+const lessons = {
+  [Symbol.iterator]() {
+    let n = 0;
+    return {
+      next() {
+        n++;
+        console.log("next", n);
+        return n <= 3 ? { value: n, done: false } : { value: undefined, done: true };
+      },
+      return() {
+        console.log("return: перебор бросили");
+        return { value: undefined, done: true };
+      },
+    };
+  },
+};
+
+const [lesson] = lessons;
+for (const item of lessons) {
+  if (item === 2) {
+    break;
+  }
+}
+console.log([...lessons]);
+```
+
+<ResultBox>
+next 1\
+return: перебор бросили\
+next 1\
+next 2\
+return: перебор бросили\
+next 1\
+next 2\
+next 3\
+next 4\
+(3) \[1, 2, 3\]
+</ResultBox>
+
+Деструктуризация взяла одно значение и бросила перебор — `return`. `break` —
+`return`, как и `return` из функции посреди цикла и ошибка в теле. Spread дошёл
+до `done: true` — итератор закончил сам, `return` не нужен. У итераторов массива
+метода `return` нет, поэтому в разделе 9 проход после `break` продолжился.
+А `value` из результата с `done: true` `for...of` и spread
+отбрасывают.
+
+## 13. Сломанный протокол {#errors}
+
+Если объект нарушил договор, язык сообщит, на каком шаге. Пример — `next` вернул
+не объект:
+
+```js
+const broken = {
+  [Symbol.iterator]() {
+    return {
+      next() {
+        return 5;
+      },
+    };
+  },
+};
+
+for (const x of broken) {
+  console.log(x);
+}
+// TypeError: Iterator result 5 is not an object
+```
+
+| Что сломано | Текст Chrome |
+| --- | --- |
+| нет `[Symbol.iterator]` или это не функция | `broken is not iterable`; в вызове `f(...obj)` — `Spread syntax requires ...iterable[Symbol.iterator] to be a function` |
+| `[Symbol.iterator]()` вернул не объект | `Result of the Symbol.iterator method is not an object` |
+| у итератора нет `next` | в `for...of` — `undefined is not a function`, в `[...obj]` — `broken is not iterable` |
+| `next()` или `return()` вернул не объект | `Iterator result 5 is not an object` |
+
+На MDN у этих ошибок другие тексты — не те, что пишет Chrome. Все четыре — `TypeError`,
+их ловит один `try...catch` вокруг цикла.
+
+## 14. Раздел 27.1.1 спецификации {#spec}
+
+Итерации посвящён раздел
+[27.1 Iteration](https://tc39.es/ecma262/2026/#sec-iteration). Его подразделы распределены
+по модулю: 27.1.1 — интерфейсы, сегодня; 27.1.2 и 27.1.3 — объект `Iterator` и его методы,
+день 13; 27.1.4 и 27.1.5 — асинхронная итерация, день 29. Прочитаем
+[27.1.1 Common Iteration
+Interfaces](https://tc39.es/ecma262/2026/#sec-common-iteration-interfaces).
+
+Он начинается с определения: **интерфейс** — набор ключей свойств, значения которых
+отвечают описанию; объект, у которого все такие свойства есть, соответствует интерфейсу. Отдельного
+объекта «интерфейс» нет, и один объект может соответствовать нескольким сразу — как итератор массива
+из раздела 9. Дальше три таблицы:
+
+- **Iterable** (таблица 78): свойство `%Symbol.iterator%` — функция,
+  которая возвращает итератор.
+- **Iterator** (таблицы 79 и 80): обязательный `next`, который возвращает
+  IteratorResult. После первого `done: true` все следующие вызовы тоже должны давать
+  `done: true` — «однако это требование не проверяется». `next` может
+  принимать аргументы, но `for...of` их не передаёт. Необязательные методы —
+  `return` (раздел 12) и `throw` (день 12); `for...of`,
+  `yield*` и деструктуризация зовут их, только проверив, что они есть.
+- **IteratorResult** (таблица 84): `done` — логическое значение; нет
+  свойства `done` — считается `false`. `value` — очередное значение,
+  а при `done: true` — «значение возврата», и тогда его может не быть вовсе.
+
+Между ними — асинхронные варианты 27.1.1.3 и 27.1.1.4, где `next` возвращает промис, —
+день 29. «Не проверяется» повторяется в таблицах не раз: спецификация описывает, как итератор
+**должен** себя вести, а язык ему доверяет.
+
+### for...of по шагам
+
+Что всё-таки проверяется, видно в алгоритмах цикла:
+
+1. [14.7.5.6](https://tc39.es/ecma262/2026/#sec-runtime-semantics-forinofheadevaluation)
+   вычисляет выражение справа от `of` и вызывает
+   [GetIterator](https://tc39.es/ecma262/2026/#sec-getiterator) (7.4.4): взять метод
+   по ключу `%Symbol.iterator%`, нет метода — `TypeError` («is not iterable»).
+2. [GetIteratorFromMethod](https://tc39.es/ecma262/2026/#sec-getiteratorfrommethod)
+   (7.4.3) вызывает метод; результат не объект — `TypeError` («Result of the
+   Symbol.iterator method is not an object»).
+3. [GetIteratorDirect](https://tc39.es/ecma262/2026/#sec-getiteratordirect) (7.4.2)
+   **один раз** читает у итератора `next` и запоминает его в записи
+   итератора (Iterator Record, 7.4.1).
+4. [14.7.5.7](https://tc39.es/ecma262/2026/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset)
+   повторяет: вызвать запомненный `next`, результат не объект — `TypeError`
+   («Iterator result … is not an object»), `done` истинно — выйти, иначе положить
+   `value` в переменную цикла и выполнить тело.
+5. Цикл прервали — [IteratorClose](https://tc39.es/ecma262/2026/#sec-iteratorclose)
+   (7.4.11): если у итератора есть `return`, вызвать его.
+
+<Scheme src="scheme-spec.svg">Цикл `for...of` по алгоритмам спецификации</Scheme>
+
+Шаг 3 легко увидеть на опыте: подменим `next` посреди цикла.
+
+```js
+const marks = [5, 4, 3];
+const iterator = marks[Symbol.iterator]();
+const source = {
+  [Symbol.iterator]() {
+    console.log("взяли итератор");
+    return iterator;
+  },
+};
+
+for (const mark of source) {
+  console.log(mark);
+  iterator.next = () => ({ value: "подмена", done: false });
+}
+// взяли итератор
+// 5
+// 4
+// 3
+```
+
+Цикл не заметил подмены: он зовёт `next`, запомненный на шаге 3. Итераторы массива
+создаёт [CreateArrayIterator](https://tc39.es/ecma262/2026/#sec-createarrayiterator)
+(23.1.5.1) — объект с тремя слотами: `[[IteratedArrayLike]]` — массив,
+`[[ArrayLikeNextIndex]]` — следующий номер, `[[ArrayLikeIterationKind]]` —
+*key*, *value* или *key+value*. Это и есть `keys`, `values`
+и `entries`: один механизм с тремя настройками. Его `next`
+([23.1.5.2.1](https://tc39.es/ecma262/2026/#sec-%25arrayiteratorprototype%25.next)) каждый
+раз заново читает длину и значение — отсюда «живой» итератор раздела 10. А дойдя до длины, записывает
+в `[[IteratedArrayLike]]` `undefined`: массив забыт, итератор исчерпан навсегда.
+
+## 15. «Карточки»: колода для for...of {#cards}
+
+Соберём день в «Карточках». Колода `Deck` устроена композицией, как
+`ReadOnlyWords` дня 10: карточки лежат в приватном поле. Выученную карточку пометим ключом-символом
+`LEARNED` — метка не попадёт ни в JSON, ни в `Object.keys`, и данные карточки
+останутся чистыми. А `for...of` по колоде будет пропускать выученное.
+
+```js
+const LEARNED = Symbol("learned");
+
+class Deck {
+  #cards;
+
+  constructor(cards) {
+    this.#cards = cards.map((card) => ({ ...card }));   // свои копии карточек
+  }
+
+  learn(word) {
+    const card = this.#cards.find((c) => c.word === word);
+    card[LEARNED] = true;
+    return card;
+  }
+
+  [Symbol.iterator]() {
+    const cards = this.#cards;
+    let index = 0;
+    return {
+      next() {
+        while (index < cards.length && cards[index][LEARNED]) {
+          index++;                                        // выученные пропускаем
+        }
+        if (index < cards.length) {
+          return { value: cards[index++], done: false };
+        }
+        return { value: undefined, done: true };
+      },
+    };
+  }
+}
+
+const deck = new Deck([
+  { word: "book", translation: "книга", topic: "школа" },
+  { word: "teacher", translation: "учитель", topic: "школа" },
+  { word: "bread", translation: "хлеб", topic: "еда" },
+  { word: "water", translation: "вода", topic: "еда" },
+  { word: "house", translation: "дом", topic: "дом" },
+]);
+
+const teacher = deck.learn("teacher");
+deck.learn("water");
+
+for (const card of deck) {
+  console.log(`${card.word} — ${card.translation}`);
+}
+const [first, ...rest] = deck;
+console.log(first.word, rest.length, [...deck].map((card) => card.topic));
+console.log(JSON.stringify(teacher), Object.keys(teacher).length, teacher[LEARNED]);
+console.log(Object.getOwnPropertySymbols(teacher), Object.getOwnPropertySymbols(first));
+const iterator = deck[Symbol.iterator]();
+console.log(iterator.next().value.word, iterator.next().value.word, iterator.next().value.word, iterator.next().done);
+```
+
+<ResultBox>
+book — книга\
+bread — хлеб\
+house — дом\
+book 2 (3) \['школа', 'еда', 'дом'\]\
+\{"word":"teacher","translation":"учитель","topic":"школа"\} 3 true\
+(1) \[Symbol(learned)\] (0) \[\]\
+book bread house true
+</ResultBox>
+
+**Строки 1–3 — свой протокол.** `for...of` получил итератор колоды, и его
+`next` перешагнул `teacher` и `water`, помеченные символом.
+
+**Строка 4 — все потребители.** Деструктуризация и spread вызвали
+`[Symbol.iterator]()` каждая заново и прошли колоду с начала; `...rest` — две
+оставшиеся карточки.
+
+**Строки 5–6 — метка-символ.** В JSON и в `Object.keys` у `teacher`
+три поля данных, но `teacher[LEARNED]` — `true`, и `getOwnPropertySymbols`
+метку находит. У невыученной `first` символов нет.
+
+**Строка 7 — итератор вручную:** три шага, три слова, четвёртый — `done: true`.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Переименуйте метод `[Symbol.iterator]()` в `iterator()`.
+Какая строка упадёт первой и с каким текстом?
+\
+\
+**Второй.** Замените метку на строковую: `card.learned = true` и
+`cards[index].learned`. Что изменится в строках 5 и 6 — и чем это плохо, если карточки
+сохраняют через JSON в `localStorage`, как прогресс на дне 35 Essentials?
+\
+\
+**Третий.** В последнем `return` итератора напишите
+`{ value: "конец", done: true }`. Напечатает ли `for...of` слово «конец»?
+Какая таблица раздела 14 отвечает на этот вопрос?
+</TryIt>
+
+## 16. Что дальше {#next}
+
+Итератор, написанный руками, многословен: счётчик в замыкании, объекты `{ value, done }`,
+`[Symbol.iterator]() { return this; }`. Завтра, на дне 12, это заменят
+**генераторы**: функция со звёздочкой и словом `yield` сама выполняет протокол,
+и итератор колоды займёт три строки. День 13 — методы `Iterator`: `map`,
+`filter`, `take` прямо на итераторе. А сегодняшний протокол лежит под всем этим
+и под `Map` и `Set` дней 14–15.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Symbol](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol) | уникальные ключи; реестр; встроенные символы; символы и `for...in`, JSON | <Full /> |
+| [Symbol() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/Symbol) | создание символа; `new Symbol()` — ошибка | <Full /> |
+| [Symbol.prototype.description](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/description) | описание символа, геттер | <Full /> |
+| [Symbol.iterator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/iterator) | ключ метода, который выдаёт итератор | <Full /> |
+| [Iteration protocols](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols) | перебираемый объект и итератор; `return`; ошибки протокола | <Full /> |
+| [Array.prototype.keys()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/keys) | итератор номеров, дырки | <Full /> |
+| [Array.prototype.values()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/values) | итератор значений; одноразовость; правки во время прохода | <Full /> |
+| [Array.prototype.entries()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/entries) | итератор пар `[номер, значение]` | <Full /> |
+| [Array.prototype\[Symbol.iterator\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/Symbol.iterator) | та же функция, что `values` | <Full /> |
+| [ECMA-262, 27.1.1 Common Iteration Interfaces](https://tc39.es/ecma262/2026/#sec-common-iteration-interfaces) | интерфейсы Iterable, Iterator, IteratorResult | <Full /> |
+| [Symbol.for()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/for) | общий символ из реестра по строке | <Brief /> |
+| [Symbol.keyFor()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/keyFor) | строка символа из реестра или `undefined` | <Brief /> |
+| [Symbol.prototype.toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/toString) | `"Symbol(описание)"`; неявно в строку — ошибка | <Brief /> |
+| [Symbol.prototype.valueOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/valueOf) | сам символ | <Brief /> |
+| [String.prototype\[Symbol.iterator\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/Symbol.iterator) | перебор строки по кодовым точкам | <Brief /> |
+| [Object.getOwnPropertySymbols()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getOwnPropertySymbols) | все свои ключи-символы | <Brief /> |
+| [ECMA-262, 27.1 Iteration](https://tc39.es/ecma262/2026/#sec-iteration) | как устроен раздел об итерации | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// const id = Symbol("id");            // новый уникальный символ; new Symbol() — ошибка
+// id.description                      // "id"; String(id) — "Symbol(id)"; "" + id — TypeError
+// const obj = { [id]: 7 };            // ключ-символ: obj[id], не obj.id
+// keys, for...in, JSON — не видят; getOwnPropertySymbols, spread, assign, in — видят
+// Symbol.for("app.key")               // общий символ из реестра; Symbol.keyFor(sym) — его строка
+// Symbol.iterator                     // встроенный символ: ключ метода, который выдаёт итератор
+
+// перебираемый объект: [Symbol.iterator]() { return итератор; } — каждый раз новый
+// итератор: next() { return { value, done }; }; необязательно return() — когда перебор бросили
+// потребители: for...of, [...x], f(...x), const [a, b] = x, Array.from(x)
+// массив: keys() — номера, values() = [Symbol.iterator]() — значения, entries() — [номер, значение]
+// итератор массива одноразовый, читает массив на каждом шаге; исчерпанный — навсегда
+// проверка: typeof value?.[Symbol.iterator] === "function"
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем `Symbol("id")` отличается от `Symbol.for("id")`?
+   <Answer>`Symbol("id")` каждый раз создаёт новый символ. `Symbol.for("id")` берёт
+   символ из реестра по строке: два вызова дают один символ, `Symbol.keyFor` вернёт
+   `"id"`.</Answer>
+2. Объект `{ name: "Аман", [id]: 7 }` сохранили через `JSON.stringify`.
+   Что попало в строку и как всё-таки найти символьное свойство?
+   <Answer>Только `{"name":"Аман"}`: JSON, `Object.keys` и `for...in`
+   символьных ключей не видят. Найти их можно через `Object.getOwnPropertySymbols`.</Answer>
+3. Что нужно объекту, чтобы по нему прошёл `for...of`?
+   <Answer>Метод под ключом `Symbol.iterator`, который возвращает итератор — объект
+   с методом `next()`, а тот возвращает объекты `{ value, done }`.</Answer>
+4. Почему массив можно перебрать дважды, а его итератор — нет?
+   <Answer>Каждый `for...of` вызывает `[Symbol.iterator]()` массива и получает новый
+   итератор. Итератор массива на этот вызов возвращает себя, а он уже исчерпан.</Answer>
+5. Когда язык вызывает у итератора метод `return()`?
+   <Answer>Когда перебор бросили до конца: `break`, `return`, ошибка в теле,
+   деструктуризация взяла меньше значений. После `done: true` — не вызывается.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols" />

@@ -1,0 +1,95 @@
+---
+title: День 12 — конспект
+css: |
+  h1 { border-bottom-color: #14b8a6; }
+  h2 { color: #0f766e; background: #f0fdfa; border-left-color: #14b8a6; }
+---
+
+# День 12. Генераторы: function\* и yield
+
+<Subtitle>Выжимка лекции: генераторная функция и пауза, `yield` и `return`, одноразовость, `next(value)`, `return()`, `throw()`, `yield*`, четыре состояния генератора.</Subtitle>
+
+## Главное
+
+```js
+function* lessonDay() {                 // генераторная функция
+  const mood = yield "лекция";          // выдать и встать на паузу
+  yield `практика, настроение: ${mood}`;
+  return "конец";                       // итог — вместе с done: true
+}
+
+const day = lessonDay();                // тело ещё НЕ выполнялось
+day.next();                             // {value: 'лекция', done: false}
+day.next("бодрое");                     // {value: 'практика, настроение: бодрое', done: false}
+day.next();                             // {value: 'конец', done: true}
+
+const range = {
+  from: 1,
+  to: 3,
+  *[Symbol.iterator]() {                // перебираемый много раз
+    for (let n = this.from; n <= this.to; n++) yield n;
+  },
+};
+const all = [...range];                 // [1, 2, 3]
+```
+
+<Definition>
+Вызов генераторной функции возвращает **генератор** — перебираемый итератор. Каждый
+`next()` выполняет тело до ближайшего `yield`. Аргумент `next(x)`
+становится результатом остановившегося `yield`; аргумент первого `next` теряется.
+Значение `return` `for...of` и spread не видят.
+</Definition>
+
+**Записи:** `function* f() {}`, `const f = function* () {}`,
+`{ *m() {} }`, `class { *m() {} }`; стрелочного генератора нет, `new f()` —
+`TypeError`. Свои `this` и `arguments`, как у обычной функции.
+Параметры по умолчанию вычисляются при вызове, тело — на первом `next()`.
+
+## Один проход
+
+<Remember>
+Генератор одноразовый: `break` вызывает его `return()` и закрывает его.
+Генераторная функция — фабрика проходов. Объект, который перебирают много раз, хранит генератор
+в методе `*[Symbol.iterator]()`. `while (true)` внутри генератора безопасен —
+значения считаются по требованию; `[...бесконечный]` — зависание.
+</Remember>
+
+**Ленивость** полезна и для конечных данных: генератор `pages(list, size)`
+отрезает следующую страницу списка только на очередном `next()` и сам помнит, где остановился.
+Итог через `return` читают вручную: цикл `while (!result.done)`, после него —
+`result.value`.
+
+## return(), throw(), yield\*
+
+| Вызов | Что делает |
+| --- | --- |
+| `g.return(x)` | `return x` на месте паузы; `finally` выполняется, если тело начато |
+| `g.throw(err)` | `throw err` на месте паузы; можно поймать внутри |
+| `yield* iterable` | выдать всё из другого; результат — его `return`; закрыли внешний — закроется и внутренний |
+
+<KeyPoint>
+Состояния `[[GeneratorState]]`: *suspended-start* → *executing* ↔
+*suspended-yield* → *completed*. Метод, вызванный во время *executing*, —
+`Generator is already running`. `yield` в параметре —
+`Yield expression not allowed in formal parameter`.
+</KeyPoint>
+
+<NoteBox>
+Рекурсия по дереву: `function* walk(node) { yield node; for (const c of node.children ?? []) yield* walk(c); }`.
+Методы генератора — в общем `Generator.prototype`; генераторная функция — объект
+`GeneratorFunction`, он не глобальный.
+</NoteBox>
+
+<Homework>
+1. Найдите в своём проекте цикл, который собирает массив, чтобы потом его перебрать, и замените
+   его генератором.
+2. Сделайте объект-коллекцию проекта перебираемым через `*[Symbol.iterator]()`
+   и сравните с итератором дня 11.
+3. Прочитайте на MDN раздел «Advanced generators» учебника
+   [Iterators and generators](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators)
+   и повторите пример Фибоначчи со сбросом через `next(true)`.
+4. Найдите в спецификации таблицу 89 раздела 27.5.2 и для каждого состояния запишите, какой
+   вызов из него выводит.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Iterators_and_generators" />

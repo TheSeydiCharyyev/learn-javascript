@@ -1,0 +1,103 @@
+---
+title: Day 32 — notes
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+---
+
+# Day 32. Mini project: a catalog with data from a server
+
+<Subtitle>A summary of the lecture: how an application that waits for a server is built, and how to check that the project is ready.</Subtitle>
+
+## Where what lives
+
+| Data | Where | When it appears |
+| --- | --- | --- |
+| books | the server: `catalog.json` | after `load()` |
+| favorites | `localStorage` | at start, written at the end of `render` |
+| search, genre, checkbox | variables | changed by the listeners |
+
+```js
+let books = [];                                                // will come from the server
+let favorites = JSON.parse(localStorage.getItem(KEY)) ?? [];   // read first!
+
+async function load() {
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`server replied ${response.status}`);
+    books = await response.json();
+    makeGenreButtons();   // once — not in render
+    render();             // the first showing — only when there is data
+  } catch (err) {
+    error.textContent = `Could not load the catalog: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+  }
+}
+```
+
+<KeyPoint>
+A page that waits for a server is always in one of three states: loading, data or
+error — and the person must see each of them. “Loading…” is removed in `finally`, otherwise
+on an error it will hang next to the message. `catch` also catches mistakes in our own
+code: the text on the page is the first thing to read for any oddity.
+</KeyPoint>
+
+## A filter of several conditions
+
+```js
+function isVisible(book) {
+  const text = `${book.title} ${book.author}`.toLowerCase();
+  if (!text.includes(query)) return false;                              // search
+  if (genre !== "all" && book.genre !== genre) return false;           // genre
+  if (onlyFavorites && !favorites.includes(book.id)) return false;      // favorites
+  return true;                                                          // passed everything
+}
+```
+
+<Remember>
+Every check only **refuses**, and `true` comes in one line at the
+end. An early `return true` (“the genre ‘all’ — show it”) turns off all the checks
+below. The search brings both sides to lower case. The favorites keep the numbers of books, not
+copies: everything else about a book is always taken fresh from the server.
+</Remember>
+
+The genre buttons are built from the data: a genre is added if `!names.includes(genre)`.
+A new genre on the server gets a button by itself. This has to be called once, after loading:
+from `render` the buttons would multiply after every action.
+
+## A readiness checklist
+
+The project is ready when every row has been checked by hand through Live Server.
+
+| What to check | How |
+| --- | --- |
+| loading | “Loading…”, then eight cards and “Shown: 8 of 8” |
+| error | the file is renamed — a clear text, “Loading…” is gone |
+| search | “tolst” and “TOLSTOY” — “War and Peace”; “xyz” — “Nothing found” |
+| genres | six buttons from the data, the selected one is highlighted |
+| together | search, genre and “Only favorites” work at the same time |
+| favorites | a star can be set and removed, the card is highlighted |
+| memory | after a reload the favorites are in place, while the search and the genre are reset |
+| storage | `catalog:favorites` holds an array of numbers, not strings |
+| console | not a single red line, except a 404 if you caused it on purpose |
+
+## Four mistakes by their symptoms
+
+| Symptom | Cause |
+| --- | --- |
+| the search does not work with “all” | an early `return true` |
+| after a reload the favorites are empty, storage has `"[]"` | storage was not read, `render` overwrote it |
+| the star does not light up, storage has `["5"]` | the number as a string, without `Number` |
+| there is an error, but “Loading…” hangs | cleanup is not in `finally` |
+
+<Homework>
+1. Finish the catalog and go through the whole checklist.
+2. Make one improvement from tasks 4–7 that you did not manage in the lesson.
+3. Replace the books with your own data — films, songs, goods — without changing a single line
+   in the functions. What did you have to change, and why so little?
+4. For day 33: come up with your final application. What data does it have, where does it live,
+   what does a person do with it?
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" />

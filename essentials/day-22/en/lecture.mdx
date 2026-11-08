@@ -1,0 +1,951 @@
+---
+title: Day 22 — Destructuring, spread and optional chaining
+day: Day 22 • lesson 1
+heading: Destructuring, spread and optional chaining
+lead: Module “Arrays, objects and JSON”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- take values out of an array and an object in one line;
+- take an object in function parameters, with defaults;
+- copy and merge arrays and objects with three dots;
+- tell three dots in a declaration from three dots in a call;
+- safely read fields that may be missing.
+</Goals>
+
+<Toc>
+1. [Three forms that shorten yesterday’s code](#why)
+2. [Array destructuring](#arr-destr)
+3. [Skips, defaults, the rest](#arr-more)
+4. [Swapping values](#swap)
+5. [Object destructuring](#obj-destr)
+6. [Renaming and nesting](#rename)
+7. [In function parameters](#params)
+8. [In loops and callbacks](#loops)
+9. [Three traps of destructuring](#destr-traps)
+10. [Spread: copying and merging](#spread)
+11. [Spread in a function call](#spread-call)
+12. [Three dots in two roles](#spread-vs-rest)
+13. [Optional chaining](#optional)
+14. [Where `?.` will not help](#optional-limits)
+15. [The “Report card” and the cart, shorter](#tabel)
+16. [Common mistakes and what comes tomorrow](#mistakes)
+</Toc>
+
+## 1. Three forms that shorten yesterday’s code {#why}
+
+Today there will be no new capabilities — there will be three **short forms** of what
+we can already do. The reference of the day has only three pages — fewer were only on days 3 and 13. But
+these forms come up in every modern file, and without them you cannot read other people’s code.
+
+| Form | What it does | What it replaces |
+| --- | --- | --- |
+| `const { name } = student;` | destructuring | `const name = student.name;` |
+| `{ ...defaults, ...given }` | spread | `Object.assign({}, defaults, given)` |
+| `student.address?.city` | optional chaining | `student.address && student.address.city` |
+
+All three were born from yesterday’s topic: an object has to be taken apart, copied
+and safely read. We will go through them in turn, and at the end we will use them to rebuild yesterday’s cart
+and the “Report card” that runs through the course — and see how much shorter both programs get.
+
+It is worth saying honestly: none of the three forms is required. Everything we write
+today can be written with yesterday’s means too — longer, but it will work the same way.
+Why learn them, then?
+
+The reason is reading. **You will read these forms more often than you will
+write them.** Open any modern project, and you will see them in the very first lines
+of every file; without them the code looks like a set of riddles. It was the same with arrow
+functions on day 13: first we learned to recognize them, and only later came to love writing them.
+
+And one more thing: all three forms have edges where they behave unexpectedly.
+It is the edges that get the most space in this lesson — the forms themselves are mastered
+in ten minutes.
+
+## 2. Array destructuring {#arr-destr}
+
+The usual way to get elements out is by index:
+
+```js
+const marks = [5, 4, 3];
+
+const first = marks[0];
+const second = marks[1];
+```
+
+Destructuring does the same in one line. To the left of `=` you put
+a **pattern** that looks like an array, and the language puts the values into their places:
+
+```js
+const [first, second] = marks;
+
+first;    // 5
+second;   // 4
+```
+
+<Scheme src="scheme-arr-destr.svg">On the left are the names, on the right — where to take the values from. They match only by position</Scheme>
+
+Notice: the variable names can be **anything**. The array does not know
+that the zeroth element is “the first mark”; you decide that when you write the pattern.
+
+Hence the main limitation of this form: **it is useful where the position
+means something**. For a list of marks “the first” and “the second” mean almost nothing,
+but for a “key — value” pair from `Object.entries` they mean a lot,
+and there array destructuring is used all the time.
+
+If the positions are arbitrary, taking an array apart by names is a sure way
+to get confused: tomorrow the data will come in a different order, and all the variables will silently
+swap places.
+
+## 3. Skips, defaults, the rest {#arr-more}
+
+If you need an element other than the first, the extra positions are skipped with commas:
+
+```js
+const [, , third] = marks;
+third;   // 3
+
+const [a, b, c, d = 0] = [5, 4, 3];
+d;       // 0 — there is no fourth element, the default was taken
+```
+
+Two commas in a row mean “I do not need this element” — it looks strange,
+but it is short. And the defaults work by the same rule as the function parameters
+from day 14: **they fire only on `undefined`**.
+
+And the same rest syntax: three dots collect everything that is left into a new array:
+
+```js
+const [head, ...tail] = marks;
+
+head;   // 5
+tail;   // [4, 3]
+```
+
+Its rules are the same as for a rest parameter: it is **the last one and the only one**.
+It is literally the same construct, just in a different place.
+
+## 4. Swapping values {#swap}
+
+A small technique that is often the very reason destructuring gets shown first. Swapping
+two variables usually needs a third one:
+
+```js
+let x = 1;
+let y = 2;
+
+let temp = x;
+x = y;
+y = temp;
+```
+
+With destructuring — one line and no extra variable:
+
+```js
+x = 1;
+y = 2;
+[x, y] = [y, x];
+
+x;   // 2
+y;   // 1
+```
+
+The technique is small but telling: it explains how assignment works in general.
+It works because the right side is evaluated **entirely before**
+the assignment begins. First the array `[2, 1]` is built from the old
+values, and only then is it taken apart back.
+
+<Mistake>
+Such a line must be preceded by a semicolon on the previous line. Otherwise the language
+will decide that the square bracket continues the previous expression, and you will get an error.
+This is one of the few cases where its absence really gets in the way.
+</Mistake>
+
+## 5. Object destructuring {#obj-destr}
+
+With objects it is the same, but the matching goes **by name, not by position**:
+
+```js
+const student = { name: "Aman", age: 17, city: "Mary" };
+
+const { name, age } = student;
+
+name;   // "Aman"
+age;    // 17
+```
+
+The order in the pattern does not matter — the names do. That is why `const { age, name } = student`
+gives exactly the same result.
+
+A property that does not exist gives `undefined` — just like ordinary reading through a dot.
+And defaults work here too:
+
+```js
+const { group = "1-A", phone } = student;
+group;   // "1-A" — there is no property, the default was taken
+phone;   // undefined
+
+const { p = 10 } = { p: null };
+p;       // null, not 10 — the default does not react to null
+```
+
+## 6. Renaming and nesting {#rename}
+
+The variable can get a different name — with a colon:
+
+```js
+const { name: studentName } = student;
+
+studentName;   // "Aman"
+// this line does not create a variable name — only studentName
+```
+
+It reads from right to left: “take the property `name` and call it
+`studentName`”. You need this in two cases: when the name is taken by another variable
+and when the property name is too general — `value`, `data`,
+`items`.
+
+Nested objects are taken apart the same way, with a nested pattern:
+
+```js
+const student = { name: "Aman", address: { city: "Mary" } };
+
+const { address: { city } } = student;
+
+city;   // "Mary"
+```
+
+<Important>
+Here `address` is not a variable but a **path**. Only one variable
+was created: `city`. If you need both, you write
+`const { address, address: { city } } = student;` — yes, the property
+is named twice.
+</Important>
+
+And the rest syntax for objects: it collects all the properties you
+did not name:
+
+```js
+const { name: n, ...others } = student;
+
+n;        // "Aman"
+others;   // { address: { city: "Mary" } }
+```
+
+## 7. In function parameters {#params}
+
+The most useful application. Yesterday’s `makeRow(student)` started
+with unpacking:
+
+```js
+function makeRow(student) {
+  const name = student.name;
+  const marks = student.marks;
+  // ...
+}
+```
+
+The pattern can be put right in the parameter — and two lines disappear:
+
+```js
+function makeRow({ name, marks }) {
+  // name and marks are already there
+}
+```
+
+Together with defaults you get a very dense form:
+
+```js
+function greet({ name, city = "not given" }) {
+  return name + " from " + city;
+}
+
+greet({ name: "Meret" });   // "Meret from not given"
+```
+
+Such a function also has a pleasant side effect: **the order of the arguments stops
+mattering**. This is the cure for the trouble of day 14, where the call
+`f(1, undefined, undefined, true)` was unreadable. Compare:
+
+```js
+// the function from day 15 — which argument means what?
+// makeLine("Present", 3, undefined, undefined, "", 5);
+// its version with an object (you will write it in task 4) — it is clear at once:
+// makeLine({ name: "Present", value: 3, total: 5 });
+```
+
+Functions with four or more settings are written this way. Built-in ones are made like this too:
+on day 25 you will meet `scrollIntoView({ behavior: "smooth" })`.
+
+## 8. In loops and callbacks {#loops}
+
+Yesterday’s iteration over an object was clumsy — the pair came as an array, and it
+was accessed by indices:
+
+```js
+const prices = { bread: 3.5, tea: 12, butter: 25 };
+
+Object.entries(prices).forEach((pair) => {
+  console.log(pair[0] + " = " + pair[1]);
+});
+```
+
+A pattern right in the callback parameter settles it:
+
+```js
+Object.entries(prices).forEach(([key, value]) => {
+  console.log(key + " = " + value);
+});
+```
+
+The same in a `for...of` loop:
+
+```js
+for (const [key, value] of Object.entries(prices)) {
+  console.log(key + " = " + value);
+}
+```
+
+And in methods over an array of objects — instead of `item.name` just
+`name`:
+
+```js
+const cart = [
+  { name: "bread", price: 3.5 },
+  { name: "tea", price: 12 },
+  { name: "butter", price: 25 },
+];
+
+cart.map(({ name, price }) => name + " — " + price + " m");
+// ["bread — 3.5 m", "tea — 12 m", "butter — 25 m"]
+```
+
+This is probably the most frequent destructuring in real code: it comes up in every
+second callback.
+
+### When it is not worth taking apart
+
+Shorter does not mean better. If you need **one** field from an object, an ordinary
+dot reads more simply:
+
+```js
+cart.map((item) => item.price);                // one field — a dot
+cart.map(({ name, price }) => name + price);   // two or more — a pattern
+```
+
+The second case is when the rest of the function needs **the whole object**.
+Having taken it apart, you lose the chance to pass it on, and you will have to
+put it back together.
+
+The third is deep nesting. A pattern like `{ a: { b: { c } } }`
+reads harder than an ordinary chain `obj.a.b.c`, and it does not protect
+from emptiness either — it will crash the same way.
+
+The rule is simple: **destructuring should remove repetition**. If
+there is no repetition, it only adds brackets. Count how many times `item.` is written
+in a function: twice or more — put a pattern, once — leave the dot.
+
+## 9. Three traps of destructuring {#destr-traps}
+
+**The first: parentheses when assigning to existing variables.** If there is
+no `const` on the left, the language sees a curly brace and thinks a block body has started:
+
+```js
+const obj = { score: 1 };
+let score;
+// { score } = obj;   → SyntaxError: Unexpected token '='
+```
+
+It is cured by wrapping it in parentheses — the language understands that this is an expression:
+
+```js
+({ score } = obj);   // now it works
+score;               // 1
+```
+
+**The second: you cannot take apart `undefined` and `null`.**
+Ordinary reading through a dot crashed on them — and destructuring crashes too, just
+with a different text:
+
+```js
+const { z } = undefined;
+// TypeError: Cannot destructure property 'z' of 'undefined' as it is undefined.
+
+const [w] = undefined;
+// TypeError: undefined is not iterable
+```
+
+The protection is a default for the whole pattern:
+
+```js
+function makeRow({ name, marks } = {}) {
+  // now makeRow() without arguments will not crash
+}
+```
+
+**The third: an empty object is not the same as missing properties.**
+Taking apart `{}`, you will get `undefined` in all the variables —
+and this is not an error but a quiet emptiness. Later it will turn into `NaN` or
+into the word “undefined” in the report, as we saw on day 15.
+
+This third trap is more treacherous than the first two precisely because it does not crash. The first two
+announce themselves at once: one with a syntax error at launch, the second with a clear
+`TypeError`. But taking apart an empty object looks like a success, and you have to dig
+into it later, in the report, where the word “undefined” stands instead of a name.
+
+Hence a habit worth picking up right away: **when you put a default on the whole
+pattern, put defaults on the important fields inside too**. Then instead of a quiet
+emptiness the program will have at least something meaningful — like “unnamed” in our
+“Report card”.
+
+## 10. Spread: copying and merging {#spread}
+
+The same three dots, but in a different place, do the opposite: they **spread out**
+a ready array or object into separate elements.
+
+```js
+const marks = [5, 4, 3];
+
+[...marks];            // [5, 4, 3]   a copy
+[0, ...marks];         // [0, 5, 4, 3]
+[...marks, ...[2, 1]]; // [5, 4, 3, 2, 1]  merging
+```
+
+The copy is real — a new array, not a second reference to the old one:
+
+```js
+[...marks] === marks;   // false — these are different arrays
+```
+
+With objects it is the same, and this is a direct replacement for yesterday’s `Object.assign`:
+
+```js
+const defaults = { city: "Mary", group: "1-A" };
+const given = { name: "Aman", city: "Ashgabat" };
+
+const merged = { ...defaults, ...given };
+// { city: "Ashgabat", group: "1-A", name: "Aman" }
+
+Object.assign({}, defaults, given);   // the same, yesterday’s form
+```
+
+<Mistake>
+A line cannot start with an object literal: in a file `{ ...defaults };`
+gives `SyntaxError: Unexpected token '...'` — the language read the curly brace
+as the start of a block. That is why the result is always put somewhere or wrapped in parentheses.
+Arrays do not have this trouble.
+</Mistake>
+
+The overriding rule is the same as before: **whoever stands further right wins**. That is why
+the defaults go first, and the user’s data last.
+
+And a handy small thing — add one property without touching the others:
+
+```js
+const withYear = { ...given, year: 2026 };   // a copy plus a new property
+```
+
+<Mistake>
+The copy is still **shallow**. Three dots copy the properties
+of the top level, while nested objects stay shared — exactly like
+`Object.assign` yesterday. The form is shorter, not deeper.
+</Mistake>
+
+### What we still lack
+
+The task “copy an object entirely, together with the nested parts” can so far be solved only by hand,
+level by level:
+
+```js
+const order = { id: 1, customer: { name: "Aman" } };
+
+const shallow = { ...order };
+shallow.customer.name = "Meret";
+order.customer.name;   // "Meret" — the original suffered
+
+const deep = { ...order, customer: { ...order.customer } };
+deep.customer.name = "Sapar";
+order.customer.name;   // "Meret" — and now it is intact
+```
+
+It works, but only until the first extra level: if there is one more object inside `customer`,
+you will have to add a third line. The real solution to this
+task will appear tomorrow, together with `JSON` — and there it will also turn out at what cost.
+
+## 11. Spread in a function call {#spread-call}
+
+The third place for three dots is the arguments of a call. Here they spread an array
+into separate arguments:
+
+```js
+const marks = [5, 4, 3];
+
+Math.max(marks);      // NaN — an array is ONE argument
+Math.max(...marks);   // 5   — and now three arguments
+```
+
+This is that very debt left over from day 18: back then the maximum of an array had to be found
+with a loop, because `Math.max` does not take a list. Now it does.
+
+It also works with our functions with a rest parameter from day 14:
+
+```js
+function sumAll(...numbers) {
+  return numbers.reduce((total, n) => total + n, 0);
+}
+
+sumAll(...marks);   // 12
+```
+
+And with any string — a string can be iterated over too, as we saw on day 15:
+
+```js
+[..."Aman"];   // ["A", "m", "a", "n"]
+```
+
+## 12. Three dots in two roles {#spread-vs-rest}
+
+The very same three dots do opposite things — and mixing them up is common.
+Telling them apart is simple: **look at where they stand**.
+
+<Scheme src="scheme-spread-vs-rest.svg">The place decides everything. In a declaration three dots take in many, in a call — give out many</Scheme>
+
+You can check yourself with a question: **does this line describe what the function takes,
+or does it do something right now?** In the first case the three dots collect,
+in the second they spread.
+
+The confusion usually arises in one particular place — when both roles stand side by side:
+
+```js
+function sumAll(...numbers) {      // collects: arguments → array
+  return numbers.reduce((total, n) => total + n, 0);
+}
+
+sumAll(...marks);                  // spreads: array → arguments
+```
+
+The two lines look almost the same but do the opposite. Read them like this:
+in the first we *describe* the function, in the second we *call* it. The description
+takes, the call gives.
+
+And a useful small thing: in a declaration three dots can stand only at the end, while in a call
+and a literal — anywhere and any number of times. `[...a, 0, ...b]` is a perfectly
+normal form, while `function f(...a, b)` is an error from day 14.
+
+## 13. Optional chaining {#optional}
+
+Yesterday we ran into an error that makes life hard when working with other people’s data:
+
+```js
+const student = { name: "Meret" };   // no address
+
+student.address.city;
+// TypeError: Cannot read properties of undefined (reading 'city')
+```
+
+The program crashes not on `address` — it honestly gives `undefined` —
+but on the attempt to read `city` from that `undefined`.
+
+The old cure is a check with `&&` from day 7:
+
+```js
+const city = student.address && student.address.city;
+```
+
+It works, but with three levels of nesting it turns into a mess. A question mark
+before the dot does the same briefly:
+
+```js
+student.address?.city;   // undefined, without an error
+```
+
+It reads like this: “if the left side is not `null` and not `undefined`, go
+on; otherwise the whole result is `undefined`”.
+
+The sign appeared in the language later than anything else in this course — in 2020 — and it appeared
+out of necessity. The more data comes from outside, the more often it turns out
+that the needed field is simply not there: the user did not fill it in, the server did not send it, an old
+record was created by different rules. Before `?.` every such place grew
+checks, and the code turned into a forest of `&&`.
+
+It works in three places — before a dot, before square brackets and before a call:
+
+```js
+const key = "name";
+
+student?.name;        // "Meret" — a property
+student?.[key];       // "Meret" — a property by a variable
+student.greet?.();    // undefined — there is no method, there was no call
+```
+
+The last form is especially useful for optional callbacks: if the function
+was not passed, there simply will be no call.
+
+And almost always `??` from day 7 stands next to it — it puts in a fallback
+value:
+
+```js
+const city = student.address?.city ?? "not given";
+
+city;   // "not given"
+```
+
+## 14. Where `?.` will not help {#optional-limits}
+
+It is important to understand the limits. **The question mark protects only what stands
+right after it.** Further down the chain there is no protection — unless you put
+it once more:
+
+```js
+const student = { name: "Meret" };
+
+student.address?.city;          // undefined — protected
+student.address?.city.length;   // undefined — too, the chain broke off entirely
+```
+
+The second line does not crash for a special reason: as soon as `?.` fired,
+**the whole rest of the chain is skipped**. This is called short-circuiting,
+and that is exactly why one sign is often enough.
+
+But here is what `?.` does not save you from at all:
+
+| Situation | Will `?.` help? |
+| --- | --- |
+| there is no property | yes, it returns `undefined` |
+| the object is `null` or `undefined` | yes |
+| a typo in the property name | **no** — a silent `undefined` |
+| the variable is not declared | **no** — `ReferenceError` |
+| a number came instead of an object | not needed: a number simply has no such property |
+
+<Scheme src="scheme-optional-limits.svg">As soon as `?.` meets emptiness, the whole rest of the chain is not run</Scheme>
+
+### Walkthrough: why everyone has “not given”
+
+Here is a case that shows why it pays to be careful. The program works, there are no errors,
+but the city is shown for nobody:
+
+```js
+const students = [
+  { name: "Aman", address: { city: "Mary" } },
+  { name: "Meret" },
+];
+
+students.map((s) => s.name + " — " + (s.adress?.city ?? "not given"));
+// ["Aman — not given", "Meret — not given"]
+```
+
+**Step 1. We notice something odd.** Meret really has no city, but Aman
+does. So the problem is not in the data but in the reading.
+
+**Step 2. We print the data itself.** Not the result, but what it is
+calculated from:
+
+```js
+Object.keys(students[0]);   // ["name", "address"]
+```
+
+**Step 3. We compare with the code.** The object has `address`,
+while the code has `adress` — one letter “d” instead of two. A typo.
+
+**Step 4. We understand why it stayed silent.** `s.adress` is
+`undefined`, `?.` honestly broke off the chain, and `??`
+put in the fallback value. All three constructs worked correctly — and together
+they hid the error.
+
+```js
+Object.hasOwn(students[0], "adress");    // false — here is the answer
+Object.hasOwn(students[0], "address");   // true
+```
+
+Without `?.` the program would have crashed at once on the first student, and the typo would have been found
+in a second. This is the price of convenience.
+
+<Mistake>
+The main danger is **putting `?.` everywhere just in case**.
+Then a typo in a property name and a real hole in the data look the same: a quiet
+`undefined` everywhere, and the program stops crashing altogether. The sign is put where
+a missing field is a *normal* situation, not where it feels scary.
+</Mistake>
+
+## 15. The “Report card” and the cart, shorter {#tabel}
+
+Let us start with the cart — yesterday’s code gets noticeably shorter:
+
+```js
+const cart = [
+  { name: "bread", price: 3.5 },
+  { name: "tea", price: 12 },
+  { name: "butter", price: 25 },
+];
+
+// before: (item) => item.name + " — " + item.price
+cart.map(({ name, price }) => name + " — " + price + " m");
+
+// a copy of the cart before sorting — now with three dots
+[...cart].sort((a, b) => a.price - b.price);
+
+// add a product without touching the original
+const bigger = [...cart, { name: "salt", price: 2 }];
+```
+
+Now the program that runs through the course. Two things change: the parameter of `makeRow` becomes
+a pattern, and `Math.min` and `Math.max` finally get the array
+directly.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+const toMark = (raw) => Number(String(raw).trim());
+const isValidMark = (m) => Number.isInteger(m) && m >= MIN_MARK && m <= MAX_MARK;
+
+const sum = (numbers) => numbers.reduce((total, n) => total + n, 0);
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+const students = [
+  { name: "Aman", marks: [5, "4", " 9 ", 3, 5, 0, "4", 5] },
+  { name: "Meret", marks: ["3", 3, 4] },
+  { name: "Gülnar", marks: [9, 0, "five"] },
+  { name: "Sapar", marks: [5, 5, "4", 5] },
+  { name: "Oguljan", marks: ["4.5", 4, 5] },
+];
+
+function makeHeader() {
+  return "Name".padEnd(NAME_WIDTH) + "Avg".padStart(6) + "Min".padStart(5)
+    + "Max".padStart(5) + "%".padStart(7) + "  Verdict";
+}
+
+// new: a pattern right in the parameter, with a default for the whole object
+function makeRow({ name = "unnamed", marks = [] } = {}) {
+  const all = marks.map((r) => toMark(r));
+  const valid = all.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "no valid marks";
+  }
+
+  const avg = average(valid);
+  const percent = Math.round(valid.length / all.length * 100);
+
+  // new: maxOf and minOf are no longer needed
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(Math.min(...valid)).padStart(5)
+    + String(Math.max(...valid)).padStart(5)
+    + (percent + "%").padStart(7)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(56);
+
+console.log(makeHeader());
+console.log(line);
+students.map(makeRow).forEach((row) => console.log(row));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Name           Avg  Min  Max      %  Verdict
+--------------------------------------------------------
+Aman          4.33    3    5    75%  good student
+Meret         3.33    3    4   100%  average student
+Gülnar      no valid marks
+Sapar         4.75    4    5   100%  top student
+Oguljan       4.50    4    5    67%  top student
+--------------------------------------------------------
+```
+</ResultBox>
+
+The numbers are the same again. But there is noticeably less code.
+
+**Two functions disappeared entirely.** `maxOf` and `minOf`
+were written with a loop on day 18 and with `reduce` on day 20 — now they are not needed:
+`Math.max(...valid)` does the same. This is the promised debt of day 18.
+
+**`= {}` at the end of the pattern** is the protection from section 9. Without it,
+the call `makeRow()` without arguments would crash, and with a different text than in section 9: when
+the pattern has defaults, Chrome writes `TypeError: Cannot read properties of undefined (reading 'name')`.
+With it, it returns a string where “unnamed” is followed by “no valid marks”.
+
+**The name `all` instead of `marks`** did not appear by chance:
+`marks` is now taken by a variable from the pattern. A small thing, but exactly such small things
+break code when it is rewritten.
+
+It is worth looking back at what happened to the program that runs through the course over the last week.
+On day 18 it had four `for` loops. On day 20 they turned
+into `reduce` and `map`. Today two functions disappeared completely. The program does exactly the same
+as before — and this is checked with one glance at the output.
+
+And not a single change was an “optimization”. Each time we just took
+the tool that appeared that day and looked at what it removes. This is how
+real code grows: not by rewriting from scratch, but by small replacements, after each
+of which the program works.
+
+And one more observation: **the data in the program has not changed since day 17**.
+The same five students, the same marks mixed as numbers and strings. Only the code
+around them changed — and this is the right order of things.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Remove `= {}` from the parameter and call
+`makeRow()`. Write down the error text and explain how it differs
+from an ordinary “there is no property”.
+\
+\
+**The second.** Add a nested property
+`address: { city }` to the students, but not to all of them. Print the city with `?.`
+and `??` so that the others get “not given”.
+\
+\
+**The third.** Build a copy of the list with `students.map((s) => ({ ...s }))`
+and change a name in the copy. Then change a mark. Look at the original and explain why the results are different.
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `{ a } = obj` without parentheses | the language reads `{` as a block | `({ a } = obj)` |
+| `const { x } = undefined` | there is nothing to take apart | a default for the whole pattern: `= {}` |
+| expecting `{ p = 10 }` to fire on `null` | defaults react to `undefined` | check `null` separately |
+| `[...obj]` for an object | an object is not iterated like a list | `{ ...obj }` |
+| treating `{ ...obj }` as a deep copy | the copy is shallow | copy the nested part separately |
+| `f(...args)` in a declaration | there the three dots collect, they do not spread | remember the place: a declaration or a call |
+| `?.` everywhere just in case | it hides typos and holes in the data | put it where emptiness is normal |
+| forgetting the semicolon before `[x, y] = ...` | the bracket sticks to the previous line | put the semicolon |
+
+### What comes tomorrow
+
+Day 23 is `JSON`. An object turns into a string, a string back into an object,
+and it is in this form that data travels between programs and comes from the server.
+The topic is small, only five reference pages, but without it there will be neither day 31
+nor the second mini-project.
+
+And along the way the question of the deep copy will be closed: `JSON` has a technique that
+solves the task “copy an object together with the nested parts” — with caveats that
+we will talk about.
+
+### Where today’s topics come up later
+
+From this day on destructuring and three dots stop being a topic and become background —
+we will not explain them separately any more.
+
+| Day | Where it comes in handy |
+| --- | --- |
+| 23 | the “Report card” takes the pattern `{ name = "unnamed", marks = [] } = {}` |
+| 24 | `[...items]` turns a list of page elements into an array |
+| 26 | `list.append(...items)` puts a whole array on the page at once |
+| 29 | the to-do list is built in one line: `list.append(...tasks.filter(isVisible).map(makeItem))` |
+
+Pay attention to day 26. The form `list.append(...items)` is the same three
+dots in a call as in today’s `Math.max(...marks)`, only the arguments
+are page elements. One line instead of a loop.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Destructuring](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Destructuring) | patterns for arrays and objects, defaults, nesting | <Full /> |
+| [Spread](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Spread_syntax) | three dots in literals and calls | <Full /> |
+| [Optional chaining](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Optional_chaining) | `?.` before a dot, square brackets and a call | <Full /> |
+
+Three pages — fewer were only on days 3 and 13. But all three are in depth, and each
+will come up in any modern code. For comparison: yesterday there were twenty-three pages,
+and on day 18 — forty-six. The size of the reference and the size of the topic are completely different things:
+today’s three pages have to be known by heart, while of the forty-six pages of day 18
+most only need to be recognized on sight.
+</Ref>
+
+<Cheatsheet>
+```js
+// ARRAY DESTRUCTURING — by position
+const marks = [5, 4, 3];
+const [first, second] = marks;   // first = 5, second = 4
+const [, , third] = marks;       // third = 3 — a skip
+const [p, q, r, s = 0] = marks;  // s = 0 — a default (only on undefined)
+const [head, ...tail] = marks;   // head = 5, tail = [4, 3] — the rest
+let x = 1;
+let y = 2;
+[x, y] = [y, x];                 // x = 2, y = 1 — a swap; a semicolon on the line ABOVE
+
+// OBJECT DESTRUCTURING — by name
+const student = { name: "Aman", age: 17, address: { city: "Mary" } };
+const { name, age } = student;            // name = "Aman", age = 17
+const { name: studentName } = student;    // renaming
+const { group = "1-A" } = student;        // group = "1-A" — a default
+const { address: { city } } = student;    // city = "Mary" — nested
+const { name: n, ...others } = student;   // others = { age: 17, address: {…} } — the rest
+
+// IN PARAMETERS AND CALLBACKS
+function makeRow({ name, marks = [] } = {}) { }   // = {} saves you from a call without arguments
+const cart = [{ name: "bread", price: 3.5 }, { name: "tea", price: 12 }];
+cart.map(({ name, price }) => name + " — " + price);   // ["bread — 3.5", "tea — 12"]
+for (const [key, value] of Object.entries(student)) { }
+
+// SPREAD — spreads out
+const copy = [...marks];                    // a copy of the array
+const both = [...marks, ...[2, 1]];         // [5, 4, 3, 2, 1] — merging
+const defaults = { city: "Mary" };
+const given = { city: "Ashgabat" };
+const merged = { ...defaults, ...given };   // { city: "Ashgabat" } — the right one wins
+const plus = { ...given, year: 2026 };      // a copy plus a property
+Math.max(...marks);   // 5 — array → arguments
+[..."Aman"];          // ["A", "m", "a", "n"] — string → array
+// the copy is SHALLOW: nested things stay shared
+
+// THREE DOTS: where they stand decides what they do
+function f(...args) { return args.length; }   // declaration — COLLECTS
+f(...marks);                                  // 3 — call — SPREADS
+
+// OPTIONAL CHAINING
+const pupil = { name: "Meret" };
+pupil.address?.city;                  // undefined instead of an error
+pupil?.["name"];                      // "Meret"
+pupil.greet?.();                      // undefined — there is no method, there was no call
+pupil.address?.city ?? "not given";   // "not given"
+pupil.address?.city.length;           // undefined — the whole chain breaks off
+// does NOT save you from typos and undeclared variables
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. How does array destructuring differ from object destructuring?
+   <Answer>For an array the matching is by position, and you choose the variable names.
+   For an object it is by the property name, and the order in the pattern does not matter.</Answer>
+2. Why is there `= {}` in `function makeRow({ name } = {})`?
+   <Answer>So that a call without arguments does not crash. You cannot take apart `undefined`:
+   there will be `TypeError: Cannot destructure property...`,
+   while with the default an empty object is taken apart.</Answer>
+3. How can you tell from the look of a line whether three dots collect or spread?
+   <Answer>By the place. In a function declaration and to the left of `=` they collect
+   many values into one array. In a function call and inside the literals
+   `[...]` and `{...}` they spread one list
+   into separate values.</Answer>
+4. What will `student.address?.city.length` return if there is no address?
+   <Answer>`undefined`, and there will be no error: as soon as `?.`
+   fired, the whole rest of the chain is skipped. This is short-circuiting.</Answer>
+5. Why should `?.` not be put everywhere?
+   <Answer>It turns a typo in a property name into a quiet `undefined`:
+   the program stops crashing but starts lying. It is put where
+   a missing field is a normal situation.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Destructuring" />

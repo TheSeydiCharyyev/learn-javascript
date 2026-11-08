@@ -1,0 +1,907 @@
+---
+title: "Day 23 — JSON: parse and stringify"
+day: Day 23 • lesson 1
+heading: "JSON: parse and stringify"
+lead: Module “Arrays, objects and JSON”, the last day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- turn an object into a string and back;
+- know what is lost in such a conversion;
+- read parse error messages and fix broken JSON;
+- make a deep copy of an object and understand the cost of the technique;
+- tell the JSON format from an object literal in code.
+</Goals>
+
+<Toc />
+
+## 1. Why it is needed {#why}
+
+An object lives in the program’s memory. While the program runs, the object is available; as soon as
+the page is closed, it is gone. And it cannot be passed anywhere: not to a file, not to a server,
+not to a neighboring tab.
+
+Only **text** can be passed on. So the object has to be written down somehow
+as a string — in a way that lets you put it back together later. That is exactly what today’s two
+functions do.
+
+```js
+const student = { name: "Aman", age: 17, marks: [5, 4] };
+
+const text = JSON.stringify(student);
+text;   // '{"name":"Aman","age":17,"marks":[5,4]}'
+
+const back = JSON.parse(text);
+back.name;   // "Aman" — an ordinary object again
+```
+
+<Scheme src="scheme-why.svg">The round trip. What comes back is *equal in contents*, but a different object</Scheme>
+
+Notice the caption under the scheme: after the round trip you get a **new**
+object. We will use this in section 10, when we make a deep copy.
+
+And right away a warning we will come back to more than once: **the round trip is not free**.
+An object in memory is richer than text, and part of its contents does not get through a string.
+What exactly is lost, we will go through in section 4, and this is the main thing to take away
+from today.
+
+## 2. JSON is text {#format}
+
+The abbreviation stands for “JavaScript Object Notation”.
+But JSON itself is **not JavaScript**; it is a separate text
+format that all languages understand: Python, Java, PHP, anything.
+
+It has few rules, and they are stricter than in JavaScript:
+
+| Allowed in JavaScript | In JSON |
+| --- | --- |
+| `{ name: "Aman" }` | a key goes **only in double quotes**: `{"name": "Aman"}` |
+| `{ 'name': 'Aman' }` | single quotes are **forbidden** |
+| `[1, 2, ]` | a trailing comma is **forbidden** |
+| `// comment` | there are **no** comments |
+| `undefined`, functions | **do not exist** |
+| `0x1F`, `1_000` | only ordinary numbers |
+
+Everything else is familiar: objects in curly braces, arrays in square brackets,
+strings, numbers, `true`, `false`, `null`. Six kinds
+of values — and nothing else.
+
+<Scheme src="scheme-format.svg">On the left — all of JSON. On the right — what is usual in code but will break parsing in a file</Scheme>
+
+<Important>
+Hence a rule that will save you hours: **when you see a parse error, first
+look for single quotes, a key without quotes and an extra comma**. These are three
+causes out of four.
+</Important>
+
+## 3. `stringify`: an object to a string {#stringify}
+
+It takes a value and returns its text form:
+
+```js
+JSON.stringify({ name: "Aman", age: 17 });
+// '{"name":"Aman","age":17}'
+
+JSON.stringify([1, "two", true, null]);
+// '[1,"two",true,null]'
+
+typeof JSON.stringify({ a: 1 });   // "string"
+```
+
+It works not only with objects — with any value:
+
+```js
+JSON.stringify(42);        // "42"
+JSON.stringify("Aman");    // '"Aman"'  — the quotes became part of the string!
+JSON.stringify(true);      // "true"
+JSON.stringify(null);      // "null"
+```
+
+The second line is surprising: it was a string — it became a string, but a longer one. That is how it should be:
+in JSON text is written in quotes, and the quotes are part of the notation. That is why
+`JSON.stringify("Aman").length` is six, not four.
+
+## 4. What is lost when writing {#lost}
+
+JSON can store six kinds of values, and JavaScript has more. Everything extra
+**simply disappears** when writing — without an error and without a warning.
+
+```js
+const tricky = {
+  fn() { return 1; },
+  undef: undefined,
+  nan: NaN,
+  inf: Infinity,
+  nested: { ok: 1 },
+};
+
+JSON.stringify(tricky);
+// '{"nan":null,"inf":null,"nested":{"ok":1}}'
+```
+
+Compare the input and the output: there were five properties, three are left. The function and
+`undefined` disappeared entirely, while `NaN` and `Infinity`
+turned into `null` — because JSON has no such numbers.
+
+In an array the behavior is different: a missing element would shift the others, so instead
+of disappearing, `null` is put in:
+
+```js
+JSON.stringify([1, undefined, 3]);        // "[1,null,3]"
+JSON.stringify([1, function () {}, 3]);   // "[1,null,3]"
+```
+
+And an edge case: if the value itself cannot be written, `stringify`
+returns not a string but `undefined`:
+
+```js
+JSON.stringify(undefined);           // undefined, not "undefined"
+JSON.stringify(function () {});      // undefined
+```
+
+### Dates separately
+
+A date is the most treacherous loss, because it looks like a success:
+
+```js
+const order = { id: 1, when: new Date(2026, 8, 25, 14, 30) };
+
+const back = JSON.parse(JSON.stringify(order));
+
+typeof order.when;   // "object" — it was a date
+typeof back.when;    // "string" — it became a string!
+```
+
+A date knows how to write itself as a string, and `stringify` uses that. But
+there is no reverse conversion: `parse` sees ordinary text and leaves it
+text. That is why after the round trip the date breaks on the very first method call:
+
+```js
+back.when.getFullYear();
+// TypeError: back.when.getFullYear is not a function
+```
+
+What to do about it — in section 12.
+
+## 5. Pretty output {#indent}
+
+By default `stringify` writes everything in one line — that is shorter for passing on.
+For a human reader there is a third argument: **the indentation**.
+
+```js
+JSON.stringify({ a: 1, b: { c: 2 } }, null, 2);
+```
+
+<ResultBox>
+```plain-out
+{
+  "a": 1,
+  "b": {
+    "c": 2
+  }
+}
+```
+</ResultBox>
+
+The number means the number of spaces; you can also pass a string — for example,
+`"\t"` for a tab. For now we put `null` as the second argument;
+it is the subject of the next section.
+
+Indentation is only for the eyes: `parse` reads the compact form and the pretty one
+equally well. That is why **data that is passed on is written without indentation, while data for display and files
+that are edited by hand get indentation**.
+
+## 6. Choosing fields {#replacer}
+
+The second argument decides what gets into the string. The simplest is to pass a list of the needed
+keys:
+
+```js
+const student = { name: "Aman", age: 17, secret: "code", marks: [5, 4] };
+
+JSON.stringify(student, ["name", "marks"]);
+// '{"name":"Aman","marks":[5,4]}'
+```
+
+This is how extra things are removed before sending: passwords, service fields, heavy chunks that
+the recipient does not need.
+
+Instead of a list you can pass a function — it is called for each property and decides
+what to do with it. Returning `undefined` means “throw it out”:
+
+```js
+JSON.stringify(student, (key, value) =>
+  key === "secret" ? undefined : value);
+// '{"name":"Aman","age":17,"marks":[5,4]}'
+```
+
+In ordinary tasks a list is enough; a function is needed when a field has to be not thrown out
+but changed — round a number, cut a long text.
+
+## 7. `parse`: a string to an object {#parse}
+
+The reverse function. It takes text and returns a value:
+
+```js
+JSON.parse('{"a":1}');      // { a: 1 }
+JSON.parse("[1,2,3]");      // [1, 2, 3]
+JSON.parse("42");           // 42
+JSON.parse('"Aman"');       // "Aman"
+```
+
+Notice the quotes in the examples. The argument of `parse` is a
+**string**, and inside it lies JSON. Hence the double set of quotes:
+single ones outside are JavaScript, double ones inside are JSON.
+
+Here is also a beginner’s most common mistake:
+
+```js
+JSON.parse({ a: 1 });   // wrong! the argument must be a string
+```
+
+Passing an object to `parse` makes no sense: it is already an object. What needs parsing is
+what came as text — from a file, from the network, from the browser’s storage. And the error here
+will be strange: the argument will first turn into the string `"[object Object]"`,
+and the parser will complain about exactly that.
+
+## 8. Parse errors {#parse-errors}
+
+If the text does not fit, `parse` throws a `SyntaxError`.
+In Chrome the messages are detailed and point to the place — this is a rare case when it is
+clearer than Firefox:
+
+```js
+JSON.parse("{a:1}");
+// SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+
+JSON.parse("{'a':1}");
+// SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+
+JSON.parse('{"a":1,}');
+// SyntaxError: Expected double-quoted property name in JSON at position 7 (line 1 column 8)
+```
+
+The three classic causes from section 2: a key without quotes, single quotes, a trailing
+comma. In all three cases the message points to the **position** — the number
+of the character where parsing broke.
+
+Two more errors come up all the time:
+
+```js
+JSON.parse("");
+// SyntaxError: Unexpected end of JSON input
+
+JSON.parse("undefined");
+// SyntaxError: "undefined" is not valid JSON
+```
+
+The first is an empty string; it usually means the data did not come at all. The second is an attempt
+to parse the word `undefined`: this happens when there was nothing in the storage,
+but the result was sent to `parse` anyway.
+
+<Mistake>
+On MDN this page is titled “SyntaxError: JSON.parse: bad parsing” and lists
+31 wordings — all from Firefox. Chrome says it differently and, more importantly, usually
+**names the position**. If the text is long, count the characters from the start
+or look exactly there. The exception is “Unexpected token”: instead of the position Chrome
+shows the extra character itself and a piece of the text around it.
+</Mistake>
+
+That is why parsing other people’s data is almost always wrapped in `try` from day 11:
+
+```js
+function parseOrNull(text) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    console.log("could not parse:", error.message);
+    return null;
+  }
+}
+```
+
+### Walkthrough: why “undefined” came
+
+The most common parse error in real programs looks mysterious: the string
+you are parsing seems to hold data, but the message talks about the word
+`undefined`.
+
+```js
+const store = {};   // a store that is still empty
+
+JSON.parse(store.students);
+// SyntaxError: "undefined" is not valid JSON
+```
+
+**Step 1. We read the message literally.** It does not say “the data is bad”
+but “the string `"undefined"` is not JSON”. So exactly this word got into parsing.
+
+**Step 2. We look at what was passed.**
+
+```js
+store.students;          // undefined — the store has no such key
+typeof store.students;   // "undefined"
+```
+
+**Step 3. We understand the conversion.** `JSON.parse` expects a string,
+and if it gets something else, it first converts the argument to a string — by the rules of day 8.
+`undefined` becomes the text `"undefined"`, and that is exactly
+what cannot be parsed.
+
+**Step 4. We fix it with a check before parsing:**
+
+```js
+const text = store.students;
+const students = text ? JSON.parse(text) : [];
+```
+
+On day 31 the store will become real. There an empty key gives `null`,
+and `JSON.parse(null)` returns `null` without an error — but
+an `undefined` written by mistake will turn into exactly this string
+`"undefined"`. An empty store is a normal state of the program at its first
+launch, and it must not crash on it.
+
+## 9. A circular reference {#cyclic}
+
+The second error of the day belongs to `stringify`. It happens when an object refers
+to itself:
+
+```js
+const a = { name: "a" };
+a.self = a;
+
+JSON.stringify(a);
+// TypeError: Converting circular structure to JSON
+```
+
+Such a thing cannot be written in principle: the record would be endless. Chrome also
+hints which property closes the circle — the message has a line like
+“property 'self' closes the circle”.
+
+In study tasks a cycle is rare, but in real ones it is easy to get: two objects refer
+to each other, for example a student knows their group, and the group knows its list of students. Try
+to save such a structure, and this error appears.
+
+## 10. A deep copy through JSON {#deep-copy}
+
+Yesterday we stopped at a task that neither `Object.assign`
+nor three dots solve: copying an object together with everything inside.
+
+```js
+const deep = { id: 1, customer: { name: "Aman", tags: ["vip"] } };
+
+const shallow = { ...deep };
+shallow.customer.name = "Meret";
+deep.customer.name;   // "Meret" — the original suffered
+```
+
+The round trip through JSON solves it in one line. The reason is simple: `parse` builds
+**everything anew**, from the topmost object to the last nested one,
+and not a single reference stays shared.
+
+```js
+const clone = JSON.parse(JSON.stringify(deep));
+
+clone.customer.name = "Sapar";
+clone.customer.tags.push("new");
+
+deep.customer.name;        // "Meret" — untouched
+clone.customer === deep.customer;   // false — different objects
+```
+
+<Scheme src="scheme-deep-copy.svg">The object goes through the string whole — and not a single shared reference is left at the end</Scheme>
+
+## 11. The cost of this technique {#deep-limits}
+
+The technique looks like a magic wand, but it has a cost — exactly the one discussed
+in section 4. **The copy keeps only what can
+be written to JSON.**
+
+| What it was | What it becomes after the round trip |
+| --- | --- |
+| strings, numbers, `true`, `null` | as they were |
+| arrays and nested objects | as they were, but new |
+| object methods | **will disappear** |
+| `undefined` in a property | **the property will disappear** |
+| `NaN`, `Infinity` | `null` |
+| `Date` | a string |
+| a circular reference | `TypeError` |
+
+So the rule is: **for simple data it is an excellent technique, for objects
+with methods and dates it is not**. In our course the data is simple, so
+you can use it freely.
+
+Browsers also have an honest deep copy — `structuredClone`. It handles
+both dates and cycles. But it is not part of the language but a browser feature, so its place
+is in course 4 together with the other Web APIs.
+
+### Numbers separately
+
+Numbers go through JSON as they are — including the binary inaccuracy from day 17:
+
+```js
+JSON.parse(JSON.stringify({ n: 0.1 + 0.2 })).n;   // 0.30000000000000004
+```
+
+But big integers get lost, and this trap is scarier. The boundary is the same as
+on day 17 — `MAX_SAFE_INTEGER`:
+
+```js
+JSON.stringify({ id: 9007199254740993 });
+// '{"id":9007199254740992}' — the last digit changed!
+
+JSON.parse('{"id":"9007199254740993"}').id;
+// "9007199254740993" — as a string it was kept exactly
+```
+
+The loss happens not in JSON but in the language itself: such a number does not fit into the
+`number` type. That is why long identifiers — order numbers, database keys —
+**are passed as strings**. When you see `"id": "12345"` in quotes
+in someone else’s JSON, know this: it is not carelessness, it is protection.
+
+## 12. Reviving while parsing {#reviver}
+
+Back to the broken date. `parse` also has a second argument — a function
+that is called for every parsed value. It can return something of its own:
+
+```js
+const text = '{"id":1,"when":"2026-09-25"}';
+
+const order = JSON.parse(text, (key, value) =>
+  key === "when" ? new Date(value) : value);
+
+order.when instanceof Date;   // true — a real date again
+```
+
+This function is called a “reviver”. It is needed exactly where the JSON format is poorer than
+your data: dates, big numbers, your own kinds of values. The function gets every key
+and every value — including nested ones — and returns what should end up
+in the result.
+
+In simple programs it is not written — it is easier to store a date as a number
+(`getTime()` from day 17) and not have this problem at all. But it is worth
+recognizing in other people’s code.
+
+## 13. Where JSON comes up {#where}
+
+Three places, and all three are waiting for us in this course.
+
+| Where | What happens | When |
+| --- | --- | --- |
+| the browser’s storage | `localStorage` stores only strings, so objects are put there with `stringify` | day 31 |
+| a server response | `fetch` brings text, and the response has a method `json()` | day 31 |
+| settings files | `package.json` and its relatives are ordinary JSON with indentation | in any project |
+
+There is a fourth place too, a less obvious one: **debugging**. When an object
+is complex and collapses in the console, `console.log(JSON.stringify(obj, null, 2))`
+shows it whole and in a clear form.
+
+### JSON as a debugging tool
+
+This is worth explaining in more detail, because the technique saves a lot of time.
+When you print an object to the console, the browser shows it collapsed — and part of it
+shows only after you expand the arrows. Worse: an expanded object
+shows the **current** state, not what it was at the moment of printing.
+
+```js
+const student = { name: "Aman", marks: [5, 4] };
+
+console.log(student);                          // shows the object “live”
+console.log(JSON.stringify(student));          // shows a snapshot of this moment
+console.log(JSON.stringify(student, null, 2)); // the same, but readable
+```
+
+The difference is visible when the object changes later in the program: the first line in the console
+will show the already changed data, and the second — the data as it was. For finding “where exactly
+it got spoiled” this settles the matter.
+
+The technique also works for comparing two states: print before, print after,
+compare the strings by eye. The main thing is to remember the limitation from section 4 — functions, dates
+and `undefined` will not get into such a snapshot.
+
+### Comparing objects — and why it is a trap
+
+From day 21 we know: two objects with the same contents are not equal to each other.
+`===` asks “is it the same box”, not “is the inside the same”.
+
+```js
+const a = { name: "Aman", age: 17 };
+const b = { name: "Aman", age: 17 };
+
+a === b;   // false
+```
+
+Hence a popular technique: compare not the objects but their written forms.
+
+```js
+JSON.stringify(a) === JSON.stringify(b);   // true
+```
+
+It works — but only until the first surprise. The written form depends on the **order
+of the properties**, and the order can differ for objects that mean the same:
+
+```js
+const c = { age: 17, name: "Aman" };   // the same data, a different order
+
+JSON.stringify(a);   // '{"name":"Aman","age":17}'
+JSON.stringify(c);   // '{"age":17,"name":"Aman"}'
+
+JSON.stringify(a) === JSON.stringify(c);   // false!
+```
+
+The data is the same, the answer is negative. And this is not the only trouble: the technique
+will not notice the difference between `undefined` and a missing property,
+and on an object with a cycle it will simply crash.
+
+<Mistake>
+You can use this technique only when you **created both
+objects the same way yourself** — for example, in a check of your own code. For other people’s data
+it is wrong, and you will have to write a real comparison yourself, going through the properties.
+</Mistake>
+
+### Size and transfer
+
+Indentation is convenient for the eyes but expensive in transfer. The difference is noticeable:
+
+```js
+const students = [
+  { name: "Aman", marks: [5, 4, 9, 3, 5, 0, 4, 5] },
+  { name: "Meret", marks: [3, 3, 4] },
+];
+
+JSON.stringify(students).length;          // 76
+JSON.stringify(students, null, 2).length; // 200
+```
+
+Two and a half times more — and this is for two students. For a thousand records the difference
+is in megabytes, and it is paid by whoever has a slow internet connection.
+
+Hence the general rule: **over the network — without indentation; on the screen and in a file that
+is edited by hand — with indentation**. Everything that goes to the server is written compactly.
+
+## 14. The “Report card” from saved data {#tabel}
+
+Today the data comes to the program the way it will come in a real project —
+as one string. Inside it is the same list of students, but written by the rules of JSON:
+all keys in double quotes, no comments.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+const toMark = (raw) => Number(String(raw).trim());
+const isValidMark = (m) => Number.isInteger(m) && m >= MIN_MARK && m <= MAX_MARK;
+
+const sum = (numbers) => numbers.reduce((total, n) => total + n, 0);
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+// new: the data came as a string — as if from a file or a server
+const saved = `[
+  { "name": "Aman",     "marks": [5, "4", " 9 ", 3, 5, 0, "4", 5] },
+  { "name": "Meret",    "marks": ["3", 3, 4] },
+  { "name": "Gülnar",   "marks": [9, 0, "five"] },
+  { "name": "Sapar",    "marks": [5, 5, "4", 5] },
+  { "name": "Oguljan",  "marks": ["4.5", 4, 5] }
+]`;
+
+const students = JSON.parse(saved);
+
+// new: we compute the report as an object and show it separately
+function makeReport({ name = "unnamed", marks = [] } = {}) {
+  const all = marks.map((r) => toMark(r));
+  const valid = all.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return { name, ok: false };
+  }
+
+  const avg = average(valid);
+  return {
+    name,
+    ok: true,
+    average: Math.round(avg * 100) / 100,
+    min: Math.min(...valid),
+    max: Math.max(...valid),
+    percent: Math.round(valid.length / all.length * 100),
+    verdict: verdict(avg),
+  };
+}
+
+function makeHeader() {
+  return "Name".padEnd(NAME_WIDTH) + "Avg".padStart(6) + "Min".padStart(5)
+    + "Max".padStart(5) + "%".padStart(7) + "  Verdict";
+}
+
+function makeRow(report) {
+  if (!report.ok) {
+    return report.name.padEnd(NAME_WIDTH) + "no valid marks";
+  }
+  return report.name.padEnd(NAME_WIDTH)
+    + report.average.toFixed(2).padStart(6)
+    + String(report.min).padStart(5)
+    + String(report.max).padStart(5)
+    + (report.percent + "%").padStart(7)
+    + "  " + report.verdict;
+}
+
+const reports = students.map(makeReport);
+const line = "-".repeat(56);
+
+console.log(makeHeader());
+console.log(line);
+reports.map(makeRow).forEach((row) => console.log(row));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Name           Avg  Min  Max      %  Verdict
+--------------------------------------------------------
+Aman          4.33    3    5    75%  good student
+Meret         3.33    3    4   100%  average student
+Gülnar      no valid marks
+Sapar         4.75    4    5   100%  top student
+Oguljan       4.50    4    5    67%  top student
+--------------------------------------------------------
+```
+</ResultBox>
+
+The output is the same, but inside an important separation has happened. **Computing and
+display went to different functions.** `makeReport` now returns
+not a string but an object with numbers; `makeRow` turns this object into a row
+of the table.
+
+Why? Because a report object can be not only shown but also saved:
+
+```js
+console.log(JSON.stringify(reports[0], null, 2));
+```
+
+<ResultBox>
+```plain-out
+{
+  "name": "Aman",
+  "ok": true,
+  "average": 4.33,
+  "min": 3,
+  "max": 5,
+  "percent": 75,
+  "verdict": "good student"
+}
+```
+</ResultBox>
+
+With the table this would not work: you cannot get the numbers back out of an aligned string.
+This is a general rule that will come in handy in the projects: **compute in data,
+format at the very end**.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Break the JSON in `saved` in three ways,
+one at a time: remove the quotes from one key, use single quotes, add a comma
+after the last student. Write down the error text and the position for each case, and if
+there is no position — the character Chrome complains about.
+\
+\
+**The second.** Save the whole report as a string and parse it back.
+Compare `JSON.stringify(JSON.parse(text)) === text` — and explain
+the result.
+\
+\
+**The third.** Add a property `added: new Date(...)` to a student,
+run the list through the JSON round trip and see what happened to the date.
+</TryIt>
+
+## 15. How to read someone else’s JSON {#read-json}
+
+Finally — a technique that is used all the time. When unfamiliar JSON comes in
+(from documentation, from a server response, from someone else’s file), it is convenient to figure it out
+not by eye but with code.
+
+```js
+const incoming = '[{"name":"Aman","marks":[5,4]},{"name":"Meret","marks":[3]}]';
+const data = JSON.parse(incoming);
+
+typeof data;              // "object" — an object or an array?
+Array.isArray(data);      // true — so it is an array
+data.length;              // 2 — how many elements it has
+Object.keys(data[0]);     // ["name", "marks"] — what fields one element has
+```
+
+Four lines — and the structure is clear. This is the same reading by layers that we
+went through on day 15 for other people’s functions: first the general shape, then the details.
+
+And a useful small thing: if JSON came as one long line, it is easy to make it
+readable:
+
+```js
+console.log(JSON.stringify(JSON.parse(incoming), null, 2));
+```
+
+We parsed it and right away wrote it back, but with indentation. The same technique tidies up
+compressed settings files too.
+
+### The order of work with other people’s data
+
+Let us gather everything from today into one sequence of steps — it is used every time
+data comes from outside, and it will also come in handy on day 31.
+
+```js
+function readList(text) {
+  // 1. check that anything came at all
+  if (!text) {
+    return [];
+  }
+
+  // 2. parse under protection
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (error) {
+    console.log("data is broken:", error.message);
+    return [];
+  }
+
+  // 3. check the shape, not only the contents
+  if (!Array.isArray(data)) {
+    console.log("expected a list, got:", typeof data);
+    return [];
+  }
+
+  // 4. and only now work with it
+  return data.filter((item) => item && item.name);
+}
+
+readList("");                        // [] — empty
+readList("{");                       // [] and “data is broken: …”
+readList("42");                      // [] and “expected a list, got: number”
+readList('[{"name":"Aman"}, {}]');   // [{ name: "Aman" }] — the garbage is filtered out
+```
+
+Four steps, and each closes its own case: empty, broken, the wrong shape, garbage
+inside. You can skip any of them — but then the program will crash exactly there, and usually
+not for you but for the user.
+
+The third step is worth a separate note. **A successful parse does not mean the data
+is correct.** The string `"42"` is perfectly valid JSON, and
+`parse` will return a number instead of the expected list. The shape check costs one
+line and removes a whole class of errors.
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `JSON.parse(obj)` | you parse a string, not an object | `JSON.parse(text)` |
+| single quotes inside JSON | the format requires double ones | `{"a": 1}` |
+| a trailing comma | forbidden in JSON | remove the last comma |
+| expecting a date after the round trip | `parse` will return a string | store a number or write a reviver |
+| copying an object with methods through JSON | methods are not written | copy by hand or use `structuredClone` |
+| parsing without `try` | other people’s data fails at the most inconvenient moment | `try/catch` around `parse` |
+| `JSON.parse(localStorage...)` without a check | with an empty key you get `null` | check the result before working with it |
+
+### What comes tomorrow
+
+The module about arrays and objects is finished. From day twenty-four on comes
+the most visible part of the course: **the page**. We will learn to find
+elements on it, change text, create new nodes and respond to clicks.
+
+Everything we have been building in the console for the last two weeks will finally appear on the screen.
+And the “Report card” will move from `console.log` into a real table on the page —
+and it will turn out that the separation “data apart, display apart” that we made
+today comes in very handy.
+
+### The “Arrays, objects and JSON” module as a whole
+
+Five days — and the data in the program went all the way from a list of numbers to a record
+that can be saved and passed on.
+
+| Day | What appeared | What it gave the “Report card” |
+| --- | --- | --- |
+| 19 | arrays and their methods | did not change: the methods it has relied on since day 20 appeared |
+| 20 | iteration: map, filter, reduce | all the loops disappeared |
+| 21 | objects | a student became one whole, the data separated from the code |
+| 22 | destructuring and spread | two helper functions were no longer needed |
+| 23 | JSON | the data comes from outside, the report can be saved |
+
+Notice the last column: **the program does the same thing
+as on day 18**. The same output, the same numbers. What changed was not the behavior but the structure —
+and each time exactly as much as the new tool allowed.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) | an overview of the format and both functions | <Full /> |
+| [JSON.stringify](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify) | an object to a string; choosing fields and indentation | <Full /> |
+| [JSON.parse](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/parse) | a string to an object; the reviver | <Full /> |
+| [Error: bad JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/JSON_bad_parse) | in Chrome the message usually names the position | <Brief /> |
+| [Error: a circular reference](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cyclic_object_value) | `Converting circular structure to JSON` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// OBJECT → STRING
+const obj = { name: "Aman", age: 17 };
+JSON.stringify(obj);              // '{"name":"Aman","age":17}'
+JSON.stringify(obj, null, 2);     // with indentation, for reading
+JSON.stringify(obj, ["name"]);    // '{"name":"Aman"}' — only the needed fields
+typeof JSON.stringify(obj);       // "string"
+
+// WHAT IS LOST
+// functions and undefined in an object — disappear
+// in an array — become null
+// NaN and Infinity — become null
+// Date — becomes a string and does NOT come back to life
+
+// STRING → OBJECT
+JSON.parse('{"a":1}');            // { a: 1 }
+const text = '{"when":"2026-09-25"}';
+JSON.parse(text, (k, v) => k === "when" ? new Date(v) : v);   // a reviver: when is a date again
+
+// FORMAT RULES (stricter than in JS)
+// keys ONLY in double quotes
+// single quotes — not allowed
+// a trailing comma — not allowed
+// comments — not allowed
+
+// ERRORS
+// JSON.parse("{a:1}")   → SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+// JSON.parse("")        → SyntaxError: Unexpected end of JSON input
+// a self-referencing object → TypeError: Converting circular structure to JSON
+
+// A DEEP COPY of simple data
+const clone = JSON.parse(JSON.stringify(obj));
+// methods, dates and undefined will not survive the round trip
+
+// SOMEONE ELSE’S JSON
+const data = JSON.parse('[{"name":"Aman"}]');
+typeof data;               // "object"
+Array.isArray(data);       // true
+data.length;               // 1
+console.log(JSON.stringify(data, null, 2));   // tidy it up
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. How does JSON differ from an object literal in JavaScript?
+   <Answer>JSON is a text format, not code. Keys in it go only in double
+   quotes; single quotes, trailing commas and comments are forbidden,
+   and there is no `undefined` and no functions at all.</Answer>
+2. What happens to a function and to `undefined` when writing to JSON?
+   <Answer>In an object the property disappears entirely, without an error. In an array
+   `null` takes its place — otherwise the other elements would shift.</Answer>
+3. Why does `order.when.getFullYear()` break after
+   `JSON.parse(JSON.stringify(order))`?
+   <Answer>The date was written as a string, and `parse` left it a string —
+   a string has no method `getFullYear`. It is cured with a reviver
+   or by storing the date as a number.</Answer>
+4. Why does the round trip through JSON give a real deep copy?
+   <Answer>`parse` builds all the objects anew, from the top one to the most
+   nested one, so not a single reference stays shared. The cost: everything
+   that cannot be written to JSON is lost.</Answer>
+5. What should you do if `JSON.parse` threw an error on data
+   from a user?
+   <Answer>Wrap the parsing in `try/catch` and return a clear
+   default value. Other people’s data can always come broken
+   or not come at all.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON" />

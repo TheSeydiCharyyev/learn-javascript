@@ -1,0 +1,846 @@
+---
+title: "Day 34 — Final project: implementation"
+day: Day 34 • lesson 1
+heading: "Final project: implementation"
+lead: The second of the four days of the final project. 45 minutes.
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+  h3 { color: #854d0e; }
+  .step-number { background: #eab308; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- work by the plan: one task — one check — one mark;
+- replace stubs with real code without breaking what is already done;
+- go around a list in a circle with the remainder of division;
+- recognize three typical mistakes of such applications by their symptoms;
+- compare the plan with the actual time and move what is left to the next day.
+</Goals>
+
+<Toc />
+
+## 1. How to work by the plan {#how}
+
+Yesterday we wrote a plan: five tasks for today, each with minutes and a way to check it.
+Today we carry it out. The most important rule of the day sounds boring, but it saves hours:
+**one task at a time**. We take a task, replace the stub with code, check it,
+mark it in the plan — and only then the next one.
+
+<Scheme src="scheme-how.svg">One task at a time: code, check, mark; when something fails — the data first</Scheme>
+
+Why not everything at once? If you write five pieces and only then open the page, then on
+an error it is unknown which piece is to blame. If you check after each one, the error is always in
+the last one — in twenty lines, not in a hundred. And the mark in the plan with the real minutes
+is needed for section 16: in the evening you will see how well the estimate matched the work.
+
+Before every big edit save a copy of the project folder — for example,
+`cards-2`. If an edit broke everything and it is unclear why, there is a place to go back to.
+Professionals do the same with a version control system — for example, `git` —
+but for the four days of the project a copy is enough.
+
+### If you are stuck
+
+| Step | What to do |
+| --- | --- |
+| 1 | read the red line in the console and the text in `#error` — in full, to the end |
+| 2 | ask the data: `[words.length, learned, topic, position, flipped]` |
+| 3 | run the checks: `testDeck()`, `testCurrent()` |
+| 4 | it did not help in 10 minutes — go back to the copy and repeat the task in smaller steps |
+
+## 2. Where we start from {#start}
+
+The skeleton of day 33 already shows the first word from the server and remembers the learned ones. Let us mark in
+the feature table what is ready:
+
+| No. | Feature | State | Task today |
+| --- | --- | --- | --- |
+| 1 | load the words from the server | ready |  |
+| 2 | report a loading error | ready |  |
+| 3 | flip a card | a stub | 1 |
+| 4 | “I know” | a stub | 2 |
+| 5 | “Again” | a stub | 2 |
+| 6 | pick a topic | a stub | 3 |
+| 7 | a counter “Learned: N of M” | ready |  |
+| 8 | remember the learned words | we read, but do not write | 4 |
+| 9 | start over | none | 5 |
+
+Three rows are ready from the first day and one more is half done — this is by design: a skeleton with the first step removes
+the main fear “what if nothing works”. Five tasks of the plan are left, and their order
+is not random — each one relies on the previous ones:
+
+| Task | Relies on |
+| --- | --- |
+| 1. flipping | the current card — section 3 |
+| 2. “I know”, “Again” | the current card and `flipped` from task 1 |
+| 3. topic buttons | the deck, the position and `flipped` |
+| 4. saving | “I know”: without it there is nothing to save |
+| 5. an empty deck, “Start over” | everything above: the deck empties only after “I know” |
+
+## 3. First — the card on the screen {#current}
+
+All three buttons of the day talk about “the current card”: flipping shows its translation,
+“I know” remembers its number, “Again” moves to the next one. So first of all we need
+a function that returns this card. Such a restructuring before the tasks is a common
+thing: a shared piece is moved into a function once, not written three times in three listeners.
+We have the deck and the number of the position:
+
+```js
+// the card that is on the screen now; null — the deck is empty
+function current() {
+  const cards = deck();
+  return cards.length === 0 ? null : cards[position % cards.length];
+}
+```
+
+Why is the card not kept in a separate variable but computed every time? Because
+a copy would be out of date after the very first “I know” or a change of topic, and it would have to be updated
+by hand in all the listeners. Computed from `deck` and `position`, it
+is always right — the same principle “do not keep a copy” as with the favorites on day 32.
+
+What `%` does we will cover in section 6, and for now — two things. When the deck is empty,
+the function returns `null`: this is an honest answer “there is no card”, and it is easy
+to check. And the function changes nothing — it only answers. Checking the step on the loaded
+page:
+
+```js
+current().word;   // "book"
+position = 3;
+current().word;   // "bread"
+position = 0;
+```
+
+And an empty deck — a branch that the normal way reaches only in task 5:
+
+```js
+learned = [1, 2, 3, 4, 5, 6, 7, 8];
+current();   // null — the deck is empty
+learned = [];
+```
+
+## 4. Task 1: flipping {#flip}
+
+Flipping is the variable `flipped` from day 33. The listener switches it,
+`render` shows the word or the translation. First the showing:
+
+```js
+function render() {
+  const word = current();
+  card.textContent = word === null ? "No words" : (flipped ? word.translation : word.word);
+  counter.textContent = `Learned: ${learned.length} of ${words.length}`;
+}
+```
+
+What to show — the word or the translation — is decided by `render`, not by the listener:
+the listener only changes `flipped`. This way the page stays a picture of the data, as
+on day 29, and any other place of the program that changes `flipped` will at once
+get the right card. Then the listener — instead of the plan comment of day 33:
+
+```js
+card.addEventListener("click", () => {
+  if (current() === null) return;   // there is nothing to flip
+  flipped = !flipped;
+  render();
+});
+```
+
+`!flipped` is the “change to the opposite” from day 7: it was `false`, it becomes
+`true`, and back. The first line guards against a click on an empty deck: there is no
+card — and there is nothing to flip. The check of the task is row 3 of the feature table:
+
+<ResultBox>
+| What we did | On the card |
+| --- | --- |
+| opened the page | book |
+| a click on the card | kitap |
+| one more click | book |
+</ResultBox>
+
+```js
+flipped;   // false — after two clicks it is the word again
+```
+
+Why `flipped = !flipped` and not `flipped = true`? The second variant
+flips the card only one way: after the first click the translation would stay
+forever. A switch is “do the opposite”, and it is written with
+`!`.
+
+The task is closed: in the plan we mark “flipping — done” and how many minutes it took.
+
+## 5. Task 2: “I know” {#know}
+
+```js
+knowButton.addEventListener("click", () => {
+  learned.push(current().id);
+  flipped = false;
+  render();
+});
+```
+
+Three lines in the scheme “change the data → `render`”. The number of the current card
+goes into `learned`, and the deck at once becomes shorter: `deck`
+does not let learned words through. The line `flipped = false` is there so that the next card
+opens as a word, not as a translation; section 8 will show what happens without it.
+
+Notice what is **not** here: `position` does not change.
+The card at position 0 left the deck, and the next one took its place by itself. The check:
+
+```js
+// clicked “I know” at “book”:
+[current().word, learned];     // ["teacher", [1]]
+counter.textContent;           // "Learned: 1 of 8"
+```
+
+Can one word get into `learned` twice? No: a learned word leaves the deck at once, and
+“I know” will not reach it any more. But a “no” is worth checking, not taking on
+faith. After a dozen clicks on “I know” and “Again” mixed together:
+
+```js
+learned.filter((id, i) => learned.indexOf(id) !== i).length;   // 0 — no repeats
+```
+
+## 6. Task 2: “Again” and the deck in a circle {#again}
+
+```js
+againButton.addEventListener("click", () => {
+  position++;
+  flipped = false;
+  render();
+});
+```
+
+“Again” does not touch the learned words — it simply moves to the next card. But what happens
+after the last one? The deck has eight cards, positions from 0 to 7, and `position`
+keeps growing: 8, 9, 10… This is where the `%` from `current` works —
+the remainder of division from day 6:
+
+<Scheme src="scheme-again.svg">position grows without end, and the remainder of dividing by the length of the deck goes around in a circle</Scheme>
+
+```js
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((p) => p % 8);   // [0, 1, 2, 3, 4, 5, 6, 7, 0, 1]
+```
+
+The position can be anything, but the remainder of dividing by the length of the deck is always from 0
+to the length minus one. After the last card — the first one again. And one more gain: the deck
+can become shorter (“I know”, another topic), and `%` by itself will bring the position into
+the allowed bounds. The check is a check function in the spirit of day 33:
+
+```js
+function testCurrent() {
+  const oldLearned = learned;
+  const oldTopic = topic;
+  const oldPosition = position;
+  learned = [];
+  topic = "all";
+  position = 0;
+  console.assert(current().word === "book", "the first card is book");
+  position = 8;
+  console.assert(current().word === "book", "after the last one — the first again");
+  learned = [1, 2, 3, 4, 5, 6, 7, 8];
+  console.assert(current() === null, "everything is learned — there is no card");
+  learned = oldLearned;
+  topic = oldTopic;
+  position = oldPosition;
+}
+```
+
+`testCurrent()` — silence. And the same by hand: “Again” eight times — the card shows
+“book” again, and `position` is 8. And “I know” on the last card, “window”, takes
+us back to “book”: the deck became one card shorter, and position 7 with length 7 is the
+start again.
+
+Is it not dangerous that `position` grows without end? No: whole numbers in JavaScript
+are exact up to `Number.MAX_SAFE_INTEGER` from day 17 — that is more than nine quadrillion.
+To reach it, you would have to press “Again” once a second for hundreds of millions of years.
+
+An edge case is a deck of one card. The remainder of dividing by 1 is always 0, so
+“Again” shows the same card. This is right: there is nothing else to repeat.
+
+```js
+// the topic “home”, “I know” at house — one card is left in the deck:
+[current().word, deck().length];   // ["window", 1]
+// “Again”:
+[current().word, position];        // ["window", 1]
+```
+
+## 7. Walkthrough: the deck ran out {#bug-end}
+
+A common first version of `current` does without the remainder:
+
+```js
+// do NOT do this
+return cards.length === 0 ? null : cards[position];
+```
+
+**Step 1. The symptom.** “Again” seven times — all is well, the card shows “window”.
+The eighth time — the card does not change, and there is a red line in the console:
+
+```js
+// Uncaught TypeError: Cannot read properties of undefined (reading 'word')
+position;   // 8
+```
+
+**Step 2. The cause.** The deck has eight cards, positions 0–7. `cards[8]`
+— there is no such element, it is `undefined` (day 19). The check for `null` let it
+through: `undefined` and `null` are different values, and the comparison is
+strict:
+
+```js
+const cards = deck();
+[cards[8], cards[8] === null, cards[8] === undefined];   // [undefined, false, true]
+```
+
+Then `render` tried to read the property `word` of
+`undefined` and failed before it could update the page.
+
+**Step 3. We fix it** with the remainder of division, as in section 3. And we remember the sign:
+*reading 'word'* of `undefined` almost always means “the number went outside
+the array”.
+
+The two “nothings” in our program mean different things, and the text of the error shows which of them
+we met:
+
+| Value | Where it comes from | What it means |
+| --- | --- | --- |
+| `undefined` | a number outside the array, a function without `return` | “there is no such place” — most often a mistake |
+| `null` | `current()` on an empty deck, `getItem` without the key | “we said it ourselves: there is nothing” — an answer that is expected and checked |
+
+## 8. Walkthrough: a hint too early {#bug-spoiler}
+
+The second common version of “I know” forgets the line `flipped = false`. There are no errors
+in the console, but the application gives a hint:
+
+<ResultBox>
+| What we did | On the card |
+| --- | --- |
+| a click on “book” | kitap |
+| “I know” | mugallym — the translation of the next word at once! |
+</ResultBox>
+
+**Step 1. What is in the data?**
+
+```js
+[flipped, current().word];   // [true, "teacher"]
+```
+
+`flipped` is `true`. We flipped “book”, and this mark stayed,
+although the card on the screen is already a different one.
+
+**Step 2. The cause.** `flipped` describes not “a card in general”, but
+the current card. When the current card changes, the mark must be reset. The current card
+changes in three places: “I know”, “Again” and the choice of a topic.
+
+**Step 3. We fix it** — `flipped = false` in all three listeners. The rule
+is wider than this mistake: **data that depends on other data is reset together with
+it**. On day 32 the “Show more” counter was reset the same way on a new search.
+
+## 9. Task 3: topic buttons {#topics}
+
+The buttons are built the same way as the genres of the catalog on day 32 — from the data, once after
+loading:
+
+```js
+function makeTopicButtons() {
+  const names = ["all"];
+  words.forEach((w) => {
+    if (!names.includes(w.topic)) names.push(w.topic);
+  });
+  topics.append(...names.map((name) => {
+    const button = document.createElement("button");
+    button.textContent = name;
+    button.dataset.topic = name;
+    return button;
+  }));
+}
+```
+
+```js
+topics.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  topic = button.dataset.topic;
+  position = 0;
+  flipped = false;
+  render();
+});
+```
+
+`makeTopicButtons` is still called by `load`, once: on day 32
+we saw that from `render` the buttons would multiply after every click.
+On a change of topic both dependent variables are reset: the position — so that the new deck
+starts with the first card, and `flipped` — by the rule of section 8. The selected
+button is highlighted by `render`, with one line from day 32:
+
+```js
+topics.querySelectorAll("button").forEach((b) => {
+  b.classList.toggle("active", b.dataset.topic === topic);
+});
+```
+
+Checking the step: the buttons appeared in the order in which the topics occur in the file, and a click
+on “home” switched the deck and reset the position:
+
+```js
+[...topics.children].map((b) => b.textContent);   // ["all", "school", "food", "home"]
+// clicked “home”:
+[topic, position, current().word];               // ["home", 0, "house"]
+```
+
+`testDeck()` from day 33 is still silent. It is worth running after every
+task: it guards the deck, which all the new listeners touch.
+
+## 10. Task 4: saving {#save}
+
+We learned to read storage yesterday. Today — to write. As in the to-do list and the catalog,
+one line at the end of `render`:
+
+```js
+localStorage.setItem(KEY, JSON.stringify(learned));   // the last line of render
+```
+
+`render` is called after every change, so it also saves after
+every one. Why not in the “I know” listener? Because it is not the only one that changes `learned`:
+task 5 will bring “Start over”. Writing in one place, at the end of `render`,
+will save that too — without a single new line. The check is row 8 of the table:
+
+```js
+// “I know” at “book”, reloaded the page:
+localStorage.getItem("cards:learned");   // "[1]"
+current().word;                          // "teacher"
+```
+
+Notice: the counter “Learned: N of M” counts over all topics, not over the selected one. This is
+a decision, not a mistake — but it is worth writing into the feature table, so that at the defense
+nobody takes it for a mistake. A counter by topic is a good improvement for day 35.
+
+## 11. Task 5: an empty deck and “Start over” {#empty}
+
+When all the words of a topic are learned, the deck is empty. The card needs a clear text, and the buttons
+“I know” and “Again” need to disappear: they have nothing to work with. The final `render`:
+
+```js
+function render() {
+  const word = current();
+  card.textContent = word === null ? "All the words of this topic are learned!" : (flipped ? word.translation : word.word);
+  knowButton.hidden = word === null;
+  againButton.hidden = word === null;
+  counter.textContent = `Learned: ${learned.length} of ${words.length}`;
+  topics.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.topic === topic);
+  });
+  localStorage.setItem(KEY, JSON.stringify(learned));
+}
+```
+
+“Start over” erases the progress. This cannot be undone, so first we ask — with
+`confirm` from day 28:
+
+```js
+resetButton.addEventListener("click", () => {
+  if (!confirm("Forget all the learned words?")) return;
+  learned = [];
+  position = 0;
+  flipped = false;
+  render();
+});
+```
+
+Checking the step:
+
+```js
+// the topic “home”, “I know” twice:
+[card.textContent, knowButton.hidden, counter.textContent];
+// ["All the words of this topic are learned!", true, "Learned: 2 of 8"]
+```
+
+“Start over”, Cancel — nothing changed. Once more, OK — “house” again and
+“Learned: 0 of 8”: the topic is still “home”, and the progress is erased.
+
+## 12. Walkthrough: “I know” on an empty deck {#bug-empty}
+
+What if we forget to hide the buttons? The topic “home” is learned, the card says “All the words of this
+topic are learned!”, and the “I know” button is still in its place. A click:
+
+```js
+// Uncaught TypeError: Cannot read properties of null (reading 'id')
+```
+
+**Step 1. Where did it fail?** In the “I know” listener, at `current().id`.
+
+**Step 2. Why?** The deck is empty, and `current()` honestly returned
+`null`. But the listener asked `null` for a number. Compare with section 7:
+there it was `undefined` — a number outside the array, here it is `null` — our
+own answer “there is no card”.
+
+**Step 3. We fix it** in two ways at once. We hide the button in `render` —
+a person is not offered the impossible. And the “I know” listener gets as its first line the same
+guard as flipping: `if (current() === null) return`. This is how it stands in
+the whole program. A good program does not hope that the button will not be pressed: it checks.
+
+| Symptom | Cause | Where to look |
+| --- | --- | --- |
+| `reading 'word'` of `undefined` after the last card | a number outside the deck, no `%` | `current` |
+| the next card shows the translation at once | `flipped` is not reset | the listeners of “I know”, “Again”, topics |
+| `reading 'id'` of `null` | the button is visible on an empty deck | `render`, hiding the buttons |
+| after a reload the progress is gone | no writing in `render` or no reading at the start | the end of `render`, the declaration of `learned` |
+
+## 13. Walkthrough: “Start over” reset nothing {#bug-reset}
+
+Since the progress lies in storage, the first thought is to erase it there:
+
+```js
+// do NOT do this
+resetButton.addEventListener("click", () => {
+  if (!confirm("Forget all the learned words?")) return;
+  localStorage.removeItem(KEY);
+  position = 0;
+  flipped = false;
+  render();
+});
+```
+
+**Step 1. The symptom.** “I know” twice, “Start over”, OK — the card still
+shows “lesson”, “Learned: 2 of 8”. Reloaded the page — the same.
+
+**Step 2. What is in the data and in storage?**
+
+```js
+[learned, localStorage.getItem("cards:learned")];   // [[1, 2], "[1,2]"]
+```
+
+The key was removed — and written again right away. `learned` in memory stayed the same, and
+the last line of `render` saved it back. Storage is only a copy of the data of the
+program, and erasing the copy is useless while the original is alive.
+
+**Step 3. We fix it**: we change the data — `learned = []` — and storage
+will be updated by `render`, as after any action. This is the same rule of day 29, only
+from the other side: a listener changes the data, not the page — and not storage.
+
+## 14. The whole program {#whole}
+
+```js
+// 1. Data
+const KEY = "cards:learned";
+let words = [];                                              // will come from the server
+let learned = JSON.parse(localStorage.getItem(KEY)) ?? [];   // the numbers of learned words
+let topic = "all";                                           // the selected topic
+let position = 0;                                            // which card of the deck is current
+let flipped = false;                                         // whether the translation is visible
+
+// 2. The elements of the page
+const topics = document.querySelector(".topics");
+const loading = document.querySelector("#loading");
+const error = document.querySelector("#error");
+const card = document.querySelector("#card");
+const knowButton = document.querySelector("#know");
+const againButton = document.querySelector("#again");
+const counter = document.querySelector("#counter");
+const resetButton = document.querySelector("#reset");
+
+// 3. Showing
+function checkData() {
+  console.assert(words.length > 0, "there are no words");
+  console.assert(words.every((w) => w.id && w.word && w.translation && w.topic), "a word is missing a field");
+  console.assert(words.every((w, i) => words.findIndex((x) => x.id === w.id) === i), "numbers repeat");
+}
+
+function deck() {
+  return words.filter((w) => !learned.includes(w.id) && (topic === "all" || w.topic === topic));
+}
+
+function current() {
+  const cards = deck();
+  return cards.length === 0 ? null : cards[position % cards.length];
+}
+
+function makeTopicButtons() {
+  const names = ["all"];
+  words.forEach((w) => {
+    if (!names.includes(w.topic)) names.push(w.topic);
+  });
+  topics.append(...names.map((name) => {
+    const button = document.createElement("button");
+    button.textContent = name;
+    button.dataset.topic = name;
+    return button;
+  }));
+}
+
+function render() {
+  const word = current();
+  card.textContent = word === null ? "All the words of this topic are learned!" : (flipped ? word.translation : word.word);
+  knowButton.hidden = word === null;
+  againButton.hidden = word === null;
+  counter.textContent = `Learned: ${learned.length} of ${words.length}`;
+  topics.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.topic === topic);
+  });
+  localStorage.setItem(KEY, JSON.stringify(learned));
+}
+
+// 4. Loading
+async function load() {
+  try {
+    const response = await fetch("words.json");
+    if (!response.ok) throw new Error(`server replied ${response.status}`);
+    words = await response.json();
+    checkData();
+    makeTopicButtons();
+    render();
+  } catch (err) {
+    error.textContent = `Could not load the words: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+  }
+}
+
+// 5. The checks testDeck (day 33) and testCurrent (section 6) — unchanged
+
+// 6. Actions: understand → change the data → render()
+card.addEventListener("click", () => {
+  if (current() === null) return;
+  flipped = !flipped;
+  render();
+});
+
+knowButton.addEventListener("click", () => {
+  if (current() === null) return;
+  learned.push(current().id);
+  flipped = false;
+  render();
+});
+
+againButton.addEventListener("click", () => {
+  position++;
+  flipped = false;
+  render();
+});
+
+topics.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  topic = button.dataset.topic;
+  position = 0;
+  flipped = false;
+  render();
+});
+
+resetButton.addEventListener("click", () => {
+  if (!confirm("Forget all the learned words?")) return;
+  learned = [];
+  position = 0;
+  flipped = false;
+  render();
+});
+
+// 7. Start
+load();
+```
+
+Compare with the skeleton of day 33: the names, the order of the parts and the variables are the same. Only
+the bodies of the functions and listeners changed — the stubs became code. This is what a good skeleton looks like: by the end
+of the implementation it did not have to be broken.
+
+Read the program with the eyes of the person who will ask questions at the defense. Here is what
+is asked most often and where the “Cards” have the answer:
+
+| Question | Where the answer is |
+| --- | --- |
+| where do the words come from? | `load`: the file `words.json` from the server |
+| why do learned words not disappear? | reading at the declaration of `learned`, writing at the end of `render` |
+| what happens after the last card? | `%` in `current`: the first one again |
+| what happens if everything is learned? | `render`: a text, the buttons are hidden; a guard in the listeners |
+| why `flipped = false` in three places? | the walkthrough of section 8 |
+
+If you cannot answer some question about your own project in half a minute, that place
+is worth rereading today, not at the defense.
+
+## 15. Checking by the feature table {#check}
+
+All the tasks are marked — it is time to go through the whole feature table, as it will be done at
+the defense. One scenario where every branch worked at least once:
+
+<ResultBox>
+| What we did | What is on the page |
+| --- | --- |
+| opened | “Loading…”, then “book”, “Learned: 0 of 8”, “all” is highlighted |
+| a click, one more click | “kitap”, “book” again |
+| “I know” | “teacher”, “Learned: 1 of 8” |
+| “Again” | “lesson” |
+| a click, “Again” | “sapak”, then “bread” — as a word, not a translation |
+| the topic “home” | “house”, “home” is highlighted |
+| “I know”, “I know” | “All the words of this topic are learned!”, no buttons, “Learned: 3 of 8” |
+| reloaded the page | the topic “all”, “teacher”, “Learned: 3 of 8” |
+| “Start over”, Cancel | nothing changed |
+| “Start over”, OK | “book”, “Learned: 0 of 8” |
+</ResultBox>
+
+<Scheme src="scheme-check.svg">Three states of the card and the buttons that move between them</Scheme>
+
+The scheme is also useful as a check of the code: every arrow must have its own listener, and
+every listener its own arrow. The arrow from the “translation” to the next word goes through
+`flipped = false` — this is the walkthrough of section 8, drawn.
+
+### Checks in code
+
+By hand you check what a person sees, and with code — what can quietly break with
+the next edit. Two check functions guard the two main pieces of logic:
+
+| Check | Guards | Run after |
+| --- | --- | --- |
+| `testDeck()` | the deck: learned words, topics | “I know”, topics, any edit of `deck` |
+| `testCurrent()` | the current card, the circle, an empty deck | “Again”, an empty deck, edits of `current` |
+
+```js
+testDeck();
+testCurrent();
+// silence — both checks pass, and the data stayed as it was
+```
+
+### Edge cases
+
+| Case | What happens | Why |
+| --- | --- | --- |
+| one card in the deck, “Again” | the same card | the remainder of dividing by 1 is always 0 |
+| “I know” on the last card | the first one again | the deck is shorter, `%` brings it back to the start |
+| all the words are learned | “All the words of this topic are learned!”, no buttons | `current()` is `null` |
+| “Start over”, Cancel | nothing | `confirm` returned `false` |
+| a broken string in storage | `app.js` fails, “Loading…” hangs | `JSON.parse` outside `try` — as in the catalog of day 32 |
+
+The last row is a known shortcoming. We already wrote a guard for reading storage in
+the tasks of day 32; here it will go into the plan of day 35, into the task “edge cases”.
+
+## 16. Plan and actual {#fact}
+
+At the end of the day, next to every task of the plan you write how long it really took. Let us say
+we got this:
+
+```js
+// plan — the array of tasks from day 33
+const actual = [15, 35, 20, 10, 20];   // the real minutes, in the order of the tasks of day 34
+const day34 = plan.filter((t) => t.day === 34);
+day34.map((t, i) => `${t.task}: plan ${t.minutes}, actual ${actual[i]}`);
+// ["flipping a card: plan 15, actual 15", "“I know” and “Again”: plan 25, actual 35", …]
+actual.reduce((sum, m) => sum + m, 0);   // 100 — 10 minutes more than the plan
+```
+
+An overrun of 10 minutes is normal, and you can see where it comes from: “I know” and “Again” took
+longer, because on the way we found the mistake of section 7. What to do with an overrun? Not
+to hurry, but to **recount day 35**: if it is 10 minutes short,
+the task marked `later` — “shuffle the deck” — moves to “later”.
+
+```js
+plan.filter((t) => t.day === 35 && !t.later).reduce((sum, t) => sum + t.minutes, 0);   // 70
+```
+
+Without “shuffle” day 35 takes 70 minutes: there is room for the 10 minutes of overrun and as much
+again for the unexpected. The decision is made calmly and in advance, not in a panic half an hour
+before the defense.
+
+### On the way you want more
+
+New ideas always come during the work: “and let Space flip the
+card”. The idea is good, but it is not in the plan. The rule: **a new idea is not done, it is
+written down** — into “later”, with minutes:
+
+```js
+plan.push({ day: 35, task: "keys: Space — flip", minutes: 15, later: true });
+plan.filter((t) => t.later).map((t) => t.task);
+// ["shuffle the deck", "keys: Space — flip"]
+```
+
+The idea is not lost, the plan is not broken. If time is left on day 35, the most useful one
+will be taken from the “later” list. Doing it now means stealing time from a task without which
+the application does not work.
+
+## 17. What is next {#next}
+
+All the features of the table work. Tomorrow, on day 35, — polishing: checking on a phone,
+edge cases, reading someone else’s code. An application that works for its author on a big
+screen and an application that does not let a stranger down on a phone are different
+applications. It is the second one that goes to the defense.
+
+By the end of day 34 your project must have: all the rows of the feature table, except
+“later”, work; the check functions are silent; in the plan every task of day 34 has its actual minutes,
+and the plan of day 35 is recounted. The last check of the day — in the console of your project:
+
+```js
+testDeck();
+testCurrent();
+[words.length, learned.length, localStorage.getItem("cards:learned") !== null];
+// [8, …, true] — the data is there, the progress is counted and saved
+```
+
+In practice today you do the same with your own project: task by task, by your own
+plan, with a check after each one and a note of the minutes. If a task is stuck for more than twice
+the planned time — stop and ask the data in the console: most often the answer is there.
+
+<Ref>
+<p style={{margin: "0 0 8px"}}>There are no new pages — the project uses the ones covered before:</p>
+
+| Page | Where in the project | Day |
+| --- | --- | --- |
+| [% (remainder)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Remainder) | the deck in a circle | 6 |
+| [! (NOT)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_NOT) | flipping | 7 |
+| [?: (ternary)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Conditional_operator) | the word or the translation | 7 |
+| [Array.push](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/push) | “I know” | 19 |
+| [Array.includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/includes) | the deck, topics without repeats | 19 |
+| [hidden](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/hidden) | the buttons on an empty deck | 25 |
+| [confirm()](https://developer.mozilla.org/en-US/docs/Web/API/Window/confirm) | “Start over” | 28 |
+| [setItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/setItem) | saving the learned words | 31 |
+| [console.assert()](https://developer.mozilla.org/en-US/docs/Web/API/console/assert_static) | `testCurrent` | 2 |
+</Ref>
+
+<Cheatsheet>
+```js
+// WORKING BY THE PLAN: one task → code → check → mark the minutes → the next one
+
+// THE CURRENT ITEM OF A LIST, IN A CIRCLE
+function current() {
+  const cards = deck();
+  return cards.length === 0 ? null : cards[position % cards.length];   // null — empty
+}
+position++;                       // “next” — it just grows, % keeps it in bounds
+
+// DEPENDENT DATA IS RESET TOGETHER
+topic = button.dataset.topic;
+position = 0;                     // a new deck — from the start
+flipped = false;                  // a new card — as a word
+
+// THE EMPTY STATE: a clear text, extra buttons hidden, the listener guarded
+knowButton.hidden = current() === null;
+if (current() === null) return;
+
+// THE IRREVERSIBLE — through confirm
+if (!confirm("Forget all the learned words?")) return;
+
+// PLAN AND ACTUAL: an overrun → recount tomorrow, throw out later
+plan.filter((t) => t.day === 35 && !t.later).reduce((sum, t) => sum + t.minutes, 0);
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why are the tasks of the plan done one at a time and checked after each one?
+   <Answer>Then the error is always in the last piece written — in twenty lines, not in
+   the whole program. Otherwise it is unknown which of the pieces is to blame.</Answer>
+2. Why is there a remainder of division in `current`?
+   <Answer>`position` grows without end, but the number of the card must stay
+   within the deck. The remainder goes around in a circle: after the last card — the first one again,
+   and the deck can become shorter without errors.</Answer>
+3. Why does “I know” not change `position`?
+   <Answer>The learned card leaves the deck, and the next one takes its place by itself.
+   Moving the position would mean skipping one word.</Answer>
+4. What does `Cannot read properties of null (reading 'id')` in the “I know” listener mean?
+   <Answer>The deck is empty, `current()` returned `null`, and the listener asked
+   it for a number. The button is hidden on an empty deck, and the listener is guarded with a check.</Answer>
+5. Which variables are reset on a change of topic, and why?
+   <Answer>`position` — the new deck starts with the first card;
+   `flipped` — the new card opens as a word. Both depend on
+   which deck is on the screen.</Answer>
+6. The tasks of the day took 10 minutes more than planned. What to do?
+   <Answer>Not to hurry, but to recount the next day: the tasks marked “later” move
+   into the reserve, so that the main things surely fit.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Remainder" />

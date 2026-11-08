@@ -17,7 +17,7 @@
 //     the navigation bar the new site links to routes ("student", not "student.html" — 07.11.2026), so there its
 //     page links are compared with ".html" added. The markup is compared as the browser lays it out (08.11.2026 —
 //     MDX does not keep the HTML files' line breaks and indentation): runs of spaces and line breaks in text are one
-//     space, and none next to a block-level element (SVG too: its schemes are files now, without the HTML page's
+//     space, and none next to a block-level element or a <br> (SVG too: its schemes are files now, without the HTML page's
 //     indentation); inside <pre> (white-space kept) everything as is;
 //     comments are skipped (React writes <!-- --> between some texts); attributes in name order, style as the
 //     browser normalizes it;
@@ -196,6 +196,8 @@ const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
   const isNext = eval(nextNode);
   const isNew = location.protocol === 'http:';
   const isBlock = (n) => !!n && n.nodeType === 1 && !/^inline/.test(getComputedStyle(n).display);
+  // spaces around a <br> are not drawn either (the end of a line, the start of the next): trimmed as next to a block
+  const breaks = (n) => isBlock(n) || (!!n && n.nodeType === 1 && n.tagName === 'BR');
   const keepsSpaces = (el) => /^pre/.test(getComputedStyle(el).whiteSpace);
   const quote = (v) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   const attrs = (el) => {
@@ -221,8 +223,8 @@ const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
     parts.forEach((p, i) => {
       if (p.el) { inner += markup(p.el); return; }
       let t = p.text.replace(/[ \t\n\r\f]+/g, ' ');
-      if (i === 0 ? isBlock(el) : isBlock(parts[i - 1].el)) t = t.replace(/^ /, '');
-      if (i === parts.length - 1 ? isBlock(el) : isBlock(parts[i + 1].el)) t = t.replace(/ $/, '');
+      if (i === 0 ? isBlock(el) : breaks(parts[i - 1].el)) t = t.replace(/^ /, '');
+      if (i === parts.length - 1 ? isBlock(el) : breaks(parts[i + 1].el)) t = t.replace(/ $/, '');
       inner += t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\u00a0/g, '&nbsp;');
     });
     return open + inner + close;

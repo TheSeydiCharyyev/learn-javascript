@@ -1,0 +1,859 @@
+---
+title: "День 32 — Мини-проект: каталог с данными с сервера"
+day: День 32 • урок 1
+heading: "Мини-проект: каталог с данными с сервера"
+lead: Проектный день после модуля «Таймеры, промисы и fetch». 45 минут.
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+  h3 { color: #854d0e; }
+  .step-number { background: #eab308; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- собрать приложение, которое берёт данные с сервера;
+- показывать три состояния: загрузка, данные, ошибка;
+- строить кнопки и карточки из данных, а не из разметки;
+- сочетать поиск, фильтр и избранное в одной функции;
+- хранить выбор человека между загрузками страницы.
+</Goals>
+
+<Toc />
+
+## 1. Последний мини-проект {#why}
+
+На дне 29 мы собрали список дел из того, что дал модуль «DOM и события». С тех пор
+появились таймеры, промисы, `fetch` и хранилище. Сегодня соединим всё в одном
+приложении: **каталог книг**. Список приходит с сервера, человек ищет, выбирает
+жанр и отмечает книги в избранное, а избранное помнится между загрузками.
+
+| Что понадобится | Откуда |
+| --- | --- |
+| `filter`, `map`, `forEach`, `includes` | дни 16, 19–20 |
+| `createElement`, `append`, `dataset`, `classList` | дни 25–26 |
+| слушатели, делегирование, `input`, `change` | дни 27–28 |
+| схема «данные → `render` → страница» | день 29 |
+| `fetch`, `async` / `await`, `try...catch...finally` | дни 30–31 |
+| `localStorage`, `JSON.stringify` и `JSON.parse` | дни 23, 31 |
+
+Каталог — самый частый вид страниц в интернете: магазин, афиша, библиотека, список
+курсов. Устроены они одинаково, и после сегодняшнего дня вы сможете собрать любой из них.
+Работаем через Live Server: без него `fetch` не заработает.
+
+## 2. Что должен уметь каталог {#spec}
+
+| № | Возможность | Как проверить |
+| --- | --- | --- |
+| 1 | загрузить книги с сервера | пока грузится — «Загрузка…», потом восемь карточек |
+| 2 | сообщить об ошибке загрузки | файла нет — понятный текст, «Загрузка…» исчезла |
+| 3 | искать по названию и автору | «толст» — «Война и мир», регистр не важен |
+| 4 | выбрать жанр | кнопки жанров, выбранная выделена |
+| 5 | отметить книгу в избранное и снять отметку | кнопка на карточке, карточка выделена |
+| 6 | показать только избранное | флажок «Только избранное» |
+| 7 | сочетать поиск, жанр и избранное | все три условия работают вместе |
+| 8 | счётчик «Показано: N из M» | меняется после каждого действия |
+| 9 | помнить избранное | обновили страницу — отметки на месте |
+
+Чего каталог не делает: не меняет сам список книг — добавлять и удалять их можно только
+на сервере, то есть в файле. Помнит он только избранное; поиск и жанр после обновления
+сбрасываются. Это решение, а не недосмотр: запомнить стоит то, что человек отмечал
+сознательно.
+
+Собирать будем в порядке дня 29, по одному куску: данные на сервере, данные в
+программе, рама, загрузка, карточка, кнопки жанров, `render`, действия. После
+каждого куска — проверка в консоли. Тогда любая ошибка найдётся в последних нескольких
+строках, а не во всём файле.
+
+## 3. Данные на сервере {#data}
+
+Папка `day-32/catalog`. Рядом со страницей лежит файл `catalog.json` —
+это наш «сервер»:
+
+```js
+[
+  { "id": 1, "title": "Капитанская дочка", "author": "Александр Пушкин", "year": 1836, "genre": "повесть" },
+  { "id": 2, "title": "Преступление и наказание", "author": "Фёдор Достоевский", "year": 1866, "genre": "роман" },
+  { "id": 3, "title": "Война и мир", "author": "Лев Толстой", "year": 1869, "genre": "роман" },
+  { "id": 4, "title": "Собака Баскервилей", "author": "Артур Конан Дойл", "year": 1902, "genre": "детектив" },
+  { "id": 5, "title": "Хоббит", "author": "Джон Толкин", "year": 1937, "genre": "фэнтези" },
+  { "id": 6, "title": "Маленький принц", "author": "Антуан де Сент-Экзюпери", "year": 1943, "genre": "сказка" },
+  { "id": 7, "title": "Старик и море", "author": "Эрнест Хемингуэй", "year": 1952, "genre": "повесть" },
+  { "id": 8, "title": "Гарри Поттер и философский камень", "author": "Джоан Роулинг", "year": 1997, "genre": "фэнтези" }
+]
+```
+
+У каждой книги есть `id` — постоянный номер, как у дел на дне 29: по нему
+карточка найдёт свою книгу, а избранное запомнит, какие книги отмечены. Названия могут
+совпасть у разных изданий, номер — никогда.
+
+Проверка шага: пока нет ни строчки `app.js`, откройте страницу через Live Server
+и спросите сервер из консоли. Если файл отдаётся — половина проекта уже работает:
+
+```js
+const data = await (await fetch("catalog.json")).json();
+data.length;                                       // 8
+data[4].title;                                     // "Хоббит"
+data.filter((b) => b.genre === "роман").length;    // 2
+```
+
+И сразу — как выглядит беда. Опечатка в имени файла не роняет запрос, а даёт ответ 404
+(день 31):
+
+```js
+(await fetch("katalog.json")).status;   // 404
+```
+
+## 4. Данные в программе {#state}
+
+Как и на дне 29, сначала решаем, что программа хранит. Всё, от чего зависит вид страницы:
+
+```js
+const KEY = "catalog:favorites";
+let books = [];                                               // придут с сервера
+let favorites = JSON.parse(localStorage.getItem(KEY)) ?? [];  // номера избранных книг
+let query = "";                                               // строка поиска
+let genre = "все";                                            // выбранный жанр
+let onlyFavorites = false;                                    // флажок «Только избранное»
+```
+
+Пять переменных — три вида данных. `books` приходит с сервера и сначала пуст.
+`favorites` берётся из хранилища. `query`, `genre` и
+`onlyFavorites` — выбор человека прямо сейчас.
+
+Строка с `favorites` читается справа налево. Ключа ещё нет —
+`getItem` вернёт `null`, `JSON.parse(null)` — тоже
+`null` (день 31), и `??` из дня 7 подставит пустой массив. Ключ
+есть — получим сохранённые номера. Приставка `catalog:` — чтобы не столкнуться
+со списком дел и «Табелем» на том же Live Server.
+
+```js
+JSON.parse(null);   // null
+null ?? [];         // [] — первый запуск: избранного ещё нет
+```
+
+## 5. Разметка {#markup}
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Каталог книг</title>
+  <style>
+    .cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; }
+    .card.favorite { border-color: #eab308; background: #fefce8; }
+    .genres .active { font-weight: bold; }
+    .error { color: #b91c1c; }
+  </style>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>Каталог книг</h1>
+  <p>
+    <input id="search" placeholder="Название или автор">
+    <label><input type="checkbox" id="only-favorites"> Только избранное</label>
+  </p>
+  <p class="genres"></p>
+  <p id="loading">Загрузка…</p>
+  <p id="error" class="error"></p>
+  <ul id="books" class="cards"></ul>
+  <p id="empty" hidden>Ничего не нашлось</p>
+  <p id="counter"></p>
+</body>
+</html>
+```
+
+Рама почти пуста: нет ни одной книги и ни одной кнопки жанра — всё это появится из
+данных. Карточки — пункты списка `<ul>`, а правило `grid`
+раскладывает их плиткой: столько в ряд, сколько поместится. «Загрузка…» видна сразу —
+ведь при открытии страницы данных ещё нет.
+
+```js
+const search = document.querySelector("#search");
+const favoritesBox = document.querySelector("#only-favorites");
+const genres = document.querySelector(".genres");
+const loading = document.querySelector("#loading");
+const error = document.querySelector("#error");
+const list = document.querySelector("#books");
+const empty = document.querySelector("#empty");
+const counter = document.querySelector("#counter");
+```
+
+Проверка шага: элементы нашлись, данных ещё нет, «Загрузка…» видна.
+
+```js
+[books.length, favorites, genres.children.length, loading.hidden];   // [0, [], 0, false]
+```
+
+## 6. Главная схема {#idea}
+
+<Scheme src="scheme-idea.svg">Схема дня 29, к которой добавились два источника данных: сервер и хранилище</Scheme>
+
+Это схема дня 29: слушатель меняет данные и зовёт `render`, та строит
+страницу. Нового два. Часть данных **приходит позже** — с сервера, поэтому
+первый `render` случится только после загрузки. И часть данных
+**живёт дольше страницы** — избранное читается из хранилища при старте и
+записывается в конце каждого `render`, как задачи на дне 31.
+
+Главное проектное решение дня — где что живёт:
+
+| Данные | Где | Почему |
+| --- | --- | --- |
+| книги | сервер | общие для всех; меняет их владелец каталога, а не читатель |
+| избранное | `localStorage` | личный выбор, нужен и завтра |
+| поиск, жанр, флажок | только в переменных | нужны сейчас; после обновления удобнее начать с чистого листа |
+
+Книги в хранилище мы не кладём сознательно: сервер — единственный источник правды
+о каталоге. Сохрани мы копию, после изменения файла человек видел бы устаревший список.
+
+## 7. Загрузка: три состояния {#load}
+
+У страницы, которая ждёт сервер, всегда три состояния: **загрузка**,
+**данные** или **ошибка**. Каждое человек должен видеть:
+
+```js
+async function load() {
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`сервер ответил ${response.status}`);
+    books = await response.json();
+    makeGenreButtons();   // раздел 9
+    render();             // раздел 10
+  } catch (err) {
+    error.textContent = `Не удалось загрузить каталог: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+  }
+}
+
+load();
+```
+
+| Состояние | Когда | Что видно |
+| --- | --- | --- |
+| загрузка | от открытия до ответа | «Загрузка…» из разметки |
+| данные | ответ пришёл, JSON разобран | карточки, кнопки жанров, счётчик |
+| ошибка | сервер молчит, файла нет, JSON испорчен | текст ошибки; «Загрузка…» убрана |
+
+Всё знакомо по дню 31: проверка `ok`, одна ветка `catch` на все беды,
+уборка в `finally`. Переименуйте `catalog.json` — на странице будет
+«Не удалось загрузить каталог: сервер ответил 404».
+
+Если собирать проект по шагам, как мы, здесь ждёт сюрприз: функций
+`makeGenreButtons` и `render` ещё нет. Запустим как есть:
+
+```js
+error.textContent;   // "Не удалось загрузить каталог: makeGenreButtons is not defined"
+books.length;        // 8 — книги пришли, упала следующая строка
+```
+
+`catch` ловит не только беды сети, но и ошибки в нашем же коде — MDN называет
+это одним из достоинств промисов. Поэтому текст ошибки на странице — первое, что читают
+при любой странности. Пока разделы 9 и 10 не написаны, закомментируйте две строки
+с вызовами, и проверка шага пройдёт:
+
+```js
+[books.length, loading.hidden, error.textContent];   // [8, true, ""]
+```
+
+И состояние ошибки — переименуйте `catalog.json` и обновите страницу:
+
+```js
+[books.length, loading.hidden, error.textContent];
+// [0, true, "Не удалось загрузить каталог: сервер ответил 404"]
+```
+
+## 8. Одна книга — одна карточка {#card}
+
+<Scheme src="scheme-card.svg">Каждое поле книги — своя часть карточки; вид кнопки зависит от избранного</Scheme>
+
+```js
+function makeCard(book) {
+  const card = document.createElement("li");
+  const title = document.createElement("h3");
+  const info = document.createElement("p");
+  const star = document.createElement("button");
+
+  title.textContent = book.title;
+  info.textContent = `${book.author}, ${book.year} · ${book.genre}`;
+  star.textContent = favorites.includes(book.id) ? "★ в избранном" : "☆ в избранное";
+  star.classList.add("fav");
+
+  card.append(title, info, star);
+  card.classList.add("card");
+  card.classList.toggle("favorite", favorites.includes(book.id));
+  card.dataset.id = book.id;
+  return card;
+}
+```
+
+Это `makeItem` дня 29 с другим содержимым. Данные — только через
+`textContent`: названия пришли с сервера, и доверять им как разметке нельзя
+(день 25). Новое одно: карточка смотрит не только на книгу, но и на
+`favorites`, — от него зависят надпись на кнопке и класс `favorite`.
+
+```js
+makeCard(books[4]).outerHTML;
+// '<li class="card" data-id="5"><h3>Хоббит</h3><p>Джон Толкин, 1937 · фэнтези</p><button class="fav">☆ в избранное</button></li>'
+```
+
+А если книга в избранном, та же функция даёт другую карточку:
+
+```js
+favorites = [5];
+const hobbit = makeCard(books[4]);
+hobbit.className;                          // "card favorite"
+hobbit.querySelector(".fav").textContent;  // "★ в избранном"
+```
+
+## 9. Кнопки жанров из данных {#genres}
+
+Жанры можно было бы вписать в разметку, как фильтры дня 29. Но тогда новый жанр на
+сервере требовал бы правки страницы. Надёжнее собрать кнопки **из самих данных** —
+по одной на каждый жанр, который встретился:
+
+```js
+function makeGenreButtons() {
+  const names = ["все"];
+  books.forEach((book) => {
+    if (!names.includes(book.genre)) names.push(book.genre);
+  });
+  genres.append(...names.map((name) => {
+    const button = document.createElement("button");
+    button.textContent = name;
+    button.dataset.genre = name;
+    return button;
+  }));
+}
+```
+
+Список без повторов собирается знакомыми `forEach` и `includes`:
+жанр добавляем, только если его ещё нет. Порядок — в каком жанры встретились в файле.
+Вызывается функция один раз, после загрузки, — поэтому её и зовёт `load`,
+а не `render`. Из `render` она дописывала бы шесть кнопок после
+каждого действия: после первого же щелчка их стало бы двенадцать. Приём «без повторов»
+стоит запомнить отдельно — на маленьком примере:
+
+```js
+const names = ["все"];
+["роман", "повесть", "роман"].forEach((g) => {
+  if (!names.includes(g)) names.push(g);
+});
+names;   // ["все", "роман", "повесть"] — второй «роман» не добавился
+```
+
+Проверка шага на настоящих данных:
+
+```js
+[...genres.children].map((b) => b.textContent);
+// ["все", "повесть", "роман", "детектив", "фэнтези", "сказка"]
+```
+
+## 10. `render`: три условия {#render}
+
+<Scheme src="scheme-render.svg">isVisible пропускает книгу, только если она прошла все три проверки</Scheme>
+
+```js
+function isVisible(book) {
+  const text = `${book.title} ${book.author}`.toLowerCase();
+  if (!text.includes(query)) return false;
+  if (genre !== "все" && book.genre !== genre) return false;
+  if (onlyFavorites && !favorites.includes(book.id)) return false;
+  return true;
+}
+
+function render() {
+  const visible = books.filter(isVisible);
+  list.textContent = "";
+  list.append(...visible.map(makeCard));
+  empty.hidden = visible.length > 0;
+  counter.textContent = `Показано: ${visible.length} из ${books.length}`;
+  genres.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.genre === genre);
+  });
+  localStorage.setItem(KEY, JSON.stringify(favorites));
+}
+```
+
+В `isVisible` каждая проверка может только **отказать**:
+не подошла книга — `return false`, подошла — идём к следующей. `true`
+возвращается лишь в самом конце, когда пройдены все три. Поэтому условия сочетаются сами:
+поиск внутри жанра, избранное внутри поиска. Раздел 12 покажет, что бывает, если нарушить
+это правило. Функцию можно спросить напрямую:
+
+```js
+isVisible(books[4]);   // true — поиск пуст, жанр «все», флажок снят
+genre = "роман";
+isVisible(books[4]);   // false — «Хоббит» не роман
+genre = "все";
+```
+
+В `render` всё из дня 29 плюс две строки: «Ничего не нашлось» видно, только
+когда видимых книг ноль, а последней строкой избранное уходит в хранилище. Проверим
+`render` из консоли, не трогая ни одной кнопки:
+
+```js
+query = "толст";
+render();
+list.children.length;        // 1 — «Война и мир»
+
+query = "";
+genre = "фэнтези";
+render();
+counter.textContent;         // "Показано: 2 из 8"
+```
+
+И пустой результат — ветка, которая на обычных данных не срабатывает:
+
+```js
+query = "xyz";
+genre = "все";
+render();
+[empty.hidden, counter.textContent];   // [false, "Показано: 0 из 8"]
+```
+
+## 11. Поиск, жанры, избранное {#actions}
+
+Четыре слушателя — каждый по схеме дня 29: понять, что случилось, изменить данные,
+позвать `render`.
+
+```js
+search.addEventListener("input", () => {
+  query = search.value.trim().toLowerCase();
+  render();
+});
+
+genres.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  genre = button.dataset.genre;
+  render();
+});
+
+favoritesBox.addEventListener("change", () => {
+  onlyFavorites = favoritesBox.checked;
+  render();
+});
+
+list.addEventListener("click", (event) => {
+  if (!event.target.closest(".fav")) return;
+  const id = Number(event.target.closest(".card").dataset.id);
+  if (favorites.includes(id)) {
+    favorites = favorites.filter((f) => f !== id);   // было — убрать
+  } else {
+    favorites.push(id);                                // не было — добавить
+  }
+  render();
+});
+```
+
+Поиск слушает `input` — на каждую букву, как живой поиск дня 28. Строку
+сразу чистим `trim` и приводим к нижнему регистру: тогда «&nbsp;&nbsp;ХОББИТ »
+найдёт «Хоббит», ведь в `isVisible` текст книги тоже в нижнем регистре.
+Ждать паузу, как автосохранение дня 30, здесь не нужно: данные уже на странице, фильтр
+мгновенный. Пауза понадобилась бы, если бы каждая буква уходила запросом на сервер.
+
+Жанры — делегирование на абзац с кнопками. Флажок — событие `change` и его
+`checked` (день 28). Избранное — делегирование на список и знакомый мост
+«элемент → данные» через `data-id` и `Number`. Отметка работает как
+переключатель: номер есть — убираем через `filter`, нет — добавляем через
+`push`. Проверка шага: набрали «толст», щёлкнули «роман», отметили флажок —
+слушатели записали всё в данные:
+
+```js
+[query, genre, onlyFavorites];   // ["толст", "роман", true]
+```
+
+Переключатель можно записать и одной строкой — тернарным оператором (день 7) и
+`...` (день 22). Длиннее не значит хуже: выберите запись, которую легче читать.
+
+```js
+// внутри слушателя списка, вместо if...else:
+favorites = favorites.includes(id) ? favorites.filter((f) => f !== id) : [...favorites, id];
+```
+
+Теперь на чистой странице отметили «Хоббита» и «Преступление и наказание»:
+
+```js
+favorites;                                  // [5, 2]
+localStorage.getItem("catalog:favorites");  // "[5,2]"
+```
+
+Обновите страницу — обе карточки снова выделены: `favorites` прочитан из
+хранилища ещё до загрузки книг, и первый же `render` нарисовал звёзды.
+
+Почему в избранном только номера, а не книги целиком? Потому что книга уже есть в
+`books`, а вторая копия устарела бы при первой правке файла. Номер — ссылка:
+всё остальное о книге всегда берётся свежим с сервера. Тот же принцип, что и у
+`data-id` на карточке: хранить не копию, а указание, где найти.
+
+## 12. Разбор: поиск не работает при «все» {#bug-return}
+
+Частая первая версия `isVisible` — «сначала самое простое»:
+
+```js
+// так НЕ надо
+function isVisible(book) {
+  if (genre === "все") return true;            // «все» — значит, показываем
+  if (book.genre !== genre) return false;
+  if (onlyFavorites && !favorites.includes(book.id)) return false;
+  return `${book.title} ${book.author}`.toLowerCase().includes(query);
+}
+```
+
+**Шаг 1. Симптом.** Набрали «толст» при жанре «все» — видны все восемь книг,
+«Показано: 8 из 8». Выбрали «роман» — поиск вдруг заработал: одна книга. Флажок
+«Только избранное» при «все» тоже ничего не делает. Консоль подтверждает, что данные верны:
+
+```js
+[query, genre];          // ["толст", "все"] — поиск записан
+counter.textContent;     // "Показано: 8 из 8" — а фильтр его не учёл
+```
+
+**Шаг 2. Причина.** Первая же строка при «все» возвращает `true`,
+и до остальных проверок дело не доходит. `return` завершает функцию сразу —
+так было со дня 12. Разрешить раньше времени — значит пропустить все проверки ниже.
+
+**Шаг 3. Чиним.** Правило для функций-фильтров: каждая проверка только
+**отказывает**, а `true` — одной строкой в самом конце, как в
+разделе 10. Жанр «все» — это не «пропустить без проверок», а «проверку жанра
+пропустить»: `genre !== "все" && …`.
+
+## 13. Разбор: избранное пропадает {#bug-favorites}
+
+Вторая частая версия объявляет избранное, как все остальные данные:
+
+```js
+let favorites = [];   // так НЕ надо: хранилище не прочитано
+```
+
+**Шаг 1. Симптом.** Отметили «Хоббита», звезда горит. Обновили страницу —
+звезды нет.
+
+**Шаг 2. Что в хранилище?**
+
+```js
+localStorage.getItem("catalog:favorites");   // "[5]" — до обновления
+// обновили страницу:
+localStorage.getItem("catalog:favorites");   // "[]"
+```
+
+Данные не просто не прочитались — они **стёрты**. Пустой
+`favorites` дожил до первого `render`, а тот последней строкой записал
+его в хранилище поверх сохранённого.
+
+**Шаг 3. Чиним.** Читать хранилище при объявлении, как в разделе 4. И
+запомнить порядок: **сначала прочитать, потом записывать**. Код, который пишет
+раньше, чем прочитал, уничтожает данные молча.
+
+## 14. Разбор: ошибка есть, а «Загрузка…» висит {#bug-loading}
+
+Третья версия убирает «Загрузка…» там, где «всё получилось»:
+
+```js
+// так НЕ надо
+async function load() {
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`сервер ответил ${response.status}`);
+    books = await response.json();
+    makeGenreButtons();
+    render();
+    loading.hidden = true;             // только при успехе
+  } catch (err) {
+    error.textContent = `Не удалось загрузить каталог: ${err.message}`;
+  }
+}
+```
+
+**Шаг 1. Симптом.** Пока файл на месте, разницы не видно. Переименуем
+`catalog.json` — на странице одновременно «Загрузка…» и «Не удалось загрузить
+каталог: сервер ответил 404». Страница сама себе противоречит: и ждёт, и уже сдалась.
+
+```js
+[loading.hidden, error.textContent];
+// [false, "Не удалось загрузить каталог: сервер ответил 404"]
+```
+
+**Шаг 2. Причина.** После `throw` остаток `try` не
+выполняется, управление сразу уходит в `catch`. Строка с
+`loading.hidden` стояла в пропущенной части.
+
+**Шаг 3. Чиним.** Уборку, нужную при любом исходе, пишут в
+`finally` — ровно для этого он и существует (дни 30–31). Все три разбора в
+одной таблице, с четвёртой ошибкой, знакомой по дню 29:
+
+| Симптом | Причина | Где смотреть |
+| --- | --- | --- |
+| поиск и «Только избранное» не работают при «все» | ранний `return true` | первая строка `isVisible` |
+| после обновления избранное пусто, в хранилище `"[]"` | хранилище не прочитано | объявление `favorites` |
+| звезда не загорается, в хранилище `["5"]` | номер строкой, без `Number` | слушатель списка |
+| ошибка на странице, а «Загрузка…» висит | `loading.hidden` не в `finally` | конец `load` |
+
+## 15. Программа целиком {#whole}
+
+Соберём `app.js` в одном месте. Порядок частей: данные, элементы, показ,
+загрузка, действия, старт.
+
+```js
+// 1. Данные: книги придут с сервера, остальное — выбор человека
+const KEY = "catalog:favorites";
+let books = [];
+let favorites = JSON.parse(localStorage.getItem(KEY)) ?? [];   // номера избранных книг
+let query = "";
+let genre = "все";
+let onlyFavorites = false;
+
+// 2. Элементы страницы
+const search = document.querySelector("#search");
+const favoritesBox = document.querySelector("#only-favorites");
+const genres = document.querySelector(".genres");
+const loading = document.querySelector("#loading");
+const error = document.querySelector("#error");
+const list = document.querySelector("#books");
+const empty = document.querySelector("#empty");
+const counter = document.querySelector("#counter");
+
+// 3. Показ
+function makeCard(book) {
+  const card = document.createElement("li");
+  const title = document.createElement("h3");
+  const info = document.createElement("p");
+  const star = document.createElement("button");
+
+  title.textContent = book.title;
+  info.textContent = `${book.author}, ${book.year} · ${book.genre}`;
+  star.textContent = favorites.includes(book.id) ? "★ в избранном" : "☆ в избранное";
+  star.classList.add("fav");
+
+  card.append(title, info, star);
+  card.classList.add("card");
+  card.classList.toggle("favorite", favorites.includes(book.id));
+  card.dataset.id = book.id;
+  return card;
+}
+
+function makeGenreButtons() {
+  const names = ["все"];
+  books.forEach((book) => {
+    if (!names.includes(book.genre)) names.push(book.genre);
+  });
+  genres.append(...names.map((name) => {
+    const button = document.createElement("button");
+    button.textContent = name;
+    button.dataset.genre = name;
+    return button;
+  }));
+}
+
+function isVisible(book) {
+  const text = `${book.title} ${book.author}`.toLowerCase();
+  if (!text.includes(query)) return false;
+  if (genre !== "все" && book.genre !== genre) return false;
+  if (onlyFavorites && !favorites.includes(book.id)) return false;
+  return true;
+}
+
+function render() {
+  const visible = books.filter(isVisible);
+  list.textContent = "";
+  list.append(...visible.map(makeCard));
+  empty.hidden = visible.length > 0;
+  counter.textContent = `Показано: ${visible.length} из ${books.length}`;
+  genres.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.genre === genre);
+  });
+  localStorage.setItem(KEY, JSON.stringify(favorites));
+}
+
+// 4. Загрузка
+async function load() {
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`сервер ответил ${response.status}`);
+    books = await response.json();
+    makeGenreButtons();
+    render();
+  } catch (err) {
+    error.textContent = `Не удалось загрузить каталог: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+  }
+}
+
+// 5. Действия: понять → изменить данные → render()
+search.addEventListener("input", () => {
+  query = search.value.trim().toLowerCase();
+  render();
+});
+
+genres.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  genre = button.dataset.genre;
+  render();
+});
+
+favoritesBox.addEventListener("change", () => {
+  onlyFavorites = favoritesBox.checked;
+  render();
+});
+
+list.addEventListener("click", (event) => {
+  if (!event.target.closest(".fav")) return;
+  const id = Number(event.target.closest(".card").dataset.id);
+  if (favorites.includes(id)) {
+    favorites = favorites.filter((f) => f !== id);
+  } else {
+    favorites.push(id);
+  }
+  render();
+});
+
+// 6. Старт
+load();
+```
+
+Полный файл — 116 строк, короче списка дел: самую трудную работу делают
+`fetch`, `filter` и хранилище. Сценарий, где каждая ветка сработала:
+
+<ResultBox>
+| Что сделали | Что на странице |
+| --- | --- |
+| открыли | «Загрузка…», затем восемь карточек, «Показано: 8 из 8», шесть кнопок, выделена «все» |
+| «&nbsp;&nbsp;хоббит » | одна карточка «Хоббит» |
+| «ин» | пять карточек: слово есть в названии или у автора |
+| «xyz» | «Ничего не нашлось», «Показано: 0 из 8» |
+| жанр «роман» | «Преступление и наказание», «Война и мир» |
+| «☆» у «Хоббита» и «Преступления…» | обе карточки выделены, в хранилище `[5,2]` |
+| «Только избранное», жанр «фэнтези» | одна карточка «Хоббит», «Показано: 1 из 8» |
+| обновили страницу | восемь карточек, две выделены, флажок снят, жанр «все» |
+| `catalog.json` переименован | «Не удалось загрузить каталог: сервер ответил 404», «Загрузка…» исчезла |
+</ResultBox>
+
+### Крайние случаи
+
+| Случай | Что будет | Почему |
+| --- | --- | --- |
+| поиск «и» | все восемь книг | буква есть в каждом названии или имени |
+| поиск «ТОЛСТОЙ» | «Война и мир» | обе стороны в нижнем регистре |
+| книгу убрали из файла, а она в избранном | её номер лежит в хранилище, но карточки нет | избранное хранит номера, а не книги |
+| в хранилище испорченная строка | `app.js` падает на объявлении `favorites`, «Загрузка…» висит | `JSON.parse` стоит вне `try` |
+
+```js
+localStorage.setItem("catalog:favorites", "[99]");
+// обновили страницу:
+[favorites, list.querySelectorAll(".favorite").length];   // [[99], 0]
+```
+
+Последние две строки таблицы — честные недоработки. Первая безвредна: лишний номер
+ничему не мешает. Вторая опасна: страница перестаёт работать совсем. Защитить чтение хранилища —
+одно из сегодняшних заданий.
+
+### Что общего со списком дел
+
+|  | Список дел (день 29) | Каталог (день 32) |
+| --- | --- | --- |
+| откуда данные | в коде, потом в хранилище | с сервера |
+| что меняет человек | сами данные: дела | только свой выбор: поиск, жанр, избранное |
+| один объект → один элемент | `makeItem` | `makeCard` |
+| что показывать | `isVisible`: один фильтр | `isVisible`: три условия |
+| что помнит | все дела | номера избранных |
+
+## 16. Что дальше {#next}
+
+Мини-проекты закончились. Впереди — итоговый проект курса, четыре дня. На дне 33 вы
+придумаете своё приложение и разобьёте его на задачи, на дне 34 — соберёте, на дне 35 —
+доведёте и проверите на телефоне, на дне 36 — защитите. Каталог — хороший образец:
+данные с сервера, карточки, поиск и фильтры, память в хранилище. Многие итоговые проекты
+будут устроены так же, только с другими данными.
+
+### Как расширять каталог
+
+| Идея | Что понадобится |
+| --- | --- |
+| сортировка по году или названию | переменная `sort`, `toSorted` в `render` (день 20) |
+| защита от испорченного хранилища | `try...catch` вокруг чтения (день 11) |
+| поиск запоминается на время вкладки | `sessionStorage` (день 31) |
+| кнопка «Повторить» при ошибке | ещё раз вызвать `load` |
+| число избранных в заголовке вкладки | `document.title` в `render` (день 24) |
+
+<Ref>
+<p style={{margin: "0 0 8px"}}>Новых страниц нет — проект пользуется разобранными раньше:</p>
+
+| Страница | Где в проекте | День |
+| --- | --- | --- |
+| [fetch()](https://developer.mozilla.org/en-US/docs/Web/API/Window/fetch) | загрузка `catalog.json` | 31 |
+| [Response.ok](https://developer.mozilla.org/en-US/docs/Web/API/Response/ok) | 404 превращаем в ошибку | 31 |
+| [Response.json()](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) | тело ответа — массив книг | 31 |
+| [async function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function) | `load` | 31 |
+| [try...catch](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/try...catch) | ошибка загрузки, `finally` | 11, 31 |
+| [getItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/getItem) и [setItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/setItem) | избранное | 31 |
+| [JSON.parse](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/parse) | номера из хранилища | 23 |
+| [??](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing) | пустой массив при первом запуске | 7 |
+| [Array.includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/includes) | жанры без повторов, избранное | 19 |
+| [String.includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/includes) | поиск по тексту | 16 |
+| [Array.filter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter) | видимые книги, снятие отметки | 20 |
+| [createElement](https://developer.mozilla.org/en-US/docs/Web/API/Document/createElement) | карточки, кнопки жанров | 26 |
+| [closest](https://developer.mozilla.org/en-US/docs/Web/API/Element/closest) | от кнопки к карточке | 24 |
+| [dataset](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/dataset) | `data-id`, `data-genre` | 25 |
+| [input](https://developer.mozilla.org/en-US/docs/Web/API/Element/input_event) | поиск на каждую букву | 28 |
+</Ref>
+
+<Cheatsheet>
+```js
+// ПРИЛОЖЕНИЕ С ДАННЫМИ С СЕРВЕРА
+let books = [];                                             // придут позже
+let favorites = JSON.parse(localStorage.getItem(KEY)) ?? [];   // сначала прочитать!
+
+async function load() {                                     // три состояния
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`сервер ответил ${response.status}`);
+    books = await response.json();
+    render();                                               // первый показ — после данных
+  } catch (err) {
+    error.textContent = err.message;                        // ошибка
+  } finally {
+    loading.hidden = true;                                  // уборка в любом исходе
+  }
+}
+
+// ФИЛЬТР ИЗ НЕСКОЛЬКИХ УСЛОВИЙ: каждая проверка только отказывает
+function isVisible(book) {
+  if (!matchesSearch(book)) return false;
+  if (!matchesGenre(book)) return false;
+  return true;                                              // true — одной строкой в конце
+}
+
+// ПЕРЕКЛЮЧАТЕЛЬ В МАССИВЕ
+favorites = favorites.includes(id) ? favorites.filter((f) => f !== id) : [...favorites, id];
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Какие три состояния у страницы, которая ждёт сервер, и что человек видит в каждом?
+   <Answer>Загрузка — «Загрузка…»; данные — карточки и счётчик; ошибка — понятный текст.
+   «Загрузка…» убирается в `finally`, чтобы не остаться при ошибке.</Answer>
+2. Почему кнопки жанров строятся из данных, а не пишутся в разметке?
+   <Answer>Новый жанр на сервере сам получит кнопку, страницу править не придётся.
+   Разметка отвечает за раму, данные — за содержимое.</Answer>
+3. Почему в `isVisible` нельзя начинать с `if (genre === "все") return true`?
+   <Answer>`return` завершит функцию, и проверки поиска и избранного не
+   выполнятся. Каждая проверка должна только отказывать, а `true` —
+   в самом конце.</Answer>
+4. Что будет, если объявить `let favorites = [];` и не читать хранилище?
+   <Answer>После обновления избранное пусто, а первый `render` запишет
+   `[]` поверх сохранённого — данные потеряны. Сначала прочитать,
+   потом записывать.</Answer>
+5. Зачем поиску `toLowerCase` с обеих сторон?
+   <Answer>Чтобы регистр не мешал: «ТОЛСТОЙ» и «толстой» найдут «Лев Толстой». Приводим
+   к одному регистру и запрос, и текст книги.</Answer>
+6. Почему поиск здесь не ждёт паузу в наборе, как автосохранение дня 30?
+   <Answer>Данные уже на странице, фильтр работает мгновенно. Пауза нужна, когда каждая
+   буква уходила бы запросом на сервер.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" />

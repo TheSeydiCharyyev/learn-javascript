@@ -1,0 +1,995 @@
+---
+title: Day 11 — Iterating values and try...catch
+day: Day 11 • lesson 1
+heading: "Iterating values: for...of, for...in; try...catch"
+lead: Module “Conditions and loops” — the last day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #a16207; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #78350f; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- iterate over an array and a string with `for...of` without a counter;
+- iterate over the properties of an object with `for...in`;
+- explain why the two must not be confused;
+- catch an error with `try...catch` and not let the program crash;
+- throw your own error with `throw` and choose its type.
+</Goals>
+
+<Toc />
+
+## 1. Two jobs for today {#why}
+
+Today we close the module, and there are two jobs.
+
+**The first.** Yesterday we went through an array with the counter `i`. It works,
+but it is a lot of letters just to look at each element:
+
+```js
+for (let i = 0; i < marks.length; i++) {
+  console.log(marks[i]);
+}
+```
+
+There is a shorter form — `for...of`. We have already used it in the “Report card” without explaining it.
+It is time to explain it, and along the way to cover its twin `for...in`, which looks similar
+and does something completely different.
+
+**The second.** A debt from day 9: `try...catch` and `throw`.
+This is the second half of the control flow chapter — that very “try it, and if it breaks,
+do this”.
+
+## 2. The for...of loop {#forof}
+
+It takes the elements **by value**, without indexes and without a counter:
+
+```js
+const marks = [5, 4, 3];
+
+for (const mark of marks) {
+  console.log(mark);   // 5 4 3
+}
+```
+
+Compare it with yesterday’s form. Three things are gone: the declaration of the counter, the condition with
+`length` and the access `marks[i]`. Yesterday’s mistakes are gone with them —
+off-by-one, an extra pass, a forgotten step. There is simply nowhere to make them.
+
+<Important>
+The variable is declared with **`const`**, not `let`.
+We covered this on day 4: in `for...of` a **new** variable is created
+on every pass, and nobody changes it — so a constant fits.
+In an ordinary `for` there is one variable for the whole loop, and it needs `let`.
+</Important>
+
+`break` and `continue` work as yesterday:
+
+```js
+for (const mark of marks) {
+  if (mark === 2) {
+    continue;          // we skip the twos
+  }
+  if (mark === 5) {
+    break;             // we exit at the first five
+  }
+  console.log(mark);
+}
+```
+
+### And if you need a number
+
+What `for...of` does **not** have is the number of the element. This is its main
+limitation, and there are three ways around it.
+
+**The most honest one is to take an ordinary `for`.** Since you need an index, it is its
+job:
+
+```js
+for (let i = 0; i < marks.length; i++) {
+  console.log(`${i + 1}. ${marks[i]}`);
+}
+// 1. 5   2. 4   3. 3
+```
+
+**The second is to keep a counter alongside.** People write it this way when the index is needed rarely,
+and all the rest of the code reads better with `for...of`:
+
+```js
+let i = 0;
+for (const mark of marks) {
+  console.log(`${i + 1}. ${mark}`);
+  i++;                              // do not forget it!
+}
+```
+
+**The third is the `entries()` method**, which gives a pair
+“index and value” at once:
+
+```js
+for (const [index, mark] of marks.entries()) {
+  console.log(`${index + 1}. ${mark}`);
+}
+```
+
+The form `[index, mark]` is destructuring from day 22, and `entries()` is
+an array method that course 2 explains in detail. I am showing it now so that you recognize it in other people’s code: it is common
+and looks mysterious until you know what it is.
+
+<ProTip>
+The choice is simple. **If you always need the index, take `for`. If you do not need the index,
+take `for...of`.** The second way, with its own counter, is a compromise, and it has
+the same problem as `while` from day 10: you can forget `i++`.
+</ProTip>
+
+## 3. What can be iterated {#iterable}
+
+`for...of` does not work with just anything, only with what the documentation calls
+**iterable**. In Essentials these are three things:
+
+| What | What the loop gives |
+| --- | --- |
+| an array | the elements in order |
+| a string | the characters one by one |
+| `NodeList` — elements found on the page | the elements; day 24 |
+
+```js
+for (const letter of "Mary") {
+  console.log(letter);   // M a r y
+}
+```
+
+But **a plain object cannot be iterated** — and this is the first thing people trip over:
+
+```js
+const user = { name: "Aman", age: 17 };
+
+for (const value of user) {
+  console.log(value);
+}
+// TypeError: user is not iterable
+```
+
+The same with a number, `null` and `undefined`:
+
+```js
+for (const x of 42) { }          // TypeError: 42 is not iterable
+for (const x of null) { }        // TypeError: null is not iterable
+for (const x of undefined) { }   // TypeError: undefined is not iterable
+```
+
+The last two come up at work all the time: the data did not arrive, the variable is empty,
+and the loop crashes. Hence the habit of checking data *before* the loop — or catching the error,
+which we will learn in the second half of the lesson.
+
+## 4. The for...in loop {#forin}
+
+The second loop looks almost the same — it differs by one word. And it does something else: it goes through
+**the names of an object’s properties**.
+
+```js
+const user = { name: "Aman", age: 17, city: "Mary" };
+
+for (const key in user) {
+  console.log(key);            // name age city
+}
+```
+
+Notice: the loop gives **keys**, not values. To get a value,
+you take it by its key:
+
+```js
+for (const key in user) {
+  console.log(`${key}: ${user[key]}`);
+}
+// name: Aman
+// age: 17
+// city: Mary
+```
+
+The form `user[key]` is property access with brackets from day 3. A dot
+will not do here: `user.key` would look for a property named “key”, but we need what
+lies *in the variable* `key`. We will cover objects in detail on day 21.
+
+## 5. Why they get confused {#confuse}
+
+Both loops can be set on an array — and this is where the confusion starts:
+
+<Scheme src="scheme-confuse.svg">The same array, the same form — different results</Scheme>
+
+```js
+const marks = [5, 4, 3];
+
+for (const x of marks) { console.log(x, typeof x); }
+// 5 "number"  4 "number"  3 "number"
+
+for (const x in marks) { console.log(x, typeof x); }
+// "0" "string"  "1" "string"  "2" "string"
+```
+
+<Mistake>
+Keys are **strings**, even for an array. So arithmetic with them gives
+something other than you expect:
+
+```js
+for (const i in marks) {
+  console.log(i + 1);     // "01", "11", "21" — joining, not adding!
+}
+```
+
+Remember day 6: plus with a string joins. To get a number, you need
+`Number(i) + 1`. Or simply do not use `for...in` for arrays.
+</Mistake>
+
+## 6. The traps of for...in {#forintraps}
+
+Besides the string keys, `for...in` has two more features that make it
+a bad choice for arrays.
+
+**The first: it sees all the properties, not only the indexes.** An array is an object
+(day 3), and if someone added an ordinary property to it, the loop will show it too:
+
+```js
+const marks = [5, 4];
+marks.meta = "exam";
+
+for (const key in marks) {
+  console.log(key);      // "0", "1", "meta"  ← where did the third one come from?
+}
+
+for (const value of marks) {
+  console.log(value);    // 5, 4  ← and here all is as it should be
+}
+```
+
+**The second: it skips holes.** If an array has unfilled places —
+those sparse arrays from day 3 — `for...in` will not show them,
+while `for...of` will show them as `undefined`:
+
+```js
+const a = [1];
+a[5] = 6;                      // four empty places between them
+
+for (const k in a) { }         // "0", "5" — two of them
+for (const v of a) { }         // 1, undefined × 4, 6 — six of them
+```
+
+<Important>
+The rule is simple and almost without exceptions: **`for...in` is for objects,
+`for...of` is for arrays and strings**. If you are tempted to write
+`for...in` over an array, you almost certainly need an ordinary `for`
+with an index.
+</Important>
+
+### What replaces for...in
+
+Since `for...in` has so many caveats, a question arises: is it needed at all?
+For objects — yes, but even there it has a rival. The `Object.keys` method gives
+the keys as an ordinary array, which is then iterated with `for...of`:
+
+```js
+const user = { name: "Aman", age: 17 };
+
+for (const key in user) {              // version 1
+  console.log(key, user[key]);
+}
+
+for (const key of Object.keys(user)) { // version 2 — the same thing
+  console.log(key, user[key]);
+}
+
+console.log(Object.keys(user));        // ["name", "age"]
+console.log(Object.values(user));      // ["Aman", 17]
+```
+
+Why the second version is better: `Object.keys` takes **only the object’s own**
+properties, while `for...in` also looks into inherited ones. In simple code
+there will be no difference, but as soon as classes appear (course 2), it will become noticeable.
+
+And `Object.values` saves you from `user[key]` altogether if you do not need
+the keys. All these methods in detail are on day 21.
+
+<ProTip>
+A practical rule for today: **you must know `for...in`** —
+it appears in any code, and without it you cannot read someone else’s program. **Writing it
+in your own code is up to you**: `Object.keys` with `for...of`
+is more reliable and reads just as well.
+</ProTip>
+
+## 7. Which loop for what {#whichloop}
+
+Now we have five loops. Here is the whole picture in one table:
+
+| Loop | What it gives | When to take it |
+| --- | --- | --- |
+| `for` | a counter | you need an index, the step is not one, you go backward |
+| `for...of` | values | simply go through an array or a string |
+| `for...in` | the keys of an object | go through the properties of an object |
+| `while` | — | the number of passes is unknown |
+| `do...while` | — | the body must run at least once |
+
+By how often they appear in real code: first place goes to `for...of`, second to
+`for`, and the rest far behind. And on day 20 array methods will appear,
+which will push even `for...of` aside.
+
+## 8. Three iteration errors {#iterErrors}
+
+| What was written | The message in Chrome |
+| --- | --- |
+| `for (const x of user)` over an object | `TypeError: user is not iterable` |
+| `for (const v = 1 of arr)` | `SyntaxError: for-of loop variable declaration may not have an initializer` |
+| `for (let k = 0 in obj)` | `SyntaxError: for-in loop variable declaration may not have an initializer` |
+
+The first is the most common, and it happens **while the program runs**: so the file
+ran, and it crashed only on the data. Usually the cause is an empty variable instead of an array.
+
+The other two are syntax errors: in the header of these loops the variable cannot be given a start
+value, because the loop assigns it by itself on every pass.
+
+<Mistake>
+The third has a historical oddity that the documentation also warns about.
+The form `for (var k = 0 in obj)` is **a leftover from old versions of the language**.
+In normal mode it does not crash but simply ignores `= 0`:
+
+```js
+for (var k = 0 in { a: 1, b: 2 }) {
+  console.log(k);   // "a", "b" — it works, the initializer is ignored
+}
+```
+
+You will see the error only in strict mode or if you write `let` instead of
+`var`. One more argument for both.
+</Mistake>
+
+## 9. try...catch: catching an error {#trycatch}
+
+Let us move on to the second topic. We know from day 5: when the engine cannot do something,
+it throws an error, and the program stops. Sometimes this must not be allowed.
+
+```js
+const text = "{this is not JSON}";
+const data = JSON.parse(text);   // SyntaxError — and that is it, the program is dead
+console.log("we will not get here");
+```
+
+The `try...catch` construct lets you intercept an error and go on working:
+
+```js
+try {
+  const data = JSON.parse(text);
+  console.log(data);
+} catch (error) {
+  console.log("Could not parse the data");
+}
+
+console.log("but we will get here");   // runs in any case
+```
+
+<Scheme src="scheme-trycatch.svg">An error in `try` does not kill the program but moves it to `catch`</Scheme>
+
+The key detail: **on an error the rest of the `try` block does not run**.
+Control jumps to `catch` immediately, from the very line where it broke.
+
+In the parentheses after `catch` is a variable that receives the error itself. Any name works;
+people usually write `e` or `error`. It has useful properties:
+
+```js
+try {
+  JSON.parse("{bad}");
+} catch (error) {
+  console.log(error.name);      // "SyntaxError" — the type of the error
+  console.log(error.message);   // the text: what exactly is wrong
+  console.log(error.stack);     // where it happened, line by line
+}
+```
+
+If you do not need the error, you can leave out the parentheses altogether:
+
+```js
+try {
+  JSON.parse(text);
+} catch {
+  console.log("it did not work");
+}
+```
+
+### How to read stack
+
+We have mentioned the `stack` property since day 3 but never covered it. And it is the most
+useful part of an error: it shows **the whole path of calls** by which
+the program got to the breakdown.
+
+Take a file `app.js` of four lines — three functions call each other, and the deepest
+one breaks:
+
+```js
+function level3() { throw new RangeError("it broke"); }
+function level2() { level3(); }
+function level1() { level2(); }
+level1();
+```
+
+A page with this file, opened through Live Server, will print this stack in the console:
+
+```plain-out
+RangeError: it broke
+    at level3 (http://127.0.0.1:5500/app.js:1:27)
+    at level2 (http://127.0.0.1:5500/app.js:2:21)
+    at level1 (http://127.0.0.1:5500/app.js:3:21)
+    at http://127.0.0.1:5500/app.js:4:1
+```
+
+The numbers after the file name are the line and the character. `1:27` points right at
+`new RangeError`: that is where the error was created.
+
+It is read **from top to bottom, from the place of the breakdown to the start**:
+
+- the top line is where the error *happened*: the function `level3`,
+  line 1;
+- each next line is who called the previous one;
+- the bottom line is where it all began: the file itself, line 4.
+
+<ProTip>
+The practice of reading a stack is this. **The top line says “what broke”,
+and the one you need is usually the second or third — “why bad data got there”**.
+If `level3` crashed on `undefined`, you should fix not it
+but whoever passed `undefined`.
+\
+\
+And also: a stack sometimes has lines from other people’s libraries — you can skip them. Look
+for **your own files**; they are usually closer to the bottom.
+</ProTip>
+
+In the browser the stack is shown the same way, and every line is clickable — as we covered
+on day 3. One click, and you are in the right function on the right line.
+
+## 10. finally {#finally}
+
+The third, optional block. It runs **always** — both when there was no error
+and when there was one:
+
+```js
+try {
+  console.log("try");
+  throw new Error("it broke");
+} catch (e) {
+  console.log("catch");
+} finally {
+  console.log("finally");
+}
+// try, catch, finally
+
+// and without an error:
+// try, finally
+```
+
+What it is for: to clean up regardless of the outcome. Remove the “Loading…” text,
+close a connection, unlock a button. Such code must run in any case,
+and writing it twice — at the end of `try` and at the end of `catch` — is bad.
+
+```js
+function load() {
+  showSpinner();                    // we showed “Loading…”
+
+  try {
+    const data = fetchData();
+    render(data);
+  } catch (e) {
+    showError("Could not load");
+  } finally {
+    hideSpinner();                  // removed it — whether it worked or not
+  }
+}
+```
+
+Without `finally` you would have to call `hideSpinner()` twice. And if you
+forget one of the two, the “Loading…” text will hang there forever. This is exactly what
+stuck spinners on websites look like: someone forgot to remove one in the error branch.
+
+We will cover real data loading on day 31, but now you will recognize the technique.
+
+<Mistake>
+One oddity worth knowing in advance: `return` in `finally`
+**overrides** the `return` from `try`.
+
+```js
+function f() {
+  try {
+    return "from try";
+  } finally {
+    return "from finally";   // this one wins
+  }
+}
+f();   // "from finally"
+```
+
+It looks like a trap — that is why people do not write `return` in `finally`.
+Its job is to clean up, not to return values.
+</Mistake>
+
+## 11. throw: throwing your own {#throw}
+
+Errors are thrown not only by the engine — you can do it too. For this there is `throw`:
+
+```js
+function checkMark(mark) {
+  if (mark < 2 || mark > 5) {
+    throw new RangeError(`mark ${mark} is out of range`);
+  }
+  return mark;
+}
+```
+
+`throw` stops the function immediately — like `return`, only
+as an “emergency”. Control goes to the nearest `catch`, and if there is none, the program
+stops with a red message in the console.
+
+You can throw anything, even a string. But **people do not do that**:
+
+<Compare>
+<Wrong label="Bad">
+```js
+throw "something is wrong";
+
+// in catch:
+e.name      // undefined
+e.message   // undefined
+e.stack     // undefined
+```
+</Wrong>
+
+<Right label="Good">
+```js
+throw new Error("something is wrong");
+
+// in catch:
+e.name      // "Error"
+e.message   // "something is wrong"
+e.stack     // where it happened
+```
+</Right>
+</Compare>
+
+An `Error` object carries a name, a text and a place with it — without these,
+debugging turns into guessing.
+
+### Where a thrown error flies
+
+The most important thing about `throw`: the error does not stay in the function where it happened.
+It **goes up the chain of calls** until it meets a
+`catch`. If it does not meet one, the program stops.
+
+<Scheme src="scheme-throw.svg">An error looks for the nearest `catch` up the calls, not next to itself</Scheme>
+
+Let us check it with code — the order of the messages speaks for itself:
+
+```js
+function level3() {
+  console.log("level3 started");
+  throw new RangeError("it broke deep down");
+}
+
+function level2() {
+  console.log("level2 started");
+  level3();
+  console.log("level2 finished");     // will not run!
+}
+
+function level1() {
+  console.log("level1 started");
+  try {
+    level2();
+  } catch (e) {
+    console.log("level1 caught:", e.name);
+  }
+  console.log("level1 finished");
+}
+
+level1();
+// level1 started
+// level2 started
+// level3 started
+// level1 caught: RangeError
+// level1 finished
+```
+
+Notice what is **not** in the output: the line “level2 finished”. The error
+threw us out of `level3` and `level2` at once, without letting them finish.
+
+<ProTip>
+Hence an important conclusion about where to put `try`. It does not have to be next
+to the dangerous line — it is put where **you know what to do with the error**.
+A function that just calculates should not show messages to the user: it throws
+an error, and the one who called it and knows how to react catches it.
+</ProTip>
+
+## 12. Error types and instanceof {#errortypes}
+
+`Error` has ready-made kinds — the very ones we have met since day 4:
+
+| Type | When it is thrown |
+| --- | --- |
+| `Error` | the general case, when nothing else fits |
+| `TypeError` | a value of the wrong type |
+| `RangeError` | a number outside the allowed limits |
+| `SyntaxError` | text that breaks the rules — thrown mostly by the engine |
+| `ReferenceError` | a name does not exist — also the engine |
+
+```js
+throw new TypeError("a mark must be a number");
+throw new RangeError("the mark is out of the range 2–5");
+```
+
+Why choose a type if the text is your own anyway? Because by the type you can **tell
+errors apart in `catch`** — with the `instanceof` operator:
+
+```js
+try {
+  checkMark(mark);
+} catch (e) {
+  if (e instanceof RangeError) {
+    console.log("Fix the mark:", e.message);
+  } else if (e instanceof TypeError) {
+    console.log("This is not a number:", e.message);
+  } else {
+    throw e;               // rethrow an error that is not ours
+  }
+}
+```
+
+<Important>
+The last line matters. ***All* errors from `try` get into `catch`**
+— not only the ones you were expecting. If you caught something
+unfamiliar, it is more honest to throw it further than to swallow it silently: otherwise a real breakdown
+will hide under your message.
+</Important>
+
+The language has no separate “conditional catch”, so such a fork inside `catch` is
+common practice.
+
+You can also tell the type apart without `instanceof` — by the `name` property:
+
+```js
+if (e.name === "RangeError") { }     // the same as instanceof
+```
+
+The difference is subtle: `instanceof` also works for “descendants” of a type, while comparing
+the name works only for an exact match. In Essentials both forms are equal; take the one
+that is clearer.
+
+And one more possibility that will come in handy: **you can add your own fields
+to an error object** — it is an ordinary object after all (day 3):
+
+```js
+const error = new Error("there is no such mark");
+error.mark = 9;                      // our own field
+throw error;
+
+// and in catch:
+console.log(e.message, e.mark);      // "there is no such mark" 9
+```
+
+This is how details that do not fit into the message text are passed to `catch`:
+which value let you down, which line of the file, which record number.
+
+### throw or return null
+
+When a function cannot do its job, it has two ways to report it. We have used
+both: on day 8 the function `toMark` returned `null`, and today
+`checkMark` throws an error. How do they differ?
+
+<Compare>
+<Wrong label="return null">
+```js
+function toMark(input) {
+  const n = Number(input);
+  if (Number.isNaN(n)) {
+    return null;
+  }
+  return n;
+}
+
+const m = toMark("five");
+if (m === null) {
+  // we deal with it
+}
+```
+</Wrong>
+
+<Right label="throw">
+```js
+function checkMark(mark) {
+  if (mark < 2 || mark > 5) {
+    throw new RangeError("out of range");
+  }
+  return mark;
+}
+
+try {
+  checkMark(9);
+} catch (e) {
+  // we deal with it
+}
+```
+</Right>
+</Compare>
+
+The difference is **whether you can miss the problem**. A returned
+`null` is easy to ignore: you forgot the check — and `null` travels on
+through the program, breaking something in another place. A thrown error cannot be ignored:
+either you catch it, or the program stops.
+
+| When | How to report it |
+| --- | --- |
+| “not found” — an ordinary, expected outcome | `return null` |
+| bad input from the user | `return null` and a message |
+| the function’s contract is broken: it was given something other than promised | `throw` |
+| you cannot go on, and there is nothing to fix | `throw` |
+
+A rough rule: **`null` is for “this happens”, `throw` is
+for “this must not happen”**. A user who typed “five” instead of a digit is
+“this happens”. And a function that was slipped `undefined` instead of an array is
+“this must not happen”.
+
+## 13. When to catch and when not to {#whencatch}
+
+The main question of the day: where to put `try...catch`? The rule from day 9
+still holds, and it is the main one.
+
+<ProTip>
+**`try...catch` is not a replacement for checks.** What can be checked
+with a condition is checked with a condition. `try` is taken for what cannot be checked:
+parsing someone else’s data, a request to a server, working with a file.
+</ProTip>
+
+<Compare>
+<Wrong label="Do not">
+```js
+try {
+  const half = total / count;
+} catch (e) { }
+
+try {
+  console.log(user.name);
+} catch (e) { }
+```
+
+Both cases can be checked with a condition. Besides, division by zero does not throw
+an error at all — the `catch` will never work.
+</Wrong>
+
+<Right label="Do">
+```js
+try {
+  const data = JSON.parse(text);
+} catch (e) {
+  showError("bad data");
+}
+```
+
+Whether a string “can be parsed” can only be checked by trying to parse it.
+Here `try` is in its place.
+</Right>
+</Compare>
+
+And the second rule: **an empty `catch` is almost always a mistake**.
+
+```js
+try {
+  risky();
+} catch (e) { }      // the error vanished without a trace
+```
+
+The program will pretend that everything is fine, and the data will turn out wrong. The minimum that must
+be in `catch` is a message to the console. Better — a clear message to the user
+and a fallback scenario.
+
+Here is a list of places where `try` is really needed. It is short, and that is no accident:
+
+| Where | Why it cannot be checked in advance | When we cover it |
+| --- | --- | --- |
+| `JSON.parse` | whether a string is valid is found out only by trying to parse it | day 23 |
+| a request to a server | the network can drop at any moment | day 31 |
+| reading the browser storage | it may be turned off in the settings | day 31 |
+| someone else’s function from a library | you do not know what is inside it | as they come up |
+| your own function with `throw` | you decided yourself to report errors this way | **today** |
+
+Everything else — division, property access, type conversion — is checked with a condition.
+If you are tempted to wrap ordinary arithmetic in `try`, most likely you are hiding the problem
+rather than solving it.
+
+## 14. The “Report card”: data from outside {#tabel}
+
+Let us put both of today’s tools together. Imagine that the student’s data comes as a string —
+from a file or from a server, as it will on day 31.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+
+const raw = `{"name": "Aman", "marks": [5, 4, 9, 3, 5]}`;
+
+function parseStudent(text) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    console.log("Could not read the data:", e.name);
+    return null;                    // we honestly say: it did not work
+  }
+}
+
+function checkMark(mark) {
+  if (typeof mark !== "number" || Number.isNaN(mark)) {
+    throw new TypeError(`a mark must be a number, got: ${mark}`);
+  }
+  if (mark < MIN_MARK || mark > MAX_MARK) {
+    throw new RangeError(`mark ${mark} is out of the range ${MIN_MARK}–${MAX_MARK}`);
+  }
+  return mark;
+}
+
+const student = parseStudent(raw);
+
+if (student !== null) {
+  let sum = 0;
+  let count = 0;
+
+  for (const mark of student.marks) {        // for...of — over values
+    try {
+      sum += checkMark(mark);
+      count++;
+    } catch (e) {
+      console.log(`Skipped: ${e.message}`);
+    }
+  }
+
+  console.log(`${student.name}: ${count} marks, average ${(sum / count).toFixed(2)}`);
+
+  console.log("Object fields:");
+  for (const key in student) {               // for...in — over properties
+    console.log(`  ${key}: ${student[key]}`);
+  }
+}
+```
+
+<ResultBox>
+Skipped: mark 9 is out of the range 2–5\
+Aman: 4 marks, average 4.25\
+Object fields:\
+&nbsp;&nbsp;name: Aman\
+&nbsp;&nbsp;marks: 5,4,9,3,5
+</ResultBox>
+
+Three places are worth taking apart.
+
+**`try` stands inside the loop, not outside.** This matters: if you wrap
+the whole loop, the very first bad mark will break off the iteration, and the rest will not be checked.
+This way a bad mark is skipped, and the loop goes on.
+
+**`parseStudent` returns `null` on failure.**
+We covered this on day 5: `null` means “empty on purpose”. The calling code
+checks the result and decides what to do. This way the function does not have to know how to show errors.
+
+**`for...in` over `student` showed `marks` as a string.**
+This is not a mistake — the template literal turned the array into `"5,4,9,3,5"` by the rules
+of day 8. For a nice output, the array has to be gone through separately.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Spoil the `raw` string — remove the quotes around
+`"name"`. The program should say “Could not read the data: SyntaxError”
+and not crash.
+\
+\
+**The second.** Add the string `"five"` to the array of marks and see
+which of the two messages works.
+\
+\
+**The third.** Move `try` outside, wrapping the whole loop, and explain
+why the average changed.
+</TryIt>
+
+## 15. Common mistakes of the day {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `for...of` over an object | an object cannot be iterated | `for...in` or `Object.keys` (day 21) |
+| `for...in` over an array | gives string keys and extra properties | `for...of` or an ordinary `for` |
+| `i + 1` in `for...in` | the key is a string, you get joining | `Number(i) + 1` |
+| an empty `catch` | the error vanishes without a trace | at least `console.error` |
+| `throw "text"` | no `name`, `message`, `stack` | `throw new Error("text")` |
+| `try` around the whole loop | the first error breaks off the iteration | `try` inside the loop |
+| `try` instead of a condition | hides what can be checked | `if` where you can check |
+
+## 16. What comes next {#next}
+
+The module “Conditions and loops” is closed — days 9, 10 and 11. Now the program can do everything it needs:
+choose a road, repeat actions, go through data and not crash on bad data.
+
+| Day | Topic | What stays with you |
+| --- | --- | --- |
+| 9 | Conditions | `if`, the ladder, `switch`, checking at the boundaries |
+| 10 | Loops | `for`, `while`, `break`, `continue`, five techniques |
+| 11 | Iteration and errors | `for...of`, `for...in`, `try...catch`, `throw` |
+
+Tomorrow a new module begins — **“Functions”**. On day 12 we will cover how
+to gather code into named pieces: declaration, parameters, `return`. We have already written
+functions — there are two of them in today’s “Report card” — but we have never explained them.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [for...of](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for...of) | iterating values: arrays, strings | <Full /> |
+| [for...in](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for...in) | iterating property names; keys are strings | <Full /> |
+| [try...catch](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/try...catch) | catching an error; the `finally` block | <Full /> |
+| [throw](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/throw) | throw your own error | <Full /> |
+| [Error: not iterable](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/is_not_iterable) | `TypeError: x is not iterable` | <Brief /> |
+| [Error: an initializer in for...of](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_for-of_initializer) | the variable cannot be given a value in the header | <Brief /> |
+| [Error: an initializer in for...in](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_for-in_initializer) | the same; in normal mode with `var` it is silently ignored | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+for (const value of marks) { }    // VALUES — arrays, strings
+for (const key in user) { }       // the KEYS of an object, always STRINGS
+user[key];                        // the value by key — with brackets
+
+// for...of does not work with an object, a number, null, undefined:
+// TypeError: x is not iterable
+
+// for...in over an array: keys as strings, sees extra properties,
+// skips holes — we do not use it for arrays
+
+try {
+  JSON.parse(text);
+} catch (e) {
+  e.name;      // "SyntaxError"
+  e.message;   // the text
+  e.stack;     // where
+} finally {
+  // always runs
+}
+
+try { /* … */ } catch { /* … */ }   // without a parameter — allowed
+
+throw new Error("text");          // not throw "text"!
+throw new TypeError("not a number");
+throw new RangeError("out of range");
+
+if (e instanceof RangeError) { } else { throw e; }   // rethrow what is not ours
+
+// try — for what cannot be checked (parsing, network, files)
+// if  — for everything that can be checked
+// an empty catch = the error vanished without a trace
+// try inside the loop, not around it
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. What does `for...in` give over the array `[5, 4, 3]`, and what type
+   are the values?
+   <Answer>The keys `"0"`, `"1"`, `"2"` — and they are all
+   **strings**, not numbers. That is why `i + 1` gives
+   `"01"`, not 1.</Answer>
+2. Why does `for (const v of user)` over a plain object crash?
+   <Answer>A plain object is not iterable: it has no order of values.
+   You get `TypeError: user is not iterable`. For objects there is
+   `for...in`.</Answer>
+3. What runs if an error happened in `try` on the second line out of five?
+   <Answer>The first line, then `catch` right away, then `finally`,
+   if there is one. Lines three to five are skipped completely.</Answer>
+4. Why is `throw new Error("x")` better than `throw "x"`?
+   <Answer>An `Error` object has `name`, `message`
+   and `stack` — the type of the error, the text and the place. A string has nothing,
+   and debugging turns into guessing.</Answer>
+5. Why is it better to put `try` inside a loop rather than around it?
+   <Answer>An error breaks off the whole `try` block. If it covers the whole loop,
+   the very first bad element will break off the iteration, and the rest will not be processed.
+   Inside the loop, a bad element is simply skipped.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/for...of" />

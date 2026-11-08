@@ -1,0 +1,905 @@
+---
+title: "Day 27 — Events: listeners, the event object, bubbling"
+day: Day 27 • lesson 1
+heading: "Events: listeners, the event object, bubbling"
+lead: Module “DOM and events”, the fourth day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+---
+
+<Goals>
+- add listeners to elements and remove them;
+- read from the event object what happened and where;
+- respond to mouse clicks and key presses;
+- explain bubbling and tell `target` from `currentTarget`;
+- serve many elements with one listener — by delegation;
+- cancel the browser’s action and stop bubbling;
+- give every row of the “Report card” a “Delete” button.
+</Goals>
+
+<Toc />
+
+## 1. A page that responds {#why}
+
+For three days the page changed by itself: the code ran on load, and that was it. Now it will start
+**responding** to a person. A click, a key press, the end of loading — all of these are
+**events**: the browser reports that something happened. The code subscribes
+to the event it needs and gets a call when the event happens.
+
+The study page is yesterday’s, with two additions at the end of `main`:
+
+```html
+<button id="hello">Say hello</button>
+<p id="log"></p>
+```
+
+```js
+const button = document.querySelector("#hello");
+const log = document.querySelector("#log");
+
+button.addEventListener("click", () => {
+  log.textContent = "Salam!";
+});
+```
+
+Click the button — “Salam!” appears below it. Everything we know about the page
+can now be done **in response** to a person’s action: finding (day 24),
+changing (day 25), creating and removing (day 26).
+
+Put this code into `app.js`, and write the examples of the sections in the console. The examples
+of one section continue each other, and before each new section reload the page
+(<Kbd>F5</Kbd>): only the listener from `app.js` will remain.
+
+A function that responds to an event is called a **listener** or
+a **handler**. It waits for its moment: the line with
+`addEventListener` runs at once, while the function itself runs only on a click,
+and as many times as people click.
+
+There are hundreds of events in a browser: the MDN guide “DOM events” lists them by kind —
+from animations to networking. In this course a few are enough for us:
+
+| Kind | Events | When we cover it |
+| --- | --- | --- |
+| mouse and touch | `click`, `mousedown`, `mouseup`, `contextmenu` | today |
+| keyboard | `keydown`, `keyup` | today |
+| focus | `focus`, `blur` | today, briefly |
+| loading | `DOMContentLoaded`, `load` | today |
+| forms | `input`, `change`, `submit` | tomorrow |
+
+## 2. `addEventListener` {#listen}
+
+Everything that can receive events has this method — the `EventTarget` interface.
+It is the very top level of the lineage from day 25: elements,
+`document` and `window` all have it. There are two arguments: the **event name**
+as a string and a **function**.
+
+```js
+function greet(event) {
+  console.log("clicked:", event.type);
+}
+
+button.addEventListener("click", greet);   // we pass the function, we do not call it!
+```
+
+The main mistake of the first week is parentheses after the function name:
+
+```js
+button.addEventListener("click", greet());
+// TypeError: Cannot read properties of undefined (reading 'type')
+```
+
+The parentheses **called** `greet` at once, on load — without any
+event. Inside it `event` was `undefined`, and reading
+`event.type` crashed. If the function did not touch `event`, it would be worse:
+no error, its result — `undefined` — would go to the listeners, and a click would silently
+do nothing.
+
+The event name is written without the `on` prefix and in lowercase: case matters.
+Listeners for `"onclick"` or `"Click"` will never fire —
+the browser sends no such events, and again there will be no error.
+
+One element can have any number of listeners; they are called in the order they were
+added. But one and the same function cannot be added twice: a second call to
+`addEventListener` with the same name and the same function adds nothing.
+
+```js
+button.addEventListener("click", () => console.log("A"));
+button.addEventListener("click", () => console.log("B"));
+// click: “clicked: click” from greet above, then A, then B
+
+button.addEventListener("click", greet);
+button.addEventListener("click", greet);   // greet is already there — it is not added a second time
+```
+
+### Walkthrough: the button does not respond
+
+You click — nothing. There is no error in the console. We check in order, from simple to complex.
+
+**Step 1. Was the element found?** A typo in the selector — and instead of the button
+there is `null`. Then there will be an error after all, but on load, not on the click, and it
+is easy to miss:
+
+```js
+document.querySelector("#helo").addEventListener("click", greet);
+// TypeError: Cannot read properties of null (reading 'addEventListener')
+```
+
+**Step 2. Is the listener added?** The Chrome console has a helper that
+shows an element’s listeners. This is a feature of Chrome itself, not of the language:
+
+```js
+getEventListeners(button);   // {click: Array(4)} — from app.js, greet, A and B
+```
+
+The same is visible in the Elements tab, on the Event Listeners pane on the right.
+
+**Step 3. The event name and the function.** `"click"` in lowercase
+and without `on`; the function passed without parentheses. These two mistakes give no messages
+at all, so they are checked by eye.
+
+## 3. The event object {#event}
+
+A listener gets one argument — the **event object**. It is usually called
+`event` or, shorter, `e`. It holds everything about what happened:
+
+```js
+button.addEventListener("click", (event) => {
+  event.type;        // "click" — what happened
+  event.target;      // <button id="hello">Say hello</button> — with what
+  event.timeStamp;   // for example 1234.5 — when: milliseconds since the page opened
+  event.isTrusted;   // true — the event comes from a person, not from code
+});
+```
+
+All events have a common part — the `Event` interface. Different kinds of events
+add their own properties to it: the mouse — coordinates, the keyboard — the key.
+
+| Event | Object | Its own main properties |
+| --- | --- | --- |
+| `click` | `PointerEvent`, a descendant of `MouseEvent` | `clientX`, `clientY`, `button` |
+| `keydown`, `keyup` | `KeyboardEvent` | `key`, `code` |
+| `DOMContentLoaded`, `load` | `Event` | only the common part |
+
+All the properties at once can be seen in the console:
+
+```js
+button.addEventListener("click", (event) => console.log(event));
+// PointerEvent {isTrusted: true, … } — expand the arrow, all the properties are there
+```
+
+This is the fastest way to find out what an unfamiliar event has at all: print it
+and look.
+
+A technique: the `timeStamp` of two events can be subtracted to find out how much time passed between them.
+
+```js
+let last = 0;
+button.addEventListener("click", (event) => {
+  if (last) console.log("elapsed", Math.round(event.timeStamp - last), "ms");
+  last = event.timeStamp;
+});
+// second click: elapsed 138 ms — your number will be different
+```
+
+This is how games measure reaction speed, and how forms filter out an accidental double click.
+
+## 4. A click and `MouseEvent` {#mouse}
+
+The `click` event comes when the main mouse button was pressed and released over
+an element. But not only then: a finger tap and pressing <Kbd>Enter</Kbd> or
+<Kbd>Space</Kbd> on a focused button are also `click`.
+That is why buttons that listen for `click` work without a mouse too.
+
+```js
+button.addEventListener("click", (event) => {
+  console.log(event.clientX, event.clientY, event.button);
+});
+// for example: 43 264 0 — the click coordinates and the button number
+```
+
+`clientX` and `clientY` are the coordinates of the click point in pixels from
+the top left corner of the **visible part** of the window, not of the whole page: a click
+at the left edge of the window always gives a `clientX` of 0, however far the page
+is scrolled. `button` is the number of the mouse button:
+
+| `button` | Button | Which events |
+| --- | --- | --- |
+| 0 | the main one, usually the left | `mousedown`, `mouseup`, `click` |
+| 1 | the middle one, the wheel | `mousedown`, `mouseup`, `auxclick` |
+| 2 | the second one, usually the right | `mousedown`, `mouseup`, `auxclick`, `contextmenu` |
+
+This shows: a right click **does not cause** `click`. That is why
+in a `click` listener `button` is almost always 0, and to see
+other numbers, you listen for `mousedown` or `mouseup`:
+
+```js
+button.addEventListener("mousedown", (event) => console.log(event.button));
+// left button: 0, wheel: 1, right: 2
+```
+
+## 5. The keyboard: `keydown` and `keyup` {#keys}
+
+`keydown` comes when a key is pressed, `keyup` when it is released.
+They come to the element that is in focus now, and if there is none, to `body`.
+Bubbling (section 6), they reach `document`, so the keys of the whole page
+are listened for on it:
+
+```js
+document.addEventListener("keydown", (event) => {
+  console.log(event.key, event.code);
+});
+// a → "a" "KeyA"      1 → "1" "Digit1"
+// Shift+A → first "Shift" "ShiftLeft", then "A" "KeyA"
+// Enter → "Enter" "Enter"      Space → " " "Space"      Esc → "Escape" "Escape"
+```
+
+The two properties answer different questions. `key` is **what was typed**:
+the character, taking <Kbd>Shift</Kbd> and the layout into account, and for service keys —
+a name (`"Enter"`, `"Escape"`, `"ArrowUp"`).
+`code` is **which key it physically is**: its place on the keyboard,
+the same with any layout.
+
+If a key is held down, `keydown` comes again and again until it is released,
+and `keyup` comes once. That is why a “press” in the human sense is a pair of
+`keydown` and `keyup`, and an action is usually attached to `keydown`:
+it comes at once and repeats while the key is held, like letters in a text.
+
+| Pressed | `key` | `code` |
+| --- | --- | --- |
+| the A key, English layout | `"a"` | `"KeyA"` |
+| the same key with Shift | `"A"` | `"KeyA"` |
+| the same key, French AZERTY layout | `"q"` | `"KeyA"` |
+| space | `" "` | `"Space"` |
+
+The rule: **if you react to a character or a meaning — `key`**
+(`event.key === "Escape"`), **to the place of a key — `code`**.
+The second is needed by games: <Kbd>W</Kbd><Kbd>A</Kbd><Kbd>S</Kbd><Kbd>D</Kbd>
+must work on a French AZERTY layout too, where these places have Z, Q, S, D.
+
+```js
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") console.log("close");
+  if (event.key === "Enter") console.log("confirm");
+});
+```
+
+### Walkthrough: the keys are not heard
+
+```js
+const info = document.querySelector("#info");
+info.addEventListener("keydown", () => console.log("the paragraph heard"));
+// we press keys — silence
+```
+
+**Step 1. Who gets `keydown`?** The element in focus,
+and without focus — `body`. A paragraph does not get focus, so the event does not
+reach it.
+
+**Step 2. Where does it bubble to?** From `body` up — to
+`document` and `window`. The paragraph lies *below* `body`,
+it is not on the bubbling path.
+
+**Step 3. We fix it.** The keys of the whole page are listened for on `document`.
+The keys of a particular element — only on one that can get focus: buttons,
+links, the input fields of tomorrow.
+
+## 6. Bubbling and capturing {#bubbling}
+
+You clicked a list item. But this item lies in `ul`, that one in
+`main`, that one in `body`. The click was on all of them at once. That is why the event
+does not stop at the item but **bubbles up**: after the item it is received by the
+parent, then the parent’s parent — and so on up to `document` and `window`.
+
+<Scheme src="scheme-bubbling.svg">The path of an event: down to the target, at the target, up to window. Listeners catch the third part by default</Scheme>
+
+In fact the path goes both ways. First the event goes down from `window` to the target —
+this is **capturing**, then it comes to the target, then it goes back up —
+**bubbling**. An ordinary listener fires at the target and during bubbling.
+To catch the event on the way down, a third argument is passed —
+`{ capture: true }`.
+
+Let us check with a click on Aman, adding a listener to each ancestor. The number in parentheses is the
+`event.eventPhase` property: 1 — capturing, 2 — target, 3 — bubbling.
+
+```js
+const say = (name) => (event) => console.log(name, event.eventPhase);
+
+document.querySelector("li").addEventListener("click", say("li"));
+list.addEventListener("click", say("ul"));
+list.addEventListener("click", say("ul on the way down"), { capture: true });
+document.body.addEventListener("click", say("body"));
+// a click on Aman: ul on the way down 1 → li 2 → ul 3 → body 3
+```
+
+Listeners on `main`, `document` and `window` would join
+the same queue after `body`, all with phase 3. The whole path is given by the method
+`composedPath`:
+
+```js
+document.querySelector("li").addEventListener("click", (event) => {
+  event.composedPath();   // [li, ul, main, body, html, document, window]
+  event.bubbles;          // true — click bubbles
+});
+```
+
+Not all events bubble. `focus` and `blur`, which come to
+an element when it gets and loses focus, do not bubble: their `bubbles` is
+`false`. Whether an event bubbles is written on its MDN page.
+
+## 7. `target` and `currentTarget` {#target}
+
+Since one event passes through several elements, the event object has two of them:
+
+```js
+const info = document.querySelector("#info");   // <p>Classes: <b>Mon, Wed, Fri</b></p>
+
+info.addEventListener("click", (event) => {
+  event.target.nodeName;          // "B" — the bold text was clicked
+  event.currentTarget.nodeName;   // "P" — but the listener hangs on the paragraph
+});
+```
+
+`target` is where the event **happened**: the deepest element
+under the cursor. `currentTarget` is where **this listener fired**:
+the element we attached it to. When the paragraph itself is clicked, it is one and the same
+element. When the `<b>` inside is clicked, they are different.
+
+<Mistake>
+`currentTarget` lives only while the listener is running:
+</Mistake>
+
+```js
+let saved;
+button.addEventListener("click", (event) => {
+  console.log(event.currentTarget.id);   // "hello" — inside the listener
+  saved = event;
+});
+// after the click:
+saved.currentTarget;   // null — the listener has finished
+saved.target.id;       // "hello" — target stayed
+```
+
+If you need the element later, save the element itself, not the event.
+
+## 8. Delegation {#delegation}
+
+Bubbling gives the most useful technique of this day. There is no need to add a listener to every list
+item: **one for the whole list** is enough. A click on any item
+bubbles up to `ul`, and `event.target` tells which one exactly.
+
+```js
+const list = document.querySelector("#list");
+
+list.addEventListener("click", (event) => {
+  const li = event.target.closest("li");   // day 24: from the click spot up to the item
+  if (!li) return;                         // clicked past the items — not our business
+  li.classList.toggle("star");             // day 25
+  console.log(li.textContent, li.dataset.id);
+});
+// a click on Gülnar: "Gülnar" "3", and the item became bold
+```
+
+<Scheme src="scheme-delegation.svg">One listener on the parent instead of a listener on every item</Scheme>
+
+Why `closest` here and not just `event.target`? Inside an item
+there may be a nested element — a bold name, an icon, a button. Then `target`
+will be that element, while `closest("li")` still climbs up to the item. That is what day 24
+promised: “a click often lands on a nested element, and `closest("li")` finds
+the item that was clicked”.
+
+And `if (!li) return` is needed for a click on the list itself, past the items —
+on the gap between them: then `closest("li")` returns `null`.
+Let us check that items added later are served too:
+
+```js
+const ilyas = document.createElement("li");
+ilyas.textContent = "Ilýas";
+ilyas.dataset.id = "6";
+list.append(ilyas);
+// a click on Ilýas: "Ilýas" "6" — although the listener was added before he appeared
+```
+
+Delegation has three benefits. There is one listener, not one per item. Items
+added by code later (day 26) are served by themselves: the listener hangs on the parent,
+which does not care where the children came from. And `dataset` from day 25 immediately tells
+which student it is.
+
+Delegation does not fit only events that do not bubble — for example,
+`focus` and `blur` (section 6). They do not reach the parent, and they
+have to be listened for on the element itself.
+
+## 9. Stopping bubbling {#stop}
+
+`event.stopPropagation()` cuts the path: the ancestors will not get the event.
+The other listeners of **the same** element still fire.
+`stopImmediatePropagation()` stops them too.
+
+```js
+const li = document.querySelector("li");   // Aman
+
+li.addEventListener("click", (event) => {
+  console.log("li-1");
+  event.stopPropagation();
+});
+li.addEventListener("click", () => console.log("li-2"));
+list.addEventListener("click", () => console.log("ul"));
+// a click on Aman: li-1, li-2 — but it did not reach ul
+```
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.addEventListener("click", (event) => {
+  console.log("li-1");
+  event.stopImmediatePropagation();
+});
+meret.addEventListener("click", () => console.log("li-2"));
+// a click on Meret: only li-1 — neither the neighboring listener nor the ancestors
+```
+
+<Important>
+You rarely have to stop bubbling, and it almost always breaks something else:
+delegation on a parent, a common listener on `document`, someone else’s code.
+Before writing `stopPropagation`, check whether the parent’s listener
+could simply look at `event.target`.
+</Important>
+
+## 10. `preventDefault`: cancel the browser’s action {#default}
+
+Many events have a **default action** — what the browser will do
+by itself unless it is stopped:
+
+| Event | What the browser will do |
+| --- | --- |
+| `click` on a link | go to the address |
+| `keydown` of Space | scroll the page |
+| `contextmenu` | show the right-click menu |
+| `submit` of a form | send it and reload the page — tomorrow |
+
+`event.preventDefault()` tells the browser: do not do this, I will handle it myself.
+
+```js
+const link = document.querySelector('a[href="#info"]');
+
+link.addEventListener("click", (event) => {
+  event.preventDefault();
+  console.log(event.defaultPrevented);   // true — the action is canceled
+});
+// a click on the link: the address did not change, location.hash stayed ""
+```
+
+Not everything can be canceled. The `cancelable` property tells whether this event
+can be canceled: for `click` — yes, for `DOMContentLoaded` — no.
+`defaultPrevented` tells whether someone canceled the action — the listeners
+higher up the bubbling path see this too:
+
+```js
+document.addEventListener("click", (event) => {
+  console.log(event.defaultPrevented);
+});
+// a click on “Schedule”: true — the link canceled it
+// a click on “List”: false — nobody canceled anything there
+```
+
+Do not mix up the two methods: `preventDefault` cancels the **browser’s** action,
+but the event bubbles on; `stopPropagation` cuts bubbling, but the browser’s
+action remains. Tomorrow `preventDefault` becomes the main line of every form:
+without it sending reloads the page.
+
+## 11. Removing a listener {#remove}
+
+`removeEventListener` takes the same arguments as
+`addEventListener`. A listener is removed only if **the very same
+function** is passed:
+
+```js
+function greet() { console.log("greet"); }
+
+button.addEventListener("click", greet);
+button.removeEventListener("click", greet);   // removed
+
+button.addEventListener("click", () => console.log("arrow"));
+button.removeEventListener("click", () => console.log("arrow"));     // NOT removed
+```
+
+The second pair has two different functions, although they are written the same way (day 21: two identical
+objects are not equal). That is why a listener that will have to be removed is made a named
+function or kept in a variable:
+
+```js
+const onClick = () => console.log("onClick");
+button.addEventListener("click", onClick);
+button.removeEventListener("click", onClick);   // removed: it is the same function
+```
+
+And for the common case “fire once” there is a ready-made parameter:
+
+```js
+button.addEventListener("click", () => console.log("only the first click"), { once: true });
+```
+
+## 12. The `onclick` properties {#onevent}
+
+In old code, instead of `addEventListener` you meet properties with the prefix
+`on`: `onclick`, `onkeydown`, `onload`.
+
+```js
+button.onclick = () => console.log("onclick 1");
+button.onclick = () => console.log("onclick 2");      // replaced the first one!
+button.addEventListener("click", () => console.log("listener"));
+// click: onclick 2, listener
+```
+
+A property has **one** slot: a new function pushes out the old one, and to remove it,
+write `null`: `button.onclick = null`. `addEventListener`
+listeners are independent and do not interfere with each other — that is why MDN calls
+it the recommended way. The third option is an attribute in the markup:
+
+```html
+<button onclick="console.log('we do not do this')">Say hello</button>
+```
+
+MDN directly advises against it: code mixes with the layout, and the attribute has the same single
+slot as the `onclick` property. On day 2 that is exactly why we moved code into a separate
+file — so that markup and script do not mix.
+
+## 13. `DOMContentLoaded` and `load` {#load}
+
+Two events report the loading of the page.
+
+<Scheme src="scheme-load.svg">DOMContentLoaded — the tree is ready; load — absolutely everything is loaded</Scheme>
+
+`DOMContentLoaded` comes to `document` when the HTML is fully parsed
+and the scripts with `defer` have run. It does not wait for images.
+`load` comes to `window` when absolutely everything is loaded, including
+images and styles.
+
+```js
+// app.js, loaded with defer
+console.log("script", document.readyState);   // "interactive" — the tree is ready already
+
+document.addEventListener("DOMContentLoaded", () => console.log("DOMContentLoaded"));
+window.addEventListener("load", () => console.log("load", document.readyState));   // "complete"
+// order: script → DOMContentLoaded → load
+```
+
+Hence an important conclusion for us: a script with `defer` **already**
+runs when the tree is ready, so it does not need to wrap its code in a
+`DOMContentLoaded` listener. In other people’s code such a wrapper is common —
+it is a legacy of scripts without `defer` from day 24. `load`
+is needed only when the code waits for images — for example, to find out their sizes.
+
+```js
+window.addEventListener("load", () => {
+  document.addEventListener("DOMContentLoaded", () => console.log("too late"));
+});
+// “too late” is never printed: DOMContentLoaded has already happened, events do not repeat
+```
+
+## 14. Events from code {#synthetic}
+
+**Focus** is the element that gets the keyboard right now. It is moved by the
+<Kbd>Tab</Kbd> key: on our page the first press moves focus to the link
+“List”, the second to “Schedule”, the third to the button. Not all elements get focus:
+links, buttons and input fields do, paragraphs and list items do not (section 5).
+
+An event can also be triggered without a person. The simplest is `el.click()`:
+it starts a `click` on the element. The methods `focus()` and `blur()`
+move focus to the element and take it away — with the `focus` and
+`blur` events.
+
+```js
+button.addEventListener("click", (e) => console.log("click", e.isTrusted));
+
+button.click();   // click false — from code
+                  // a real click: click true
+
+button.focus();   // now the button gets the keys: Enter and Space give click
+```
+
+You can also invent your own event: create an object with the `Event` constructor
+and send it with the `dispatchEvent` method. The listeners are called at once, right
+inside `dispatchEvent`:
+
+```js
+button.addEventListener("hello", (e) => console.log("my own event", e.type));
+
+button.dispatchEvent(new Event("hello"));                    // my own event hello
+button.dispatchEvent(new Event("hello", { bubbles: true })); // this way it will also bubble
+```
+
+By default your own event does not bubble and cannot be canceled — this is turned on with the parameters
+`bubbles` and `cancelable`. If the event is cancelable and someone called
+`preventDefault`, `dispatchEvent` returns `false`:
+
+```js
+button.addEventListener("check", (event) => event.preventDefault());
+
+button.dispatchEvent(new Event("check", { cancelable: true }));   // false — canceled
+button.dispatchEvent(new Event("check"));                         // true — it cannot be canceled
+```
+
+The `EventTarget()` constructor creates an object that can do only one thing —
+accept listeners and send out events. It is a “mailbox” without any page.
+In course 2 your own classes are built on it.
+
+```js
+const bus = new EventTarget();
+bus.addEventListener("ping", (event) => console.log("received", event.type));
+bus.dispatchEvent(new Event("ping"));   // received ping
+```
+
+Two more properties from the reference will come in handy later. `composed` tells
+whether an event goes beyond the boundary of the “shadow DOM” — the hidden insides of elements like
+`<video>`; this is a topic of course 4. `composedPath()` we already saw
+in section 6: it returns the whole path of the event.
+
+## 15. The “Report card” with buttons {#tabel}
+
+Yesterday we promised: every row gets a “Delete” button, and the row disappears on a click. Let us also add
+selecting a row with a click and unselecting with the <Kbd>Esc</Kbd> key.
+The markup has a seventh empty header cell and a `.selected` rule:
+
+```html
+<style>
+  .excellent { background: #dcfce7; }
+  .good      { background: #e0f2fe; }
+  .fair      { background: #fef9c3; }
+  .weak      { background: #fee2e2; }
+  .empty     { color: gray; font-style: italic; }
+  .selected  { outline: 2px solid #8b5cf6; }
+</style>
+
+<tr><th>Name</th><th>Avg</th><th>Min</th><th>Max</th><th>%</th><th>Verdict</th><th></th></tr>
+```
+
+```js
+// unchanged: MIN_MARK … makeReport (day 23), makeCells (day 24),
+// VERDICT_CLASS and rowClass (day 25), makeRow (day 26)
+
+// new: a seventh cell with a button
+function addDeleteButton(row) {
+  const button = document.createElement("button");
+  button.textContent = "Delete";
+  button.classList.add("delete");
+  const cell = document.createElement("td");
+  cell.append(button);
+  row.append(cell);
+  return row;
+}
+
+const tbody = document.querySelector("#tabel tbody");
+const reports = students.map(makeReport);
+tbody.append(...reports.map(makeRow).map(addDeleteButton));
+
+function updateSummary() {
+  const excellent = reports.filter((r) => r.ok && r.verdict === "top student").length;
+  document.querySelector("#summary").textContent = `Top students: ${excellent} of ${reports.length}`;
+  document.title = `Report card — students: ${reports.length}`;
+}
+updateSummary();
+
+// new: one listener for the whole table body
+tbody.addEventListener("click", (event) => {
+  const row = event.target.closest("tr");
+  if (event.target.closest(".delete")) {
+    const i = reports.findIndex((r) => r.name === row.dataset.name);
+    reports.splice(i, 1);   // from the data
+    row.remove();           // and from the page
+    updateSummary();
+    return;
+  }
+  row.classList.toggle("selected");
+});
+
+// new: Esc unselects all the rows
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    document.querySelectorAll("tr.selected").forEach((tr) => tr.classList.remove("selected"));
+  }
+});
+```
+
+<ResultBox>
+<table>
+<thead>
+<tr><th>Name</th><th>Avg</th><th>Min</th><th>Max</th><th>%</th><th>Verdict</th><th></th></tr>
+</thead>
+<tbody>
+<tr style={{background: "#e0f2fe"}}><td>Aman</td><td>4.33</td><td>3</td><td>5</td><td>75%</td><td>good student</td><td><button type="button">Delete</button></td></tr>
+<tr style={{color: "gray", fontStyle: "italic"}}><td>Gülnar</td><td>—</td><td>—</td><td>—</td><td>—</td><td>no valid marks</td><td><button type="button">Delete</button></td></tr>
+<tr style={{background: "#dcfce7"}}><td>Oguljan</td><td>4.50</td><td>4</td><td>5</td><td>67%</td><td>top student</td><td><button type="button">Delete</button></td></tr>
+</tbody>
+</table>
+
+After deleting Meret and Sapar: “Top students: 1 of 3”, and on the tab “Report card — students: 3”.
+</ResultBox>
+
+Let us go through what here is from today.
+
+**Delegation.** There is one listener — on `tbody`, not one
+per button. A click on a button bubbles up to the table body, and
+`closest(".delete")` answers whether it was a button. Rows added later
+are served by themselves — if the student is added both to the data and to the page:
+
+```js
+const ilyas = makeReport({ name: "Ilýas", marks: [5, 5, "4"] });
+reports.push(ilyas);                             // to the data
+tbody.append(addDeleteButton(makeRow(ilyas)));   // and to the page
+updateSummary();                                 // on the page: “Top students: 3 of 6”
+```
+
+<Mistake>
+Yesterday’s way — only `tbody.append(…)` — lets you down here. The new row
+has no pair in `reports`, `findIndex` returns `-1`, and
+`reports.splice(-1, 1)` silently removes the last student — Oguljan.
+Ilýas’s row goes away, and the total lies: there are five rows, but the page says “Top students: 1 of 4”.
+</Mistake>
+
+**Two branches of one listener.** A click on the button deletes the row, a click
+on any other place of the row toggles the selection. `return` after deleting
+does not let the second branch run: the row is gone, there is nothing to select.
+
+This scheme — a listener on the container, `closest` for the button and the row,
+the data and the page change together — will become the basis of the mini-project on day 29. The to-do
+list works the same way: add, mark as done, delete.
+
+**The data and the page together.** A row is deleted in two places: from the
+`reports` array (`findIndex` and `splice` from days 19–20) and from the page.
+The total is computed from the data, so “Top students: 1 of 3” matches what is visible.
+
+**The tab title.** It used to be “Report card: 5 students”. Now the
+number changes, and we would get “Report card: 1 students” — wrong in English. The right form
+depends on the number (1 student, 2 students), and choosing it is something
+`Intl` from the next courses can do. For now — “Report card — students: 4”.
+
+<TryIt>
+**An experiment.** Remove the `return` after `updateSummary()`
+and delete a row. Will there be an error in the console? Which line of code then
+worked with the already deleted row — and why is that worse than an error?
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | What you will see | How to do it right |
+| --- | --- | --- |
+| `addEventListener("click", greet())` | the function ran at once, a click does nothing | without parentheses: `greet` |
+| `"onclick"` or `"Click"` | nothing, silently | `"click"` |
+| a listener on every item | it works, but new items are left without it | delegation on the parent |
+| `event.target` where the item is needed | sometimes a nested `<b>` | `event.target.closest("li")` |
+| removing an arrow written anew | the listener stayed | a named function |
+| `click` for the right button | does not come | `mousedown` / `contextmenu` |
+| `code` to check a character | wrong on another layout | `key` |
+| `stopPropagation` “just in case” | delegation higher up breaks | check `event.target` |
+| two `onclick` in a row | only the second one works | `addEventListener` |
+
+### The module: what we can already do
+
+| Day | We can | The “Report card” |
+| --- | --- | --- |
+| 24 | find an element and walk the tree | moved into a table on the page |
+| 25 | change text, attributes, classes, styles | rows in color |
+| 26 | create and remove an element | as many rows as students |
+| 27 | respond to a click and a key | deleting, selecting, Esc |
+
+### What comes tomorrow
+
+Tomorrow — **forms**: input fields, checkboxes, a submit button. The events
+`input`, `change` and `submit`, and in the
+`submit` listener — today’s `preventDefault`. The “Report card” will get a form
+through which a student can be added without the console — and a check that the marks are entered correctly.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [DOM events](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Events) | an overview of the kinds of events and ways to listen | <Full /> |
+| [EventTarget](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget) | everything that receives events | <Full /> |
+| [addEventListener](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener) | subscribe to an event | <Full /> |
+| [removeEventListener](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/removeEventListener) | remove — the same function | <Full /> |
+| [Event](https://developer.mozilla.org/en-US/docs/Web/API/Event) | what all events share | <Full /> |
+| [type](https://developer.mozilla.org/en-US/docs/Web/API/Event/type) | the event name | <Full /> |
+| [target](https://developer.mozilla.org/en-US/docs/Web/API/Event/target) | where the event happened | <Full /> |
+| [currentTarget](https://developer.mozilla.org/en-US/docs/Web/API/Event/currentTarget) | where the listener fired | <Full /> |
+| [bubbles](https://developer.mozilla.org/en-US/docs/Web/API/Event/bubbles) | whether it bubbles | <Full /> |
+| [preventDefault](https://developer.mozilla.org/en-US/docs/Web/API/Event/preventDefault) | cancel the browser’s action | <Full /> |
+| [stopPropagation](https://developer.mozilla.org/en-US/docs/Web/API/Event/stopPropagation) | stop bubbling | <Full /> |
+| [click](https://developer.mozilla.org/en-US/docs/Web/API/Element/click_event) | a click, a tap, Enter on a button | <Full /> |
+| [MouseEvent](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent) | mouse events | <Full /> |
+| [clientX](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/clientX) | the horizontal coordinate in the window | <Full /> |
+| [clientY](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/clientY) | the vertical coordinate in the window | <Full /> |
+| [button](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button) | which mouse button: 0, 1, 2 | <Full /> |
+| [keydown](https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event) | a key was pressed | <Full /> |
+| [keyup](https://developer.mozilla.org/en-US/docs/Web/API/Element/keyup_event) | a key was released | <Full /> |
+| [KeyboardEvent](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent) | keyboard events | <Full /> |
+| [key](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key) | what was typed | <Full /> |
+| [code](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code) | which key it physically is | <Full /> |
+| [DOMContentLoaded](https://developer.mozilla.org/en-US/docs/Web/API/Document/DOMContentLoaded_event) | the tree is built | <Full /> |
+| [load](https://developer.mozilla.org/en-US/docs/Web/API/Window/load_event) | everything is loaded, images included | <Brief /> |
+| [cancelable](https://developer.mozilla.org/en-US/docs/Web/API/Event/cancelable) | whether it can be canceled | <Brief /> |
+| [defaultPrevented](https://developer.mozilla.org/en-US/docs/Web/API/Event/defaultPrevented) | whether someone canceled it | <Brief /> |
+| [stopImmediatePropagation](https://developer.mozilla.org/en-US/docs/Web/API/Event/stopImmediatePropagation) | stop the neighboring listeners too | <Brief /> |
+| [eventPhase](https://developer.mozilla.org/en-US/docs/Web/API/Event/eventPhase) | the phase: 1, 2, 3 | <Brief /> |
+| [composedPath](https://developer.mozilla.org/en-US/docs/Web/API/Event/composedPath) | the whole path of the event | <Brief /> |
+| [composed](https://developer.mozilla.org/en-US/docs/Web/API/Event/composed) | whether it leaves the shadow DOM | <Brief /> |
+| [isTrusted](https://developer.mozilla.org/en-US/docs/Web/API/Event/isTrusted) | from a person or from code | <Brief /> |
+| [timeStamp](https://developer.mozilla.org/en-US/docs/Web/API/Event/timeStamp) | when, in milliseconds | <Brief /> |
+| [Event()](https://developer.mozilla.org/en-US/docs/Web/API/Event/Event) | create your own event | <Brief /> |
+| [dispatchEvent](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/dispatchEvent) | send an event | <Brief /> |
+| [EventTarget()](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/EventTarget) | your own event receiver | <Brief /> |
+| [click()](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/click) | a click from code | <Brief /> |
+| [focus()](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/focus) | move focus | <Brief /> |
+| [blur()](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/blur) | take focus away | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// SUBSCRIBE — we pass the function, we do not call it
+function greet(event) { console.log("clicked:", event.type); }
+const list = document.querySelector("#list");
+button.addEventListener("click", greet);
+button.removeEventListener("click", greet);                 // the same function!
+button.addEventListener("click", greet, { once: true });    // once
+list.addEventListener("click", greet, { capture: true });   // on the way down
+
+// THE EVENT OBJECT — inside the listener
+document.addEventListener("keydown", (event) => {
+  console.log(event.type, event.target.nodeName, event.isTrusted);
+  console.log(event.key, event.code);   // "a" "KeyA": what was typed and which key
+});
+button.addEventListener("mousedown", (event) => {
+  console.log(event.clientX, event.clientY, event.button);   // 0 left, 1 wheel, 2 right
+});
+
+// BUBBLING AND ACTIONS
+const link = document.querySelector('a[href="#info"]');
+link.addEventListener("click", (event) => {
+  event.preventDefault();    // the browser will not do its own thing: a link, a form
+  event.stopPropagation();   // it will not go further up
+});
+
+// DELEGATION — one listener on the parent
+list.addEventListener("click", (event) => {
+  const li = event.target.closest("li");
+  if (!li) return;
+  console.log(event.currentTarget.nodeName, li.textContent);   // "UL" and the name
+});
+
+// LOADING
+document.addEventListener("DOMContentLoaded", () => console.log("the tree is ready"));
+window.addEventListener("load", () => console.log("and the images too"));
+
+// FROM CODE
+button.click();
+button.focus();
+button.blur();
+button.dispatchEvent(new Event("hello", { bubbles: true }));
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. What is wrong with `button.addEventListener("click", greet())`?
+   <Answer>The parentheses call `greet` at once, and its result goes to the listeners —
+   `undefined`. A click then does nothing. You need to pass the function itself:
+   `greet` without parentheses.</Answer>
+2. How does `event.target` differ from `event.currentTarget`?
+   <Answer>`target` is the element where the event happened, the deepest one under the cursor.
+   `currentTarget` is the element the fired listener hangs on.</Answer>
+3. Why does delegation also serve items added later?
+   <Answer>The listener hangs on the parent, and a click on any child bubbles up to it.
+   The parent does not care when the children appeared.</Answer>
+4. How does `key` differ from `code`?
+   <Answer>`key` is the typed character or the key’s name, taking Shift and the layout into account.
+   `code` is the physical place of the key, the same with any layout.</Answer>
+5. How does `preventDefault` differ from `stopPropagation`?
+   <Answer>`preventDefault` cancels the browser’s action, but the event bubbles on.
+   `stopPropagation` cuts bubbling, but the browser’s action remains.</Answer>
+6. Why does a script with `defer` not need a `DOMContentLoaded` wrapper?
+   <Answer>Such a script runs when the tree is already built — right before
+   `DOMContentLoaded`. All the elements can already be found.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Events" />

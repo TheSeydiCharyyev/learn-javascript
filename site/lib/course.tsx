@@ -140,10 +140,25 @@ export function courseComponents(ctx: PageContext) {
     Brief: () => <span className="mark mark-brief">{L.brief}</span>,
     Review: () => <span className="mark mark-brief">{L.review}</span>,
     Kbd: ({ children }: Kids) => <span className="kbd">{children}</span>,
-    Step: ({ n, children }: { n: string } & Kids) => (
+    // the number is a <div> on some pages and a <span> on others (numberTag="span")
+    Step: ({ n, numberTag, children }: { n: string; numberTag?: "span" } & Kids) => (
       <div className="step">
-        <div className="step-number">{n}</div>
+        {numberTag === "span" ? <span className="step-number">{n}</span> : <div className="step-number">{n}</div>}
         <div>{children}</div>
+      </div>
+    ),
+    // two ways side by side: the wrong one and the right one, each with its own label
+    Compare: blockBox("compare"),
+    Wrong: ({ label, children }: { label: string } & Kids) => (
+      <div className="wrong">
+        <div className="label">{label}</div>
+        {children}
+      </div>
+    ),
+    Right: ({ label, children }: { label: string } & Kids) => (
+      <div className="right">
+        <div className="label">{label}</div>
+        {children}
       </div>
     ),
     Timeline: blockBox("timeline"),
@@ -184,6 +199,8 @@ export function courseComponents(ctx: PageContext) {
     KeyPoint: textBox("key-point"),
     Remember: textBox("remember"),
     NoteBox: textBox("note-box"),
+    ResultBox: textBox("result-box"),
+    Summary: textBox("summary"),
     Analogy: textBox("analogy"),
     TryIt: textBox("try-it"),
     Why: textBox("why"),

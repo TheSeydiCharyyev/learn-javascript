@@ -1,0 +1,891 @@
+---
+title: Day 5 — Data types and typeof
+day: Day 5 • lesson 1
+heading: Data types and typeof
+lead: Module “Syntax, types and operators”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #a16207; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #78350f; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- name the eight types and say which of them are primitives;
+- find the type of a value with the `typeof` operator and know the two places where it lies;
+- explain the difference between `null` and `undefined` and choose the right one;
+- detect `NaN` with the right check, not with `===`;
+- predict what `Boolean()` gives for any value.
+</Goals>
+
+<Toc />
+
+## 1. Dynamic and weak typing {#dynamic}
+
+Yesterday we gave values names. Today we look at the values themselves — and we start with two words
+that describe JavaScript in any documentation.
+
+**Dynamic typing** means that the type belongs to the value, not to the variable.
+One variable holds a number today, a string tomorrow, and the language does not mind:
+
+```js
+let foo = 42;      // a number now
+foo = "salam";     // now a string
+foo = true;        // now a boolean
+```
+
+In languages with static typing — Java, C#, TypeScript — this is not allowed: there the type is declared
+in advance, and the compiler will not let you put anything else into the variable. Both approaches have their price.
+A dynamic language is faster to write, a static one is more reliable.
+
+**Weak typing** is the second half. When values of different types meet in one operation,
+the language does not complain but converts one into the other *by itself*:
+
+```js
+const foo = 42;
+const result = foo + "1";
+console.log(result);   // "421" — the number became a string, not 43
+```
+
+This is convenient right up to the moment when the conversion happens where you did not expect it. Such
+mistakes do not fail with a message — they simply give a wrong answer. That is why knowing the types and being able to
+check them matters more than it seems in the first week.
+
+<Why>
+Remember yesterday’s advice to name variables so that the name tells what is inside:
+`marks` is a list, `isReady` is “yes / no”. Now it is clear why this is not
+nitpicking: the language does not watch types by itself, and your discipline is the only protection.
+</Why>
+
+## 2. Eight types and one important feature {#eight}
+
+There are eight types: seven primitives and the object. The main feature that divides them is **mutability**.
+
+<Scheme src="scheme-eight.svg">On the left is what cannot be changed. On the right is what can</Scheme>
+
+“Immutable” here means literally: a primitive has no parts that can be changed. A string cannot
+be edited — you can only build a new one:
+
+```js
+let word = "Mary";
+word[0] = "C";        // silently does nothing
+console.log(word);    // "Mary"
+
+word = "C" + word.slice(1);   // but this gives a new string
+console.log(word);            // "Cary"
+```
+
+All string methods work exactly like this: they do not spoil the original but return a new string. In detail —
+day 16.
+
+### Two rare primitives
+
+You will meet five types from the left column every day. The remaining two — `BigInt`
+and `Symbol` — will not be needed in Essentials, but you have to know they exist: you will see them in other people’s code.
+
+**`BigInt`** is needed for very large whole numbers. An ordinary number stores
+whole numbers exactly only up to a certain limit, and after that it starts rounding:
+
+```js
+console.log(Number.MAX_SAFE_INTEGER);   // 9007199254740991 — beyond this there is no precision
+
+// ordinary numbers: two different numbers became one
+Number.MAX_SAFE_INTEGER + 1 === Number.MAX_SAFE_INTEGER + 2;   // true (!)
+
+// BigInt: written with the letter n at the end
+const big = 9007199254740993n;
+typeof big;   // "bigint"
+```
+
+You cannot mix `BigInt` with ordinary numbers in one expression — the language deliberately
+forbids it so as not to lose precision silently:
+
+```js
+1n + 1;   // TypeError: Cannot mix BigInt and other types, use explicit conversions
+```
+
+**`Symbol`** is a value that is guaranteed not to match anything.
+Even two symbols with the same description are not equal:
+
+{/* ahead-ok: course 2 */}
+
+```js
+Symbol("id") === Symbol("id");   // false — these are different values
+typeof Symbol("id");             // "symbol"
+```
+
+Symbols are needed for service keys of objects that are sure not to clash with someone else’s. We study them
+in course 2.
+
+### You cannot describe everything with a string
+
+Since there are many types, the question arises: which one to choose? Beginners are tempted to keep everything as strings —
+strings are easy to join and easy to print, and an input field gives you a string anyway.
+
+```js
+const marks = "5,4,5,3";   // tempting, but bad
+```
+
+Here is what is bad: to get the marks one by one, the string will have to be split at the commas.
+And if one of the values contains a comma, the splitting breaks. Then escaping gets added,
+then rules for escaping — and instead of data you get a small language of your own that
+has to be maintained.
+
+```js
+const marks = [5, 4, 5, 3];   // like this: an array of numbers
+marks.length;                 // you know at once how many there are
+marks[0] + marks[1];          // and you can calculate
+```
+
+The rule: **strings are for text**. For everything else take the right type:
+an array for a list, an object for a set of properties, a number for a number. If a string came from outside, parse
+it once at the entrance and from then on work with proper values.
+
+## 3. The typeof operator {#typeof}
+
+Since the type belongs to the value, you can ask for it. There is the `typeof` operator for that.
+It returns a **string** with the name of the type:
+
+{/* ahead-ok: course 2 */}
+
+```js
+typeof 42;              // "number"
+typeof 9007199254740993n;  // "bigint"
+typeof "Mary";          // "string"
+typeof true;            // "boolean"
+typeof Symbol("id");    // "symbol"
+typeof undefined;       // "undefined"
+typeof { };             // "object"
+typeof function () { }; // "function"
+```
+
+Note: the result is a string, so it is compared with a string in quotes.
+
+```js
+const value = 42;
+
+if (typeof value === "number") {       // correct
+  console.log("it is a number");
+}
+
+if (typeof value === number) {         // ReferenceError: number is not defined
+  console.log("and this is not allowed");
+}
+```
+
+The list of possible answers is closed — there are exactly eight of them, and `typeof`
+returns nothing else.
+
+What is it for in practice? Often a function has to work differently depending on
+what it was given. Here is a real example: we print a mark, and it can come as a number, as a string,
+or not come at all:
+
+```js
+function showMark(mark) {
+  if (typeof mark === "number") {
+    return `mark: ${mark}`;
+  }
+  if (typeof mark === "string") {
+    return `mark as a string: ${mark}`;
+  }
+  return "no mark";
+}
+
+showMark(5);       // "mark: 5"
+showMark("5");     // "mark as a string: 5"
+showMark();        // "no mark"
+```
+
+Such checks are written all the time at work: data comes from an input field, from a server response,
+from someone else’s code — and nobody promises that it will be of the right type. By the end of the lesson we will build a ready
+cheat sheet out of such checks.
+
+And for now — eight answers for eight types? Not quite, and this is where it gets interesting.
+
+## 4. Two places where typeof lies {#lies}
+
+There are eight types and eight answers, but the lists do not match. Compare:
+
+| Type | What `typeof` answers |  |
+| --- | --- | --- |
+| Number | `"number"` |  |
+| BigInt | `"bigint"` |  |
+| String | `"string"` |  |
+| Boolean | `"boolean"` |  |
+| Symbol | `"symbol"` |  |
+| Undefined | `"undefined"` |  |
+| Null | `"object"` | **← not true** |
+| Object | `"object"` |  |
+| — a function (it is an object) | `"function"` | **← an extra answer** |
+
+**The first untruth: `typeof null` returns `"object"`.**
+This is a mistake made in the very first version of the language in 1995. It cannot be fixed: there are
+millions of pages in the world that rely on this behavior, and any fix would break them.
+You have to check for `null` separately:
+
+```js
+const value = null;
+
+typeof value === "object";   // true — but it is not an object!
+value === null;              // true — this is the right check
+```
+
+**The second feature is milder: a function is an object**; we talked about this on day 3.
+But `typeof` answers `"function"` for it. There is no formal lie here,
+and the answer is rather useful: checking whether a value can be called is a common task.
+
+And a third thing worth knowing right away: **`typeof` does not tell an array from an object**.
+
+```js
+typeof [1, 2, 3];        // "object" — does not help
+Array.isArray([1, 2, 3]);   // true  — this is the right way
+Array.isArray({ });         // false
+```
+
+We will study `Array.isArray` on day 19, but today remember the fact itself: an array needs
+a separate question.
+
+<ProTip>
+`typeof` also has a special kindness: for an **undeclared name** it
+does not throw an error but calmly answers `"undefined"`.
+
+```js
+console.log(neverDeclared);          // ReferenceError
+console.log(typeof neverDeclared);   // "undefined" — quietly
+```
+
+It is the only operator with such behavior, and it used to be used to check whether a variable exists.
+However, in the dead zone (day 4) it does fail — there the name is already taken.
+</ProTip>
+
+## 5. undefined: there is no value {#undefined}
+
+`undefined` means “there is no value here, and nobody put one”. The language puts it in by itself
+in four cases, and you have already met all four:
+
+| Case | Example |
+| --- | --- |
+| a variable is declared without a value | `let x;` |
+| an object was asked for a property it does not have | `user.iDontExist` |
+| a function returned nothing | `function f() { }` |
+| a function was called without an argument | `f()` with `function f(a)` |
+
+```js
+let x;
+console.log(x);              // undefined
+
+const user = { name: "Aman" };
+console.log(user.age);       // undefined — there is no such property
+
+function greet() { }
+console.log(greet());        // undefined — return was not written
+```
+
+<Important>
+In all four cases **there will be no error**. The program calmly goes on
+with `undefined` inside, and breaks later — in another place and with an unclear message.
+That is why `undefined` in the console is almost always a hint: somewhere above you did not
+put something in.
+</Important>
+
+## 6. null: empty on purpose {#null}
+
+`null` means something else: “this is empty, and it is the programmer’s decision”. The language itself
+almost never puts in `null` — you write it.
+
+```js
+let selectedStudent = null;   // nobody has been chosen yet — and we say so
+
+// ... later
+selectedStudent = { name: "Gülnar" };
+```
+
+Why such an agreement? To tell “not chosen yet” apart from “forgot to put in”.
+If a variable holds `null`, everything is going to plan, there is just no choice yet.
+If it holds `undefined`, most likely there is a mistake somewhere.
+
+<Analogy>
+Imagine the “Middle name” field in a form. An empty field is `undefined`: it is unknown
+whether there is no middle name or the person did not finish filling in. A dash in the field is `null`: the person
+got to it and said “I don’t have one”. The difference is whether there was an answer.
+</Analogy>
+
+## 7. null or undefined: which to choose {#compare}
+
+Technically they are similar, and that is the main confusion. Here are all the differences at once:
+
+| Check | `null` | `undefined` |
+| --- | --- | --- |
+| `typeof` | `"object"` (a mistake of the language) | `"undefined"` |
+| who puts it | the programmer | the language |
+| in a number | `null + 1` → `1` | `undefined + 1` → `NaN` |
+| `Number()` | `0` | `NaN` |
+| in a condition | falsy | falsy |
+
+The third and fourth rows are a real trap. Two very similar values behave completely differently
+in arithmetic:
+
+```js
+console.log(null + 1);        // 1   — null turned into 0
+console.log(undefined + 1);   // NaN — undefined does not turn into anything
+```
+
+And they compare like this:
+
+```js
+null == undefined;    // true  — loose comparison considers them the same
+null === undefined;   // false — strict comparison sees the difference
+```
+
+This is perhaps the only case when `==` is useful: the check
+`value == null` answers `true` for both `null`
+and `undefined` at once. The technique is common, but in the course we will still write
+strictly and explicitly. The two kinds of comparison in detail — day 7.
+
+<ProTip>
+A practical rule: **in your code write `null`** when you want to
+say “empty”. Leave `undefined` to the language — let it mean “something went wrong
+or we have not got there yet”.
+</ProTip>
+
+## 8. NaN: a number that is not a number {#nan}
+
+`NaN` is short for “Not a Number”. The paradox is that
+**its type is number**:
+
+```js
+typeof NaN;   // "number"
+```
+
+There is no contradiction: `NaN` is a special number value that is the answer
+when a calculation did not work out. It appears in five ways:
+
+| Where from | Example |
+| --- | --- |
+| a failed conversion to a number | `Number("salam")`, `parseInt("blabla")` |
+| math without an answer | `Math.sqrt(-1)` |
+| an indeterminate form | `0 * Infinity`, `Infinity - Infinity` |
+| infection from another `NaN` | `7 * "blabla"`, `NaN + 5` |
+| wrong data instead of a number | `new Date("blabla").getTime()` |
+
+And it has a property that no other value in the language has:
+
+```js
+NaN === NaN;   // false — the only value not equal to itself
+```
+
+This is not a JavaScript quirk but a rule of the IEEE 754 standard, by which fractional numbers work
+in all languages. The logic is this: `NaN` means “unknown what”. Two unknown numbers
+do not have to be equal, so the answer is “no”.
+
+One more feature follows from the same rule: **any comparison with `NaN`
+gives `false`** — even one that seems bound to be true:
+
+```js
+NaN > 1;      // false
+NaN < 1;      // false
+NaN >= NaN;   // false
+```
+
+## 9. How to catch NaN {#findnan}
+
+Since `===` does not work, another way is needed. There are three, and you have to choose wisely.
+
+```js
+const value = Number("salam");   // NaN
+
+Number.isNaN(value);   // true  — the right way
+isNaN(value);          // true  — also true, but be careful
+Object.is(value, NaN); // true  — works, but is rarely written
+```
+
+The difference between the first two shows in another example, and it is important:
+
+<Compare>
+<Wrong label="isNaN — the old one">
+```js
+isNaN("salam");   // true
+```
+
+First tries to turn the value into a number, then checks. The string “salam” is not `NaN`,
+it is just a string, but the answer is `true`.
+</Wrong>
+
+<Right label="Number.isNaN — the precise one">
+```js
+Number.isNaN("salam");   // false
+```
+
+Converts nothing. Answers `true` only when the value
+really is `NaN`.
+</Right>
+</Compare>
+
+The rule: **write `Number.isNaN`**. The old `isNaN` answers
+a different question — “will this fail to become a number” — and if that is the one you need, it is better to write
+it explicitly.
+
+<Mistake>
+The most common mistake with `NaN` is not noticing it at all. The program gets
+`NaN` in one place and fails or lies in a completely different one:
+
+```js
+const input = "12 manat";       // the user typed an extra word
+const price = Number(input);    // NaN
+const total = price * 3;        // NaN — the infection spread further
+console.log(`Total: ${total}`); // "Total: NaN"
+```
+
+That is why a number that came from the user is checked *right away*, not at the end of the calculation.
+</Mistake>
+
+## 10. Infinity and division by zero {#infinity}
+
+The second special number value is `Infinity`. Its type is number too.
+You get it in two cases:
+
+```js
+console.log(1 / 0);                  // Infinity
+console.log(-1 / 0);                 // -Infinity
+console.log(Number.MAX_VALUE * 2);   // Infinity — went beyond the limit
+typeof Infinity;                     // "number"
+```
+
+Note: division by zero in JavaScript is **not an error**. In school math
+you cannot do it, but here you get a perfectly working value that you can keep calculating with.
+
+Even arithmetic with it makes sense, but only up to a point: where the answer becomes
+indeterminate, `NaN` appears.
+
+```js
+Infinity + 1;          // Infinity
+Infinity * 2;          // Infinity
+Infinity - Infinity;   // NaN — it is unclear what should come out here
+0 * Infinity;          // NaN
+```
+
+In everyday code `Infinity` is rare, but as a sign of a bug it shows up
+all the time: you see infinity in the output, so something was divided by zero somewhere.
+
+### Minus zero
+
+Since we are talking about division by zero: JavaScript actually has two zeros — `+0`
+and `-0`. This is a consequence of the same IEEE 754 standard. In normal work there is almost no difference:
+
+```js
++0 === -0;         // true — comparison does not tell them apart
+console.log(-0);   // -0 — but the Chrome console shows the minus
+String(-0);        // "0" — when turned into a string the minus is lost
+```
+
+In calculations the difference shows in division:
+
+```js
+console.log(42 / +0);   // Infinity
+console.log(42 / -0);   // -Infinity
+```
+
+Negative zero appears, for example, when a negative number is multiplied by zero or when
+a small negative fraction is rounded. You do not need to think about it specially; it is worth knowing so that you are
+not surprised by a minus in front of infinity where it seemingly has nowhere to come from.
+
+## 11. Boolean: six liars {#boolean}
+
+The boolean type is the simplest of all: it has exactly two values, `true` and `false`.
+The interesting part begins when something that is *not* a boolean is put into a condition — and people do this
+all the time.
+
+```js
+const name = "Aman";
+
+if (name) {                  // not true or false here, but a string
+  console.log("there is a name");
+}
+```
+
+The language turns the value into “yes” or “no” by itself. The rule is short, and it is worth learning by heart —
+it is one of the few things you really have to remember:
+
+<Important>
+**There are six falsy values:** `false`, `0` — zero in any
+form (both `-0` from the previous section and `0n`, the BigInt zero from section 2),
+`""` (the empty string), `NaN`, `null`, `undefined`.
+\
+**Everything else is truthy.**
+</Important>
+
+<Scheme src="scheme-boolean.svg">The six on the left — learn them. On the right — what is most often mistaken for emptiness</Scheme>
+
+“Everything else” is exactly where people stumble. Here are values that look empty
+but count as truthy:
+
+```js
+Boolean("0");     // true — the string is not empty, and what is in it does not matter
+Boolean(" ");     // true — a space is a character too
+Boolean([]);      // true — an empty array is still an object
+Boolean({ });     // true — and so is an empty object
+Boolean(-1);      // true — only zero is falsy
+```
+
+You can check explicitly in two ways, both correct:
+
+```js
+Boolean("text");   // true — the Boolean function
+!!"text";          // true — double negation, the short form
+```
+
+Double negation `!!` is just `!` twice: the first one turns the value
+into a boolean and flips it, the second flips it back. The form is short and very
+common, so you need to recognize it.
+
+### Three conversion functions
+
+`Boolean` is not the only such function. There are three, one for each type into which
+it makes sense to convert:
+
+```js
+Number("42");      // 42
+String(42);        // "42"
+Boolean(42);       // true
+```
+
+All three are written **without `new`** — then they are ordinary conversion functions,
+and the result is a primitive. Here is what they do with common values:
+
+| Value | `Number()` | `String()` | `Boolean()` |
+| --- | --- | --- | --- |
+| `"42"` | `42` | `"42"` | `true` |
+| `"12px"` | `NaN` | `"12px"` | `true` |
+| `""` | `0` | `""` | `false` |
+| `true` | `1` | `"true"` | `true` |
+| `null` | `0` | `"null"` | `false` |
+| `undefined` | `NaN` | `"undefined"` | `false` |
+| `[]` | `0` | `""` | `true` |
+| `[5]` | `5` | `"5"` | `true` |
+| `{ }` | `NaN` | `"[object Object]"` | `true` |
+
+Two rows of this table deserve a close look. **`Number("")` gives zero,
+not `NaN`** — the empty string counts as “zero characters”, and this regularly breaks
+input checks: the user typed nothing, and the program got an honest number 0.
+
+And the second: **an empty array is zero in a number context and truthy in a boolean one**.
+The same value, two different answers, because the questions are different. Such oddities happen
+with objects, and that is exactly why objects are not compared or added; people work with their contents.
+
+Notice: there is not a single error in the table — only results. The language will always answer something.
+About when it does this by itself, without being asked — day 8.
+
+## 12. Wrappers and the new Boolean trap {#wrapper}
+
+One question is left that has surely come up already. If a primitive is a simple value without parts,
+why does it have methods?
+
+```js
+"Mary".length;        // 4
+true.toString();      // "true"
+(42).toFixed(2);      // "42.00"
+```
+
+The answer: at the moment a property is accessed, the language **temporarily wraps** the primitive
+in a wrapper object, takes what it needs from it and immediately throws the wrapper away.
+
+<Scheme src="scheme-wrapper.svg">A primitive does not keep methods — a wrapper lends them for a moment</Scheme>
+
+Five primitives have such wrappers: `Number`, `String`,
+`Boolean`, `BigInt`, `Symbol`. But `null`
+and `undefined` have no wrapper — that is why accessing their properties fails with an error,
+and we will see this in a minute.
+
+A wrapper can also be created by hand, with the word `new`. You should not do this — and here is why:
+
+```js
+const myFalse = new Boolean(false);
+
+typeof myFalse;        // "object" — this is no longer a primitive
+
+if (myFalse) {
+  console.log("it worked!");   // and this is printed
+}
+```
+
+<Mistake>
+`new Boolean(false)` is an **object**, and any object is truthy.
+You get a value that prints as `false` but behaves as `true`
+in a condition. The cure is simple: **never write `new` before
+`Boolean`, `Number` and `String`**. Without `new`
+the same words work as ordinary conversion functions, and that is the right way.
+
+```js
+Boolean(value);       // this is conversion, you get a primitive
+new Boolean(value);   // this is a wrapper object, almost always a mistake
+```
+</Mistake>
+
+If a wrapper did get into your code from somewhere, you can take the primitive out of it with the
+`valueOf` method, and turn it into a string with the `toString` method:
+
+```js
+const wrapped = new Boolean(false);
+wrapped.valueOf();    // false — a real primitive
+wrapped.toString();   // "false" — a string
+true.toString();      // "true" — it works on an ordinary value too
+```
+
+## 13. Two errors of the day {#errors}
+
+Both are connected with types, and you have seen both already.
+
+**ReferenceError: x is not defined.** A name was used that does not exist. Most often
+it is a typo or a variable declared further down in the code:
+
+```js
+console.log(score);   // ReferenceError: score is not defined
+```
+
+**TypeError: an unexpected type.** The value exists, but it cannot do what is asked
+of it. In the vast majority of cases `null` or `undefined` are to blame —
+the very two values without a wrapper:
+
+```js
+const student = null;
+student.name;      // TypeError: Cannot read properties of null (reading 'name')
+
+let user;
+user.name;         // TypeError: Cannot read properties of undefined (reading 'name')
+
+const count = 5;
+count();           // TypeError: count is not a function
+```
+
+Such a message is read backwards, and it is very precise. `Cannot read properties of null
+(reading 'name')` means: “I tried to read the property `name`, and to the left
+of the dot there was `null`”. So you have to look not at `name` but at what stands
+before the dot — and find out why it is empty.
+
+<Important>
+The difference between the two errors is in one word. `ReferenceError` — **there is no name**.
+`TypeError` — **the name exists, the value is wrong**. The first is fixed in the declaration,
+the second — where the value came from.
+</Important>
+
+Let us take a `TypeError` apart on a real example — this is how it is fixed at work:
+
+```js
+const students = [
+  { name: "Aman", marks: [5, 4] },
+  { name: "Gülnar", marks: [5, 5] },
+];
+
+const third = students[2];               // there is no such one — we got undefined
+console.log(third.marks.length);
+// TypeError: Cannot read properties of undefined (reading 'marks')
+```
+
+Step one: read the message. “I cannot read the property `marks` because on the left there is
+`undefined`”. So the culprit is not `marks` but what stands before the dot —
+`third`.
+
+Step two: go **left of the dot** and see where the empty value came from.
+`third` is `students[2]`, and the array has only two elements, with indexes 0 and 1.
+The real mistake is one line above the one named in the message.
+
+Step three: fix the cause, not the symptom. You can take the right index, or you can check:
+
+```js
+const third = students[2];
+
+if (third === undefined) {
+  console.log("there is no such student");
+} else {
+  console.log(third.marks.length);
+}
+```
+
+<ProTip>
+The “go left of the dot” technique works for any `TypeError` of the kind “Cannot read
+properties”. In a long chain `a.b.c.d` the message names exactly the link where
+everything broke: if it says `(reading 'd')`, then `a.b.c` turned out to be empty.
+Look there, not at `d`.
+</ProTip>
+
+## 14. How to check data in a program {#check}
+
+Let us put today’s material together into one practical technique. Everything that comes from outside — from an input field,
+from a server response, from someone else’s function — is checked **right away**, before any calculations.
+
+```js
+function priceToNumber(input) {
+  const price = Number(input);
+
+  if (Number.isNaN(price)) {
+    return null;                 // it did not work — we say so honestly
+  }
+  return price;
+}
+
+const result = priceToNumber("12 manat");
+
+if (result === null) {
+  console.log("Enter a number only");
+} else {
+  console.log(`Total: ${result * 3}`);
+}
+```
+
+Everything we studied today works here: `Number` turns a string into a number,
+`Number.isNaN` catches a failure, `null` says “empty on purpose”,
+and `=== null` checks it precisely. Strict comparison matters: with `==` the check
+would also catch `undefined`, and that is a different situation.
+
+<TryIt>
+Add this function to your “Report card” and give it a string with a mark typed by hand.
+Try `"5"`, `"five"`, `""` and `"  4  "`.
+Two of the four answers will surprise you — work out why.
+</TryIt>
+
+### A cheat sheet of checks
+
+Let us collect in one place all the ways to ask “what is this”. It is handy to keep this table at hand
+for the whole course:
+
+| What we check | How |
+| --- | --- |
+| a number (and not `NaN`) | `typeof x === "number" && !Number.isNaN(x)` |
+| a string | `typeof x === "string"` |
+| a boolean | `typeof x === "boolean"` |
+| a function | `typeof x === "function"` |
+| an array | `Array.isArray(x)` |
+| an object (not `null`, not an array) | `typeof x === "object" && x !== null && !Array.isArray(x)` |
+| exactly `null` | `x === null` |
+| exactly `undefined` | `x === undefined` |
+| empty: `null` or `undefined` | `x == null` (that very case for `==`) |
+| “nothing useful”: any falsy value | `!x` |
+
+Two rows need a reservation. The first: a check for a number **must** include
+`Number.isNaN` — otherwise `NaN` passes as a normal number, because
+`typeof NaN` is `"number"`.
+
+The second: the object check filters out `null` and arrays, but lets through a date, an error and in general
+any built-in object — they are objects too. If you need to tell apart exactly a “plain object
+with properties”, the task is harder, and it will wait until course 2.
+
+The last row is the shortest and the most dangerous. `!x` answers “yes” to all six
+falsy values at once, including `0` and `""`. For the check “the user
+entered something” this is often a mistake: zero is perfectly legal input.
+
+```js
+function checkAge(age) {
+  if (!age) {                        // a trap: zero is falsy too
+    return "enter your age";
+  }
+  return `age: ${age}`;
+}
+
+checkAge(0);   // "enter your age" — but the person really is 0 years old
+
+// it is better to ask exactly what is meant
+function checkAge2(age) {
+  if (age == null) {                 // only null and undefined
+    return "enter your age";
+  }
+  return `age: ${age}`;
+}
+```
+
+## 15. Common mistakes of the day {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `typeof x === "object"` as an object check | it is also `"object"` for `null` | add `x !== null` |
+| `typeof arr === "array"` | there is no such answer | `Array.isArray(arr)` |
+| `x === NaN` | `NaN` is not equal to itself | `Number.isNaN(x)` |
+| `isNaN("text")` as a check for `NaN` | it converts to a number first | `Number.isNaN` |
+| `if (arr.length)` confused with `if (arr)` | an empty array is truthy | check `length` itself |
+| `new Boolean(false)` | you get a truthy object | `Boolean(x)` or `!!x` |
+
+## 16. What comes tomorrow {#next}
+
+Today we studied what values there are. Tomorrow, on day 6, we start
+**working** with them: arithmetic and assignment — `+`, `-`,
+`*`, `/`, `%`, `+=`, `++`.
+
+Today’s material will be useful right away: you already know that `+` with a string joins,
+and `undefined + 1` gives `NaN`. Tomorrow it will become clear by which rules the language
+decides what to add to what.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Guide: Data structures](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures) | a textbook chapter: all types, primitives and objects, type conversion | <Full /> |
+| [typeof](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/typeof) | the type operator; a closed list of eight answers | <Full /> |
+| [null](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/null) | intentional emptiness; why `typeof` lies | <Full /> |
+| [undefined](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/undefined) | there is no value; four cases when the language puts it in | <Full /> |
+| [NaN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/NaN) | not a number; five sources; not equal to itself | <Full /> |
+| [Boolean](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean) | the boolean type and conversion to it | <Full /> |
+| [Infinity](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Infinity) | infinity; division by zero is not an error | <Brief /> |
+| [Boolean()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean/Boolean) | the constructor; we do not write it with `new` | <Brief /> |
+| [Boolean.prototype.toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean/toString) | `"true"` or `"false"` as a string | <Brief /> |
+| [Boolean.prototype.valueOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean/valueOf) | take the primitive out of a wrapper | <Brief /> |
+| [Error: name is not defined](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Not_defined) | `ReferenceError: x is not defined` | <Brief /> |
+| [Error: unexpected type](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Unexpected_type) | `TypeError: Cannot read properties of null` | <Brief /> |
+
+Numbers, strings and objects from the “Data structures” chapter are studied in detail on their own days:
+16 (strings), 17 (numbers), 21 (objects). `Symbol` and `BigInt` — course 2.
+</Ref>
+
+<Cheatsheet>
+```js
+// 7 primitives (immutable) + Object (mutable)
+typeof 42;          // "number"      typeof "x";        // "string"
+typeof true;        // "boolean"     typeof undefined;  // "undefined"
+typeof 9n;          // "bigint"      typeof Symbol();   // "symbol"
+typeof { };         // "object"      typeof function(){}; // "function"
+
+typeof null;        // "object"  ← a mistake of the language, check with === null
+typeof [1, 2];      // "object"  ← an array: Array.isArray()
+
+// null and undefined
+null + 1;           // 1
+undefined + 1;      // NaN
+null == undefined;  // true      null === undefined;  // false
+
+// NaN
+typeof NaN;         // "number"
+NaN === NaN;        // false
+Number.isNaN(x);    // the right check
+isNaN("salam");     // true — converts first, be careful
+
+// Infinity
+1 / 0;              // Infinity      Infinity - Infinity;  // NaN
+
+// falsy are only: false, 0 (and -0, 0n), "", NaN, null, undefined
+Boolean("0");       // true      Boolean([]);   // true
+!!"text";           // true — the short form
+new Boolean(false); // an object, and it is TRUTHY — we do not write this
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why does `typeof null` answer `"object"`, and how do you check for
+   `null` correctly?
+   <Answer>It is a mistake of the first version of the language from 1995; it cannot be fixed — old code would break.
+   The right check is `value === null`.</Answer>
+2. What do `null + 1` and `undefined + 1` give?
+   <Answer>`1` and `NaN`. `null` in a number context
+   turns into 0, and `undefined` into `NaN`.</Answer>
+3. How is `Number.isNaN("salam")` different from `isNaN("salam")`?
+   <Answer>`false` and `true`. The old `isNaN` first tries
+   to turn the value into a number, while `Number.isNaN` checks that the value
+   really is `NaN`. We write the second.</Answer>
+4. Which of these values are truthy: `0`, `"0"`, `[]`,
+   `""`, `{}`?
+   <Answer>`"0"`, `[]` and `{}` are truthy. `0`
+   and `""` are falsy. An empty array and an empty object are objects, and objects are always truthy.</Answer>
+5. Why does `if (new Boolean(false))` run the body of the condition?
+   <Answer>Because `new Boolean(false)` creates a wrapper object, not the primitive
+   `false`. Any object is truthy. That is why `Boolean` is written
+   without `new`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures" />

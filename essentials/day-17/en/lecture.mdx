@@ -1,0 +1,826 @@
+---
+title: Day 17 — Numbers and first dates
+day: Day 17 • lesson 1
+heading: Numbers and first dates
+lead: Module “Strings, numbers, Math and date basics”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.78rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- turn a string into a number in three ways and choose the right one;
+- tell `isNaN` from `Number.isNaN` and know why it matters;
+- round to the needed digit and understand why `0.1 + 0.2` is not equal to `0.3`;
+- build a date, take it apart and show it in a familiar format;
+- recognize an invalid date before it spoils a report.
+</Goals>
+
+<Toc />
+
+## 1. One number for all cases {#one-type}
+
+Most languages have several kinds of numbers: integers separately, fractions separately, and also
+of different sizes. JavaScript has one kind. Integer, fractional, positive, negative —
+all of it is `number`:
+
+```js
+typeof 5;      // "number"
+typeof 4.5;    // "number"
+typeof -273;   // "number"
+typeof NaN;    // "number" — yes, “not a number” is a number by type too
+```
+
+This is both handy and dangerous. Handy — no need to think about kinds. Dangerous — behind the simplicity
+hide two catches: fractional numbers are stored approximately (section 8), and very
+big integers stop being exact (section 6).
+
+Today we will take apart both the built-in `Number` object with its checks
+and constants, and three functions that live on their own: `parseInt`,
+`parseFloat`, `isNaN`. And in the second half of the lesson we will take up
+dates — just enough to put a date on a report and calculate a difference.
+
+## 2. From a string to a number {#parse}
+
+Data almost always comes as strings: from a form on the page, from a file, from a server.
+So the first thing to do is to turn it into numbers. There are three ways, and they behave
+differently.
+
+```js
+Number("42");      // 42
+Number("4.5");     // 4.5
+Number("42px");    // NaN     — either the whole number or nothing
+Number("");        // 0       — an empty string is zero
+Number("   ");     // 0       — and so are spaces
+Number(null);      // 0
+Number(undefined); // NaN
+Number(true);      // 1
+```
+
+`Number()` is strict: if the string has even one extra character, the answer is
+`NaN`. The two parsing functions, on the contrary, read the string from the left and
+stop where they can:
+
+```js
+parseInt("42px");     // 42     read as much as it could
+parseInt("  42  ");   // 42     spaces at the edges do not get in the way
+parseInt("px42");     // NaN    could not read even the start
+parseInt("4.9");      // 4      “Int” — so the fractional part is dropped
+
+parseFloat("4.5kg");  // 4.5    this one understands the dot
+parseFloat("4,5");    // 4      a comma is not a separator — reading ended
+```
+
+<Scheme src="scheme-parse.svg">The same string through three functions gives three different answers. Notice the strings `"4.5"` and `""`</Scheme>
+
+### A comma instead of a dot
+
+A separate trouble for us: where we live, fractions are written with a comma, but the language understands
+only a dot. So the most ordinary thing a person types is read wrongly:
+
+```js
+Number("4,5");      // NaN   — a comma is not a separator
+parseFloat("4,5");  // 4     — read up to the comma and stopped
+Number("1 000");    // NaN   — a space between thousands gets in the way too
+```
+
+The second line is more dangerous than the first: `NaN` is noticed right away, while a four instead of
+four and a half quietly slips into the calculations. One more argument in favor of
+`Number()`.
+
+The cure is replacing the comma with a dot before converting. We will take apart the replace method
+for strings in course 2, but it looks like this:
+
+```js
+Number("4,5".replace(",", "."));   // 4.5   — replace is covered in course 2
+```
+
+<Important>
+The agreement of the course: **for data from a form we take `Number()`**.
+It honestly says “this is not a number” instead of silently reading half of it.
+`parseInt` and `parseFloat` are needed where a tail is expected
+and does no harm — for example, `"14px"` from the page settings.
+</Important>
+
+## 3. `parseInt` and numeral systems {#radix}
+
+`parseInt` has a second parameter — **the base of the numeral
+system**. By default it is decimal, but you can ask for another one:
+
+```js
+parseInt("1010", 2);    // 10    binary 1010
+parseInt("ff", 16);     // 255   hexadecimal ff
+parseInt("0x1F");       // 31    the language recognizes 0x by itself
+parseInt("08");         // 8     a leading zero does not get in the way
+```
+
+The last two lines are worth remembering separately. Once `parseInt("08")`
+gave zero, because a leading zero meant the octal system, and lots of programs with dates
+broke on this. There is no such behavior today, but the habit has stayed:
+**if the numeral system is known, state it explicitly**.
+
+```js
+const day = "08";
+parseInt(day, 10);   // 8 — “read it as decimal”, this is how reliable code is written
+```
+
+## 4. `NaN` — “not a number” {#nan}
+
+We have known `NaN` since day 5: it is the result of a calculation that failed.
+Today we will take apart how to catch it — and this is a place where the language trips you up.
+
+There are two check functions; they are named almost the same but work differently:
+
+```js
+isNaN("abc");          // true    — first turned it into a number, got NaN
+Number.isNaN("abc");   // false   — a string is not NaN, it is a string
+
+isNaN(NaN);            // true
+Number.isNaN(NaN);     // true
+
+isNaN("42");           // false   — "42" turned into 42, that is a number
+```
+
+The difference is in one thing: **the old `isNaN` first converts the argument
+to a number, while `Number.isNaN` does not**. So the old one answers
+the question “this cannot be treated as a number”, and the new one the question “this is exactly `NaN`”.
+
+<Important>
+In new code people write **`Number.isNaN`**. The old `isNaN`
+stayed for compatibility; when you meet it in someone else’s code, remember the hidden
+conversion.
+</Important>
+
+And the main property of `NaN`, which we talked about on day 7:
+**it is not equal to itself**. So checking it with a comparison is useless:
+
+```js
+const x = Number("five");
+
+x === NaN;             // false — always false, even when x is NaN
+Number.isNaN(x);       // true  — this is the right way
+```
+
+## 5. Infinity and the limits {#limits}
+
+Division by zero in JavaScript is not an error — you get `Infinity`.
+It is checked with a pair of functions built the same way as the previous one:
+
+```js
+isFinite("42");          // true    — first turned the string into a number
+Number.isFinite("42");   // false   — a string is not a number, so not a finite number
+Number.isFinite(42);     // true
+Number.isFinite(1 / 0);  // false   — this is Infinity
+```
+
+The `Number` object itself has a set of constants — extreme values that you
+sometimes need to know:
+
+| Constant | Value | What it is |
+| --- | --- | --- |
+| `Number.MAX_VALUE` | 1.797…e+308 | the biggest number |
+| `Number.MIN_VALUE` | 5e-324 | the smallest positive one |
+| `Number.MAX_SAFE_INTEGER` | 9007199254740991 | the limit of exact integers |
+| `Number.MIN_SAFE_INTEGER` | −9007199254740991 | the same limit below zero |
+| `Number.POSITIVE_INFINITY` | Infinity | the same as `Infinity` |
+| `Number.NEGATIVE_INFINITY` | −Infinity | minus infinity |
+| `Number.EPSILON` | 2.22…e-16 | the smallest noticeable difference (section 8) |
+| `Number.NaN` | NaN | the same as `NaN` |
+
+In ordinary tasks two or three lines of this list are needed, but it is useful to know about the list itself:
+seeing `Number.MAX_SAFE_INTEGER` in someone else’s code, you will understand right away
+that the author fears losing precision on big numbers.
+
+## 6. Integer or not {#integer}
+
+Two checks from the same set:
+
+```js
+Number.isInteger(4);        // true
+Number.isInteger(4.0);      // true  — 4.0 and 4 are the same number
+Number.isInteger(4.5);      // false
+Number.isInteger("4");      // false — a string, not a number
+
+Number.isSafeInteger(2 ** 53);   // false — beyond the limit of precision
+```
+
+The second function asks not “is it an integer” but “is it an integer *and* exact”. The thing
+is that after `MAX_SAFE_INTEGER` integers start sticking together:
+
+```js
+Number.MAX_SAFE_INTEGER;   // 9007199254740991
+```
+
+Beyond this limit neighboring integers stop being different, and arithmetic starts
+quietly lying. For marks, prices and counters this does not matter, but for identifiers
+from a database it matters a lot. There they take strings or `BigInt`, which
+course 2 talks about.
+
+`Number.isInteger`, though, is useful right today: it is the best check of “did
+an integer arrive”, and it replaces two of our old checks — `typeof`
+and `Number.isNaN`.
+
+## 7. `toFixed` and rounding {#tofixed}
+
+We have been using it since day three without ever taking it apart. `toFixed(n)`
+keeps exactly `n` digits after the point:
+
+```js
+(4.333).toFixed(2);      // "4.33"
+(7).toFixed(2);          // "7.00"   — added zeros
+(1234.5678).toFixed(1);  // "1234.6" — rounded
+```
+
+<Mistake>
+**`toFixed` returns a string, not a number.** This is the main
+trap of the method: `typeof (4.333).toFixed(2)` is `"string"`.
+So you cannot add the results (you get joining), but aligning them
+with `padStart` from yesterday is just right.
+</Mistake>
+
+Rounding in `toFixed` is “as at school”, but with a catch that surprises:
+
+```js
+(4.5).toFixed(0);    // "5"
+(2.5).toFixed(0);    // "3"
+(1.005).toFixed(2);  // "1.00" — but we expected "1.01"!
+(1.015).toFixed(2);  // "1.01"
+```
+
+The third line is not a typo. The number `1.005` is stored inside as slightly less
+than 1.005, and the rounding honestly goes down. Why — in the next section.
+
+### Where to round
+
+A rule worth learning right away: **you round once, at the very end,
+when printing**. You calculate with full numbers, with all the digits.
+
+```js
+const valid = 5;
+const total = 7;
+
+const percent = valid / total * 100;   // 71.42857142857143
+percent.toFixed(1);                    // "71.4" — only for showing
+```
+
+Why you must not round earlier can be seen on a simple example. Let us divide a whole into three
+equal parts and round each one:
+
+```js
+Math.round(1 / 3 * 100);   // 33
+// three such shares add up to 99, not 100
+```
+
+One percent got lost. In a report this looks like an error, although each rounding
+was correct. If we had added the exact shares and rounded the result, we would have got
+exactly a hundred.
+
+Hence the practical conclusion for our “Report card”: the average is calculated in full,
+and `toFixed(2)` appears only in the line where the report turns
+into text.
+
+## 8. Why `0.1 + 0.2` is not `0.3` {#float}
+
+The most famous surprise of the language. Check it in the console:
+
+```js
+0.1 + 0.2;             // 0.30000000000000004
+0.1 + 0.2 === 0.3;     // false
+```
+
+This is not a JavaScript error — fractional numbers work this way in almost all languages.
+The computer stores them in the binary system, and in binary `0.1` is an endless
+fraction, like `1/3` in decimal. It has to be cut off, and a tiny
+error appears.
+
+<Scheme src="scheme-float.svg">Fractional numbers are stored approximately. This is a property not of the language but of binary notation</Scheme>
+
+There are two practical consequences, and both are simple.
+
+**The first: fractional numbers are not compared with `===`.** You compare
+the difference with a small threshold — this is what the `Number.EPSILON` constant is for:
+
+```js
+Math.abs(0.1 + 0.2 - 0.3) < Number.EPSILON;   // true
+```
+
+**The second: money and marks are kept in integers, and fractions are shown only
+at the output.** Kopecks are counted in kopecks, not in manats with a fraction; percents —
+in integers, and you divide once when printing with `toFixed`.
+
+### Walkthrough: why the sum does not add up
+
+This is how the trouble looks in a real program. Three prices; the sum must be 60.60:
+
+```js
+const prices = [10.10, 20.20, 30.30];
+
+let bill = 0;
+for (const p of prices) {
+  bill += p;
+}
+
+bill;             // 60.599999999999994
+bill === 60.6;    // false
+```
+
+**Step 1. We look at the number itself.** Not at `toFixed`, but at what
+lies in the variable. `toFixed(2)` would show `"60.60"`
+and hide the problem.
+
+**Step 2. We understand that this is not a code error.** Three
+approximate numbers were added, and their errors added up too. Looking for a typo in the loop
+is pointless — there is none.
+
+**Step 3. We change the unit of measure.** We count not in manats but in kopecks —
+that is, in integers, which have no such surprises:
+
+```js
+let kopecks = 0;
+for (const p of prices) {
+  kopecks += Math.round(p * 100);
+}
+
+kopecks;                 // 6060
+kopecks / 100 === 60.6;  // true
+```
+
+**Step 4. We round at the input, not at the output.** Notice
+`Math.round(p * 100)`: multiplication also gives an approximate result,
+so it is turned into an integer right away.
+
+<Important>
+The whole rule: **store in integers, calculate in integers, divide once —
+when showing**. It applies to money, percents, time in minutes and generally
+everything that is compared later.
+</Important>
+
+## 9. Other numeral systems {#tostring}
+
+Numbers have their own `toString`, and it can do more than the string one: as the second
+argument it takes the base of the numeral system, from 2 to 36.
+
+```js
+(255).toString(2);    // "11111111"
+(255).toString(16);   // "ff"
+(35).toString(36);    // "z"       — the digits run out, letters follow
+```
+
+Bases outside 2…36 give an error:
+
+```js
+(255).toString(1);
+// RangeError: toString() radix argument must be between 2 and 36
+```
+
+The reverse operation is the familiar `parseInt` with the same base.
+Together they give a handy technique: turn a number into a short form and back.
+
+```js
+const short = (255).toString(36);   // "73"
+parseInt(short, 36);                // 255
+```
+
+## 10. The rest about numbers {#other}
+
+Three methods worth recognizing in other people’s code, though you rarely have to write them.
+
+```js
+(1234.5).toExponential(2);   // "1.23e+3"  — scientific notation
+(1234.5).toPrecision(3);     // "1.23e+3"  — three significant digits in all
+(0.000123).toPrecision(2);   // "0.00012"
+(42).valueOf();              // 42         — the number itself
+```
+
+`toExponential` and `toPrecision` have the same error as
+`toFixed` when you ask for too many digits. The messages differ in
+the method name and the limits:
+
+```js
+(4.5).toFixed(101);
+// RangeError: toFixed() digits argument must be between 0 and 100
+
+(4.5).toPrecision(0);
+// RangeError: toPrecision() argument must be between 1 and 100
+```
+
+## 11. A date is a number {#date}
+
+We move on to the second half of the lesson. The main thing to understand about dates: inside, a date is
+**one number**, the count of milliseconds that have passed since midnight of 1 January
+1970\. Everything else is ways to build this number and to show it.
+
+```js
+const now = Date.now();          // milliseconds right now
+typeof now;                      // "number"
+
+const d = new Date(2026, 8, 22, 14, 5);   // 22 September 2026, 14:05
+d.getTime();                     // the same kind of number for this date
+```
+
+Since a date is a number, dates can be subtracted. This is how a difference is calculated:
+
+```js
+const start = new Date(2026, 8, 1);
+const end = new Date(2026, 8, 22);
+
+const days = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+days;   // 21
+```
+
+The denominator reads from right to left: 1000 milliseconds in a second, 60 seconds in a minute,
+60 minutes in an hour, 24 hours in a day. Such a line is written once and moved into a constant.
+
+### The date right now
+
+Without arguments `new Date()` gives the current moment — with all the hours,
+minutes and seconds:
+
+```js
+const now = new Date();
+
+now.getFullYear();   // the current year
+now.getHours();      // the current hour — you and your neighbor get the same
+now.getSeconds();    // but this one differs a second later
+```
+
+That is exactly why in all the examples of this day the dates are built by hand:
+`new Date(2026, 8, 22)`. The result of such an example can be printed in the lesson
+and checked — while with `new Date()` there is nothing to check against, everyone has their own.
+
+The rule for your programs is the same: **where a result must be checked,
+the date is passed as a parameter, not taken from inside**. This is the same technique from day 15 —
+a function that depends only on its parameters is checked with one call. In today’s
+“Report card” the date is done exactly this way: a parameter with a default.
+
+## 12. Months from zero {#months}
+
+Now the most important thing about dates in this language — and a source of endless errors.
+**Months are numbered from zero.** January is 0, September is 8, December is 11.
+
+```js
+new Date(2026, 0, 1).getMonth();    // 0   — January
+new Date(2026, 8, 22).getMonth();   // 8   — September
+new Date(2026, 11, 31).getMonth();  // 11  — December
+```
+
+Days, at the same time, are numbered from one, as people do it. There is no logic in this — it happened
+historically, and people simply live with it.
+
+<Scheme src="scheme-months.svg">Parts of a date. The month breaks the general rule; the rest matches what you are used to</Scheme>
+
+One more feature follows from numbering from zero: if you pass month 12, the date
+will not break but will move into the next year:
+
+```js
+const d = new Date(2026, 12, 1);
+
+d.getFullYear();       // 2027
+d.getMonth();          // 0 — January
+```
+
+This property is sometimes used on purpose — to get “a month later” without thinking
+about the end of the year. But more often it hides a typo, so the month is better checked.
+
+## 13. Showing it the human way {#locale}
+
+Dates for output are not built from pieces by hand. For this there are two methods that
+themselves know how a date is usually written in the given country:
+
+```js
+const d = new Date(2026, 8, 22, 14, 5);
+
+d.toLocaleDateString("en-GB");   // "22/09/2026"
+d.toLocaleTimeString("en-GB");   // "14:05:00"
+d.toLocaleDateString("en-US");   // "9/22/2026" — in the USA the month comes first
+```
+
+Without an argument the language set in the browser or the system is taken. This is handy
+for the user but inconvenient for checking: you and a classmate may get
+different results. **In examples and tests the language is stated explicitly.**
+
+<Important>
+These methods have one more argument — settings: whether to show the day of the week, to write
+the month as a word or a number, whether seconds are needed. The settings live in the
+`Intl` object, and this is a topic of course 2. For now two forms are enough for us —
+`"22/09/2026"` and `"14:05:00"`.
+</Important>
+
+Time zones are worth knowing about separately. A date inside is a number, the same all over the world,
+but `getHours` and the output depend on the computer’s zone. In Turkmenistan it is
+`UTC+5`, and all the examples of this day are calculated for it. A full analysis of zones
+and the modern replacement for `Date` called `Temporal` are in course 2.
+
+## 14. An invalid date {#invalid}
+
+If a date could not be built, there will be no error. You get a special value — an “invalid
+date”, which behaves roughly like `NaN`:
+
+```js
+const bad = new Date("not a date");
+
+String(bad);            // "Invalid Date"
+bad.getTime();          // NaN
+bad.getFullYear();      // NaN
+```
+
+It is checked through `getTime` and the familiar `Number.isNaN`:
+
+```js
+function isValidDate(d) {
+  return !Number.isNaN(d.getTime());
+}
+
+isValidDate(new Date(2026, 8, 22));   // true
+isValidDate(new Date("not a date"));  // false
+```
+
+But an attempt to turn an invalid date into a strict format does throw an error —
+the only date error in our reference:
+
+```js
+new Date("not a date").toISOString();
+// RangeError: Invalid time value
+```
+
+## 15. The “Report card”: marks from a form and the report date {#tabel}
+
+We put the day together. The program gets marks the way they come from a form —
+numbers and strings mixed together — and puts a date on the report.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+// new: a mark may arrive as a string
+function toMark(raw) {
+  return Number(String(raw).trim());
+}
+
+// new: one check instead of two
+const isValidMark = (mark) =>
+  Number.isInteger(mark) && mark >= MIN_MARK && mark <= MAX_MARK;
+
+const isFive = (mark) => mark === MAX_MARK;
+
+const sum = (numbers) => {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+};
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+// new: the date of the report
+function makeTitle(date = new Date(2026, 8, 22)) {
+  return "Report card for " + date.toLocaleDateString("en-GB");
+}
+
+function makeHeader() {
+  return "Name".padEnd(NAME_WIDTH) + "Avg".padStart(6) + "Num".padStart(4) + "  Verdict";
+}
+
+function makeRow(name = "unnamed", ...raw) {
+  const marks = [];
+  for (const r of raw) {
+    marks.push(toMark(r));
+  }
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "no valid marks";
+  }
+
+  const avg = average(valid);
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(valid.length).padStart(4)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(40);
+
+console.log(makeTitle());
+console.log(line);
+console.log(makeHeader());
+console.log(line);
+console.log(makeRow("Aman", 5, "4", " 9 ", 3, 5, 0, "4", 5));
+console.log(makeRow("Meret", "3", 3, 4));
+console.log(makeRow("Gülnar", 9, 0, "five"));
+console.log(makeRow("Sapar", 5, 5, "4", 5));
+console.log(makeRow("Oguljan", "4.5", 4, 5));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Report card for 22/09/2026
+----------------------------------------
+Name           Avg Num  Verdict
+----------------------------------------
+Aman          4.33   6  good student
+Meret         3.33   3  average student
+Gülnar      no valid marks
+Sapar         4.75   4  top student
+Oguljan       4.50   2  top student
+----------------------------------------
+```
+</ResultBox>
+
+The first four lines matched yesterday’s — and this is the main check. Some marks
+now arrive as strings (`"4"`, `" 9 "`), but `toMark`
+brings them to numbers before any selection, and from there the program works as before.
+
+Inside `toMark` there is `String(raw)`, and it is not redundant: a mark
+may also arrive as a number, and a number has no `trim` method. We turn it into a string,
+clean the edges, and only then parse it back into a number — then the function accepts
+both the number `5` and the string `" 5 "` in exactly the same way.
+
+**The check became stricter.** Before, any fraction in the range
+from 2 to 5 counted as valid; now `Number.isInteger` cuts it off too. This shows in the last
+line: for “Oguljan” the mark `"4.5"` was dropped, two out of three remained.
+The former check would have let it through and calculated the average over three.
+
+**`Number.isInteger` replaced two conditions** —
+`typeof` and the `NaN` check — and added a new one: a mark must
+be an integer. `NaN` from an unreadable mark still does not pass, because
+`NaN` is not an integer.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Replace `toMark` with `parseInt`
+and run it. Whose result changed, and why? A hint: look at “Oguljan”
+and at `"five"`.
+\
+\
+**The second.** Pass `makeTitle` the date `new Date(2026, 12, 1)`
+and explain which date appeared in the title.
+\
+\
+**The third.** Add a column “Days to the end of the term” to the report, counting
+from the report date to `new Date(2026, 11, 25)`. Check it on two different
+report dates.
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `x === NaN` | `NaN` is not equal to itself | `Number.isNaN(x)` |
+| `isNaN("42")` as a type check | it first turns the value into a number | `Number.isNaN` or `Number.isInteger` |
+| `total + price.toFixed(2)` | `toFixed` returns a string | add numbers, round when printing |
+| `0.1 + 0.2 === 0.3` | fractions are stored approximately | compare the difference with `Number.EPSILON` |
+| `new Date(2026, 9, 22)` as September | months from zero: 9 is October | `new Date(2026, 8, 22)` |
+| `Number("4,5")` | the separator is a dot, not a comma | replace the comma beforehand |
+| checking a date with `if (date)` | an invalid date is an object too, so it is truthy | `!Number.isNaN(date.getTime())` |
+
+### What comes tomorrow
+
+Day 18 is `Math`: rounding in every direction, random numbers, powers
+and roots. From there will come `Math.random`, which no game can do without,
+and `Math.max` with `Math.min`, which have long been asking to get
+into our “Report card”.
+
+After that the module “Strings, numbers, Math and date basics” will close with numbers and strings, and we will move on
+to arrays — days 19 and 20. By the way, familiar names will appear there: arrays have
+`slice`, `indexOf`, `includes` and `at`,
+working by yesterday’s rules.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Guide: Numbers and strings](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Numbers_and_strings) | a chapter of the guide: numbers, strings, conversions | <Full /> |
+| [Number](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number) | an overview: checks and constants | <Full /> |
+| [Number()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/Number) | a string into a number as a whole or `NaN` | <Full /> |
+| [parseInt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/parseInt) | reads an integer from the left, knows numeral systems | <Full /> |
+| [parseFloat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/parseFloat) | reads a fraction from the left | <Full /> |
+| [Number.parseInt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/parseInt) | the same under the name `Number` | <Full /> |
+| [Number.parseFloat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/parseFloat) | the same under the name `Number` | <Full /> |
+| [isNaN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/isNaN) | the old check, converts the argument | <Full /> |
+| [Number.isNaN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN) | an honest check for `NaN` | <Full /> |
+| [isFinite](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/isFinite) | the old check for finiteness | <Full /> |
+| [Number.isFinite](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite) | an honest check for finiteness | <Full /> |
+| [Number.isInteger](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger) | whether a number is an integer | <Full /> |
+| [MAX_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER) | the limit of exact integers | <Full /> |
+| [toFixed](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toFixed) | digits after the point; returns a string | <Full /> |
+| [Number.toString](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toString) | a numeral system from 2 to 36 | <Full /> |
+| [Date](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date) | an overview: a date as a number of milliseconds | <Full /> |
+| [new Date()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/Date) | build a date; the month from zero | <Full /> |
+| [Date.now](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/now) | milliseconds right now | <Full /> |
+| [getTime](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTime) | a date as a number — for a difference | <Full /> |
+| [getFullYear](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getFullYear) | the full year | <Full /> |
+| [getMonth](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getMonth) | the month from 0 to 11 | <Full /> |
+| [getDate](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getDate) | the day of the month from 1 to 31 | <Full /> |
+| [getHours](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getHours) | hours in the local zone | <Full /> |
+| [getMinutes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getMinutes) | minutes | <Full /> |
+| [toLocaleDateString](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toLocaleDateString) | a date in the form usual for a country | <Full /> |
+| [toLocaleTimeString](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toLocaleTimeString) | time in the form usual for a country | <Full /> |
+| [EPSILON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/EPSILON) | a threshold for comparing fractions | <Brief /> |
+| [isSafeInteger](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger) | an integer and exact | <Brief /> |
+| [MAX_VALUE](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_VALUE) | the biggest number | <Brief /> |
+| [MIN_VALUE](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_VALUE) | the smallest positive one | <Brief /> |
+| [MIN_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_SAFE_INTEGER) | the limit of exact integers below zero | <Brief /> |
+| [Number.NaN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/NaN) | the same as `NaN` | <Brief /> |
+| [POSITIVE_INFINITY](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/POSITIVE_INFINITY) | plus infinity | <Brief /> |
+| [NEGATIVE_INFINITY](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/NEGATIVE_INFINITY) | minus infinity | <Brief /> |
+| [toExponential](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toExponential) | scientific notation | <Brief /> |
+| [toPrecision](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toPrecision) | a given number of significant digits | <Brief /> |
+| [Number.valueOf](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/valueOf) | the number itself | <Brief /> |
+| [Error: a radix outside 2…36](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_radix) | in Chrome — `toString() radix argument must be between 2 and 36` | <Brief /> |
+| [Error: too many digits](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Precision_range) | in Chrome — `toFixed() digits argument must be between 0 and 100` | <Brief /> |
+| [Error: an invalid date](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_date) | in Chrome — `Invalid time value` | <Brief /> |
+
+Forty pages: twenty-six in depth, fourteen for recognition. The other
+methods of `Date` — parsing strings, UTC, setters — and the modern replacement
+`Temporal` come in course 2.
+</Ref>
+
+<Cheatsheet>
+```js
+// STRING → NUMBER
+Number("42");          // 42    strict: "42px" → NaN, "" → 0
+parseInt("42px");      // 42    reads from the left, drops the fractional part
+parseFloat("4.5kg");   // 4.5
+parseInt("1010", 2);   // 10    state the base explicitly
+
+// CHECKS — take the ones with Number.
+Number.isNaN("abc");     // false — an honest one
+isNaN("abc");            // true  — the old one: converts first
+Number.isFinite(42);     // true;  Number.isFinite("42") → false
+Number.isInteger(4);     // true  — the best check of “an integer arrived”
+const x = Number("five");
+x === NaN;               // false — ALWAYS, this is not how you check
+
+// ROUNDING
+(4.333).toFixed(2);   // "4.33" — a STRING, not a number!
+(1.005).toFixed(2);   // "1.00" — a binary error
+0.1 + 0.2 === 0.3;    // false
+Math.abs(0.1 + 0.2 - 0.3) < Number.EPSILON;   // true
+
+// NUMERAL SYSTEMS
+(255).toString(16);   // "ff"
+parseInt("ff", 16);   // 255
+// (255).toString(1)  → RangeError: toString() radix argument must be between 2 and 36
+
+// A DATE = A NUMBER OF MILLISECONDS
+Date.now();                                // now, a number
+const d = new Date(2026, 8, 22, 14, 5);    // THE MONTH FROM ZERO: 8 = September
+d.getMonth();                              // 8; also getFullYear, getDate, getHours, getMinutes
+const start = new Date(2026, 8, 1);
+const end = new Date(2026, 8, 22);
+(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);   // 21 — the difference in days
+
+// SHOW
+d.toLocaleDateString("en-GB");   // "22/09/2026"
+d.toLocaleTimeString("en-GB");   // "14:05:00"
+
+// AN INVALID DATE
+const bad = new Date("not a date");
+String(bad);                     // "Invalid Date"
+!Number.isNaN(bad.getTime());    // false — this is how you check
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. How is `Number("42px")` different from `parseInt("42px")`?
+   <Answer>`Number` requires the whole string to be a number and gives `NaN`
+   on an extra character. `parseInt` reads from the left as much as
+   it can and returns 42. For data from a form people take `Number`:
+   it honestly reports garbage.</Answer>
+2. Why do `isNaN("abc")` and `Number.isNaN("abc")` give different
+   answers?
+   <Answer>The old `isNaN` first turns the argument into a number: from
+   `"abc"` you get `NaN`, the answer is `true`.
+   `Number.isNaN` converts nothing and honestly answers that
+   a string is not `NaN`.</Answer>
+3. What is wrong with the expression `total + price.toFixed(2)`?
+   <Answer>`toFixed` returns a string, so the plus will join them, not
+   add them. Numbers are added as numbers and rounded once — at the moment of printing.</Answer>
+4. What date does `new Date(2026, 9, 22)` give?
+   <Answer>22 October 2026, not September: months are numbered from zero, so
+   nine is the tenth month. September is 8.</Answer>
+5. How do you check that a date was built correctly?
+   <Answer>`!Number.isNaN(date.getTime())`. The check
+   `if (date)` does not work: an invalid date is an object too, so
+   it is truthy.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number" />

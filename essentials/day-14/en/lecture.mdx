@@ -1,0 +1,963 @@
+---
+title: Day 14 — Default and rest parameters
+day: Day 14 • lesson 1
+heading: Default and rest parameters
+lead: Module “Functions”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #a16207; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #78350f; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- give a parameter a default value and know when it is used;
+- explain why `null` and `0` do not switch the default on;
+- collect any number of arguments with a rest parameter;
+- replace `arguments` with it and explain why it is better;
+- recognize four errors about parameters by their text in the console.
+</Goals>
+
+<Toc />
+
+## 1. Three lines we are tired of {#why}
+
+On day 12 we found out: if an argument is not passed, the parameter gets `undefined`.
+Sometimes that is what you need, but more often it is a source of `NaN` and strange strings:
+
+```js
+function makeGreeting(name, greeting) {
+  return greeting + ", " + name + "!";
+}
+
+makeGreeting("Aman", "Hoş geldiň");   // "Hoş geldiň, Aman!"
+makeGreeting("Aman");                 // "undefined, Aman!"
+```
+
+The greeting is almost always the same, and you do not want to write it in every call.
+So we need to put it in ourselves — if there is no second argument:
+
+```js
+function makeGreeting(name, greeting) {
+  if (greeting === undefined) {
+    greeting = "Salam";
+  }
+  return greeting + ", " + name + "!";
+}
+
+makeGreeting("Aman");                 // "Salam, Aman!"
+makeGreeting("Aman", "Hoş geldiň");   // "Hoş geldiň, Aman!"
+```
+
+It works. But three lines of checking are written for the sake of one word, and in real
+code there are often three or four such checks in a row — one for each optional parameter. Reading the function
+starts not with its job but with formalities.
+
+Today we will learn to write the same thing with a single `=` sign right in the header
+of the function. And along the way we will solve the opposite problem: what to do when there are, on the contrary,
+**any number** of arguments, and you do not know in advance how many.
+
+## 2. How to write a default {#syntax}
+
+A default value is put in the same place where the parameter is declared — with `=`:
+
+```js
+function makeGreeting(name, greeting = "Salam") {
+  return greeting + ", " + name + "!";
+}
+
+makeGreeting("Aman");                 // "Salam, Aman!"
+makeGreeting("Aman", "Hoş geldiň");   // "Hoş geldiň, Aman!"
+```
+
+The body of the function became exactly what it was written for. The check has not gone anywhere — the
+language does it itself; it just no longer takes up space in the code.
+
+<Scheme src="scheme-syntax.svg">Arguments are laid out into parameters from left to right. Where an argument was missing, the default is used</Scheme>
+
+Defaults work in all three forms of writing from yesterday:
+
+```js
+function f1(n = 1) { return n; }            // declaration
+const f2 = function (n = 1) { return n; };  // function expression
+const f3 = (n = 1) => n;                    // arrow function
+```
+
+<Mistake>
+An arrow function with a default **requires parentheses**. Yesterday’s
+rule “one simple parameter — the parentheses can go” does not apply to defaults:
+\
+\
+`const f = n = 1 => n;`
+\
+`// SyntaxError: Malformed arrow function parameter list`
+</Mistake>
+
+## 3. What “not passed” means {#undefined}
+
+Here hides the main subtlety of the day. A default is used **only on
+`undefined`** — and on nothing else. Neither `null`, nor an empty string,
+nor zero switches it on:
+
+```js
+function test(num = 1) {
+  return num;
+}
+
+test();            // 1        no argument
+test(undefined);   // 1        an explicit undefined — the same thing
+test(null);        // null     the default is NOT used
+test("");          // ""       the default is NOT used
+test(0);           // 0        the default is NOT used
+test(NaN);         // NaN      the default is NOT used
+```
+
+The logic is simple: in the language `undefined` means exactly “there is no value”. Everything else is
+a value, even if it looks empty. If a programmer passed `0`, they passed zero,
+not “nothing”.
+
+A table for all cases — it is worth reading once in full, because this is where
+the most puzzling errors are born:
+
+| What was passed | What the parameter gets | Default |
+| --- | --- | --- |
+| nothing | the value from the header | used |
+| `undefined` | the value from the header | used |
+| `null` | `null` | no |
+| `0` | `0` | no |
+| `""` (an empty string) | `""` | no |
+| `false` | `false` | no |
+| `NaN` | `NaN` | no |
+
+The first two rows are the same for a reason. For the language, “there is no argument” and “the argument equals
+`undefined`” are one and the same state; inside the function you cannot
+tell them apart.
+
+A useful technique follows from this: **an explicit `undefined` is a way to say
+“take your own here”**. It will come in handy in section 6, when you need to skip one
+parameter and pass the next one.
+
+### How this differs from the old trick with `||`
+
+Before 2015 a default was often put in with the logical OR from day 7:
+
+```js
+function test(num) {
+  num = num || 1;   // the old trick
+  return num;
+}
+
+test();      // 1   — looks right
+test(0);     // 1   — but this is already wrong!
+test("");    // 1   — and so is this
+```
+
+The `||` operator looks not at “passed or not” but at truthiness. And as we saw
+on day 5, `0`, `""` and `NaN` are all falsy.
+So a function that was honestly passed a zero silently got a one — an error that is
+hard to notice and even harder to find.
+
+The `??` operator from the same day 7 closes this hole: it reacts only to
+`null` and `undefined`. But compare three versions:
+
+```js
+function a(num) { num = num || 1; return num; }   // breaks on 0 and ""
+function b(num) { num = num ?? 1; return num; }   // correct, but in the body
+function c(num = 1) { return num; }               // correct and in the header
+```
+
+The third version is better not only because it is shorter. In it you see at first glance that the parameter
+is optional — without reading the body of the function. This is the real benefit of defaults:
+**they document the function**.
+
+<Important>
+There is still a difference between `??` and a default: `??` puts in
+the value for `null` too, while a default does not. If your function may be passed
+`null` and it must count as “nothing”, a default alone is not enough.
+</Important>
+
+## 4. A default is an expression {#expression}
+
+To the right of `=` you can write not only a ready value but any expression —
+everything we have covered since day 6:
+
+```js
+const CURRENT_YEAR = 2026;
+
+function makeCard(name, year = CURRENT_YEAR, note = "no marks yet") {
+  return name + " (" + year + "): " + note;
+}
+
+makeCard("Aman");         // "Aman (2026): no marks yet"
+makeCard("Meret", 2025);  // "Meret (2025): no marks yet"
+```
+
+You can even call another function. And here it is important to understand **when**
+this happens:
+
+```js
+function double(n) {
+  return n * 2;
+}
+
+function calc(n, m = double(n)) {
+  return n + m;
+}
+
+calc(3);      // 9   — double(3) was called, gave 6, 3 + 6
+calc(3, 1);   // 4   — there is a second argument, double was not called at all
+```
+
+A default is evaluated **at the moment of the call** and only if it is needed.
+Not when the function is declared, not once for the whole program — anew every time.
+
+The easiest way to see this is with an array:
+
+```js
+function addMark(mark, marks = []) {
+  marks.push(mark);
+  return marks;
+}
+
+addMark(5);   // [5]
+addMark(4);   // [4] — not [5, 4]
+```
+
+Every call without the second argument creates **a new empty array**.
+If you need a shared array, it is passed explicitly:
+
+```js
+const amanMarks = [];
+addMark(5, amanMarks);
+addMark(4, amanMarks);
+amanMarks;   // [5, 4]
+```
+
+### A technique: a required parameter through a default
+
+Since a default is an expression that runs at the call, you can also put
+`throw` from day 11 into it. You get a parameter that cannot be forgotten:
+
+```js
+function required(paramName) {
+  throw new TypeError("missing a required argument: " + paramName);
+}
+
+function makeGreeting(name = required("name"), greeting = "Salam") {
+  return greeting + ", " + name + "!";
+}
+
+makeGreeting("Aman");   // "Salam, Aman!"
+makeGreeting();         // TypeError: missing a required argument: name
+```
+
+Compare it with the check from day 12: there we wrote `if (name === undefined) throw ...`
+in the body, here it is one word in the header. And it works exactly when it should: if the name
+was passed, `required` is not even called.
+
+The technique is not required — many people write checks in the body, and that is fine too. But it shows well
+that a default does not have to be a value: it is code that runs
+at the right moment.
+
+<TryIt>
+Check in the console that a default really is evaluated every time:
+\
+\
+`let calls = 0;`
+\
+`function next() { calls = calls + 1; return calls; }`
+\
+`function withCall(n = next()) { return n; }`
+\
+\
+Call `withCall()` twice and look at `calls`. Then
+call `withCall(100)` and look again. What is it now, and why?
+</TryIt>
+
+## 5. Neighboring parameters are visible {#earlier}
+
+In a default you can use the parameters declared **to the left**:
+
+```js
+function greet(name, greeting, message = greeting + " " + name) {
+  return message;
+}
+
+greet("Aman", "Salam");                       // "Salam Aman"
+greet("Aman", "Salam", "Doglan günüň gutly"); // "Doglan günüň gutly"
+```
+
+Handy: by default the third parameter is built from the first two, but if you like
+you can set it completely.
+
+To the right, though, you cannot. Parameters get their values in turn, from left to right,
+and whatever has not had its turn yet does not exist yet:
+
+```js
+function bad(a = b, b = 2) {
+  return [a, b];
+}
+
+bad();    // ReferenceError: Cannot access 'b' before initialization
+bad(1);   // [1, 2] — works, because the default for a was not needed
+```
+
+Notice: the error appears **not when the function is declared**
+but at a specific call — and only the one where the default had to be evaluated. This is the same
+“dead zone” from day 4, just in the list of parameters.
+
+## 6. Optional ones go last {#order}
+
+The language does not forbid putting a parameter with a default first. But such a function
+is inconvenient to use:
+
+```js
+function f(x = 1, y) {
+  return [x, y];
+}
+
+f();      // [1, undefined]
+f(2);     // [2, undefined] — the second parameter could not be set
+```
+
+Arguments are laid out by places, not by names. To get to `y`,
+you have to fill the first place — and this is where the technique from section 3 comes in handy:
+
+```js
+f(undefined, 7);   // [1, 7] — said “take your own for x”, set y
+```
+
+It works, but it reads badly: the call contains a word that explains nothing.
+Hence the rule:
+
+<Important>
+**Parameters with defaults are put at the end of the list**, required ones at the start.
+Then any optional parameter can simply be left out.
+</Important>
+
+When there are many optional parameters, even this rule does not help —
+a call like `f(1, undefined, undefined, true)` is unreadable. In such cases all
+the settings are passed as one object; we will take this technique apart on day 22.
+
+## 7. What a default cannot contain {#limits}
+
+Defaults are evaluated **before** the body of the function starts working.
+So a default cannot see what is declared inside:
+
+```js
+function f(a = go()) {
+  function go() {
+    return "hello";
+  }
+  return a;
+}
+
+f();   // ReferenceError: go is not defined
+```
+
+The function `go` certainly exists here, and the hoisting from day 13 works — but only
+inside the body. By this moment the list of parameters is already being filled, and the body does not exist yet.
+
+The rule for practice is simple: **in a default refer only to what is outside the
+function or to the left in the list of parameters**. More about scopes is
+in course 2.
+
+## 8. The rest parameter {#rest}
+
+Now the opposite problem. A function needs to take **any number** of arguments:
+add up any number of marks, collect a list of names. How many exactly is not known in advance.
+
+For this the last parameter is marked with three dots. It is called
+a **rest parameter** and collects everything that is left into an array:
+
+```js
+function showArgs(first, second, ...others) {
+  console.log(first, second, others);
+}
+
+showArgs("bir", "iki", "üç", "dört", "bäş");
+// bir iki ["üç", "dört", "bäş"]
+```
+
+<Scheme src="scheme-rest.svg">The first arguments go into ordinary parameters; everything else is collected into an array</Scheme>
+
+The main property: **a rest parameter is always an array**. Even when
+there is one extra argument or none:
+
+```js
+showArgs("bir", "iki", "üç");   // bir iki ["üç"]
+showArgs("bir", "iki");         // bir iki []
+showArgs("bir");                // bir undefined []
+```
+
+The last line shows both of today’s topics at once: an ordinary parameter without an argument
+became `undefined`, and the rest parameter became an empty array.
+
+Now the function can be written the way you want to call it:
+
+```js
+function sumAll(...numbers) {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+}
+
+sumAll(5, 4, 5);   // 14
+sumAll(5);         // 5
+sumAll();          // 0
+```
+
+Inside, `numbers` is an ordinary array, and `for...of` from day 11
+works with it as always.
+
+## 9. Three rules of the rest parameter {#rules}
+
+The rules are short, and all three follow from common sense.
+
+**The first: it is the last one.** A rest parameter takes everything to the end,
+so there is nothing left to stand after it:
+
+```js
+// function replacer(match, ...groups, offset) { }   → SyntaxError: Rest parameter must be last formal parameter
+function replacer(match, offset, ...groups) { }      // the rest parameter goes last
+```
+
+**The second: there is only one.** There cannot be two “all the rest” in one list —
+the first has already taken everything:
+
+```js
+// function f(...a, ...b) { }   → SyntaxError: Rest parameter must be last formal parameter
+function f(a, ...b) { }         // one rest parameter, the others are ordinary
+```
+
+**The third: it never has a default.** It would never be used:
+even without arguments a rest parameter is an empty array, not `undefined`:
+
+```js
+// function f(...args = []) { }   → SyntaxError: Rest parameter may not have a default initializer
+function f(...args) { }           // without arguments args is [] anyway
+```
+
+There is a fourth small thing too: a comma after a rest parameter is also an error.
+In an ordinary list a trailing comma is allowed, here it is not:
+
+```js
+function f(a, b,) { }          // this is allowed
+// function g(...args,) { }    → SyntaxError: Rest parameter must be last formal parameter
+function g(...args) { }        // no comma
+```
+
+<Scheme src="scheme-rules.svg">Required, then optional, then rest. All four violations are a `SyntaxError`</Scheme>
+
+## 10. The rest parameter versus `arguments` {#args}
+
+Yesterday we saw the service object `arguments`: it exists in every ordinary function
+and contains all the passed arguments. It would seem to be the same thing. But there are three differences, and all
+of them favor the rest parameter.
+
+**The first: a rest parameter is a real array.** `arguments` only
+looks like an array, and it has no array methods:
+
+```js
+function withRest(...args) {
+  return args.sort();
+}
+withRest(5, 3, 7, 1);   // [1, 3, 5, 7]
+
+function withArguments() {
+  return arguments.sort();
+}
+withArguments(5, 3, 7, 1);
+// TypeError: arguments.sort is not a function
+```
+
+You can check this directly: `Array.isArray` gives `true` for a rest parameter
+and `false` for `arguments`.
+
+**The second: a rest parameter takes only the extra ones.** Named parameters do not
+get into it, while `arguments` gets absolutely everything:
+
+```js
+function compare(a, b, ...rest) {
+  return [arguments.length, rest.length];
+}
+
+compare(1, 2, 3, 4);   // [4, 2] — four arguments, two of them extra
+```
+
+**The third: a rest parameter works in arrow functions.** Yesterday we found out
+that there is no `arguments` in an arrow function at all:
+
+```js
+const countArrow = (...args) => args.length;
+countArrow(1, 2, 3);   // 3
+```
+
+<Important>
+Here is the replacement promised yesterday. `arguments` is not written in new code: it is not an array,
+it does not work in arrow functions and it confuses by including the named parameters. You need to know it
+only to read old code.
+</Important>
+
+### How to rewrite old code
+
+Before 2015 there were no rest parameters, and `arguments` had to be
+turned into an array by hand. You will meet this line in many old files:
+
+```js
+function oldSum() {
+  const numbers = Array.prototype.slice.call(arguments);   // course 2
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+}
+
+oldSum(5, 4, 5);   // 14
+```
+
+There is no need to take apart today what `slice.call` does here — that is course 2.
+It is enough to recognize the construction on sight and understand its meaning: “make
+a normal array out of `arguments`”. The modern syntax does the same thing
+and is two lines shorter:
+
+```js
+function newSum(...numbers) {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+}
+
+newSum(5, 4, 5);   // 14
+```
+
+The rule for rewriting: you see `arguments` at the start of a function —
+replace the empty list of parameters with `...args`, and every mention of
+`arguments` with `args`. If the function also has named parameters,
+be careful: `arguments` included them, and a rest parameter does not.
+
+## 11. Defaults and a rest parameter together {#together}
+
+They get along in one list — the main thing is to keep the order:
+
+```js
+function makeLine(name, sep = ": ", ...marks) {
+  return name + sep + "marks " + marks.length;
+}
+
+makeLine("Aman", " — ", 5, 4, 5);   // "Aman — marks 3"
+makeLine("Aman");                   // "Aman: marks 0"
+```
+
+And what if you do not need a separator but do need marks? The place is taken, it cannot be skipped —
+an explicit `undefined` helps out again:
+
+```js
+makeLine("Aman", undefined, 5, 4, 5);   // "Aman: marks 3"
+```
+
+This is that very case from section 6, when a call becomes ugly. Here it is still
+tolerable, but if there are three optional parameters before the rest parameter, the function is better
+redone.
+
+## 12. How many parameters a function has {#length}
+
+On day 12 we saw the `length` property of a function: `add.length` is
+the number of declared parameters. With today’s parameters it does not count all of them:
+
+```js
+function p1(a, b, c) { }
+function p2(a, b = 1, c) { }
+function p3(a, ...rest) { }
+
+p1.length;   // 3
+p2.length;   // 1  — the count stops at the first default
+p3.length;   // 1  — the rest parameter is not counted
+```
+
+The rule: `length` counts the parameters **up to the first optional one**.
+That is, it answers the question “how many arguments does this function absolutely require”.
+
+In your own code this property is rarely needed, but in other people’s code you will meet it. It is useful to know
+why a function with six parameters can have a `length` of one.
+
+## 13. Four errors about parameters {#errors}
+
+All four are a `SyntaxError`, that is, they break the whole file before it even runs.
+On the other hand, they are found right away.
+
+### Two parameters with the same name
+
+```js
+function add(x, x) {
+  return x;
+}
+add(1, 2);   // 2 — it works?!
+```
+
+This is not a typo in the lesson: in normal mode, when the parameters are simple and the function
+is not an arrow, the language allows this — for the sake of very old code. The second `x` simply hides the first one,
+and the first argument can no longer be reached.
+
+But add anything modern — a default, a rest parameter,
+strict mode or an arrow — and it becomes an error:
+
+```js
+// function add(x, x = 1) { }       → SyntaxError: Duplicate parameter name not allowed in this context
+// function add(x, x, ...rest) { }   → the same SyntaxError
+// const add = (x, x) => x;          → the same SyntaxError
+function add(x, y = 1) { }          // different names — no error
+```
+
+<Important>
+This is the second case in the course where the same syntax is sometimes an error and sometimes not — the first was
+on day 4 with strict mode. The rule for practice: **never write identical names
+in parameters**, even where the language stays silent.
+</Important>
+
+### Redeclaring a parameter
+
+A parameter is an already declared variable. You cannot declare it again with `let`
+or `const`:
+
+```js
+// function f(arg) {
+//   let arg = "foo";
+// }
+// → SyntaxError: Identifier 'arg' has already been declared
+```
+
+If you need to change the value, just assign it, without `let`. If you need
+a new variable, give it a different name:
+
+```js
+function f(arg) {
+  arg = "foo";        // this is allowed
+}
+
+function g(arg) {
+  let bar = "foo";    // and so is this
+}
+```
+
+With the old `var` from day 4 there is no ban — `var arg = "foo"` inside
+such a function works. One more reason not to use `var`: it stays silent
+where `let` warns.
+
+### A parameter after the rest parameter and a default for the rest parameter
+
+We took these two apart in section 9. Here are all four errors together, with the exact texts:
+
+| Syntax | The text in Chrome | When |
+| --- | --- | --- |
+| `f(x, x)` | `Duplicate parameter name not allowed in this context` | in strict mode, in an arrow function or if there is a default / rest parameter |
+| `f(arg) { let arg }` | `Identifier 'arg' has already been declared` | always; with `var` there is no error |
+| `f(...rest, last)` | `Rest parameter must be last formal parameter` | always |
+| `f(...rest = [])` | `Rest parameter may not have a default initializer` | always |
+
+<Mistake>
+On the MDN pages these errors are named differently: “duplicate formal argument x”,
+“redeclaration of formal parameter”, “parameter after rest parameter”, “rest parameter
+may not have a default”. These are the Firefox wordings. As we have already seen on days 4, 8 and 12,
+**search the internet by the text of your own browser**, and open the MDN page
+through the link in the reference.
+</Mistake>
+
+## 14. The “Report card”: loose marks {#tabel}
+
+Yesterday’s program required passing the marks as an array. Today we will rewrite it so
+that the marks are simply listed and the name becomes optional.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+
+const isValidMark = (mark) =>
+  typeof mark === "number"
+  && !Number.isNaN(mark)
+  && mark >= MIN_MARK
+  && mark <= MAX_MARK;
+
+const isFive = (mark) => mark === MAX_MARK;
+
+const sum = (numbers) => {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+};
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+// new: the thresholds became optional parameters
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+// new: a default name, the marks as a rest parameter
+function makeReport(name = "unnamed", ...marks) {
+  const valid = marks.filter(isValidMark);
+  const avg = average(valid);
+
+  return `${name}: ${valid.length} of ${marks.length}, `
+    + `average ${avg.toFixed(2)} — ${verdict(avg)}, `
+    + `fives ${valid.filter(isFive).length}`;
+}
+
+console.log(makeReport("Aman", 5, 4, 9, 3, 5, 0, 4, 5));
+console.log(makeReport("Meret", 3, 3, 4));
+console.log(makeReport("Gülnar", 9, 0, "five"));
+console.log(makeReport("Sapar", 5, 5, 4, 5));
+console.log(makeReport());
+```
+
+<ResultBox>
+Aman: 6 of 8, average 4.33 — good student, fives 3\
+Meret: 3 of 3, average 3.33 — average student, fives 0\
+Gülnar: 0 of 3, average 0.00 — needs work, fives 0\
+Sapar: 4 of 4, average 4.75 — top student, fives 3\
+unnamed: 0 of 0, average 0.00 — needs work, fives 0
+</ResultBox>
+
+The first four lines matched yesterday’s — and this is the right check: we changed
+**the way the data is passed**, not the calculations themselves.
+
+**There are no more square brackets in the calls.** Before it was
+`makeReport("Aman", [5, 4, 9])`, now it is `makeReport("Aman", 5, 4, 9)`.
+The function became nicer to call, and inside `marks` stayed the same array
+it was.
+
+**The thresholds are moved into parameters.** Different schools have different scales, and now
+the scale can be set without touching the code of the function:
+
+```js
+verdict(4.6);             // "top student"          — the usual scale
+verdict(4.6, 4.8);        // "good student"         — strict: top student from 4.8
+verdict(3.9, undefined, 4);  // "average student"   — skipped the first threshold
+```
+
+All the calls inside `makeReport` stayed the same — `verdict(avg)`.
+By adding defaults we broke nothing: the old way of calling keeps working.
+This is the main practical benefit of defaults — **a function can be extended
+without rewriting its calls**.
+
+**The last line of the report** is the result of `makeReport()` with no
+arguments at all. Yesterday’s version crashed on such a call:
+`marks` was `undefined`, and Chrome wrote
+`TypeError: Cannot read properties of undefined (reading 'filter')`.
+Now an honest empty card comes out.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Swap the parameters:
+`function makeReport(...marks, name = "unnamed")`. Run it and write down
+the text of the error. Then try to give the rest parameter a default: `...marks = []`.
+\
+\
+**The second.** Call `makeReport("Aman", [5, 4, 3])` — with an array,
+as yesterday. The program will not crash; explain why you got “0 of 1”.
+\
+\
+**The third.** The last line has no marks at all, yet the verdict is
+“needs work”. That is not true. Add an early branch for the case
+`valid.length === 0` to `makeReport` and check which reports have changed: besides the last one,
+the report of Gülnar, she has no valid mark either. Aman, Meret and Sapar stayed the same.
+</TryIt>
+
+## 15. Common mistakes of the day {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| expecting `0` to switch the default on | a default reacts only to `undefined` | check separately if zero must mean “nothing” |
+| `num = num \|\| 1` | breaks on `0`, `""`, `NaN` | a default in the header or `??` |
+| an optional parameter first | the next ones cannot be reached | defaults go at the end of the list |
+| `n = 1 => n` | an arrow function with a default requires parentheses | `(n = 1) => n` |
+| expecting a shared array from `marks = []` | a default is evaluated at every call | pass the array explicitly |
+| `f(...rest, last)` | a rest parameter must be the last one | reorder the parameters |
+| passing an array into a rest parameter | you get an array inside an array | list the values separated by commas |
+| `arguments` in new code | not an array, absent in arrow functions | `...args` |
+
+### Walkthrough: where did the marks go
+
+The most common mistake of today is passing a whole array into a rest parameter.
+The program does not crash, and this is the worst kind of error: it silently lies. Let us take it apart step by step,
+the way real ones are taken apart.
+
+```js
+makeReport("Aman", [5, 4, 3]);
+// "Aman: 0 of 1, average 0.00 — needs work, fives 0"
+```
+
+**Step 1. What is wrong in the report.** Three marks were passed, but the denominator
+is one. So the problem is not in checking the marks but in how many of them reached the function at all.
+
+**Step 2. We look at what is inside.** First of all we print the parameter itself —
+this is the fastest way to check a guess:
+
+```js
+function makeReport(name = "unnamed", ...marks) {
+  console.log(marks);   // [[5, 4, 3]]
+  // ...
+}
+```
+
+**Step 3. We read the output.** Two pairs of brackets instead of one: an array inside
+an array. The rest parameter collected the arguments into an array — but there was one argument, and it
+was an array itself.
+
+**Step 4. We explain the rest.** So `marks.length` is 1,
+hence “of 1”. And `typeof marks[0]` is `"object"`, and
+`isValidMark` honestly rejects the only element: hence “0 of 1”.
+All the numbers of the report add up — the version is correct.
+
+**Step 5. We fix it.** Either we list the values:
+`makeReport("Aman", 5, 4, 3)`, or, if the marks already lie in an array,
+we spread it with three dots in the call — that is day 22:
+
+```js
+const marksArray = [5, 4, 3];
+makeReport("Aman", ...marksArray);   // day 22, but it works already today
+```
+
+The order of the steps matters more than the error itself: you saw a strange number — you printed what
+it is calculated from — you explained **all** the numbers, not just one. As long as even one number
+is not explained, the version is not proven.
+
+## 16. What comes tomorrow {#next}
+
+There will be no new reference pages tomorrow. Day 15 is **mixed**:
+each of the three lessons has a little explanation and a lot of hands-on work. The topic is how to split
+a task into functions: what to move out, which parameters to give, where to put defaults.
+
+This closes the module “Functions”, and day 16 starts the module about built-in
+objects: strings, numbers, `Math`.
+
+### Three days of one topic
+
+It is worth looking back: in three days we have covered the function completely, from three different sides.
+
+| Day | What about | What you now have |
+| --- | --- | --- |
+| 12 | what a function is | `function`, parameters, `return`, a function as a value |
+| 13 | how to write it | three forms, shortening arrows, hoisting |
+| 14 | what it takes | defaults, the rest parameter, four errors |
+
+If you put it into one sentence: **a function is a value that has a name,
+a body and a list of parameters, and each of the three parts is set up separately**.
+Further in the course functions will be not the topic of a lesson but a tool — we will wrap
+work with arrays, the page and the server in them.
+
+### Where today’s topics come up later
+
+| Day | Where it comes in handy |
+| --- | --- |
+| 18 | `Math.max` and `Math.min` take any number of arguments, like `...numbers` |
+| 20 | array methods take functions with optional parameters |
+| 22 | the same three dots, but the other way around: `...` spreads an array into arguments |
+| 27 | the third argument of `addEventListener` is optional settings |
+
+The row from day 22 is especially worth remembering: three dots in a **call** do
+the opposite of what they do in a **declaration**. Today’s
+`...marks` collects arguments into an array; the
+`makeReport("Aman", ...marksArray)` of day 22, on the contrary, spreads an array
+into separate arguments. The same sign, the opposite action.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Default parameters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Default_parameters) | syntax, evaluation at the call, scope | <Full /> |
+| [Rest parameters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/rest_parameters) | three dots, restrictions, differences from `arguments` | <Full /> |
+| [Error: identical parameter names](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Duplicate_parameter) | only in strict mode or with a default / rest parameter | <Brief /> |
+| [Error: a redeclared parameter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Redeclared_parameter) | `let` over a parameter | <Brief /> |
+| [Error: a parameter after the rest parameter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Parameter_after_rest_parameter) | a rest parameter must be the last one | <Brief /> |
+| [Error: a default for the rest parameter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Rest_with_default) | it has nothing to put in | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+function f(a, b = 1) { return b; }   // b is optional
+const withDefault = (n = 1) => n;    // parentheses are REQUIRED
+
+// a default is used ONLY on undefined
+f(1);            // 1
+f(1, undefined); // 1
+f(1, null);      // null   the default is NOT used
+f(1, 0);         // 0      the default is NOT used
+f(1, "");        // ""     the default is NOT used
+
+function a(num) { num = num || 1; return num; }   // the OLD trick, breaks on 0 and ""
+function b(num) { num = num ?? 1; return num; }   // correct, but in the body
+function c(num = 1) { return num; }               // better: visible from outside
+
+// evaluated at EVERY call
+function addMark(mark, marks = []) { marks.push(mark); return marks; }
+addMark(5);   // [5]
+addMark(4);   // [4], not [5, 4]
+
+// what is to the LEFT is visible
+function greet(name, greeting, msg = greeting + " " + name) { return msg; }
+function bad(a = b, b = 2) { }   // ReferenceError when bad() is called
+
+// optional ones go last; otherwise you have to write this:
+function bad2(x = 1, y) { return [x, y]; }
+bad2(undefined, 7);   // [1, 7] — “take your own for x”, set y
+
+// a rest parameter is ALWAYS an array
+function collect(...numbers) { return numbers; }
+collect();       // []
+collect(5);      // [5]
+collect(5, 4);   // [5, 4]
+
+// three rules: last, only one, no default
+// function h(...rest, last) { }   → SyntaxError
+// function h(...a, ...b) { }      → SyntaxError
+// function h(...rest = []) { }    → SyntaxError
+
+// a rest parameter instead of arguments
+const count = (...args) => args.length;        // an array, works in arrow functions
+function old() { return arguments.length; }    // not an array, absent in arrow functions
+
+f.length;   // 1 — parameters BEFORE the first default; the rest parameter is not counted
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why does `test(0)` with `function test(num = 1)` return
+   `0` and not `1`?
+   <Answer>A default is used only on `undefined`. Zero is a value,
+   even if it is falsy in a check. This is exactly why a default is more reliable than the old
+   trick `num = num || 1`, which breaks on zero.</Answer>
+2. The function `addMark(mark, marks = [])` adds a mark to an array.
+   Why do two calls in a row without the second argument not accumulate marks?
+   <Answer>A default is evaluated anew at every call, not once at the declaration.
+   Every call creates a new empty array. To accumulate, the array is passed explicitly.</Answer>
+3. What will be in `rest` for the call `f(1)` if the function
+   is declared as `function f(a, b, ...rest)`?
+   <Answer>An empty array `[]`. A rest parameter is always an array, even when
+   there are no extra arguments. And `b` will become `undefined`.</Answer>
+4. Name three differences between a rest parameter and `arguments`.
+   <Answer>A rest parameter is a real array with methods; it contains only the extra arguments,
+   without the named ones; it works in arrow functions, where there is no `arguments`
+   at all.</Answer>
+5. Why does `function add(x, x)` sometimes work and sometimes give
+   a `SyntaxError`?
+   <Answer>In normal mode with simple parameters the language allows it for the sake of old code:
+   the second `x` hides the first one. But in strict mode, in an arrow function
+   or if the list has a default or a rest parameter, it is an error.
+   You should never write it this way.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Default_parameters" />

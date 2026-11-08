@@ -1,0 +1,915 @@
+---
+title: "Day 21 — Objects: properties, methods, iteration"
+day: Day 21 • lesson 1
+heading: "Objects: properties, methods, iteration"
+lead: Module “Arrays, objects and JSON”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- put related data into one object instead of parallel arrays;
+- read and change properties in two ways and know when to use which;
+- tell “there is no property” from “the property equals undefined”;
+- go through an object with `Object.keys`, `values`, `entries`;
+- understand why a copy of an object does not copy everything.
+</Goals>
+
+<Toc />
+
+## 1. Why an object {#why}
+
+Yesterday the cart lived in two arrays: names separately, prices separately. Only the order
+linked them.
+
+```js
+const items = ["bread", "tea", "butter"];
+const prices = [3.5, 12, 25];
+```
+
+You can work like this, but it is dangerous. Sort one array and forget about the second —
+and the prices drift away from the goods, while the program does not even complain. Every operation that
+needs both the name and the price requires an index, and the indices have to be dragged through all
+the functions.
+
+An object solves this head-on: **related data lie together, and each piece has
+a name**.
+
+```js
+const item = { name: "bread", price: 3.5 };
+
+item.name;    // "bread"
+item.price;   // 3.5
+```
+
+<Scheme src="scheme-why.svg">The same data. On the left only the position links them, on the right the structure itself does</Scheme>
+
+Hence a rule for choosing that works almost always: **many things of one kind —
+an array, different things about one item — an object**. A student’s marks are an array,
+the student is an object. And a list of goods is an array
+of objects, and almost all data on the web is built exactly this way.
+
+## 2. The literal and access to properties {#literal}
+
+An object is written in curly braces, with “name: value” pairs separated by commas. The names
+are called **keys**, and a whole pair is a **property**.
+
+```js
+const student = {
+  name: "Aman",
+  age: 17,
+  city: "Mary",
+};
+```
+
+A trailing comma after the last property is allowed and even useful: when you add a new
+line, you do not touch the previous one.
+
+Properties are read in two ways:
+
+```js
+student.name;       // "Aman"    through a dot
+student["name"];    // "Aman"    through square brackets
+```
+
+A dot is shorter and reads better — it is what people write by default. But it has a limitation:
+**after the dot stands a name written literally**. If the key lies
+in a variable, a dot will not help:
+
+```js
+const key = "age";
+
+student.key;     // undefined — looked for a property named “key”
+student[key];    // 17        — and now we took it by the value of the variable
+```
+
+And the last thing about reading: **a property that does not exist is not an error**. The object
+honestly answers `undefined`:
+
+```js
+student.phone;   // undefined — there is no property, but the program works
+```
+
+### The short form of a property
+
+Very often the property name matches the name of the variable the value comes from.
+There is a shorthand for this case:
+
+```js
+const name = "Aman";
+const age = 17;
+
+const long = { name: name, age: age };   // long
+const short = { name, age };             // the same
+
+long.name === short.name;   // true — the objects have the same contents
+```
+
+Both forms give the same object. The second comes up all the time — especially where
+an object is built from the parameters of a function:
+
+```js
+function makeStudent(name, marks) {
+  return { name, marks };
+}
+
+makeStudent("Meret", [4, 5]);   // { name: "Meret", marks: [4, 5] }
+```
+
+The shorthand works only when the names match exactly. If the property must
+be named differently from the variable, the colon comes back.
+
+## 3. When brackets are required {#brackets}
+
+Square brackets are needed in three cases, and all three come up regularly.
+
+**The first — the key is in a variable**, we have just seen it. This is how an object
+is gone through and how fields whose name comes from outside are read.
+
+**The second — the key does not look like a variable name**: with a space, with a hyphen,
+starting with a digit:
+
+```js
+const settings = {
+  "page color": "white",
+  "font-size": 14,
+};
+
+settings["page color"];  // "white"
+settings["font-size"];   // 14
+// settings.font-size    → ReferenceError: size is not defined — the language read this as subtraction
+```
+
+**The third — a numeric key.** Numbers in keys turn into strings,
+so both forms lead to the same property:
+
+```js
+const marks = { 3: "satisfactory", 5: "excellent" };
+
+marks[5];     // "excellent"
+marks["5"];   // "excellent" — the same property
+```
+
+Numeric keys have a side effect worth knowing in advance:
+**they always come first and in ascending order**, in whatever order
+you wrote them.
+
+```js
+Object.keys({ b: 1, 2: 2, a: 3, 1: 4 });
+// ["1", "2", "b", "a"] — numbers first in order, then the rest as written
+```
+
+## 4. Add, change, delete {#change}
+
+An object, unlike a string, changes freely:
+
+```js
+const student = { name: "Aman", age: 17 };
+
+student.age = 18;          // changed
+student.group = "1-A";     // added — there was no such property, now there is
+delete student.name;       // deleted
+
+student;   // { age: 18, group: "1-A" }
+```
+
+Notice: the object is declared with `const`, and this does not get in the way.
+`const` forbids changing **the variable itself** — that is, putting
+another object into it — but not the contents. The same was true of arrays on day 19.
+
+The `delete` operator returns `true` — and does so even
+when there was nothing to delete:
+
+```js
+delete student.noSuchOne;   // true, although there was no such property
+```
+
+So nothing is checked by its result. And assigning `undefined`
+instead of deleting is not the same: the property will stay, just with an empty value.
+The difference is visible in the next section.
+
+## 5. Three ways to ask “is it there” {#missing}
+
+The question “does the object have such a property” is answered in three ways, and they answer
+slightly different questions.
+
+```js
+const student = { name: "Aman", phone: undefined };
+
+student.phone !== undefined;        // false — but the property is there!
+"phone" in student;                 // true
+Object.hasOwn(student, "phone");    // true
+```
+
+The first way mixes up “there is no property” and “the property is there but empty”. Usually this does not matter,
+but sometimes it is essential: in settings “not set” and “set to empty” may mean
+different things.
+
+The difference between the second and the third is subtler. `in` also finds **inherited**
+properties — those the object got from the language:
+
+```js
+"toString" in student;                 // true  — got from the language
+Object.hasOwn(student, "toString");    // false — it has no such own property
+```
+
+Where `toString` comes from, we will take apart in course 2 together with prototypes.
+For now a rule is enough:
+
+<Important>
+**When you ask about your own data, take `Object.hasOwn`.**
+It answers exactly the question you ask and finds nothing extra.
+Leave the `in` operator for cases when the inherited ones matter too.
+</Important>
+
+When does the difference between “no property” and “an empty property” matter in practice?
+Most often in settings. If the user chose nothing, a default is put in;
+but if they chose “nothing”, it is their deliberate choice, and the default must not be put in:
+
+```js
+const settings = { theme: undefined };
+
+// wrong: “chose nothing” and “did not choose” got mixed up
+const theme1 = settings.theme ?? "light";     // "light" in both cases
+
+// right: first ask whether it was set at all
+const theme2 = Object.hasOwn(settings, "theme")
+  ? settings.theme
+  : "light";
+
+theme2;   // undefined — the user chose “nothing”, and we kept it
+```
+
+The case is rare but telling: `??` and `hasOwn` answer
+different questions, and one can replace the other only when you are sure
+that there is never `undefined` in the data.
+
+## 6. Iterating: keys, values, entries {#iterate}
+
+Three functions turn an object into an array — and from there all of yesterday’s methods work.
+
+```js
+const student = { name: "Aman", age: 17, city: "Mary" };
+
+Object.keys(student);     // ["name", "age", "city"]
+Object.values(student);   // ["Aman", 17, "Mary"]
+Object.entries(student);  // [["name", "Aman"], ["age", 17], ["city", "Mary"]]
+```
+
+<Scheme src="scheme-iterate.svg">An object turns into an array, and yesterday’s methods are at work again</Scheme>
+
+The most common use is going through the properties:
+
+```js
+Object.keys(student).forEach((key) => {
+  console.log(key + ": " + student[key]);
+});
+// name: Aman
+// age: 17
+// city: Mary
+```
+
+With `entries` it gets even shorter if you take destructuring
+from tomorrow. For now we will make do with the indices of the pair:
+
+```js
+Object.entries(student).forEach((pair) => {
+  console.log(pair[0] + ": " + pair[1]);
+});
+```
+
+And a useful small thing: **an object has no `length`**. How many
+properties it has is counted like this:
+
+```js
+Object.keys(student).length;   // 3
+```
+
+### An object as a dictionary
+
+Until now an object was “one item with different properties”. It has a second role too:
+**a lookup table where the key is data**, not a field name known in advance.
+
+```js
+const verdicts = { 5: "excellent", 4: "good", 3: "satisfactory", 2: "poor" };
+
+verdicts[4];             // "good"
+verdicts[9] ?? "no such mark";       // there is no key — put in our own
+```
+
+This replaces a long chain of `if` or a `switch` from day 9:
+instead of five branches — one line. And the `??` operator from day 7 covers the case
+“there is no such key”.
+
+The second typical job of a dictionary is counting repetitions. The value itself becomes the key:
+
+```js
+const marks = [5, 4, 3, 5, 2, 5];
+const counts = {};
+
+for (const mark of marks) {
+  counts[mark] = (counts[mark] ?? 0) + 1;
+}
+
+counts;      // { 2: 1, 3: 1, 4: 1, 5: 3 }
+counts[5];   // 3
+```
+
+The technique is familiar from day 18, where we counted dice outcomes the same way. Now it is clear
+that it was an ordinary dictionary object.
+
+## 7. `for...in` and why people dislike it {#forin}
+
+The `for...in` loop from day 11 goes through the keys of an object directly:
+
+```js
+for (const key in student) {
+  console.log(key, student[key]);
+}
+```
+
+It looks shorter than `Object.keys(...).forEach(...)`, but in modern code
+it is rarely written. There are two reasons.
+
+**The first: it looks into inherited things.** Like the `in` operator,
+it can give out properties you did not add — if the object got them from somewhere
+else. With `Object.keys` this never happens.
+
+**The second: it gives a key, not a value**, and the result cannot be passed
+straight into `map` or `filter`. `Object.keys`, on the other hand, gives
+an ordinary array you can do anything with:
+
+```js
+Object.keys(student)
+  .filter((key) => key !== "age")
+  .map((key) => key + " = " + student[key]);
+// ["name = Aman", "city = Mary"]
+```
+
+## 8. Merging: `Object.assign` {#assign}
+
+It copies properties from one object into another. The first argument is where to, the rest are
+where from:
+
+```js
+const defaults = { city: "Mary", group: "1-A" };
+const given = { name: "Aman", city: "Ashgabat" };
+
+Object.assign({}, defaults, given);
+// { city: "Ashgabat", group: "1-A", name: "Aman" }
+```
+
+This is that very “default settings” technique we talked about on day 14: the shared
+values are put first, and what the user set comes last, and it overrides
+the rest. Notice the `{}` as the first argument.
+
+<Mistake>
+**`Object.assign` changes its first argument.**
+If you write `Object.assign(defaults, given)`,
+`defaults` gets spoiled — and so does everyone who uses it. The first argument is almost always
+an empty object.
+</Mistake>
+
+A copy of an object is made the same way:
+
+```js
+const copy = Object.assign({}, student);
+
+copy.age = 18;
+student.age;   // 17 — the original is intact
+```
+
+Tomorrow, on day 22, a shorter form of the same will appear — with three dots.
+
+## 9. An object is a reference {#reference}
+
+Here begins what we talked about for arrays on day 19, and for objects it
+works exactly the same way. **A variable holds not the object itself but a reference to it.**
+
+```js
+const a = { x: 1 };
+const b = a;      // not a copy! the very same reference
+
+b.x = 2;
+a.x;              // 2 — changed it “through b”, saw it “in a”
+```
+
+<Scheme src="scheme-reference.svg">On the left — one box and two labels, on the right — two boxes</Scheme>
+
+The same goes for passing to a function: the function gets the reference and can change the caller’s
+object. We discussed this on day 15 as a reason not to change other people’s things secretly.
+
+## 10. Nested objects {#nested}
+
+The value of a property can be anything — a number, a string, an array, another object:
+
+```js
+const student = {
+  name: "Aman",
+  marks: [5, 4, 3],
+  address: { city: "Mary", street: "Mir" },
+};
+
+student.marks[0];           // 5
+student.address.city;       // "Mary"
+student.marks.length;       // 3
+```
+
+It reads from left to right, step by step. But nesting has an unpleasant consequence
+for copies:
+
+```js
+const copy = Object.assign({}, student);
+
+copy.address.city = "Ashgabat";
+student.address.city;   // "Ashgabat" — the original changed too!
+```
+
+<Mistake>
+`Object.assign` makes a **shallow copy**: the properties themselves
+are copied, but nested objects stay shared. The top level is independent,
+everything deeper is not. This is one of the most treacherous errors in working with data,
+because it does not show up at all on flat objects.
+</Mistake>
+
+### Walkthrough: why the price changed in the original
+
+This is how it looks at work. A product with a nested price, a copy — and a surprise:
+
+```js
+const product = { name: "tea", price: { value: 12, currency: "m" } };
+
+const copy = Object.assign({}, product);
+copy.price.value = 15;
+
+product.price.value;   // 15 — but we touched only the copy!
+```
+
+**Step 1. We check whether the copy is really separate.** We change a property of the top
+level — and make sure everything is fine there:
+
+```js
+copy.name = "green tea";
+product.name;   // "tea" — the top level is independent
+```
+
+**Step 2. So the trouble is in the nested part.** We compare not the values but the
+objects themselves — whether it is the same object:
+
+```js
+copy.price === product.price;   // true — one and the same object!
+```
+
+**Step 3. We fix it.** We copy the nested object separately:
+
+```js
+const copy = Object.assign({}, product, {
+  price: Object.assign({}, product.price),
+});
+```
+
+Notice step 2: comparing objects with `===` answers
+not “are they alike” but **“is this the very same object”**. Two objects
+with the same contents are not equal to each other — and this is a separate trap that
+will come up in the projects.
+
+How to make a copy “to the full depth” with one command, we will take apart in course 2. In this course
+a rule is enough for us: **if an object has nested objects, copying it with
+`assign` is not enough**.
+
+## 11. Object methods {#methods}
+
+A function that lies in a property is called a **method**. Methods are written in the short
+form — without the word `function` and without a colon:
+
+```js
+const student = {
+  name: "Aman",
+  marks: [5, 4],
+
+  addMark(mark) {
+    this.marks.push(mark);   // course 2
+  },
+
+  count() {
+    return this.marks.length;   // course 2
+  },
+};
+
+student.addMark(3);
+student.count();   // 3
+```
+
+The word `this` inside a method means “the object on which the method was called”.
+It works in a more complex way than it seems, and the full analysis waits in course 2 — together with the reason
+why an arrow function cannot be a method (we talked about this on day 13).
+
+For now remember two things: **a method is written in the short form**
+and **it refers to its own properties through `this`**.
+
+Methods are handy because the data and the actions on it lie in one place. Compare
+two approaches to the same task:
+
+```js
+// data separately, functions separately
+function addStudent(list, student) { list.push(student); }
+function countStudents(list) { return list.length; }
+
+const students = [];
+addStudent(students, { name: "Aman" });
+countStudents(students);   // 1
+
+// data and actions together
+const group = {
+  title: "1-A",
+  students: [],
+  add(student) { this.students.push(student); },   // course 2
+  size() { return this.students.length; },         // course 2
+};
+
+group.add({ name: "Aman" });
+group.size();   // 1
+```
+
+In the second variant you do not have to pass the list every time — the method knows what it
+works with. Classes, which are taken apart in course 2, grew from exactly this idea.
+
+There is a flip side too: an object with methods is harder to check and to copy,
+and in this course simple objects with data and separate
+functions are almost always enough for us. This is how both the “Report card” and the cart are built.
+
+## 12. `fromEntries` and `groupBy` {#from-group}
+
+`Object.fromEntries` does the opposite of `entries` — it builds an object
+from an array of pairs:
+
+```js
+Object.fromEntries([["a", 1], ["b", 2]]);   // { a: 1, b: 2 }
+```
+
+Together they give the technique “remake an object”: take it apart into pairs, process them with yesterday’s
+methods, build it back.
+
+`Object.groupBy` is newer and more useful. It sorts an array into groups
+and gives an object where the key is the name of the group:
+
+```js
+const marks = [5, 4, 3, 5, 2];
+
+Object.groupBy(marks, (m) => m % 2 === 0 ? "even" : "odd");
+// { odd: [5, 3, 5], even: [4, 2] }
+```
+
+The method is very fresh — like `Math.sumPrecise` from day 18, it may
+be missing in an old browser. Check it the same way: `typeof Object.groupBy`.
+In a starred task we will build such a grouping function ourselves, through
+`reduce` — and it will work anywhere.
+
+## 13. Errors with objects {#errors}
+
+The reference of the day has nine error pages — more than any other day of the course.
+Almost all of them are syntax errors: an object is easy to write wrongly.
+
+| What was written | The text in Chrome |
+| --- | --- |
+| `{ x = 5 }` | `SyntaxError: Invalid shorthand property initializer` |
+| `{ a: 1, b: 2 c: 3 }` | `SyntaxError: Unexpected identifier 'c'` |
+| `o.` without a name | `SyntaxError: Unexpected token ')'` |
+| `[1, 2;` | `SyntaxError: Unexpected token ';'` |
+| `{ __proto__: 1, __proto__: 2 }` | `SyntaxError: Duplicate __proto__ fields are not allowed in object literals` |
+| `"x" in "string"` | `TypeError: Cannot use 'in' operator to search for 'x' in string` |
+| `undefined.x` | `TypeError: Cannot read properties of undefined (reading 'x')` |
+
+<Mistake>
+The top four pages on MDN have different titles — “missing : after property id”,
+“missing \} after property list”, “missing name after . operator”, “missing \] after
+element list”. These are the Firefox wordings, and they are clearer. In three cases
+out of four Chrome says “unexpected token” or “unexpected identifier” and shows the place — look for the error one line above.
+</Mistake>
+
+The two remaining errors are not syntax errors, and both **appear only in strict
+mode**:
+
+```js
+"use strict";
+const n = 1;
+n.x = 5;
+// TypeError: Cannot create property 'x' on number '1'
+```
+
+Without strict mode the same assignment silently does not work, and `n.x` stays
+`undefined`. Deleting a protected property behaves the same way: in strict
+mode it is `TypeError: Cannot delete property 'x' of #<Object>`,
+in normal mode — silence.
+
+These are already the fourth and fifth cases in the course where behavior depends on the mode. The first
+three were on days 4, 14 and 16.
+
+## 14. A cart made of objects {#cart}
+
+Back to the cart. Now a product is one object, and the cart is an array of objects:
+
+```js
+const cart = [
+  { name: "bread", price: 3.5 },
+  { name: "tea", price: 12 },
+  { name: "butter", price: 25 },
+];
+
+// the total cost
+cart.reduce((sum, item) => sum + item.price, 0);   // 40.5
+
+// cheap goods — no indices at all
+cart.filter((item) => item.price < 10);
+// [{ name: "bread", price: 3.5 }]
+
+// only the names
+cart.map((item) => item.name);   // ["bread", "tea", "butter"]
+
+// by price and by name
+cart.toSorted((a, b) => a.price - b.price).map((i) => i.name);
+// ["bread", "tea", "butter"]
+
+cart.toSorted((a, b) => a.name < b.name ? -1 : 1).map((i) => i.name);
+// ["bread", "butter", "tea"]
+
+// a string for the buyer
+cart.map((i) => i.name + " — " + i.price + " m").join("; ");
+// "bread — 3.5 m; tea — 12 m; butter — 25 m"
+```
+
+Compare with yesterday’s variant: **the indices disappeared everywhere**. The filter
+no longer reaches into a second array, sorting does not risk breaking a pair, and a third property
+can be added to a product — quantity, discount, barcode — without touching a single
+one of these lines.
+
+And sorting by name became possible at all: yesterday it would have rearranged the names
+and left the prices in place.
+
+## 15. The “Report card”: a student became an object {#tabel}
+
+The same change in the program that runs through the course. Before, the name and the marks came into `makeRow`
+as separate arguments; now a student is an object, and the whole list is an array of objects.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+const toMark = (raw) => Number(String(raw).trim());
+const isValidMark = (m) => Number.isInteger(m) && m >= MIN_MARK && m <= MAX_MARK;
+
+const sum = (numbers) => numbers.reduce((total, n) => total + n, 0);
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+const maxOf = (numbers) => numbers.reduce((best, n) => Math.max(best, n));
+const minOf = (numbers) => numbers.reduce((worst, n) => Math.min(worst, n));
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+// new: data and code have finally parted ways
+const students = [
+  { name: "Aman", marks: [5, "4", " 9 ", 3, 5, 0, "4", 5] },
+  { name: "Meret", marks: ["3", 3, 4] },
+  { name: "Gülnar", marks: [9, 0, "five"] },
+  { name: "Sapar", marks: [5, 5, "4", 5] },
+  { name: "Oguljan", marks: ["4.5", 4, 5] },
+];
+
+function makeHeader() {
+  return "Name".padEnd(NAME_WIDTH) + "Avg".padStart(6) + "Min".padStart(5)
+    + "Max".padStart(5) + "%".padStart(7) + "  Verdict";
+}
+
+function makeRow(student) {
+  const name = student.name ?? "unnamed";
+  const marks = (student.marks ?? []).map((r) => toMark(r));
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "no valid marks";
+  }
+
+  const avg = average(valid);
+  const percent = Math.round(valid.length / marks.length * 100);
+
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(minOf(valid)).padStart(5)
+    + String(maxOf(valid)).padStart(5)
+    + (percent + "%").padStart(7)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(56);
+
+console.log(makeHeader());
+console.log(line);
+students.map(makeRow).forEach((row) => console.log(row));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Name           Avg  Min  Max      %  Verdict
+--------------------------------------------------------
+Aman          4.33    3    5    75%  good student
+Meret         3.33    3    4   100%  average student
+Gülnar      no valid marks
+Sapar         4.75    4    5   100%  top student
+Oguljan       4.50    4    5    67%  top student
+--------------------------------------------------------
+```
+</ResultBox>
+
+The numbers are the same as on day 20 — the rewriting broke nothing again. But the structure
+of the program changed a lot.
+
+**The data separated from the code.** Before, the students lived in the calls of
+`console.log`; now they are a list that is easy to replace — even with data
+from the server from day 31. Not a single function will change for that.
+
+**`makeRow` takes one argument instead of a rest list.**
+So it can be passed to `map` right by name — and this is exactly the safe
+case from yesterday’s walkthrough: the function takes one parameter, and the extra arguments of
+`map` do not bother it.
+
+**The `??` operator from day 7** puts in values if a property
+is missing altogether. Check it: `makeRow({})` will not crash and will return a string where
+“unnamed” is followed by “no valid marks”.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Add a `group` property to the students and print
+only those from “1-A”, without changing `makeRow`.
+\
+\
+**The second.** Sort the list by name, and then by the number of marks.
+What did you have to change in the program? And what would you have had to change yesterday, before objects?
+\
+\
+**The third.** Make a copy of the list with `students.map((s) => Object.assign({}, s))`
+and add a mark to one student in the copy. Check the original and explain the result.
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `obj.key` when the key is in a variable | after a dot the name is read literally | `obj[key]` |
+| `obj.length` for the number of properties | an object has no `length` | `Object.keys(obj).length` |
+| `Object.assign(defaults, given)` | it spoils the first argument | `Object.assign({}, defaults, given)` |
+| a copy through `assign` of a nested object | the copy is shallow | copy the nested part separately |
+| `const b = a` as a “copy” | the reference is copied, not the object | `Object.assign({}, a)` |
+| `if (obj)` as “the object is not empty” | an empty object is truthy too | `Object.keys(obj).length > 0` |
+| `delete` and checking its result | it returns `true` almost always | check `Object.hasOwn` before or after |
+| `{ x = 5 }` instead of `{ x: 5 }` | a literal uses a colon, not an equals sign | `Invalid shorthand property initializer` will give a hint |
+
+### What comes tomorrow
+
+Day 22 is destructuring, spread and optional chaining. All three were born
+from today’s topic: getting properties out by name in one line, copying
+and merging objects with three dots instead of `Object.assign`, safely
+accessing nested fields that may not exist.
+
+Today’s `student.address.city` is exactly a case for tomorrow’s
+`?.`: if the address is not filled in, such an expression crashes with
+`TypeError: Cannot read properties of undefined (reading 'city')`, and tomorrow we will learn
+to avoid this.
+
+### Where today’s topics come up later
+
+Objects are the last big data structure in this course. From here on they will be
+not a topic but a foundation: everything that comes from outside comes as objects.
+
+| Day | Where it comes in handy |
+| --- | --- |
+| 22 | destructuring and spread — a short form of everything from today |
+| 23 | `JSON` turns an object into a string and back |
+| 27 | the event object: `event.target`, `event.key` are ordinary properties |
+| 29 | a to-do list is an array of objects `{ id, text, done }` |
+| 31 | the server’s answer comes as an array of objects and is taken apart the same way |
+
+Day 27 deserves a special mention. When a button is pressed, the browser passes
+the handler one object with all the details of the press — and it is read exactly the same way
+as we read a student today: through a dot.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Guide: Working with objects](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Working_with_objects) | a chapter of the guide: properties, methods, iteration | <Full /> |
+| [Object initializer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Object_initializer) | curly braces, keys, the short form of methods | <Full /> |
+| [Property accessors](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Property_accessors) | a dot and square brackets | <Full /> |
+| [Object](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object) | an overview of the built-in functions for objects | <Full /> |
+| [Object.keys](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/keys) | an array of keys | <Full /> |
+| [Object.values](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/values) | an array of values | <Full /> |
+| [Object.entries](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/entries) | an array of “key — value” pairs | <Full /> |
+| [Object.assign](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/assign) | copying and merging; changes the first argument | <Full /> |
+| [Object.hasOwn](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/hasOwn) | whether there is such an own property | <Full /> |
+| [delete](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/delete) | delete a property | <Full /> |
+| [the in operator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/in) | whether there is a property, including inherited ones | <Full /> |
+| [Object.fromEntries](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/fromEntries) | an object from an array of pairs | <Brief /> |
+| [Object.groupBy](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/groupBy) | sort an array into groups; the method is very new | <Brief /> |
+| [Standard built-in objects](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects) | a list of everything the language has ready | <Brief /> |
+| [Error: no colon](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Missing_colon_after_property_id) | in Chrome — `Invalid shorthand property initializer` | <Brief /> |
+| [Error: no closing brace](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Missing_curly_after_property_list) | in Chrome — `Unexpected identifier` | <Brief /> |
+| [Error: no name after the dot](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Missing_name_after_dot_operator) | in Chrome — `Unexpected token` | <Brief /> |
+| [Error: no \] after a list](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Missing_bracket_after_list) | in Chrome — `Unexpected token` | <Brief /> |
+| [Error: two \_\_proto\_\_](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Duplicate_proto) | not allowed twice in an object literal | <Brief /> |
+| [Error: in not with an object](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/in_operator_no_object) | `Cannot use 'in' operator` | <Brief /> |
+| [Error: the value has no properties](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/No_properties) | `Cannot read properties of undefined` | <Brief /> |
+| [Error: cannot assign to a property](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_assign_to_property) | only in strict mode | <Brief /> |
+| [Error: cannot delete](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Cant_delete) | only in strict mode | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// LITERAL AND ACCESS
+const student = { name: "Aman", age: 17 };
+student.name;      // "Aman" — a dot: the name literally
+student["name"];   // "Aman" — brackets: any expression
+const key = "age";
+student[key];      // 17 — a key in a variable: ONLY brackets
+student.phone;     // undefined, not an error
+
+// BRACKETS ARE REQUIRED: a key in a variable, with a space, numeric
+const settings = { "page color": "white" };
+settings["page color"];  // "white"
+const verdicts = { 5: "excellent" };
+verdicts[5];             // "excellent"
+
+// CHANGING
+student.age = 18;        // changed
+student.group = "1-A";   // added
+delete student.name;     // deleted (returns true almost always)
+// const does not get in the way: it forbids changing the VARIABLE, not the contents
+
+// IS THERE A PROPERTY
+const s = { phone: undefined };
+s.phone !== undefined;       // false — mixes up “none” and “empty”
+"phone" in s;                // true — including inherited ones
+Object.hasOwn(s, "phone");   // true — own ones: TAKE THIS ONE
+
+// ITERATING
+const obj = { name: "Aman", age: 17 };
+Object.keys(obj);          // ["name", "age"]
+Object.values(obj);        // ["Aman", 17]
+Object.entries(obj);       // [["name", "Aman"], ["age", 17]]
+Object.keys(obj).length;   // 2 — an object has NO length
+
+// MERGING AND COPYING
+const defaults = { city: "Mary" };
+const given = { city: "Ashgabat" };
+Object.assign({}, defaults, given);    // { city: "Ashgabat" } — {} first, otherwise it spoils defaults
+const copy = Object.assign({}, obj);   // a SHALLOW copy
+
+// A REFERENCE
+const a = { x: 1 };
+const b = a;   // not a copy! a change through b is seen in a
+
+// METHODS
+const o = { items: [], count() { return this.items.length; } };   // course 2
+
+// NEW
+Object.fromEntries([["a", 1]]);                            // { a: 1 }
+Object.groupBy([5, 4, 3], (m) => m >= 4 ? "ok" : "no");    // { ok: [5, 4], no: [3] } — very new
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. When are square brackets needed to access a property?
+   <Answer>When the key lies in a variable, when it does not look like a variable name
+   (a space, a hyphen) and when it is numeric. In all other cases a dot
+   is shorter and reads better.</Answer>
+2. How is `"x" in obj` different from `Object.hasOwn(obj, "x")`?
+   <Answer>`in` also finds inherited properties — for example,
+   `toString`, which you did not add. `hasOwn`
+   answers only about own ones. For your own data people take `hasOwn`.</Answer>
+3. What is wrong with `Object.assign(defaults, given)`?
+   <Answer>The first argument changes, that is, `defaults` will be spoiled
+   for everyone who uses it. The first argument is an empty object:
+   `Object.assign({}, defaults, given)`.</Answer>
+4. Why, after `Object.assign({}, student)`, does changing
+   `copy.address.city` change the original too?
+   <Answer>The copy is shallow: the properties themselves were copied, but the nested object
+   `address` stayed shared — both variables refer to it.
+   The top level is independent, everything deeper is not.</Answer>
+5. How do you check that an object is empty?
+   <Answer>`Object.keys(obj).length === 0`. The check `if (obj)`
+   does not work: any object, even an empty one, is truthy.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Working_with_objects" />

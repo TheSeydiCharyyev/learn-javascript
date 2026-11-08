@@ -27,8 +27,8 @@ export default async function Page({ params }: PageProps<"/[[...slug]]">) {
   const page = readPage(rel);
   let content;
   if (page.mdx) {
-    const { front, body, dir, up } = page.mdx;
-    const Content = await mdxContent(rel, body);
+    const { front, body, firstLine, dir, up } = page.mdx;
+    const Content = await mdxContent(rel, body, firstLine);
     content = (
       <div className="container">
         {front.day && <DayHead day={front.day} heading={front.heading!} lead={front.lead!} />}

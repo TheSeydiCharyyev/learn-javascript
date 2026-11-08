@@ -40,7 +40,7 @@ export type SourcePage = {
   // A day page's <title> as text: given to Next.js as metadata (see page.tsx); null on the home page.
   title: string | null;
   // A page written in MDX: its frontmatter and the MDX after it (head, body and handlers are empty then).
-  mdx: { front: Frontmatter; body: string; dir: string; up: string } | null;
+  mdx: { front: Frontmatter; body: string; firstLine: number; dir: string; up: string } | null;
 };
 
 // lecture.css, student.css and tasks.css set the same selectors differently (body, h1, h2, .container, pre…), so a
@@ -78,7 +78,7 @@ function readMdxPage(rel: string, mdxRel: string): SourcePage {
   const kind = /\/(lecture|student|tasks)\.html$/.exec(rel)?.[1] as PageKind | undefined;
   const nav = navModel(rel, REPO);
   if (!kind || !nav) throw new Error(`${mdxRel}: an MDX page must be a day page (…/day-NN/[en/]lecture|student|tasks.mdx)`);
-  const { data: front, body } = splitFrontmatter(mdxRel, fs.readFileSync(path.join(REPO, mdxRel), "utf8"));
+  const { data: front, body, firstLine } = splitFrontmatter(mdxRel, fs.readFileSync(path.join(REPO, mdxRel), "utf8"));
   const lecture = front.day !== undefined || front.heading !== undefined || front.lead !== undefined;
   if (lecture && !(front.day && front.heading && front.lead)) throw new Error(`${mdxRel}: the day head needs day, heading and lead together`);
   const en = /\/en\//.test(rel);
@@ -91,7 +91,7 @@ function readMdxPage(rel: string, mdxRel: string): SourcePage {
     kind,
     pageCss: [readCourseCss(`${kind}.css`), readCourseCss("book.css"), ...(front.css ? [front.css] : [])],
     title: front.title,
-    mdx: { front, body, dir: path.join(REPO, path.dirname(rel)), up: en ? "../../../" : "../../" },
+    mdx: { front, body, firstLine, dir: path.join(REPO, path.dirname(rel)), up: en ? "../../../" : "../../" },
   };
 }
 

@@ -1,0 +1,935 @@
+---
+title: Day 7 — Comparison and logical operators
+day: Day 7 • lesson 1
+heading: Comparison and logical operators
+lead: Module “Syntax, types and operators”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #a16207; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #78350f; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- explain the difference between `==` and `===` and always write the second one;
+- predict the result of comparing values of different types;
+- join conditions with `&&`, `||` and `!`;
+- put in a fallback value and understand why `??` is better than `||`;
+- choose one of two values with the ternary operator.
+</Goals>
+
+<Toc />
+
+## 1. Why compare {#why}
+
+Yesterday the program calculated. But it cannot **decide** yet: do one thing in one
+case and another thing in another. For that we need two sets of operators.
+
+- **comparison** operators — answer the question “yes or no”: `===`,
+  `!==`, `<`, `>`, `<=`,
+  `>=`;
+- **logical** operators — join several answers into one:
+  `&&`, `||`, `!`.
+
+```js
+const age = 20;
+const hasTicket = true;
+
+age >= 18;                  // true  — one condition
+age >= 18 && hasTicket;     // true  — two conditions at once
+```
+
+We will cover the `if` conditions themselves in detail on day 9. Today — what is inside
+the parentheses: how to get a “yes” or a “no” and how to put them together.
+
+## 2. Strict comparison: === and !== {#strict}
+
+Let us start with the main operator of the course. **Three equals signs** check that the values
+are the same *and* of the same type:
+
+```js
+5 === 5;         // true
+5 === "5";       // false — a number and a string, different types
+"a" === "a";     // true
+true === 1;      // false
+null === null;   // true
+
+5 !== "5";       // true  — its pair !== answers the opposite: “not equal”
+5 !== 5;         // false
+```
+
+The rule of `===` is simple and fits entirely into two lines:
+
+<Important>
+**Different types — `false` right away, without converting anything.**
+The same types — we compare the values. For objects “the same value” means
+**the very same object**, not one with the same contents (day 3).
+</Important>
+
+```js
+const a = { name: "Aman" };
+const b = { name: "Aman" };
+const c = a;
+
+a === b;   // false — two different objects, even if they look the same
+a === c;   // true  — this is one and the same object
+
+[1, 2, 3] === [1, 2, 3];   // false — the same with arrays: these are two different arrays
+```
+
+And `==` will not help here — it behaves exactly the same way. So how do you compare two objects
+*by their contents*? The language has no honest way, so people use workarounds:
+
+```js
+const a = { name: "Aman", age: 17 };
+const b = { name: "Aman", age: 17 };
+
+JSON.stringify(a) === JSON.stringify(b);   // true — we turned both into strings
+
+[1, 2, 3].join() === [1, 2, 3].join();     // true — the same for arrays
+```
+
+<Mistake>
+The `JSON.stringify` technique has a catch: it compares **text**,
+which means the order of properties matters.
+
+```js
+JSON.stringify({ x: 1, y: 2 }) === JSON.stringify({ y: 2, x: 1 });   // false
+```
+
+The objects are the same, but the answer is negative. For a real comparison by contents people write
+a separate function that goes through all the properties — that is course 2. We will cover `JSON`
+on day 23.
+</Mistake>
+
+## 3. Loose ==: how it works {#loose}
+
+The operator of **two** equals signs behaves differently: if the types are different,
+it first converts the values to each other and only then compares.
+
+<Scheme src="scheme-loose.svg">Both operators answer “yes” or “no”, but they reach the answer in different ways</Scheme>
+
+It sounds convenient: you do not have to think about types. In fact there are more than ten conversion rules,
+and nobody can remember them all. Here is what you get:
+
+| Comparison | `==` | `===` |
+| --- | --- | --- |
+| `1` and `"1"` | `true` | `false` |
+| `0` and `false` | `true` | `false` |
+| `0` and `""` | `true` | `false` |
+| `""` and `false` | `true` | `false` |
+| `null` and `undefined` | `true` | `false` |
+| `null` and `0` | `false` | `false` |
+| `[]` and `false` | `true` | `false` |
+| `[1]` and `1` | `true` | `false` |
+| `NaN` and `NaN` | `false` | `false` |
+
+Look at the two rows in the middle. `null == undefined` is `true` — this is
+the only useful property of `==`, we talked about it on day 5. But
+`null == 0` is `false`, although `null` behaves like zero in arithmetic.
+There is no logic here, just a separate rule.
+
+## 4. Why == cannot be trusted {#nontransitive}
+
+The strongest argument against `==` is not the length of the table but these three lines:
+
+```js
+"0" == 0;     // true
+"" == 0;      // true
+"0" == "";    // false   ← ???
+```
+
+<Important>
+If `A` equals `B`, and `B` equals `C`, logic
+requires `A` to equal `C`. With `==` this rule
+**does not work**. This property is called the lack of transitivity,
+and it means a simple thing: `==` is not equality. It is a set of rules
+that sometimes look like equality.
+</Important>
+
+Why it happened: `"0"` and `0` are compared as numbers — the string becomes
+zero. `""` and `0` are compared as numbers too, and the empty string also becomes zero.
+But `"0"` and `""` are both strings: the types match, there is nothing to convert, and they
+are compared character by character. Three pairs, three different rules.
+
+<ProTip>
+The rule of the course, without exceptions: **we write only `===` and `!==`**.
+The only place where `==` fits is the “empty” check for `null`
+and `undefined` at once: `value == null`. But many people prefer to write even that one
+the long and explicit way.
+</ProTip>
+
+You still have to be able to read `==`: it appears all the time in old code and in other people’s
+examples. When you see it, be on your guard and check what types are there.
+
+## 5. Greater and less {#order}
+
+The four order operators work as you would expect. An important difference from equality: they have **no
+strict version**. There is no `>==` operator. They always convert
+the operands — like minus and multiplication yesterday:
+
+```js
+5 > 3;      // true
+5 < 3;      // false
+5 >= 5;     // true
+5 <= 4;     // false
+
+"10" > 9;     // true  — the string became a number
+"10" > "9";   // false ← but here both are strings!
+```
+
+The last line is the trap of the day. If **both** operands are strings, they are compared
+as strings, not as numbers. And then `"10"` turns out to be less than `"9"`,
+because the character `"1"` comes before the character `"9"`.
+
+<Mistake>
+Where it bites: values from input fields are strings. You compare two “digits” directly and get
+nonsense.
+
+```js
+const a = "10";   // from an input field
+const b = "9";
+
+if (a > b) { console.log("greater"); }  // will not be printed!
+if (Number(a) > Number(b)) { }          // and this is right
+```
+</Mistake>
+
+Here is how different types behave in an order comparison — the table is worth reading once:
+
+| Comparison | Result | Why |
+| --- | --- | --- |
+| `"10" > 9` | `true` | the string became the number 10 |
+| `"10" > "9"` | `false` | both are strings — character by character |
+| `true > 0` | `true` | `true` became 1 |
+| `null > 0` | `false` | `null` became 0, and 0 is not greater than 0 |
+| `null >= 0` | `true` | but 0 is equal to 0 |
+| `"a" > 1` | `false` | the string did not become a number — you get `NaN` |
+| `"a" < 1` | `false` | and the opposite is false too! |
+
+The last two rows are the same story as with `NaN` on day 5. The word `"a"`
+does not turn into a number, you get `NaN`, and any comparison with it is false. That is why
+both “greater” and “less” answer “no” at the same time.
+
+## 6. Comparing strings {#strings}
+
+Since strings can be compared, you need to know how. The rule: **character by character, by the code
+of the character in the Unicode table**, from left to right until the first difference.
+
+```js
+"a" < "b";        // true  — a comes before b
+"abc" < "abd";    // true  — the first two matched, the third decided
+"abc" < "abcd";   // true  — the shorter one that matches is less
+
+"Z" < "a";             // true  — capital Z comes before small a
+"apple" < "Apple";     // false — small a comes after capital A
+```
+
+The last two lines are unpleasant. In the Unicode table capital Latin letters come
+**before** small ones, and letters with marks, like the Turkmen ä, ş and ý, come after all the plain Latin ones.
+
+So if you sort a list of surnames this way, “Yasharov” will end up above “abdyev”. For real
+sorting of text there is `localeCompare`, which knows about alphabets and letter case —
+we will cover it in course 2 together with sorting.
+
+<Analogy>
+Comparing strings works like the order of words in a dictionary: we look at the first letter, if they match —
+at the second, and so on. The only difference is that the computer has its own “alphabet”: first digits,
+then capital Latin letters, then small Latin letters, then everything else.
+</Analogy>
+
+## 7. The oddities of null and NaN {#quirks}
+
+Two values behave in comparisons unlike all the others. You need to know about them so as not to lose
+half a day on debugging.
+
+**`NaN` is not equal to anything, including itself** — we covered this on day 5.
+Let us add: any comparison with it is false too.
+
+```js
+NaN === NaN;   // false
+NaN !== NaN;   // true  ← the only value that is not equal to itself
+NaN > 1;       // false
+NaN < 1;       // false
+NaN >= NaN;    // false
+```
+
+Notice the third and fourth lines. Usually “not greater” means “less or
+equal” — with `NaN` it is not so. You should check for it only with
+`Number.isNaN()`.
+
+**But `null` contradicts itself:**
+
+```js
+null == 0;    // false — “not equal to zero”
+null > 0;     // false — “not greater than zero”
+null >= 0;    // true  ← but “greater or equal”!
+```
+
+<Why>
+How did this happen? `==` has a **separate rule** for `null`:
+it equals only `null` and `undefined`, and no conversions are made.
+The order operators have no such rule — they honestly turn `null`
+into a number, that is into 0, and compare. So `>=` compares
+`0 >= 0` and answers “yes”, while `==` never gets to numbers at all.
+Two different mechanisms for the same value.
+</Why>
+
+The practical conclusion: **do not put `null` into order comparisons**.
+First check that the value exists at all, then compare.
+
+## 8. Three logical operators {#logic}
+
+One condition is usually not enough. Logical operators join several:
+
+| Operator | Name | Answers “yes” when |
+| --- | --- | --- |
+| `&&` | AND | **both** conditions are true |
+| `\|\|` | OR | **at least one** is true |
+| `!` | NOT | the condition is **false** |
+
+```js
+const age = 20;
+const hasTicket = true;
+
+age >= 18 && hasTicket;    // true  — both
+age < 18 || hasTicket;     // true  — at least one
+!hasTicket;                // false — we flip it
+```
+
+The `!` operator stands apart: it is unary, takes one value and **always**
+returns a real `true` or `false` — unlike the other two.
+It works by the rule of the six falsy values from day 5:
+
+```js
+!true;        // false
+!0;           // true  — zero is falsy, we flipped it
+!"text";      // false — a non-empty string is truthy
+![];          // false — an empty array is truthy too!
+!undefined;   // true
+```
+
+Hence the double negation technique we saw on day 5: `!!x` is
+a way to get an honest `true` or `false` from any value.
+The first `!` flips it, the second flips it back:
+
+```js
+const hasName = !!student.name;   // true if the name is not empty
+typeof hasName;                   // "boolean" — exactly what we wanted
+```
+
+Here is the truth table — it is worth copying into your notebook once and never coming back to it:
+
+| a | b | `a && b` | `a \|\| b` | `!a` |
+| --- | --- | --- | --- | --- |
+| `true` | `true` | `true` | `true` | `false` |
+| `true` | `false` | `false` | `true` | `false` |
+| `false` | `true` | `false` | `true` | `true` |
+| `false` | `false` | `false` | `false` | `true` |
+
+<Mistake>
+Human language is deceptive. In English we say “the mark is not 2 or 1” — with the word “or”,
+but in code it is:
+
+```js
+mark !== 2 && mark !== 1;   // right
+
+mark !== 2 || mark !== 1;   // ALWAYS true — meaningless
+```
+
+The second line is always true: any number is not equal to at least one of the two. When you write
+a condition with “not”, check it on the edge values.
+</Mistake>
+
+### What is calculated first
+
+One expression can contain arithmetic, comparison and logic all together. The order is this;
+at the top is what runs earlier:
+
+| Turn | Operators |
+| --- | --- |
+| 1 | `( )` — parentheses |
+| 2 | `!` — negation |
+| 3 | arithmetic: `* / %`, then `+ -` |
+| 4 | comparison: `< > <= >=` |
+| 5 | equality: `=== !== == !=` |
+| 6 | `&&` |
+| 7 | `\|\|` and `??` |
+| 8 | the ternary operator, then assignments |
+
+Good news follows from this: **parentheses around comparisons are not needed**. The line
+`1 + 2 === 3 && 2 > 1` works as expected — first arithmetic, then
+comparisons, then `&&`.
+
+And one trap: **`&&` binds tighter than `||`**.
+
+```js
+true || false && false;      // true  — reads as true || (false && false)
+(true || false) && false;    // false — and this is already different
+```
+
+<Mistake>
+In real life it looks like this. We wanted “an admin or an owner, and public as well”:
+
+```js
+isAdmin || isOwner && isPublic;      // in fact: isAdmin || (isOwner && isPublic)
+(isAdmin || isOwner) && isPublic;    // and we wanted this
+```
+
+The difference will not show up at once: with `isAdmin = true` and `isPublic = true` both lines give `true`,
+and the mistake will be noticed only when an admin gets access to something that is not public. **If you mix
+`&&` and `||`, always put parentheses**, even when
+the engine does not need them.
+</Mistake>
+
+### How to flip a condition correctly
+
+The mistake above is a special case of a general rule. When a compound condition is negated, the conjunction
+**changes to the opposite**:
+
+| Was | Became after negation |
+| --- | --- |
+| `!(a && b)` | `!a \|\| !b` — “and” became “or” |
+| `!(a \|\| b)` | `!a && !b` — “or” became “and” |
+
+In words it is obvious if you say it out loud. “It is not true that they came and paid” means
+“they did not come *or* did not pay” — one miss is enough. And “it is not true that they came
+or called” means “they did not come *and* did not call” — they did neither one nor the other.
+
+```js
+const canEnter = age >= 18 && hasTicket;
+
+// cannot enter — two ways to write the same thing
+!canEnter;
+age < 18 || !hasTicket;
+```
+
+<ProTip>
+In practice the best technique is **not to flip at all**. Give the condition a name
+and negate the name: `!canEnter` reads instantly, while
+`!(age >= 18 && hasTicket)` has to be worked out. The same rule saves you
+from the “not 2 or 1” mistake: name the condition `isBadMark` — and there is nothing left to mix up.
+</ProTip>
+
+### Comparing with several values
+
+A common task: check that a value is one of several. While there are two or three conditions, people write
+them with `||`:
+
+```js
+const day = "Sat";
+const isWeekend = day === "Sat" || day === "Sun";   // true
+```
+
+When there are more options, such a chain gets long. Then people take an array and ask
+whether the value is in it:
+
+```js
+const isWeekend = ["Sat", "Sun"].includes(day);   // true
+```
+
+We will cover the `includes` method on day 19 together with arrays. I am showing it now
+so that you recognize the technique when you see it: a long chain of `||` with the same kind of comparisons
+is almost always a sign that an array is asking to be used.
+
+## 9. && and || do not return true and false {#values}
+
+Here is a detail that sets JavaScript apart from school logic and that you need to understand properly.
+The `&&` and `||` operators **return one of the operands**,
+not `true` or `false`.
+
+```js
+1 && "salam";       // "salam" — not true
+0 && "salam";       // 0       — not false
+"Aman" || "Guest";  // "Aman"
+"" || "Guest";      // "Guest"
+
+1 && 2 && 3;                    // 3      — all are truthy, it gave the last one
+null || 0 || "" || "last";      // "last" — all are falsy, it gave the last one
+```
+
+The rule is this:
+
+- `&&` returns **the first falsy** value, and if all
+  are truthy — the last one;
+- `||` returns **the first truthy** value, and if all
+  are falsy — the last one.
+
+“Truthy” and “falsy” here mean the same six falsy values from day 5. The
+`!` operator, unlike the other two, always returns a real `true`
+or `false`:
+
+```js
+!0;          // true
+!"text";     // false
+!![];        // true — double negation gives a boolean value
+```
+
+### Why you need to know this
+
+It may seem that the difference between “return `true`” and “return the operand itself” is
+nitpicking. But the two techniques of the next section stand on exactly this, and it also explains
+a result like this one:
+
+```js
+const result = "" || 0;
+console.log(result);          // 0     — not false
+console.log(typeof result);   // "number"
+```
+
+Both operands are falsy, so `||` returned the last one — the number 0. If you expected
+`false` and then compared the result with `false` using `===`,
+the condition will not work. When you need exactly a boolean value, convert it explicitly:
+
+```js
+const ok = Boolean("" || 0);   // false
+const ok2 = !!("" || 0);       // false — the same, but shorter
+```
+
+And remember the six falsy values from day 5: in a condition any value is first turned
+into “yes” or “no” by the same rule. That is why `if ([])` will run, while
+`if ("")` will not.
+
+## 10. Short-circuit evaluation {#shortcircuit}
+
+Something important follows from the previous rule: **the second operand is not always evaluated**.
+If the answer is already clear from the first one, the second one is never reached.
+
+<Scheme src="scheme-shortcircuit.svg">The right part runs only if it can affect the answer</Scheme>
+
+```js
+function log() {
+  console.log("I was called");
+  return true;
+}
+
+false && log();   // prints nothing — log() was never reached
+true || log();    // nothing either
+true && log();    // "I was called"
+```
+
+Two techniques that you will meet in every project are built on this.
+
+### A fallback value
+
+```js
+const name = input || "Guest";
+```
+
+If `input` is truthy, we take it. If it is empty, `null` or
+`undefined`, we put in “Guest”. One line instead of four lines of a condition.
+
+### Protection from emptiness
+
+```js
+const title = user && user.name;
+```
+
+If `user` is `null`, `user.name` is never reached, and we
+do not get the `TypeError` from day 5. The technique works, but today there is a better
+form for this — optional chaining `user?.name`; we will cover it on day 22.
+
+### An action on a condition
+
+You will meet a third technique too, and it deserves a word of its own — not because it is good,
+but because people love to use it as a shortcut:
+
+```js
+isReady && sendReport();   // calls sendReport() only if isReady is truthy
+```
+
+It works by exactly the same rule: the left part is falsy — the right one is never reached. The form is short,
+but **you should not write like this in teaching code**. Here `&&` is used
+not for what it was made for: nobody needs the result of the expression, what is needed is a side effect.
+The reader has to guess that this is a condition, not a calculation.
+
+```js
+if (isReady) {
+  sendReport();
+}
+```
+
+Three lines instead of one, but the intention is visible at once. We will apply the same rule to the ternary
+operator in section 12: **an operator chooses a value, `if` performs
+actions**.
+
+## 11. ?? instead of || {#nullish}
+
+The `||` technique has a flaw, and a serious one. `||` puts in the fallback
+value for **all six** falsy values — including `0` and the empty string.
+And these are often legitimate data.
+
+```js
+const count = 0;
+const shown = count || 10;
+console.log(shown);   // 10 — but the user asked to show 0!
+```
+
+That is why the `??` operator was invented — “nullish coalescing”. It puts in the fallback
+value **only for `null` and `undefined`**:
+
+<Scheme src="scheme-nullish.svg">The difference is in exactly four values: `0`, `""`, `false` and `NaN`</Scheme>
+
+```js
+0 || 10;          // 10   — zero is falsy, the fallback was put in
+0 ?? 10;          // 0    — zero is a value, it was kept
+
+"" || "Guest";    // "Guest"
+"" ?? "Guest";    // ""   — the empty string is a value too
+
+null ?? 10;       // 10
+undefined ?? 10;  // 10
+false ?? 10;      // false
+```
+
+<ProTip>
+How to choose. Ask yourself: **“are zero and the empty string normal data,
+or should they be replaced too?”** The quantity of goods, a score in a game, a temperature are data,
+take `??`. A user name that must not be empty — here
+`||` fits better.
+</ProTip>
+
+One subtlety: `??` **cannot be mixed** with `&&`
+and `||` without parentheses. The language refuses to guess the order — like yesterday with exponentiation:
+
+```js
+// null || undefined ?? "foo";   → SyntaxError: Unexpected token '??'
+(null || undefined) ?? "foo";   // "foo" — it works with parentheses
+```
+
+## 12. The ternary operator {#ternary}
+
+The last operator of the day is the only one in the language that has **three** operands.
+It chooses one of two values:
+
+```js
+condition ? value_if_yes : value_if_no
+```
+
+Yesterday we wrote it like this:
+
+```js
+let stripe = "";
+if (i % 2 !== 0) {
+  stripe = "  (gray row)";
+}
+```
+
+With the ternary operator the same thing fits into one line — and the variable can be declared
+with `const`:
+
+```js
+const stripe = i % 2 !== 0 ? "  (gray row)" : "";
+```
+
+The difference is fundamental and comes from day 3: `if` is a **statement**,
+it does not return a value, so the variable has to be declared empty in advance.
+The ternary operator is an **expression**, and its result can be assigned right away.
+
+```js
+const age = 20;
+const status = age >= 18 ? "adult" : "child";
+console.log(`Status: ${status}`);      // "Status: adult"
+
+// right inside a template literal works too
+console.log(`You bought ${count} ${count === 1 ? "ticket" : "tickets"}`);
+```
+
+Ternaries can be nested inside each other — this is how a ladder of several branches is written:
+
+```js
+const score = 85;
+const grade = score >= 90 ? "5"
+  : score >= 75 ? "4"
+  : "3";
+console.log(grade);   // "4"
+```
+
+<Mistake>
+Nesting more than two or three times is not worth it — such code is impossible to read. And do not use the ternary
+operator for actions: it is made to choose a value, not to run commands.
+
+```js
+// bad: nobody needs the result, these are just two actions
+isReady ? console.log("ready") : console.log("waiting");
+
+// good
+if (isReady) {
+  console.log("ready");
+} else {
+  console.log("waiting");
+}
+```
+</Mistake>
+
+What to choose when — the rule is simple:
+
+| Task | What we write it with |
+| --- | --- |
+| choose a **value** out of two | the ternary operator |
+| perform **actions** on a condition | `if...else` |
+| the value is needed right inside a string | the ternary operator |
+| a branch has more than one line | `if...else` |
+| there are more than three branches | `if...else if` or `switch` (day 9) |
+
+A wording that helps you decide in a second: **if you put the result to the right
+of `=` or inside `${ }`, take the ternary operator. If the result
+goes nowhere, take `if`.**
+
+## 13. The comma operator {#comma}
+
+The language has this operator too: it evaluates several expressions in a row and returns
+**the last one**.
+
+```js
+const x = (1, 2, 3);
+console.log(x);   // 3 — the first two were evaluated and lost
+```
+
+In ordinary code it is not needed, and almost nobody writes it on purpose. You will meet it practically
+in one place — in the head of a loop, when you need to keep two counters at once:
+
+```js
+for (let i = 0, j = 5; i < j; i++, j--) {
+  console.log(i, j);
+}
+// 0 5
+// 1 4
+// 2 3
+```
+
+Notice: the comma in `let i = 0, j = 5` is **not** the comma operator
+but the separator in a list of declarations from day 4. But `i++, j--` is the operator.
+
+## 14. The “Report card”: checking the marks {#tabel}
+
+Let us bring the program to a state where it does not break on bad data. Today we add three
+things: dropping invalid marks, a fallback name and a verdict with a ternary.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const MIN_EXCELLENT = 4.5;
+const MIN_GOOD = 3.5;
+
+const student = {
+  name: "",                                  // the name was not filled in
+  marks: [5, 4, 5, 3, 5, 4, 9, 1],           // 9 and 1 are garbage
+};
+
+const displayName = student.name || "No name";
+
+let sum = 0;
+let count = 0;
+let excellent = 0;
+let skipped = 0;
+
+for (const mark of student.marks) {
+  if (mark >= MIN_MARK && mark <= MAX_MARK) {
+    sum += mark;
+    count++;
+    if (mark === MAX_MARK) {
+      excellent++;
+    }
+  } else {
+    skipped++;
+  }
+}
+
+const average = count > 0 ? sum / count : 0;
+
+const verdict = average >= MIN_EXCELLENT ? "excellent"
+  : average >= MIN_GOOD ? "good"
+  : "needs work";
+
+console.log(`${displayName}: ${average.toFixed(2)} — ${verdict}`);
+console.log(`Counted ${count}, skipped ${skipped}, fives ${excellent}`);
+```
+
+<ResultBox>
+No name: 4.33 — good\
+Counted 6, skipped 2, fives 3
+</ResultBox>
+
+Three places are worth looking at separately.
+
+**`mark >= MIN_MARK && mark <= MAX_MARK`** — a range
+check. Notice that you cannot write it “the math way” as `2 <= mark <= 5`:
+the language will calculate it from left to right and get nonsense. A range is always written with two
+comparisons joined by `&&`.
+
+**`count > 0 ? sum / count : 0`** — protection from division by zero.
+If all the marks turned out to be garbage, `count` would be zero, and `sum / count`
+would give `0 / 0`, that is the `NaN` from day 5. One check — and the program
+gives an honest zero instead of the contagious `NaN`.
+
+**`student.name || "No name"`** — a fallback value. Here
+`||` fits better than `??`: an empty name has to be replaced just like a missing one.
+But if we were putting in a fallback value for the *number* of marks, we would need
+`??` — otherwise an honest zero would be replaced with the fallback number.
+
+Also notice what the program does **not** have. `==` appears
+nowhere: all comparisons are strict. Values of different types are never compared: the marks
+came as numbers and are compared with numbers. And no condition is longer than one line —
+as soon as it starts to grow, it is moved into a named variable.
+
+<TryIt>
+Change all the marks in the array to invalid ones — for example, `[9, 1, 0]` — and run it.
+The program should say “0.00 — needs work”, not `NaN`. Then remove
+the `count > 0 ?` protection and see what happens.
+\
+\
+The second experiment: replace `student.name || "No name"` with
+`student.name ?? "No name"` and run it again. The name will disappear — figure out
+why, and decide which operator is right here.
+</TryIt>
+
+### How to write conditions that read well
+
+Finally — three techniques that set clear code apart from a mess. They are not about syntax
+but about habits, and it is worth starting them right away.
+
+**The first: give conditions names.** A long condition inside `if`
+has to be puzzled out. The same condition with a name reads like a sentence:
+
+<Compare>
+<Wrong label="Hard">
+```js
+if (mark >= 2 && mark <= 5
+    && mark !== 0) {
+  // ...
+}
+```
+</Wrong>
+
+<Right label="Clear">
+```js
+const isValidMark =
+  mark >= 2 && mark <= 5;
+
+if (isValidMark) {
+  // ...
+}
+```
+</Right>
+</Compare>
+
+**The second: write conditions in the positive.** A double negation is the fastest
+way to confuse a reader, including yourself:
+
+```js
+if (!isNotReady) { }    // “if not not ready” — how many seconds did it take you?
+if (isReady) { }        // like this
+```
+
+That is why names are positive too: `isReady`, not `isNotReady`;
+`hasTicket`, not `missingTicket`. A negation can always be put
+outside — one, not two.
+
+**The third: compare values of the same type.** If both operands are numbers,
+all of today’s traps disappear at once. There will be no `"10" > "9"`, no
+`null >= 0`, no `"a" < 1`. Turn the data into the right type
+*at the entrance*, as we did on day 5, and comparisons will become boring and predictable.
+
+<Important>
+Notice that none of the three techniques adds anything to the program: it would work without them.
+They save **your time** — the time that would otherwise go into hunting for a mistake in a condition
+a month later. Conditions break quietly: the program does not crash, it just goes down the wrong branch.
+</Important>
+
+## 15. Common mistakes of the day {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `if (x = 5)` | one stick assigns | `if (x === 5)` |
+| `==` instead of `===` | converts types, more than ten rules | always `===` and `!==` |
+| `"10" > "9"` | both are strings — compared character by character | `Number(a) > Number(b)` |
+| `2 <= mark <= 5` | calculated from left to right, always true | `mark >= 2 && mark <= 5` |
+| `x !== 1 \|\| x !== 2` | always true | `x !== 1 && x !== 2` |
+| `count \|\| 10` for a number | an honest zero will be replaced with 10 | `count ?? 10` |
+| `x === NaN` | always `false` | `Number.isNaN(x)` |
+
+## 16. What comes tomorrow {#next}
+
+Today we learned to get “yes” and “no”. Tomorrow, on day 8, we will close the topic of operators:
+we will cover **type conversion** — by what rules the language itself turns one thing
+into another — and put together the **full precedence table** of all the operators of the language.
+
+Along the way it will become clear why `0 == ""` is true and `"0" == ""` is false:
+today we accepted this as a fact, tomorrow we will see the mechanism itself.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Strict equality ===](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Strict_equality) | different types — `false` right away | <Full /> |
+| [Strict inequality !==](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Strict_inequality) | the opposite of `===` | <Full /> |
+| [Equality ==](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Equality) | converts types; more than ten rules | <Full /> |
+| [Inequality !=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Inequality) | the opposite of `==` | <Full /> |
+| [Less than \<](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Less_than) | there is no strict version, types are always converted | <Full /> |
+| [Less than or equal \<=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Less_than_or_equal) | the same, plus equality | <Full /> |
+| [Greater than >](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Greater_than) | two strings are compared character by character | <Full /> |
+| [Greater than or equal >=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Greater_than_or_equal) | `null >= 0` is true, but `null == 0` is not | <Full /> |
+| [Logical AND &&](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_AND) | the first falsy value or the last one | <Full /> |
+| [Logical OR \|\|](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_OR) | the first truthy value or the last one | <Full /> |
+| [Logical NOT !](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Logical_NOT) | always returns `true` or `false` | <Full /> |
+| [Nullish coalescing ??](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing) | a fallback value only for `null` and `undefined` | <Full /> |
+| [Conditional (ternary) operator ?:](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Conditional_operator) | the only one with three operands; an expression, not a statement | <Full /> |
+| [Comma operator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Comma_operator) | returns the last expression; lives in the head of `for` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+5 === 5;        // true    strict: type + value
+5 === "5";      // false   different types — false right away
+5 == "5";       // true    loose: converts types. WE DO NOT WRITE IT
+
+"0" == 0;       // true  \
+"" == 0;        // true   } == is not transitive — that is the whole argument
+"0" == "";      // false /
+
+"10" > 9;       // true    the string became a number
+"10" > "9";     // false   both are strings — character by character!
+"Z" < "a";      // true    capital letters come before small ones
+
+NaN === NaN;    // false   check with Number.isNaN()
+null == 0;      // false   but null >= 0 is true
+
+a && b          // both; returns the first falsy or the last
+a || b          // at least one; the first truthy or the last
+!a              // always true or false
+
+false && f();   // f() will not be called — short-circuit evaluation
+name || "Guest" // a fallback for the six falsy values
+count ?? 10     // a fallback only for null and undefined
+(a || b) ?? c   // ?? with || and && — only in parentheses
+
+const s = age >= 18 ? "adult" : "child";   // choosing a value
+
+mark >= 2 && mark <= 5;   // a range — only like this, with two comparisons
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why are `"0" == 0` and `"" == 0` true, but `"0" == ""` is not?
+   <Answer>In the first two pairs the types are different, so the string turns into a number, and both give 0.
+   In the third pair both are strings — the types match, there is nothing to convert, and they are compared
+   character by character. This is the lack of transitivity of `==`.</Answer>
+2. What does `0 || 10` return, and what does `0 ?? 10` return?
+   <Answer>`10` and `0`. `||` considers zero falsy and puts in
+   the fallback; `??` reacts only to `null` and
+   `undefined`, so it keeps the honest zero.</Answer>
+3. Why does `"10" > "9"` give `false`?
+   <Answer>Both operands are strings, so the comparison goes character by character: `"1"` comes
+   before `"9"` in the table, and the answer is ready on the very first character.
+   You need `Number("10") > Number("9")`.</Answer>
+4. How do you correctly check that a mark is in the range from 2 to 5?
+   <Answer>`mark >= 2 && mark <= 5`. The form `2 <= mark <= 5`
+   is calculated from left to right: first you get `true` or `false`,
+   then that is compared with 5 — and the result is meaningless.</Answer>
+5. What does `false && console.log("hello")` print, and why?
+   <Answer>Nothing. The left operand is falsy, so the answer of `&&` is already known,
+   and the right part is not evaluated at all. This is short-circuit evaluation.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Strict_equality" />

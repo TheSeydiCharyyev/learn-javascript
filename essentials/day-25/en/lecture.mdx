@@ -1,0 +1,915 @@
+---
+title: "Day 25 — Changing the page: text, markup, attributes, classes, styles"
+day: Day 25 • lesson 1
+heading: "Changing the page: text, markup, attributes, classes, styles"
+lead: Module “DOM and events”, the second day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+---
+
+<Goals>
+- change an element’s text and choose between `textContent` and `innerText`;
+- write markup through `innerHTML` and understand why it is dangerous;
+- read, set and remove attributes;
+- turn classes on and off through `classList`;
+- change the look through `style` and keep data in `dataset`;
+- color the rows of the “Report card” by verdict.
+</Goals>
+
+<Toc />
+
+## 1. From finding to changing {#why}
+
+Yesterday we learned to find elements. Today — to change them. A found element
+has five things you can change, and each has its own tool:
+
+| What we change | With what | Example |
+| --- | --- | --- |
+| text | `textContent`, `innerText` | `h1.textContent = "Group JS-2"` |
+| markup inside | `innerHTML` | `p.innerHTML = "<b>Mon</b>"` |
+| attributes | `getAttribute`, `setAttribute` | `a.setAttribute("title", "…")` |
+| classes | `classList` | `li.classList.add("star")` |
+| the look | `style` | `h1.style.color = "purple"` |
+
+Yesterday’s `write` function from the “Report card” is the first row of the table.
+There was no mystery in it:
+
+```js
+function write(cell, text) {
+  cell.textContent = text;   // one property — that is the whole secret
+}
+```
+
+The study page is yesterday’s, with additions: the list items have a `data-id` attribute,
+the schedule has a bold `<b>`, below it there is a hidden paragraph, and `head` has
+a style for two classes.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Group JS-1</title>
+  <style>
+    .absent { color: gray; text-decoration: line-through; }
+    .star { font-weight: bold; }
+  </style>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1 id="title">Group JS-1</h1>
+    <nav>
+      <a href="#list">List</a>
+      <a href="#info">Schedule</a>
+    </nav>
+  </header>
+  <main>
+    <ul id="list">
+      <li class="student" data-id="1">Aman</li>
+      <li class="student absent" data-id="2">Meret</li>
+      <li class="student" data-id="3">Gülnar</li>
+      <li class="student absent" data-id="4">Sapar</li>
+      <li class="student" data-id="5">Oguljan</li>
+    </ul>
+    <p id="info" class="note">Classes: <b>Mon, Wed, Fri</b></p>
+    <p id="secret" hidden>Test on Friday</p>
+  </main>
+  <footer>
+    <p class="note">Mary, 2026</p>
+  </footer>
+</body>
+</html>
+```
+
+Experiment boldly: the code changes the DOM, not the file, so
+<Kbd>F5</Kbd> brings the page back to how it was. The examples of one section
+continue each other, and before each new section reload the page.
+
+## 2. `Element` and `HTMLElement` {#element}
+
+Where does an element get so many properties from? DOM objects have a lineage — not like nodes
+in a tree, but like species. Every list item is an HTML element, every HTML element is an element,
+every element is a node. Each level adds its own properties.
+
+<Scheme src="scheme-element.svg">From the bottom up: a list item — an HTML element — an element — a node. Each level adds properties</Scheme>
+
+The relationship can be checked with `instanceof` — it appeared on day 23,
+when the reviver turned a string into a date:
+
+```js
+const li = document.querySelector("li");
+
+li instanceof HTMLElement;          // true
+li instanceof Element;              // true
+li instanceof Node;                 // true
+
+li.firstChild instanceof Node;      // true — a text node
+li.firstChild instanceof Element;   // false — but not an element
+```
+
+Hence yesterday’s rule “when you look for tags, take the transitions with the word `Element`”.
+A text node has neither `classList` nor `style`: an attempt
+to add a class to it ends with the error `Cannot read properties of undefined`.
+
+### How to find out what an element can do
+
+An element has hundreds of properties, and there is no point in remembering them all. `console.log` shows
+an element as a piece of markup, and `console.dir` from day 2 — as an object that
+expands into the full list of properties:
+
+```js
+console.log(li);   // <li class="student" data-id="1">Aman</li>
+console.dir(li);   // li.student — expand the arrow, all the properties are there
+```
+
+The second way is MDN. On the `Element` and `HTMLElement` pages
+the properties are grouped by level. If you did not find what you need on the `HTMLElement` page,
+go one level up, as in the scheme.
+
+## 3. `textContent`: the element’s text {#text}
+
+Every node has this property. When read, it is all the text inside; when written, it replaces all
+the contents with one string of text:
+
+```js
+const title = document.querySelector("#title");
+
+title.textContent;                   // "Group JS-1"
+title.textContent = "Group JS-2";    // the heading on the page changed
+title.textContent = 42;              // the number becomes the string "42"
+```
+
+For a container `textContent` glues together the text of all descendants — the tags disappear,
+while the spaces and line breaks from the file stay:
+
+```js
+document.querySelector("#info").textContent;   // "Classes: Mon, Wed, Fri" — without <b>
+document.querySelector("#list").textContent;   // "\n      Aman\n      Meret\n…" — with indentation
+```
+
+Writing erases **all** the children. This is also the simplest way
+to clear an element:
+
+```js
+const list = document.querySelector("#list");
+
+list.children.length;   // 5
+list.textContent = "";
+list.children.length;   // 0 — all five items disappeared
+```
+
+And the main property of `textContent`: what is written **is not parsed as
+markup**. Tags in the string stay letters:
+
+```js
+title.textContent = "<b>Group</b> JS-1";
+title.children.length;   // 0 — no <b> appeared; the page literally shows <b>Group</b>
+```
+
+On `document` itself the property returns `null` — elements have
+text, the document does not.
+
+### Walkthrough: where did the list go
+
+```js
+const list = document.querySelector("#list");
+
+list.textContent = "Group students:";    // we wanted a caption above the list…
+list.children.length;                    // 0 — …but all five items disappeared
+```
+
+**Step 1. We look at what we did.** We wrote `textContent`
+of the `ul` list itself.
+
+**Step 2. We recall the rule.** Writing replaces **all**
+the contents with one string. The items were the contents of the list — so they were replaced.
+
+**Step 3. We fix it.** A caption is a separate element in the markup, for example
+an `<h2>` above the list, and we write the text into it. The general conclusion: write
+`textContent` into an element that has no children you need — into a “leaf”
+of the tree from day 24.
+
+## 4. `innerText`: the text as it is seen {#inner-text}
+
+`innerText` is similar to `textContent`, but it looks with a human’s eyes:
+it takes only what is shown on the screen and lays out line breaks the way they are seen.
+
+```js
+const main = document.querySelector("main");
+
+main.textContent.includes("Test");          // true — it sees the hidden paragraph too
+main.innerText.includes("Test");            // false — it is not on the screen
+
+document.querySelector("#list").innerText;  // "Aman\nMeret\nGülnar\nSapar\nOguljan"
+```
+
+When writing, `innerText` turns line breaks `\n`
+into `<br>` tags, while `textContent` leaves them as they are — and
+they are not visible on the screen:
+
+```js
+title.innerText = "Group JS-1\nMary";
+title.innerHTML;   // "Group JS-1<br>Mary" — two lines on the screen
+```
+
+|  | `textContent` | `innerText` |
+| --- | --- | --- |
+| hidden things | sees them | does not see them |
+| indentation from the file | keeps it | removes it |
+| `\n` when writing | stays a character | becomes `<br>` |
+| speed | fast | slower: the browser recalculates the layout |
+
+The rule: **by default — `textContent`**. It is simpler
+and more predictable. `innerText` — when you need the text exactly as the user
+sees it.
+
+One subtlety from MDN: if the element **itself** is hidden, `innerText`
+gives its whole text, like `textContent`. Only what is hidden
+*inside* gets hidden:
+
+```js
+document.querySelector("#secret").innerText;   // "Test on Friday"
+```
+
+## 5. `innerHTML`: markup as a string {#inner-html}
+
+`innerHTML` reads and writes an element’s contents **together with the tags**.
+When writing, the browser parses the string as HTML and builds new elements from it:
+
+```js
+const info = document.querySelector("#info");
+
+info.innerHTML;     // "Classes: <b>Mon, Wed, Fri</b>"
+info.textContent;   // "Classes: Mon, Wed, Fri"
+
+info.innerHTML = "Classes: <b>Mon, Wed</b> and <i>Fri</i>";
+info.children.length;   // 2 — the browser built <b> and <i>
+```
+
+Like `textContent`, writing replaces all the contents. That is why
+`innerHTML` has a treacherous habit connected with `+=`:
+
+```js
+const bold = info.querySelector("b");
+info.innerHTML += "!";
+
+info.contains(bold);   // false — the old <b> was thrown away, a new one is in its place
+```
+
+`+=` reads all the markup as a string, adds an exclamation mark and
+writes it back. The browser parses it again and builds **all**
+the elements from scratch. Outwardly nothing changed, but saved references lead
+to thrown-away elements. And on a long list it is also slow. It is more correct to append at the end
+with `insertAdjacentHTML` from section 7.
+
+## 6. Other people’s data and `innerHTML` {#danger}
+
+Since `innerHTML` parses a string as markup, everything that ends up in the string
+will turn into markup. While we write the string ourselves, this is convenient. When it comes from data,
+it is dangerous:
+
+```js
+const name = "<i>Aman</i>";   // came from data, for example from a form
+const p = document.querySelector("footer p");
+
+p.innerHTML = "Leader: " + name;       // “Aman” became italic — the string became markup
+p.textContent = "Leader: " + name;     // the page literally shows: Leader: <i>Aman</i>
+```
+
+<Scheme src="scheme-danger.svg">One string, two properties. The difference is whether the string is parsed as HTML</Scheme>
+
+Italics are harmless, but someone else’s code gets into the markup in exactly the same way. MDN gives an example:
+
+```js
+const evil = "<img src='x' onerror='alert(1)'>";
+p.innerHTML = evil;   // there is no picture, onerror fires — someone else’s code runs
+```
+
+There is no picture at the address `x`, the browser calls the error handler, and the code
+from the string runs. A `<script>` tag inserted through
+`innerHTML` does not run, but that is no protection: there are many such workarounds.
+The attack is called **XSS**, cross-site scripting.
+
+<Important>
+A rule for the whole course: **we show data through `textContent`**.
+`innerHTML` — only for markup we wrote ourselves.
+</Important>
+
+And if you need both markup and data? Then they are separated: we write the markup as our own string,
+and put the data into a ready element as text.
+
+```js
+p.innerHTML = "Leader: <b></b>";            // the markup — our own string
+p.querySelector("b").textContent = name;   // the data — only as text
+
+p.innerHTML;   // "Leader: <b>&lt;i&gt;Aman&lt;/i&gt;</b>"
+```
+
+The name is in bold, and its tags stayed letters — the browser itself wrote them safely,
+through `&lt;` and `&gt;`. Let us put the three ways of showing a string
+into one table:
+
+|  | `textContent` | `innerText` | `innerHTML` |
+| --- | --- | --- | --- |
+| tags in the string | stay letters | stay letters | become elements |
+| user data | allowed | allowed | **not allowed** |
+| your own markup | will not work | will not work | this is what it is for |
+| when to use | almost always | you need the text as on the screen | we build the markup ourselves |
+
+## 7. `insertAdjacentHTML`: insert next to it {#adjacent}
+
+The method inserts markup into one of four places without touching what is already there:
+
+```html
+<!-- beforebegin -->
+<h1 id="title">
+  <!-- afterbegin -->
+  Group JS-1
+  <!-- beforeend -->
+</h1>
+<!-- afterend -->
+```
+
+```js
+const title = document.querySelector("#title");
+
+title.insertAdjacentHTML("beforeend", " <small>(5 students)</small>");
+title.innerHTML;   // "Group JS-1 <small>(5 students)</small>"
+
+title.insertAdjacentHTML("inside", "<b>x</b>");
+// SyntaxError: Failed to execute 'insertAdjacentHTML' on 'Element': The value provided
+// ('inside') is not one of 'beforeBegin', 'afterBegin', 'beforeEnd', or 'afterEnd'.
+```
+
+The old contents are not rebuilt — unlike `innerHTML +=`
+from section 5, references to the elements stay alive:
+
+```js
+const small = title.querySelector("small");
+title.insertAdjacentHTML("beforeend", " ✓");
+title.contains(small);   // true — the old elements are in place
+```
+
+But the string is still parsed as HTML, and the rule of section 6 applies here too.
+
+## 8. Attributes {#attributes}
+
+Attributes are `href`, `id`, `class`,
+`title` and the other “name = value” pairs in a tag. There are four methods for them:
+
+```js
+const link = document.querySelector('a[href="#info"]');
+
+link.getAttribute("href");     // "#info"
+link.getAttribute("title");    // null — there is no such attribute
+link.hasAttribute("href");     // true
+
+link.setAttribute("title", "Class days");      // there was no attribute — it appeared
+link.removeAttribute("title");                 // and it is removed
+```
+
+`setAttribute` adds an attribute if there was none, and replaces the value
+if there was one. `removeAttribute` of a nonexistent attribute gives no error.
+
+An attribute’s value is **always a string**. Everything you pass
+turns into text, even `null`:
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.setAttribute("data-mark", 5);
+meret.getAttribute("data-mark");   // "5" — a string, not a number
+
+meret.setAttribute("title", null);
+meret.getAttribute("title");       // "null" — a string too!
+```
+
+That is why MDN advises: to remove an attribute, call `removeAttribute`
+instead of writing `null`. Two more small things: attribute names in HTML are converted
+to lowercase (`"Data-Level"` becomes `data-level`), and a name
+with a space is rejected by the browser:
+
+```js
+meret.setAttribute("my attr", "x");
+// InvalidCharacterError: Failed to execute 'setAttribute' on 'Element':
+// 'my attr' is not a valid attribute name.
+```
+
+It is handy to keep the edge cases in front of you in one table:
+
+| Call | Answer |
+| --- | --- |
+| `getAttribute("no-such")` | `null` |
+| `getAttribute("hidden")` on `<p hidden>` | `""` — the attribute is there, the value is empty |
+| `setAttribute("title", 5)` | the value `"5"` |
+| `setAttribute("title", null)` | the value `"null"` |
+| `setAttribute("Data-Level", "B1")` | the attribute `data-level` |
+| `removeAttribute("no-such")` | nothing, no error |
+| `setAttribute("my attr", "x")` | `InvalidCharacterError` |
+
+## 9. An attribute and a property {#reflect}
+
+For common attributes an element has ready-made properties. This is called
+**reflection**: the property and the attribute are two windows onto one and the same value.
+
+```js
+const title = document.querySelector("#title");
+
+title.id;                   // "title" — the same as getAttribute("id")
+title.id = "main-title";    // the attribute in the markup changed too
+title.getAttribute("id");   // "main-title"
+
+document.querySelector("li").id;   // "" — the item has no id: an empty string, not null
+```
+
+<Scheme src="scheme-reflect.svg">Common attributes have properties; for all the others there are four methods</Scheme>
+
+The names do not always match. The attribute `class` corresponds to the property
+`className`: the word `class` is taken in the language, and classes are a topic of course 2.
+And the values sometimes differ. For a link the attribute keeps what is written in the markup,
+while the property keeps the full address:
+
+```js
+const first = document.querySelector("nav a");
+
+first.getAttribute("href");   // "#list" — as written in the markup
+first.href;                   // "http://127.0.0.1:5500/index.html#list" — the full address
+```
+
+The rule: **if there is a property, use the property** — it is shorter and clearer.
+`getAttribute` is needed for attributes without a property and when what matters is exactly
+what is written in the markup.
+
+## 10. `className`: classes as a string {#class-name}
+
+`className` reflects the whole `class` attribute — as one string,
+separated by spaces. A written string replaces **all** the classes at once:
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.className;            // "student absent"
+meret.className = "star";   // we wanted to add a class…
+meret.className;            // "star" — …but student and absent are gone
+```
+
+This is the most common mistake with classes. The technique `className += " star"`
+works, but it is easy to slip on the space before the word and on repeats. `className`
+is good when you need to set the classes **as a whole** — to return an element to a known
+state: `li.className = "student"`. For everything else, compare:
+
+| Task | with `className` | with `classList` |
+| --- | --- | --- |
+| add a class | `+= " star"`, not forgetting the space | `add("star")` |
+| remove a class | will not work without the string methods of course 2 | `remove("absent")` |
+| is there a class | `includes("star")` will be wrong on `"superstar"` | `contains("star")` |
+| toggle | a condition and two branches | `toggle("star")` |
+
+## 11. `classList`: classes one by one {#class-list}
+
+`classList` is the list of an element’s classes, a `DOMTokenList` object.
+It is similar to yesterday’s `NodeList`: it has `length`, numbers,
+`forEach`, `for...of` — and five methods of its own.
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.classList;                      // DOMTokenList(2) ['student', 'absent', value: 'student absent']
+meret.classList.contains("absent");   // true
+meret.classList.add("star");          // classes: student absent star
+meret.classList.add("star");          // a repeat is not added
+meret.classList.remove("star");       // classes again: student absent
+```
+
+`toggle` switches: if the class was there, it removes it and answers `false`;
+if not, it adds it and answers `true`. The second argument makes
+the switch one-way:
+
+```js
+meret.classList.toggle("absent");        // false — the class was there, it was removed
+meret.classList.toggle("absent");        // true — there was no class, it was added
+meret.classList.toggle("star", false);   // false — only remove, never add
+
+meret.classList.replace("absent", "late");   // true — replaced
+meret.classList.replace("none", "x");        // false — nothing to replace
+```
+
+Several classes are passed as several arguments. A string with a space is an error:
+
+```js
+meret.classList.add("star", "late");   // this is right
+
+meret.classList.add("star late");
+// InvalidCharacterError: Failed to execute 'add' on 'DOMTokenList': The token provided
+// ('star late') contains HTML space characters, which are not valid in tokens.
+```
+
+Together with `querySelectorAll` from day 24 this gives a common working technique —
+change all the found elements at once:
+
+```js
+document.querySelectorAll(".absent").forEach((li) => li.classList.add("star"));
+```
+
+The second argument of `toggle` is handy exactly in such a loop: the condition decides
+whether the element will have the class or not.
+
+```js
+document.querySelectorAll("li").forEach((li) => {
+  li.classList.toggle("star", li.dataset.id === "3");   // a star — only for Gülnar
+});
+```
+
+<ProTip>
+Name classes by meaning, not by look: `absent`,
+not `gray`. If tomorrow you decide to show the absent ones in red, one line
+of CSS changes, and the class name and all the code stay correct.
+</ProTip>
+
+## 12. `style`: the look from code {#style}
+
+`style` is the element’s inline style, the `style` attribute
+as an object. CSS property names in it are written in “camel case”: the hyphen is removed,
+and the next letter becomes a capital.
+
+```js
+const title = document.querySelector("#title");
+
+title.style.color = "purple";
+title.style.backgroundColor = "#f5f3ff";   // background-color → backgroundColor
+title.style.fontSize = "32px";             // units are required
+
+title.getAttribute("style");
+// "color: purple; background-color: rgb(245, 243, 255); font-size: 32px;"
+```
+
+Notice: the browser stores the color written as `#f5f3ff`
+in its own way — `rgb(245, 243, 255)`. Comparing the color you read with what you
+wrote is pointless.
+
+<Mistake>
+`style` does not forgive mistakes and does not report them. All three lines below
+**silently** do nothing to the page:
+</Mistake>
+
+```js
+title.style.fontSize = 32;       // a number without units — ignored
+title.style.color = "purpel";    // a typo in the value — ignored
+title.style.colour = "red";      // a typo in the name — just a new property of the object
+```
+
+The second surprise: `style` sees **only the inline**
+style. Meret’s gray color is set by a class in `<style>`, and
+`style` knows nothing about it:
+
+```js
+document.querySelector(".absent").style.color;   // "" — the color came from a class, not from the style attribute
+
+title.style.color = "";   // an empty string removes the inline property
+```
+
+Hence the rule: **the look — with classes, `style` — for computed values**.
+Colors and fonts live in CSS, and the code only turns a class on and off. `style`
+is needed when the value is calculated by the program — for example, the width of a bar by percent:
+`bar.style.width = percent + "%"`.
+
+The final color with all CSS rules taken into account can be found out with `getComputedStyle`,
+but that is already a browser feature from course 4. In our course a simple rule is enough:
+the look lives in classes, and in the code we check the class — `classList.contains("absent")`.
+
+## 13. `dataset`: your own data in the markup {#dataset}
+
+Attributes with the `data-` prefix were invented for your own data: a record number,
+a group, a mark. The browser does not touch them, and in the code they are collected into the `dataset` object:
+
+```js
+const meret = document.querySelector(".absent");   // data-id="2"
+
+meret.dataset.id;               // "2" — a string
+meret.dataset.id + 1;           // "21" — string concatenation, as on day 8
+Number(meret.dataset.id) + 1;   // 3
+
+meret.dataset.groupName = "JS-1";   // data-group-name="JS-1" appeared in the markup
+"groupName" in meret.dataset;       // true
+delete meret.dataset.groupName;     // the attribute is removed
+```
+
+| In the markup | In the code |
+| --- | --- |
+| `data-id` | `dataset.id` |
+| `data-group-name` | `dataset.groupName` |
+| `data-date-of-birth` | `dataset.dateOfBirth` |
+
+The `data-` prefix is dropped, and each hyphen with a letter after it
+turns into a capital letter. The values are always strings, as with any attribute.
+`in` and `delete` work the same way as with an ordinary object from day 21.
+
+Why keep data in the markup? Because the element later comes to us by itself —
+on day 27 from the event “what was clicked”. `li.dataset.id` will tell right away
+which student it is.
+
+### Walkthrough: the sum of the numbers
+
+```js
+const items = [...document.querySelectorAll("li")];
+
+items.reduce((sum, li) => sum + li.dataset.id, 0);           // "012345" — but we expected 15
+items.reduce((sum, li) => sum + Number(li.dataset.id), 0);   // 15
+```
+
+**Step 1. We look at the answer.** The digits go in a row — this is string concatenation,
+not addition.
+
+**Step 2. We play through the first step.** `0 + "1"` is a number
+plus a string; by the rule of day 8 this is concatenation: `"01"`. From then on the sum is already a string,
+and each number gets glued to it.
+
+**Step 3. We fix it where we read.** `Number` — right at
+the reading from `dataset`. The general rule: **everything we read from the page
+is a string**. `textContent`, `getAttribute`, `dataset`
+— without exception. A number is obtained through `Number`, as on day 17.
+
+## 14. Hide and scroll {#hidden}
+
+The `hidden` property reflects the attribute of the same name: if the attribute is there, the element
+is not visible.
+
+```js
+const secret = document.querySelector("#secret");
+
+secret.hidden;           // true
+secret.hidden = false;   // the paragraph appeared, the hidden attribute is gone
+secret.hidden = true;    // and it is hidden again
+```
+
+For such flag attributes what matters is **presence**, not the value. That is why
+`setAttribute("hidden", "false")` **hides** the element: the attribute is there,
+and what is written in it does not matter. The element can be shown only by removing the attribute —
+`removeAttribute("hidden")` or `hidden = false`.
+
+And a trap from the other side: `hidden` hides an element through the browser’s
+default styling. If CSS explicitly sets the element’s `display` — for example,
+with a class that has `display: block` — the `hidden` attribute stops hiding it.
+`secret.hidden` will still say `true`. If you see
+a “hidden” element on the screen, look for `display` in the styles.
+
+The `scrollIntoView` method scrolls the page so that the element ends up
+in view. An object parameter makes the scrolling smooth:
+
+```js
+const footer = document.querySelector("footer");
+
+footer.scrollIntoView();                       // at once
+footer.scrollIntoView({ behavior: "smooth" }); // smoothly
+```
+
+## 15. The “Report card” in color {#tabel}
+
+Yesterday the “Report card” moved to the page, but it wrote into the cells through the borrowed function
+`write`. Today it is not needed, and the rows get a color by verdict.
+Yesterday’s `index.html` gets two additions in its markup:
+
+```html
+<!-- in head, before script -->
+<style>
+  .excellent { background: #dcfce7; }
+  .good      { background: #e0f2fe; }
+  .fair      { background: #fef9c3; }
+  .weak      { background: #fee2e2; }
+  .empty     { color: gray; font-style: italic; }
+</style>
+
+<!-- in body, after the table -->
+<p id="summary"></p>
+```
+
+The calculation is from day 23, `makeCells` from day 24, without changes. New in
+`app.js`:
+
+```js
+// unchanged: MIN_MARK … makeReport (day 23), makeCells (day 24)
+
+// new: which class a row gets
+const VERDICT_CLASS = {
+  "top student": "excellent",
+  "good student": "good",
+  "average student": "fair",
+  "needs work": "weak",
+};
+
+function rowClass(report) {
+  return report.ok ? VERDICT_CLASS[report.verdict] : "empty";
+}
+
+const rows = document.querySelectorAll("#tabel tbody tr");
+const reports = students.map(makeReport);
+
+reports.forEach((report, i) => {
+  const row = rows[i];
+  const cells = row.children;
+  makeCells(report).forEach((text, j) => {
+    cells[j].textContent = text;   // write is no longer needed
+  });
+  row.classList.add(rowClass(report));
+  row.dataset.name = report.name;
+});
+
+const excellent = reports.filter((r) => r.ok && r.verdict === "top student").length;
+document.querySelector("#summary").textContent = `Top students: ${excellent} of ${reports.length}`;
+document.title = `Report card: ${reports.length} students`;
+```
+
+<ResultBox>
+<table>
+<thead>
+<tr><th>Name</th><th>Avg</th><th>Min</th><th>Max</th><th>%</th><th>Verdict</th></tr>
+</thead>
+<tbody>
+<tr style={{background: "#e0f2fe"}}><td>Aman</td><td>4.33</td><td>3</td><td>5</td><td>75%</td><td>good student</td></tr>
+<tr style={{background: "#fef9c3"}}><td>Meret</td><td>3.33</td><td>3</td><td>4</td><td>100%</td><td>average student</td></tr>
+<tr style={{color: "gray", fontStyle: "italic"}}><td>Gülnar</td><td>—</td><td>—</td><td>—</td><td>—</td><td>no valid marks</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Sapar</td><td>4.75</td><td>4</td><td>5</td><td>100%</td><td>top student</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Oguljan</td><td>4.50</td><td>4</td><td>5</td><td>67%</td><td>top student</td></tr>
+</tbody>
+</table>
+
+Top students: 2 of 5
+</ResultBox>
+
+The numbers are the same. New are three things, and all three are from today.
+
+**Text — through `textContent`.** The names came from data,
+so it is exactly this one, not `innerHTML` (section 6).
+
+**Color — with a class.** The code does not know a single color: it only chooses the name
+of a class, and the colors live in `<style>`. If you want a different green, the edit is
+in one place, and we do not touch the code. This is the rule of section 12 in action.
+
+**The name — in `dataset`.** It will come in handy on day 27: on a click
+on a row, `closest("tr").dataset.name` will tell whose row was chosen. For now
+a row can be found with an attribute selector from day 24:
+
+```js
+document.querySelector('[data-name="Sapar"]').className;   // "excellent"
+document.querySelectorAll("tr.excellent").length;          // 2
+```
+
+### Walkthrough: a verdict that is not in the class table
+
+Suppose tomorrow `verdict` starts returning a new word — “top” instead of
+“top student”. `VERDICT_CLASS` has no such key, and
+`VERDICT_CLASS["top"]` gives `undefined` (day 21). There will be no error:
+`classList.add(undefined)` turns the argument into a string and adds the row a class
+named `"undefined"`. The row simply stays without a color, and you can notice it
+only with your eyes. That is why, when you change the verdict words, change the class table too —
+it is one decision, not two.
+
+<TryIt>
+Two experiments.
+\
+\
+**The first.** In the loop, replace `textContent` with
+`innerHTML` and change Aman’s name in `saved` to
+`<b>Aman</b>`. What changed on the page, and why is it a bad sign?
+\
+\
+**The second.** Change the color of the `.excellent` class in
+`<style>`. How many lines of code did you have to touch?
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | What you will see | How to do it right |
+| --- | --- | --- |
+| data through `innerHTML` | other people’s tags became markup | `textContent` |
+| `innerHTML += …` in a loop | slow, references to elements get lost | `insertAdjacentHTML` |
+| `className = "star"` | the other classes are gone | `classList.add("star")` |
+| `classList.add("a b")` | `InvalidCharacterError` | `add("a", "b")` |
+| `style.fontSize = 32` | nothing, silently | `"32px"` |
+| `style.background-color = …` | `SyntaxError: Invalid left-hand side in assignment` | `style.backgroundColor` |
+| reading a class’s color through `style` | an empty string | check the class: `classList.contains` |
+| `dataset.id + 1` | `"21"` | `Number(dataset.id) + 1` |
+| `setAttribute("hidden", "false")` | the element is hidden | `hidden = false` |
+| `textContent` of a container | all the children are gone | write into a separate element |
+| a number from `textContent` or `dataset` | concatenation instead of a sum | `Number(...)` when reading |
+
+### The module: what we can already do
+
+| Day | We can | The main tools | The “Report card” |
+| --- | --- | --- | --- |
+| 24 | find an element and walk the tree | `querySelector`, `closest` | moved into a table |
+| 25 | change text, attributes, classes, styles | `textContent`, `classList` | rows in color |
+| 26 | create and remove an element | `createElement`, `append` | as many rows as students |
+
+### What comes tomorrow
+
+Today we changed what is already in the markup. Tomorrow we **create and remove**
+elements with code: `createElement`, `append`, `remove`.
+The “Report card” will finally get rid of the prepared empty rows: there will be exactly as many rows
+as there are students, and a sixth student will stop crashing the program.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Element](https://developer.mozilla.org/en-US/docs/Web/API/Element) | what all elements have in common | <Full /> |
+| [HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement) | what HTML elements have in common | <Full /> |
+| [textContent](https://developer.mozilla.org/en-US/docs/Web/API/Node/textContent) | all the text; writing does not parse markup | <Full /> |
+| [innerText](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/innerText) | the text as it is seen | <Full /> |
+| [innerHTML](https://developer.mozilla.org/en-US/docs/Web/API/Element/innerHTML) | markup as a string; the danger with data | <Full /> |
+| [getAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/getAttribute) | an attribute’s value or `null` | <Full /> |
+| [setAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/setAttribute) | set or replace an attribute | <Full /> |
+| [hasAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/hasAttribute) | whether there is an attribute | <Full /> |
+| [removeAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/removeAttribute) | remove an attribute | <Full /> |
+| [id](https://developer.mozilla.org/en-US/docs/Web/API/Element/id) | the property for the `id` attribute | <Full /> |
+| [className](https://developer.mozilla.org/en-US/docs/Web/API/Element/className) | all the classes as one string | <Full /> |
+| [classList](https://developer.mozilla.org/en-US/docs/Web/API/Element/classList) | classes one by one | <Full /> |
+| [DOMTokenList](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList) | the list of classes and its methods | <Full /> |
+| [add](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/add) | add a class; a repeat is not added | <Full /> |
+| [remove](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/remove) | remove a class | <Full /> |
+| [toggle](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/toggle) | switch; the second argument makes it one-way | <Full /> |
+| [contains](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/contains) | whether there is a class | <Full /> |
+| [style](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/style) | the inline style, camelCase names | <Full /> |
+| [dataset](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/dataset) | `data-*` attributes as an object | <Full /> |
+| [Reflected attributes](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Reflected_attributes) | a property and an attribute are one value | <Brief /> |
+| [replace](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/replace) | replace one class with another | <Brief /> |
+| [insertAdjacentHTML](https://developer.mozilla.org/en-US/docs/Web/API/Element/insertAdjacentHTML) | insert markup into one of four places | <Brief /> |
+| [hidden](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/hidden) | hide and show | <Brief /> |
+| [scrollIntoView](https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoView) | scroll to an element | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// TEXT
+const info = document.querySelector("#info");
+info.textContent;                     // "Classes: Mon, Wed, Fri" — without tags
+info.innerText;                       // the text as on the screen, without hidden parts
+info.textContent = "<b>Mon</b>";      // the tags will stay letters
+info.textContent = "";                // clear the element
+
+// MARKUP — only your own, not data!
+info.innerHTML = "Classes: <b>Mon, Wed, Fri</b>";
+info.insertAdjacentHTML("beforeend", " <i>(every week)</i>");
+// places: beforebegin, afterbegin, beforeend, afterend
+
+// ATTRIBUTES — always strings
+const link = document.querySelector("nav a");
+link.getAttribute("href");            // "#list"; no attribute — null
+link.setAttribute("title", "Group list");
+link.hasAttribute("title");           // true
+link.removeAttribute("title");
+link.href;                            // the full address — a reflecting property
+
+// CLASSES
+const meret = document.querySelector(".absent");
+meret.classList.add("star", "late");
+meret.classList.remove("late");
+meret.classList.toggle("star");       // false — the class was there, removed
+meret.classList.contains("absent");   // true
+meret.classList.replace("absent", "late");   // true
+meret.className;                      // "student late" — all the classes as a string
+
+// STYLE — only the inline one
+const title = document.querySelector("#title");
+const percent = 75;
+title.style.backgroundColor = "#f5f3ff";   // camelCase names
+title.style.width = percent + "%";         // units are required
+title.style.backgroundColor = "";          // remove
+
+// DATA — always strings
+meret.dataset.id;                     // "2"
+Number(meret.dataset.id) + 1;         // 3
+meret.dataset.groupName = "JS-1";     // in the markup: data-group-name="JS-1"
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. How does `textContent = s` differ from `innerHTML = s`?
+   <Answer>`textContent` inserts the string as text: tags stay letters.
+   `innerHTML` parses it as markup and builds elements. For data —
+   only `textContent`, otherwise someone else’s string becomes markup, or even code.</Answer>
+2. Why does `main.innerText` not contain the hidden paragraph, while
+   `main.textContent` does?
+   <Answer>`innerText` takes only what is shown on the screen.
+   `textContent` collects the text of all descendants without looking at the styling.</Answer>
+3. What happens to the classes after `el.className = "star"`?
+   <Answer>Only `star` remains: `className` is the whole string of classes,
+   and writing replaces it. To add a class without touching the others —
+   `classList.add("star")`.</Answer>
+4. Why is `el.style.color` empty although the element is gray on the screen?
+   <Answer>`style` sees only the inline style from the `style` attribute.
+   The gray color came from a CSS class, and `style` knows nothing about it.</Answer>
+5. What does `li.dataset.id + 1` return if the markup has `data-id="2"`?
+   <Answer>`"21"`: attribute values are always strings, and `+` concatenates.
+   You need `Number(li.dataset.id) + 1`.</Answer>
+6. Why does `setAttribute("hidden", "false")` hide the element?
+   <Answer>For flag attributes only presence matters. If the attribute is there, the element is hidden,
+   whatever is written in the value. To show it — `hidden = false`
+   or `removeAttribute("hidden")`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Element" />

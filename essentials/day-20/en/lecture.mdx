@@ -1,0 +1,853 @@
+---
+title: Day 20 — Iterating arrays
+day: Day 20 • lesson 1
+heading: "Iterating arrays: forEach, map, filter, reduce"
+lead: Module “Arrays, objects and JSON”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- replace a loop with an iteration method and understand when it fits;
+- choose between `map`, `filter` and `reduce` by the task;
+- fold a list into one value with `reduce`;
+- sort numbers correctly and know why `sort` is dangerous;
+- read chains of methods and build them yourself.
+</Goals>
+
+<Toc />
+
+## 1. A loop that became a method {#why}
+
+Yesterday we added, cut and searched in an array. Today we will learn to **go through it
+whole** — and get a new result from it.
+
+We have been able to do this since the eleventh day, with a loop:
+
+```js
+const marks = [5, 4, 3, 5, 2];
+
+const doubled = [];
+for (const mark of marks) {
+  doubled.push(mark * 10);
+}
+
+doubled;   // [50, 40, 30, 50, 20]
+```
+
+Four lines, of which one does the job. The rest is preparing the array, the loop
+and `push`, and this preparation is always the same. The language lets you not write it:
+
+```js
+const doubled = marks.map((mark) => mark * 10);
+
+doubled;   // [50, 40, 30, 50, 20]
+```
+
+One line, and only the essential is left in it: what we do with each element.
+All the methods of today work this way — **each one is given a function, and it calls
+it for each element**. We passed a function as a value back on day 12,
+and learned to write it as an arrow on day 13; today both skills finally work together.
+
+| Question | Method | What it returns |
+| --- | --- | --- |
+| do something with each one | `forEach` | nothing |
+| get a new list of the same length | `map` | an array |
+| keep only the suitable ones | `filter` | a shorter array |
+| find the first suitable one | `find` | an element |
+| is there at least one / are they all | `some`, `every` | `true` / `false` |
+| fold everything into one value | `reduce` | anything |
+
+## 2. `forEach` — do something with each one {#foreach}
+
+The simplest one: it runs a function for each element and returns nothing.
+
+```js
+const marks = [5, 4, 3];
+
+marks.forEach((mark) => {
+  console.log("mark: " + mark);
+});
+// mark: 5
+// mark: 4
+// mark: 3
+```
+
+It is a full replacement for `for...of`, and it has two differences you need to
+know about in advance.
+
+**The first: it returns nothing.** Nothing at all — always
+`undefined`:
+
+```js
+const result = marks.forEach((mark) => mark * 10);
+
+result;   // undefined — not [50, 40, 30]
+```
+
+This is a beginner’s most common mistake: taking `forEach` where
+`map` is needed. The rule is simple: **if you need the result, do not take
+`forEach`**.
+
+**The second: you cannot exit it early.** `break` in it is
+a syntax error, and `return` stops only the current call of the function,
+that is, it works like `continue`:
+
+```js
+marks.forEach((mark) => {
+  if (mark === 4) {
+    return;        // this is “skip”, not “exit”
+  }
+  console.log(mark);
+});
+// 5
+// 3
+```
+
+So where you need to stop at the very first one found, people take
+`find` from section 7 or an ordinary loop with `break`.
+
+### When a loop after all
+
+Methods are more convenient in most cases, but the ordinary `for...of` is not outdated.
+It stays better in three situations:
+
+```js
+// 1. you need to exit early
+for (const mark of marks) {
+  if (mark === 2) {
+    console.log("found a two, not looking further");
+    break;
+  }
+}
+```
+
+The second situation is when at each step you need two neighboring elements, or the step is not
+one: iteration methods always go one by one and in order. The third is when at each
+step you have to wait for the server’s answer: `forEach` cannot wait, and an ordinary loop
+can. Day 31 will show how to wait for an answer.
+
+In all other cases a method is shorter and more honest: its name shows right away
+what is happening, while with `for` you see it only after reading the body.
+
+### Walkthrough: why the report is empty
+
+This is how the mistake “took `forEach` instead of `map`” looks in a real
+program. Let us take it apart step by step, with the technique from day 15.
+
+```js
+const lines = marks.forEach((m) => "mark: " + m);
+
+console.log(lines.join("; "));
+// TypeError: Cannot read properties of undefined (reading 'join')
+```
+
+**Step 1. We read the error.** It is not about `join` but about what
+it was called on: “cannot read properties of `undefined`”. So
+`lines` is `undefined`.
+
+**Step 2. We check the guess.** We print the variable itself, not its
+properties:
+
+```js
+console.log(lines);   // undefined
+```
+
+**Step 3. We look at who created it.** To the right of `=` stands
+`forEach`, and it always returns `undefined`. The function inside
+honestly built the strings — but nobody received them.
+
+**Step 4. We fix it.** We need a method that collects the results:
+
+```js
+const lines = marks.map((m) => "mark: " + m);
+
+lines.join("; ");   // "mark: 5; mark: 4; mark: 3"
+```
+
+Notice step 1: the message pointed at `join`, but the line above was
+to blame. This is a common thing — **an error shows up where the value
+is used, not where it was created**. The call stack and printing the variable
+lead to the real cause in half a minute.
+
+## 3. The three arguments of a callback {#args}
+
+The function we pass gets not one argument but three — usually only the first one
+is needed:
+
+```js
+marks.forEach((value, index, array) => {
+  console.log(value, index, array.length);
+});
+// 5 0 3
+// 4 1 3
+// 3 2 3
+```
+
+The second argument — the **index** — helps out when there is a second array next to it
+with the same positions. The technique is familiar from the fifteenth day, where names and attendance went
+as a pair:
+
+```js
+const items = ["bread", "tea", "butter"];
+const prices = [3.5, 12, 25];
+
+const cheap = items.filter((item, index) => prices[index] < 10);
+
+cheap;   // ["bread"]
+```
+
+The third argument — the array itself — is needed very rarely, and it can almost always
+be left out. Extra parameters do not have to be written: back on day 12 we saw that a function
+silently drops extra arguments.
+
+## 4. `map` — build a new array {#map}
+
+It takes each element, passes it through the function and puts the results into a new array.
+**The length is always the same** — as many as there were, so many there will be.
+
+```js
+const marks = [5, 4, 3];
+
+marks.map((m) => m * 10);          // [50, 40, 30]
+marks.map((m) => m >= 4);          // [true, true, false]
+marks.map((m) => "mark " + m);     // ["mark 5", "mark 4", "mark 3"]
+
+marks;   // [5, 4, 3] — the source array is intact
+```
+
+Notice two things. The first: **the type can change** — from numbers
+we got booleans, then strings. The second: **the source array does not change**,
+just as with the string methods of day 16.
+
+Hence the rule for choosing between `map` and `forEach`:
+
+<Important>
+`map` — when you need to make **another list** from a list.
+`forEach` — when you need to **do something**: print,
+save, show on the page. If after `forEach` you collect
+the result into a separate array with `push`, you need `map`.
+</Important>
+
+## 5. The `map(parseInt)` trap {#parseint-trap}
+
+Since a function can be passed by name, a short form suggests itself. And here the language
+trips you up:
+
+```js
+["1", "2", "3"].map(Number);     // [1, 2, 3]      — works
+["1", "2", "3"].map(parseInt);   // [1, NaN, NaN]  — what?!
+```
+
+The answer is in section 3: `map` passes the function **three** arguments.
+`Number` takes one and ignores the extra ones, while the second parameter of `parseInt`
+is the numeral system from day 17. This is what happens:
+
+```js
+parseInt("1", 0);   // 1    zero means “the default system”
+parseInt("2", 1);   // NaN  there is no numeral system with base 1
+parseInt("3", 2);   // NaN  there is no digit 3 in the binary system
+```
+
+It is even clearer on identical strings:
+
+```js
+["10", "10", "10"].map(parseInt);   // [10, NaN, 2]
+```
+
+The third element is a two, because `parseInt("10", 2)` reads “10”
+as a binary number. The program does not crash, an array comes out, and half of the values are
+garbage.
+
+<Mistake>
+A rule for every day: **pass by name only those functions that
+take exactly one argument**. In other cases write the arrow explicitly —
+`map((s) => parseInt(s, 10))`. One extra pair of parentheses is more reliable
+than pretty brevity.
+</Mistake>
+
+## 6. `filter` — keep the suitable ones {#filter}
+
+It calls the function for each element and keeps those for which it returned
+`true`. We have used it since the twelfth day; now we take apart how it works.
+
+```js
+const marks = [5, 4, 3, 5, 2];
+
+marks.filter((m) => m >= 4);       // [5, 4, 5]
+marks.filter((m) => m === 5);      // [5, 5]
+marks.filter((m) => m > 100);      // []  — an empty array, not undefined
+```
+
+The result is **shorter or of the same length**, but the elements in it are the very same —
+`filter` changes nothing, it only selects. If you need both to select and to change,
+the methods are joined in a chain:
+
+```js
+marks
+  .filter((m) => m >= 4)
+  .map((m) => m * 10);        // [50, 40, 50]
+```
+
+It reads from top to bottom, like a list of steps: took the marks, kept the good ones, multiplied
+by ten. Each step gives a new array to the next one — exactly like the chains of string
+methods from day 16.
+
+The order in a chain matters both for meaning and for speed: **it is better to filter
+earlier**, so that later you work with a short list.
+
+### A chain step by step
+
+Let us look at a full chain of three methods — it will come up in the tasks. The list
+is “dirty”: it has both a nine and a zero, which cannot be marks.
+
+```js
+const raw = [5, 4, 3, 5, 2, 9, 0, 4];
+
+const total = raw
+  .filter((m) => m >= 2 && m <= 5)   // 6 elements of 8
+  .map((m) => m * 10)                // the same 6, but ten times bigger
+  .reduce((sum, m) => sum + m, 0);   // one number
+
+total;   // 230
+```
+
+<Scheme src="scheme-filter.svg">The list gets shorter, changes and finally folds. Each step gives a new array to the next one</Scheme>
+
+The main property of a chain is visible too: **the length changes only at `filter`**.
+`map` keeps it, `reduce` removes it altogether. By this sign
+a chain is easy to read even in someone else’s code.
+
+## 7. `find` and `findIndex` {#find}
+
+`filter` finds all the suitable ones. When you need only the first, people take
+`find` — it stops as soon as it has found one:
+
+```js
+const marks = [5, 4, 3, 5, 2];
+
+marks.find((m) => m < 4);        // 3    the element itself
+marks.findIndex((m) => m < 4);   // 2    its position
+
+marks.find((m) => m > 9);        // undefined
+marks.findIndex((m) => m > 9);   // -1
+```
+
+The difference in “not found” is like yesterday’s `indexOf` and `at`: the one looking for a position gives
+`-1`, and the one looking for a value gives `undefined`. And the same trap:
+**zero is a correct position**, so `findIndex` in a condition
+is compared with `-1` explicitly.
+
+There is also a mirror pair that goes from the end:
+
+```js
+marks.findLast((m) => m >= 4);        // 5   the last good mark
+marks.findLastIndex((m) => m >= 4);   // 3   its position
+```
+
+## 8. `some` and `every` {#some-every}
+
+Two methods answer with one word, “yes” or “no”:
+
+```js
+const marks = [5, 4, 3, 5, 2];
+
+marks.some((m) => m === 5);    // true   there is at least one five
+marks.every((m) => m >= 2);    // true   all marks are no lower than a two
+marks.every((m) => m === 5);   // false  not all are fives
+```
+
+Both stop as soon as the answer is clear: `some` at the first suitable one,
+`every` at the first unsuitable one. On long lists this is noticeably faster
+than counting everyone with `filter`.
+
+But the behavior on an empty array surprises:
+
+```js
+[].some((m) => true);    // false
+[].every((m) => false);  // true   — even with a check that is false on purpose!
+```
+
+The logic is this: “is there at least one suitable” among nothing — no, none will be found.
+“Do all fit” among nothing — yes, since none broke the rule. Mathematicians call this
+“vacuous truth”, and you simply have to accept it. In practice one thing is worth remembering:
+**before `every` check that the list is not empty**, if an empty
+list does not mean “all is well” for you.
+
+## 9. `reduce` — fold into one {#reduce}
+
+The most powerful and the most frightening method of the day. It goes through an array and **accumulates
+one result**: a sum, a maximum, a string — anything.
+
+```js
+const marks = [5, 4, 3];
+
+const total = marks.reduce((sum, mark) => sum + mark, 0);
+
+total;   // 12
+```
+
+The function has two parameters: **the accumulated value** and **the next
+element**. The second argument of `reduce` itself is what to start from.
+
+<Scheme src="scheme-reduce.svg">Three steps and one result. The initial value sets both the type of the result and the behavior on an empty list</Scheme>
+
+You can accumulate not only numbers. The initial value sets the type of the result:
+
+```js
+const names = ["Aman", "Meret", "Sapar"];
+
+names.reduce((line, name) => line + name + "; ", "");
+// "Aman; Meret; Sapar; "
+
+marks.reduce((best, mark) => Math.max(best, mark), 0);
+// 5 — the maximum, as on day 18, but without a loop
+```
+
+`reduce` can also count by a condition — then it accumulates not a sum
+but a count:
+
+```js
+marks.reduce((count, mark) => mark === 5 ? count + 1 : count, 0);   // 1
+marks.filter((mark) => mark === 5).length;                          // 1 — the same
+```
+
+The second form is shorter and clearer, and in ordinary code it is the one people use. The first is useful
+when you need to count several things in one pass — but such cases are rare,
+and readability matters more than saving passes.
+
+There is also the mirror `reduceRight` — it goes from the end. It is rarely needed, but the difference
+is visible right away:
+
+```js
+["a", "b", "c"].reduce((a, b) => a + b);        // "abc"
+["a", "b", "c"].reduceRight((a, b) => a + b);   // "cba"
+```
+
+## 10. `reduce` on an empty array {#reduce-empty}
+
+The initial value can be left out — then `reduce` takes the first element
+as the start. Usually the result is the same:
+
+```js
+[5, 4, 3].reduce((a, b) => a + b, 0);   // 12
+[5, 4, 3].reduce((a, b) => a + b);      // 12 — too
+```
+
+But on an empty array there is nothing to take, and this is the only error of the day:
+
+```js
+[].reduce((a, b) => a + b);
+// TypeError: Reduce of empty array with no initial value
+
+[].reduce((a, b) => a + b, 0);   // 0 — with an initial value everything is fine
+```
+
+<Important>
+**Always write the initial value.** It protects against an empty list,
+sets the type of the result and makes the code clearer: `reduce(..., 0)` shows right away
+that a number is being counted, and `reduce(..., "")` that it is a string.
+</Important>
+
+This is the same talk we had on day 18 about `Math.max()` without arguments:
+“folding an empty list” has no natural answer, and you have to assign it yourself.
+
+## 11. `sort` and why it is dangerous {#sort}
+
+The method sorts an array. And it does two things that nobody expects from it.
+
+**The first: it changes the source array** instead of returning a copy —
+the only one like this among today’s methods:
+
+```js
+const nums = [10, 9, 100, 2];
+
+nums.sort();
+nums;        // [10, 100, 2, 9] — the source array is rearranged!
+```
+
+**The second: without a hint it compares as strings.** That is why
+100 ended up between 10 and 2 — alphabetically “100” comes before “2”, since the first
+characters are compared.
+
+The same with words: first all the words with a capital letter, then those with a small one,
+because character codes are compared:
+
+```js
+["tea", "Bread", "butter"].sort();
+// ["Bread", "butter", "tea"]
+```
+
+<Mistake>
+Both properties together give a classic trouble: you called `sort` “just
+to look”, and the array in another place of the program is already rearranged — and the numbers in it
+are in the wrong order. The error takes long to find, because the guilty line
+looks harmless.
+</Mistake>
+
+## 12. Comparing by a rule {#comparator}
+
+To sort your own way, you pass `sort` a compare function. It
+gets two elements and returns a number: **negative — the first goes earlier,
+positive — the second goes earlier, zero — it does not matter**.
+
+```js
+const nums = [10, 9, 100, 2];
+
+nums.slice().sort((a, b) => a - b);   // [2, 9, 10, 100]   ascending
+nums.slice().sort((a, b) => b - a);   // [100, 10, 9, 2]   descending
+```
+
+Subtraction works exactly because the sign of the difference is the needed answer: if
+`a` is less, the difference is negative.
+
+Notice `slice()` before `sort` — this is the copy
+from yesterday, so as not to spoil the original. The technique has a modern replacement:
+
+```js
+const sorted = nums.toSorted((a, b) => a - b);
+
+sorted;   // [2, 9, 10, 100]
+nums;     // [10, 9, 100, 2] — intact
+```
+
+If you pass `sort` something that is not a function, there will be an error — the second and last one
+in today’s reference:
+
+```js
+[3, 1].sort("not a function");
+// TypeError: The comparison function must be either a function or undefined: not a function
+```
+
+## 13. `flat` and `flatMap` {#flat}
+
+Yesterday we saw arrays inside arrays. `flat` unfolds them
+into one level:
+
+```js
+[[1, 2], [3, [4]]].flat();           // [1, 2, 3, [4]]  — one level
+[[1, 2], [3, [4]]].flat(2);          // [1, 2, 3, 4]    — two
+[1, [2, [3, [4]]]].flat(Infinity);   // [1, 2, 3, 4]    — any depth
+```
+
+`flatMap` is a `map` right after which a
+`flat` of one level is done. It is needed when one element gives
+several:
+
+```js
+[1, 2, 3].flatMap((n) => [n, n * 10]);   // [1, 10, 2, 20, 3, 30]
+```
+
+Nested arrays are rarely created on purpose — more often they appear by themselves, when each
+element turns into a list. `flatMap` was invented exactly for this case.
+
+And there is a neat technique: if you return an empty array, the element simply disappears. You get
+a filter and a map in one pass:
+
+```js
+[1, 2, 3, 4].flatMap((n) => n % 2 === 0 ? [n * 10] : []);
+// [20, 40]
+```
+
+## 14. Which method to choose {#choose}
+
+There are many methods, but the choice is always settled by one question: **what should
+come out**.
+
+<Scheme src="scheme-choose.svg">First decide what comes out, and only then choose the method</Scheme>
+
+And one warning about chains. Each method goes through the whole array, so
+`filter().map().reduce()` is three passes instead of one. On a hundred elements
+there is no difference at all; on a hundred thousand it is worth a thought. **Readability almost always
+matters more**, and such things are optimized only when you have measured and made sure.
+
+## 15. The cart and the “Report card” {#together}
+
+Yesterday’s cart promised to learn to count. We teach it — with the same data as yesterday,
+plus an array of prices at the same positions:
+
+```js
+const items = ["bread", "tea", "butter"];
+const prices = [3.5, 12, 25];
+
+const round2 = (x) => Math.round(x * 100) / 100;
+
+// the total cost
+const total = prices.reduce((sum, price) => sum + price, 0);
+total;   // 40.5
+
+// only cheap goods — through the index
+const cheap = items.filter((item, index) => prices[index] < 10);
+cheap;   // ["bread"]
+
+// prices with a markup
+const withTax = prices.map((price) => round2(price * 1.1));
+withTax;   // [3.85, 13.2, 27.5]
+
+// ascending, without touching the original
+prices.toSorted((a, b) => a - b);   // [3.5, 12, 25]
+
+// are there expensive ones
+prices.some((price) => price > 20);   // true
+
+// a string for the buyer
+items.map((item, index) => item + " — " + prices[index] + " m").join("; ");
+// "bread — 3.5 m; tea — 12 m; butter — 25 m"
+```
+
+Everything that needed a loop yesterday fit into one line per task. Two parallel
+arrays are a working technique but an inconvenient one: mix up the order in one of them, and the prices
+drift away from the goods. Tomorrow, on day 21, we will finally put the name and the price into one
+object, and the indices will no longer be needed.
+
+### The “Report card”: the loops collapse
+
+Now back to the program that runs through the course. Its helpers were written with loops on days 15 and 18 —
+today each of them becomes one line.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+const toMark = (raw) => Number(String(raw).trim());
+const isValidMark = (m) => Number.isInteger(m) && m >= MIN_MARK && m <= MAX_MARK;
+
+// before — a loop with an accumulator, now — one line
+const sum = (numbers) => numbers.reduce((total, n) => total + n, 0);
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+const maxOf = (numbers) => numbers.reduce((best, n) => Math.max(best, n));
+const minOf = (numbers) => numbers.reduce((worst, n) => Math.min(worst, n));
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+function makeHeader() {
+  return "Name".padEnd(NAME_WIDTH) + "Avg".padStart(6) + "Min".padStart(5)
+    + "Max".padStart(5) + "%".padStart(7) + "  Verdict";
+}
+
+function makeRow(name = "unnamed", ...raw) {
+  const marks = raw.map((r) => toMark(r));
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "no valid marks";
+  }
+
+  const avg = average(valid);
+  const percent = Math.round(valid.length / marks.length * 100);
+
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(minOf(valid)).padStart(5)
+    + String(maxOf(valid)).padStart(5)
+    + (percent + "%").padStart(7)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(56);
+
+console.log(makeHeader());
+console.log(line);
+console.log(makeRow("Aman", 5, "4", " 9 ", 3, 5, 0, "4", 5));
+console.log(makeRow("Meret", "3", 3, 4));
+console.log(makeRow("Gülnar", 9, 0, "five"));
+console.log(makeRow("Sapar", 5, 5, "4", 5));
+console.log(makeRow("Oguljan", "4.5", 4, 5));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Name           Avg  Min  Max      %  Verdict
+--------------------------------------------------------
+Aman          4.33    3    5    75%  good student
+Meret         3.33    3    4   100%  average student
+Gülnar      no valid marks
+Sapar         4.75    4    5   100%  top student
+Oguljan       4.50    4    5    67%  top student
+--------------------------------------------------------
+```
+</ResultBox>
+
+The output did not change by a single character — and this is the main check of rewriting that
+we talked about on day 15. Something else changed: **all the loops disappeared from the program**.
+Four `for` loops turned into three lines with `reduce` and one
+with `map`.
+
+Notice `maxOf`: it has **no initial value**,
+and this is deliberate. The first element is the natural start for a maximum, and an empty list
+will not get here — there is an early branch above. In `sum`, on the other hand, the zero is required:
+it may well be called with an empty list.
+
+And one more detail: `raw.map((r) => toMark(r))` is written with an arrow,
+not the short `raw.map(toMark)`. The second variant would work here —
+`toMark` takes one argument — but the habit from section 5 is more reliable.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Replace `raw.map((r) => toMark(r))`
+with `raw.map(toMark)` and make sure the report has not changed. Then replace
+`toMark` with `parseInt` — and explain the report you get.
+\
+\
+**The second.** Remove the `0` from `sum` and run it.
+Why did the report not break? Now call `sum([])` directly.
+\
+\
+**The third.** Add a column “fives” through `filter`
+and `length`, and then get the same number through `reduce`.
+Which version reads better?
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `const x = arr.forEach(...)` | `forEach` always returns `undefined` | `map` |
+| `break` inside `forEach` | it is not a loop, you cannot exit | `find`, `some` or a loop with `break` |
+| `arr.map(parseInt)` | the index gets into the numeral system | `map((s) => parseInt(s, 10))` |
+| `[].reduce((a, b) => a + b)` | there is nothing to fold | give an initial value |
+| `arr.sort()` for numbers | it compares as strings: 100 \< 2 | `sort((a, b) => a - b)` |
+| `arr.sort()` “just to look” | it rearranges the source array | `toSorted` or `slice().sort()` |
+| `if (arr.findIndex(...))` | zero is a correct position, but falsy | compare with `-1` or take `some` |
+| expecting `filter` to change elements | it only selects | `filter().map()` |
+
+### What comes tomorrow
+
+Day 21 is objects. Today’s two parallel arrays — goods separately, prices
+separately — will turn into one list where each product has both a name and a price.
+Indices for linking will no longer be needed, and `filter` and `map`
+will stay exactly the same.
+
+Along the way `sort` will become clearer too: sorting a list of objects by price or
+by name is a very ordinary task, and the compare function there is written almost the same way as
+today.
+
+### Where today’s topics come up later
+
+In the remaining sixteen days of the course these methods will appear more than any other
+constructions of the language. Here are four days where they become the foundation:
+
+| Day | Where it comes in handy |
+| --- | --- |
+| 21 | `filter` and `map` over a list of objects — the same, but the data is handier |
+| 26 | `forEach` over a list and creating a page element for each one |
+| 29 | the to-do list is built entirely on `filter` and `map` |
+| 31 | the server’s answer comes as an array, and it is taken apart with these methods right away |
+
+Today is one of those days after which code noticeably changes its look. Loops
+will not disappear completely, but in “process a list” tasks you will write methods
+without thinking — and other people’s code written the same way will read at first glance.
+
+It is worth coming back to this day separately before the projects. The mini project of day 29 — a to-do
+list — consists almost entirely of today’s four verbs: show each one,
+select the unfinished ones, turn them into markup, count the remaining ones.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [forEach](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/forEach) | an action for each one; returns `undefined` | <Full /> |
+| [map](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map) | a new array of the same length | <Full /> |
+| [filter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter) | keep the suitable ones | <Full /> |
+| [find](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/find) | the first suitable element | <Full /> |
+| [findIndex](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/findIndex) | its position or −1 | <Full /> |
+| [reduce](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/reduce) | fold a list into one value | <Full /> |
+| [some](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/some) | whether there is at least one | <Full /> |
+| [every](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/every) | whether all fit; on an empty one — `true` | <Full /> |
+| [sort](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort) | changes the array; without a function compares as strings | <Full /> |
+| [flat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/flat) | unfold nested arrays | <Full /> |
+| [flatMap](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/flatMap) | `map` plus `flat` of one level | <Full /> |
+| [findLast](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/findLast) | the last suitable one | <Brief /> |
+| [findLastIndex](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/findLastIndex) | its position from the end | <Brief /> |
+| [reduceRight](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/reduceRight) | folding from the end | <Brief /> |
+| [toSorted](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted) | sorting without spoiling the original | <Brief /> |
+| [Error: reduce without an initial value](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Reduce_of_empty_array_with_no_initial_value) | the text is the same in all browsers | <Brief /> |
+| [Error: a wrong argument for sort](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Array_sort_argument) | in Chrome — `The comparison function must be either a function or undefined` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// THE CALLBACK GETS THREE ARGUMENTS
+const arr = [5, 4, 3];
+arr.forEach((value, index, array) => { });
+
+// AN ACTION — RETURNS NOTHING
+arr.forEach((x) => console.log(x));   // no result, break is not allowed
+
+// A NEW LIST
+arr.map((x) => x * 10);                         // [50, 40, 30] — the same length
+arr.filter((x) => x >= 4);                      // [5, 4] — shorter or the same
+arr.filter((x) => x >= 4).map((x) => x * 10);   // [50, 40] — filter earlier
+
+["1", "2", "3"].map(parseInt);                 // [1, NaN, NaN] — A TRAP
+["1", "2", "3"].map((s) => parseInt(s, 10));   // [1, 2, 3] — correct
+
+// ONE ELEMENT
+arr.find((x) => x < 4);        // 3 — the element itself or undefined
+arr.findIndex((x) => x < 4);   // 2 — a position or -1
+arr.findLast((x) => x >= 4);   // 4 — from the end; there is also findLastIndex
+
+// YES OR NO
+arr.some((x) => x === 5);      // true — at least one
+arr.every((x) => x >= 2);      // true — all; on an EMPTY array also true
+
+// ONE VALUE
+arr.reduce((sum, x) => sum + x, 0);   // 12 — ALWAYS write the initial value
+// [].reduce((a, b) => a + b)   → TypeError: Reduce of empty array with no initial value
+
+// SORTING
+const nums = [10, 9, 100, 2];
+nums.toSorted((a, b) => a - b);   // [2, 9, 10, 100] — a copy, the original is intact
+nums.toSorted((a, b) => b - a);   // [100, 10, 9, 2] — descending
+nums.sort();                      // [10, 100, 2, 9] — CHANGES nums and compares AS STRINGS
+
+// NESTED
+[[1, 2], [3]].flat();                          // [1, 2, 3]
+arr.flatMap((n) => [n, n]);                    // [5, 5, 4, 4, 3, 3] — map + flat(1)
+arr.flatMap((n) => n >= 4 ? [n * 10] : []);   // [50, 40] — a filter and a map in one pass
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. How is `map` different from `forEach`?
+   <Answer>`map` collects the results into a new array of the same length,
+   `forEach` returns nothing. If after `forEach`
+   you put the result into a separate array with `push`,
+   you need `map`.</Answer>
+2. Why does `["1", "2", "3"].map(parseInt)` give `[1, NaN, NaN]`?
+   <Answer>`map` passes the function three arguments, and the index gets
+   into the second parameter of `parseInt` — the numeral system. You get
+   `parseInt("2", 1)` and `parseInt("3", 2)`, and there are no such
+   numbers in these systems.</Answer>
+3. What will `[].every((x) => false)` return, and why?
+   <Answer>`true`. There is nothing to check, so no element broke
+   the rule. If an empty list does not mean “all is well” for you, check
+   the length separately.</Answer>
+4. Why give `reduce` an initial value?
+   <Answer>It protects against an error on an empty array, sets the type of the result and makes
+   the code clearer. Without it `[].reduce(...)` throws
+   `TypeError: Reduce of empty array with no initial value`.</Answer>
+5. Two reasons why `nums.sort()` is dangerous.
+   <Answer>It rearranges the source array instead of returning a copy; and without a compare
+   function it sorts as strings, so 100 ends up before 2.
+   `toSorted((a, b) => a - b)` removes both troubles.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/reduce" />

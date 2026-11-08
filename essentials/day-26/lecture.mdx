@@ -1,0 +1,871 @@
+---
+title: День 26 — Создаём и удаляем элементы
+day: День 26 • урок 1
+heading: Создаём и удаляем элементы
+lead: Модуль «DOM и события», третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+---
+
+<Goals>
+- создавать элементы и текстовые узлы кодом;
+- вставлять их в нужное место: в начало, в конец, до и после;
+- переносить, копировать, заменять и удалять элементы;
+- узнавать старые методы `Node` в чужом коде;
+- собирать кусок дерева в правильном порядке и строить список из массива;
+- научить «Табель» создавать строки по числу студентов.
+</Goals>
+
+<Toc />
+
+## 1. Когда разметки не хватает {#why}
+
+Два дня мы работали с тем, что уже есть в разметке: находили и меняли. Но у этого
+подхода есть потолок, и «Табель» в него упёрся. Строк в таблице столько, сколько
+заготовили руками, и шестой студент ронял программу:
+
+```js
+rows[5].children;   // TypeError: Cannot read properties of undefined (reading 'children')
+```
+
+Настоящие данные не знают, сколько их будет: сегодня пять студентов, завтра тридцать.
+Значит, элементы нужно **создавать** кодом — ровно столько, сколько пришло
+данных, — и **удалять** ненужные. Для этого в DOM есть два набора методов:
+
+|  | Новый набор (у `Element`) | Старый набор (у `Node`) |
+| --- | --- | --- |
+| вставить в конец | `append` | `appendChild` |
+| вставить в начало | `prepend` | `insertBefore(новый, первый)` |
+| вставить рядом | `before`, `after` | `insertBefore` |
+| удалить | `remove` | `removeChild` |
+| заменить | `replaceWith` | `replaceChild` |
+
+Новый набор короче и умеет больше: принимает строки и сразу несколько аргументов.
+Писать будем им. Старый нужно узнавать — он живёт в чужом коде, учебниках и на MDN,
+в том числе в руководстве, по которому построен этот урок. Страница для опытов —
+вчерашняя, из дня 25. Примеры одного раздела продолжают друг друга, а перед каждым
+новым разделом обновляйте страницу (<Kbd>F5</Kbd>).
+
+Создавать элементы придётся до конца курса: пункты списка дел на дне 29, карточки
+каталога с данными с сервера на дне 32, строки итогового проекта. Везде картина одна:
+данных сколько-то, разметка под них появляется кодом.
+
+## 2. `createElement`: новый элемент {#create}
+
+`document.createElement(имяТега)` создаёт новый пустой элемент.
+Главное, что нужно понять сразу: **на странице его ещё нет**.
+
+```js
+const li = document.createElement("li");
+
+li;                               // <li></li>
+li.isConnected;                   // false — к странице не подключён
+li.parentElement;                 // null — родителя нет
+document.body.contains(li);       // false
+```
+
+Элемент живёт в памяти, как любой объект, пока мы не вставим его в дерево. Это
+удобно: его можно спокойно наполнить до вставки — дать текст, классы, данные. Всё,
+что мы делали вчера с найденными элементами, работает и с созданными:
+
+```js
+li.textContent = "Ильяс";
+li.classList.add("student");
+li.dataset.id = "6";
+
+const list = document.querySelector("#list");
+list.append(li);                  // вот теперь он на странице
+
+li.isConnected;                   // true
+list.children.length;             // 6
+li.outerHTML;                     // '<li class="student" data-id="6">Ильяс</li>'
+```
+
+Имя тега можно писать любыми буквами: в HTML-документе оно приводится к маленьким,
+и `createElement("LI")` даст тот же `<li></li>`.
+Имя с пробелом браузер отвергнет, а незнакомое примет молча:
+
+```js
+document.createElement("my item");
+// InvalidCharacterError: Failed to execute 'createElement' on 'Document':
+// The tag name provided ('my item') is not a valid name.
+
+document.createElement("student");   // <student></student> — HTMLUnknownElement, без ошибки
+```
+
+Последняя строка — тихая ловушка. Опечатка в имени тега (`"lii"`,
+`"tabel"`) даст странный элемент, который браузер покажет как простой текст
+без оформления. Если созданный элемент выглядит «не так», первым делом проверьте имя тега.
+
+### Разбор: создали, а на странице пусто
+
+```js
+const nazik = document.createElement("li");
+nazik.textContent = "Назик";
+nazik.classList.add("student");
+
+document.body.contains(nazik);   // false — на странице её нет
+nazik.isConnected;               // false
+```
+
+**Шаг 1. Ошибок нет.** Каждая строка сработала, и в консоли элемент
+выглядит правильно. Поэтому кажется, что всё сделано.
+
+**Шаг 2. Спрашиваем элемент.** `isConnected` отвечает
+`false`: элемент существует, но ни к чему не прикреплён.
+
+**Шаг 3. Чиним.** Не хватает третьего действия: `list.append(nazik)`.
+Порядок всегда один — **создать, наполнить, вставить**. Последний шаг
+забывают чаще всего: первые два уже дают картинку в консоли.
+
+## 3. Текст: узлы и строки {#text-node}
+
+Текстовый узел из дня 24 тоже можно создать отдельно — методом
+`createTextNode`. Как и `textContent`, он никогда не разбирает
+разметку:
+
+```js
+const p = document.querySelector("footer p");
+const text = document.createTextNode("<b>Мары</b>");
+
+text.nodeName;          // "#text"
+p.textContent = "";
+p.append(text);
+p.children.length;      // 0 — никакого <b>, на странице буквально <b>Мары</b>
+```
+
+В старом коде `createTextNode` встречается постоянно — в руководстве MDN
+им наполнена каждая ячейка таблицы. Нам он нужен редко, потому что `append`
+умеет принимать строки и сам превращает их в текстовые узлы:
+
+```js
+p.textContent = "Мары";
+p.append(", ", "Туркменистан", "!");
+
+p.textContent;          // "Мары, Туркменистан!"
+p.childNodes.length;    // 4 — четыре текстовых узла подряд
+```
+
+На экране это одна строка, а в дереве — четыре узла. MDN отмечает то же самое:
+«hello» и «world» выглядят одним словом, но в модели документа их два.
+
+<Mistake>
+Всё, что не узел, `append` превращает в текст — без ошибок. Число станет
+цифрами, а `null` и `undefined` — словами:
+`p.append(2026, null, undefined)` допишет `"2026nullundefined"`.
+Если на странице вдруг появилось слово «undefined», ищите, какая переменная
+попала в `append` пустой.
+</Mistake>
+
+| Способ | Что делает | Когда |
+| --- | --- | --- |
+| `el.textContent = s` | заменяет всё содержимое текстом | задать текст целиком |
+| `el.append(s)` | дописывает текст в конец | добавить к тому, что есть |
+| `createTextNode(s)` | отдельный узел, который вставляют куда угодно | старый код и старые методы |
+
+## 4. `append` и `prepend` {#append}
+
+`append` вставляет внутрь элемента **в конец**,
+`prepend` — **в начало**. Оба принимают сколько угодно
+аргументов: узлы и строки вперемешку.
+
+```js
+const list = document.querySelector("#list");
+const first = document.createElement("li");
+first.textContent = "Ильяс";
+
+list.prepend(first);
+list.firstElementChild.textContent;   // "Ильяс"
+list.children[1].textContent;         // "Аман" — остальные сдвинулись
+```
+
+Несколько элементов вставляются одним вызовом — в том порядке, в каком переданы:
+
+```js
+const a = document.createElement("li");
+const b = document.createElement("li");
+a.textContent = "Ильяс";
+b.textContent = "Бахар";
+
+list.append(a, b);
+list.lastElementChild.textContent;    // "Бахар" — последним переданный встал последним
+```
+
+Узлы и строки можно смешивать — MDN показывает это на примере «текст, потом абзац».
+Так удобно собирать подписи из постоянной части и данных:
+
+```js
+const mark = document.createElement("b");
+mark.textContent = "5";
+
+const item = document.createElement("li");
+item.append("Аман — оценка ", mark);   // строка станет текстом, b встанет после неё
+item.childNodes.length;                // 2
+```
+
+Оба метода **ничего не возвращают**. Отсюда ошибка, которая встречается
+у каждого второго:
+
+```js
+const added = list.append(first);
+added;   // undefined — append ничего не отдаёт
+```
+
+Правильно — держать созданный элемент в своей переменной, а вставлять отдельной
+строкой. Так и было в разделе 2: `li` создан, наполнен, вставлен, и после
+вставки `li` по-прежнему указывает на него.
+
+## 5. `before` и `after` {#before-after}
+
+Эти два метода вставляют не внутрь элемента, а **рядом** с ним —
+соседом перед ним или после него. Вместе с `prepend` и `append`
+получаются те же четыре места, что у `insertAdjacentHTML` из дня 25,
+только вставляются узлы, а не разметка:
+
+<Scheme src="scheme-before-after.svg">prepend и append — внутрь элемента, before и after — рядом с ним</Scheme>
+
+```js
+const title = document.querySelector("#title");
+const note = document.createElement("p");
+note.textContent = "Куратор: Сапар";
+
+title.after(note);    // абзац встал сразу после заголовка, внутри header
+title.before("Мары, 2026");   // строка тоже годится — станет текстовым узлом
+```
+
+Названия легко спутать, поэтому запомним по схеме: `pre`- и `ap`-
+— это «к детям», в начало и в конец; `before` и `after` —
+«к соседям», до и после.
+
+У соседских методов есть условие: у элемента должен быть родитель. Новому,
+ещё не вставленному элементу поставить соседа некуда, и метод молча ничего не сделает:
+
+```js
+const lonely = document.createElement("p");
+lonely.after("текст");   // ни ошибки, ни результата: у lonely нет родителя
+```
+
+## 6. Вставка переносит, а не копирует {#move}
+
+Что будет, если вставить элемент, который уже стоит на странице? Он не
+раздвоится — он **переедет**. Узел не может быть в двух местах дерева
+сразу, поэтому вставка сначала забирает его со старого места:
+
+```js
+const list = document.querySelector("#list");
+
+list.prepend(list.lastElementChild);   // Огулджан переехала в начало
+[...list.children].map((li) => li.textContent);
+// ["Огулджан", "Аман", "Мерет", "Гүлнар", "Сапар"] — по-прежнему пять
+```
+
+<Scheme src="scheme-move.svg">Узел не может стоять в двух местах: вставка забирает его со старого</Scheme>
+
+То же самое при переносе в другого родителя:
+
+```js
+const first = list.firstElementChild;           // сейчас это Огулджан
+document.querySelector("footer").append(first);
+
+list.children.length;          // 4 — в списке её больше нет
+first.parentElement.nodeName;  // "FOOTER"
+```
+
+Это не ошибка, а важный инструмент: перестановка элементов — это просто вставка
+их в новом порядке (раздел 14). А если нужна именно копия — её делают явно.
+
+## 7. `cloneNode`: копия {#clone}
+
+`cloneNode` возвращает копию узла. Без аргумента копируется только сам
+элемент с атрибутами, с аргументом `true` — вместе со всем, что внутри:
+
+```js
+const aman = document.querySelector("li");
+
+aman.cloneNode();       // <li class="student" data-id="1"></li> — пустой, без текста
+aman.cloneNode(true);   // <li class="student" data-id="1">Аман</li> — с содержимым
+```
+
+На элементе с детьми разница видна ещё лучше:
+
+```js
+const header = document.querySelector("header");
+
+header.cloneNode().querySelectorAll("*").length;       // 0 — пустая обёртка
+header.cloneNode(true).querySelectorAll("*").length;   // 4 — h1, nav и обе ссылки
+```
+
+Копия, как и новый элемент, **не на странице**, пока её не вставят.
+И она независима: поменяете копию — оригинал не заметит. Удобно, когда в разметке
+есть готовый образец и нужно ещё несколько таких же:
+
+```js
+const copy = aman.cloneNode(true);
+copy.textContent = "Аман (копия)";
+copy.dataset.id = "11";
+list.append(copy);
+
+aman.textContent;   // "Аман" — оригинал не тронут
+```
+
+<Mistake>
+MDN предупреждает: копия уносит с собой и `id`. Скопировали заголовок
+`#title` и вставили — на странице два элемента с одним `id`,
+а `getElementById` найдёт только первый. У копии `id` меняют
+сразу, до вставки.
+</Mistake>
+
+## 8. `remove`: удалить {#remove}
+
+`remove()` убирает элемент со страницы. Сам объект при этом не исчезает:
+пока на него есть переменная, его можно прочитать и даже вставить обратно.
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.remove();
+meret.isConnected;                          // false — на странице её нет
+document.querySelectorAll("li").length;    // 4
+meret.textContent;                          // "Мерет" — но объект цел
+
+list.firstElementChild.after(meret);        // вернули на место — после Амана
+```
+
+Удалить элемент, которого нет на странице, можно без ошибки: `remove`
+просто ничего не сделает.
+
+### Разбор: почему удалились не все
+
+Задача: очистить список, удалив каждый пункт. Кажется, это делается циклом
+по детям:
+
+```js
+const list = document.querySelector("#list");
+
+for (const li of list.children) {
+  li.remove();
+}
+list.children.length;   // 2 — остались Мерет и Сапар!
+```
+
+**Шаг 1. Вспоминаем, что такое `children`.** Это живая
+`HTMLCollection` из дня 24: она меняется вместе со страницей.
+
+**Шаг 2. Прокручиваем цикл.** Первый шаг берёт элемент номер 0 —
+Амана — и удаляет. Коллекция тут же сжимается: Мерет становится нулевой, Гүлнар —
+первой. Второй шаг берёт элемент номер 1 — это уже Гүлнар. Мерет пропущена.
+Так цикл перешагивает через каждого второго.
+
+**Шаг 3. Чиним.** Перебирать нужно то, что не меняется во время
+удаления. Подходит снимок `querySelectorAll` из дня 24 — он «помнит, как
+было». Или цикл «пока есть первый — удаляй первый»:
+
+```js
+document.querySelectorAll("#list li").forEach((li) => li.remove());
+
+while (list.firstElementChild) {
+  list.firstElementChild.remove();
+}
+```
+
+А если нужно убрать вообще всё содержимое, хватает строки из дня 25:
+`list.textContent = ""`. Она уберёт и элементы, и пробельные текстовые узлы
+между ними — цикл по `firstElementChild` их оставляет.
+
+| Задача | Как |
+| --- | --- |
+| убрать один элемент | `el.remove()` |
+| убрать всё содержимое | `el.textContent = ""` |
+| убрать выбранные | `querySelectorAll(…).forEach((x) => x.remove())` |
+| убрать, чтобы потом вернуть | `remove()`, а объект держать в переменной |
+
+## 9. `replaceWith`: заменить {#replace}
+
+`replaceWith` ставит на место элемента что-то другое — узлы или строки.
+Старый элемент уходит со страницы, но, как и после `remove`, остаётся
+в переменной:
+
+```js
+const meret = document.querySelector(".absent");
+const bahar = document.createElement("li");
+bahar.textContent = "Бахар";
+
+meret.replaceWith(bahar);
+meret.isConnected;   // false
+// в списке теперь: Аман, Бахар, Гүлнар, Сапар, Огулджан
+```
+
+Как и `append`, метод принимает несколько узлов и строки. Один элемент
+можно заменить двумя:
+
+```js
+const sapar = document.querySelector(".absent");   // Мерет уже заменена, теперь это Сапар
+const ilyas = document.createElement("li");
+const nazik = document.createElement("li");
+ilyas.textContent = "Ильяс";
+nazik.textContent = "Назик";
+
+sapar.replaceWith(ilyas, nazik);
+// в списке: Аман, Бахар, Гүлнар, Ильяс, Назик, Огулджан
+```
+
+А строка вместо элемента станет текстовым узлом:
+`el.replaceWith("просто текст")`.
+
+Где пригодится: в задании со звёздочкой дня 29 текст дела на время заменяется
+полем ввода, чтобы его поправить.
+
+## 10. Старые методы `Node` {#node}
+
+Новый набор появился в браузерах позже. До него всё делали через интерфейс
+`Node` из дня 25 — общий для всех узлов, от документа до текста. Эти методы
+работают и сейчас, и в чужом коде их полно.
+
+```js
+const list = document.querySelector("#list");
+const li = document.createElement("li");
+li.textContent = "Ильяс";
+
+list.appendChild(li);                            // в конец, возвращает li
+list.insertBefore(li, list.firstElementChild);   // перед первым — то есть в начало
+list.insertBefore(li, null);                     // null вместо соседа — в конец
+list.removeChild(li);                            // удалить, возвращает li
+list.replaceChild(li, list.firstElementChild);   // сначала НОВЫЙ, потом СТАРЫЙ
+```
+
+Отличий от новых методов четыре. Методы вызываются **у родителя**,
+а не у самого элемента. Принимают **ровно один** узел. Строки
+**не принимают**. И **возвращают** узел — поэтому их можно
+вкладывать в выражения.
+
+```js
+list.appendChild("Ильяс");
+// TypeError: Failed to execute 'appendChild' on 'Node': parameter 1 is not of type 'Node'.
+```
+
+У `replaceChild` необычный порядок: новый узел первым, старый вторым.
+MDN сам называет его «непривычным» и советует `replaceWith`.
+
+Вставка в середину списка показывает разницу подходов нагляднее всего. Старый
+набор просит родителя «вставь перед этим ребёнком», новый — соседа «встань перед собой»:
+
+```js
+const ilyas = document.createElement("li");
+ilyas.textContent = "Ильяс";
+list.insertBefore(ilyas, list.children[2]);   // старый: у родителя
+
+const bahar = document.createElement("li");
+bahar.textContent = "Бахар";
+list.children[2].before(bahar);               // новый: у соседа
+```
+
+<Mistake>
+То, что `appendChild` возвращает вставленный узел, а не родителя, рождает
+ошибку, которую MDN приводит отдельно. Цепочка
+`body.appendChild(p1).appendChild(p2)` вставит `p2`
+не рядом с `p1`, а **внутрь** него:
+получится `<p><p></p></p>`.
+</Mistake>
+
+## 11. Собираем кусок дерева {#build}
+
+Одиночный `<li>` с текстом — простой случай. Обычно нужно собрать
+элемент с детьми: пункт с жирным именем и оценками, строку таблицы из шести ячеек,
+карточку. Руководство MDN даёт правило: **создаём сверху вниз, прикрепляем
+снизу вверх**.
+
+```js
+function makeItem(student) {
+  const li = document.createElement("li");        // 1. создаём: сначала внешний,
+  const name = document.createElement("b");       //    потом внутренние
+  const marks = document.createElement("span");
+
+  name.textContent = student.name;                // 2. наполняем данными — текстом
+  marks.textContent = " " + student.marks.join(", ");
+
+  li.append(name, marks);                         // 3. прикрепляем детей к родителю
+  li.classList.add("student");
+  return li;                                      // 4. отдаём готовый, но ещё не вставленный
+}
+
+list.append(makeItem({ name: "Ильяс", marks: [5, 4, 5] }));
+// <li class="student"><b>Ильяс</b><span> 5, 4, 5</span></li>
+```
+
+<Scheme src="scheme-build.svg">Пока кусок собирается, его нет на странице. Готовым он вставляется одной строкой</Scheme>
+
+Почему именно так? Пока кусок собирается, его нет на странице, и браузеру не нужно
+ничего перерисовывать. Готовый кусок вставляется одной операцией. И функция вроде
+`makeItem` ничего не знает о том, куда её результат попадёт: её можно
+вызвать для одного студента или для сотни.
+
+### Главный пример MDN: таблица из кода
+
+Руководство MDN строит этим способом целую таблицу. Два вложенных цикла из дня 10:
+внешний создаёт строки, внутренний — ячейки.
+
+```js
+const table = document.createElement("table");
+const body = document.createElement("tbody");
+
+for (let i = 0; i < 2; i++) {
+  const row = document.createElement("tr");
+  for (let j = 0; j < 3; j++) {
+    const cell = document.createElement("td");
+    cell.textContent = `строка ${i}, столбец ${j}`;
+    row.append(cell);                            // ячейку — в строку
+  }
+  body.append(row);                              // строку — в тело
+}
+table.append(body);                              // тело — в таблицу
+document.querySelector("main").append(table);    // таблицу — на страницу, один раз
+
+table.querySelectorAll("td").length;             // 6
+```
+
+В оригинале вместо `append` стоит `appendChild`, а текст ячейки
+создаётся через `createTextNode` — это старый набор из раздела 10. Порядок
+тот же: каждый уровень прикрепляется к родителю, а на страницу попадает только готовая
+таблица.
+
+## 12. Ошибки вставки {#errors}
+
+Дерево не позволит сделать из себя не дерево. Нельзя вставить элемент внутрь его
+же потомка: получился бы круг, а в дереве кругов не бывает.
+
+```js
+list.append(document.querySelector("main"));
+// HierarchyRequestError: Failed to execute 'append' on 'Element':
+// The new child element contains the parent.
+```
+
+`main` — предок списка. Вставить его в список значит положить коробку
+внутрь её собственного содержимого. Ещё три ошибки, которые встретятся:
+
+| Вызов | Что скажет Chrome |
+| --- | --- |
+| `list.appendChild("текст")` | `TypeError: … parameter 1 is not of type 'Node'.` |
+| `list.removeChild(title)` — не ребёнок | `NotFoundError: … The node to be removed is not a child of this node.` |
+| `list.insertBefore(li, title)` — сосед не из этого списка | `NotFoundError: … The node before which the new node is to be inserted is not a child of this node.` |
+| `textNode.append("x")` | `TypeError: … append is not a function` — у текста нет детей |
+
+Чаще других встречается `NotFoundError` у `removeChild`:
+метод требует, чтобы его вызвали у **настоящего** родителя.
+
+```js
+list.removeChild(document.querySelector("#title"));
+// NotFoundError: Failed to execute 'removeChild' on 'Node':
+// The node to be removed is not a child of this node.
+```
+
+Заголовок лежит в `header`, а не в списке. `title.remove()`
+такой ошибки не даст — он сам знает своего родителя. Ещё один довод за новый набор.
+
+## 13. Список из массива {#render}
+
+Самая частая задача модуля: есть массив данных — нарисовать его на странице.
+Собираем всё сегодняшнее в одну функцию:
+
+```js
+function toItem(name) {
+  const li = document.createElement("li");
+  li.textContent = name;                 // данные — только текстом
+  return li;
+}
+
+function renderList(list, names) {
+  list.textContent = "";                 // 1. убрать старое (день 25)
+  list.append(...names.map(toItem));     // 2. по элементу на значение — и разом на страницу
+}
+
+renderList(document.querySelector("#list"), ["Аман", "Мерет", "Гүлнар"]);
+// <li>Аман</li><li>Мерет</li><li>Гүлнар</li>
+```
+
+`map` из дня 20 превращает массив имён в массив элементов, три точки
+из дня 22 раскладывают его на отдельные аргументы, и `append` вставляет
+всё за один вызов. Функцию можно вызывать сколько угодно раз, а с пустым массивом
+она просто очистит список.
+
+### Разбор: список удвоился
+
+```js
+const names = ["Аман", "Мерет", "Гүлнар"];
+
+renderList(list, names);             // три пункта
+list.append(...names.map(toItem));   // «обновили» без очистки
+list.children.length;                // 6 — старые пункты никуда не делись
+```
+
+**Шаг 1. Считаем.** Пунктов вдвое больше, чем имён, — значит,
+старые остались, а новые встали после них.
+
+**Шаг 2. Вспоминаем, что делает `append`.** Только добавляет.
+Убирать старое он не умеет и не должен.
+
+**Шаг 3. Правило.** Перерисовать — это **очистить и вставить
+заново**. Поэтому `renderList` начинается с очистки. Этот образец
+пригодится до конца курса: список дел на дне 29 перерисовывается после каждого
+изменения, каталог на дне 32 — после загрузки данных с сервера.
+
+Ту же задачу часто решают через `innerHTML` и шаблонную строку из дня 16:
+
+```js
+// вместо тела renderList
+list.innerHTML = names.map((n) => `<li>${n}</li>`).join("");
+```
+
+Коротко, но с данными — опасно: имя `"<b>Аман</b>"` станет
+разметкой, а злой строке хватит и обработчика `onerror` (день 25).
+Сравним:
+
+|  | `createElement` + `textContent` | `innerHTML` со строкой |
+| --- | --- | --- |
+| данные пользователя | безопасно | опасно |
+| ссылки на элементы | есть сразу, в переменных | искать заново через `querySelector` |
+| длина кода | длиннее | короче |
+| когда брать | данные, особенно чужие | неизменная разметка, написанная нами |
+
+## 14. Перестановка и сортировка {#reorder}
+
+Раздел 6 обещал: перестановка — это вставка в новом порядке. Отсортируем список
+по номеру из `data-id`, от большего к меньшему:
+
+```js
+const list = document.querySelector("#list");
+
+const sorted = [...list.children].sort(
+  (a, b) => Number(b.dataset.id) - Number(a.dataset.id),
+);
+list.append(...sorted);
+
+[...list.children].map((li) => li.textContent);
+// ["Огулджан", "Сапар", "Гүлнар", "Мерет", "Аман"]
+```
+
+Три шага. Детей превратили в массив — у живой коллекции нет `sort`
+(день 24). Массив отсортировали функцией сравнения из дня 20, превратив строки
+`data-id` в числа (день 25). И вставили элементы обратно в новом порядке.
+Пунктов по-прежнему пять: `append` не копирует, а переносит каждый на
+новое место. Ни одного элемента не создано и не удалено — только переставлено.
+
+Тот же приём переворачивает список — и возвращает наш к исходному порядку:
+
+```js
+list.append(...[...list.children].reverse());
+// ["Аман", "Мерет", "Гүлнар", "Сапар", "Огулджан"]
+```
+
+## 15. «Табель» без заготовок {#tabel}
+
+Теперь «Табель» может отказаться от пустых строк в разметке. Тело таблицы пустое —
+строки создаст код:
+
+```html
+<table id="tabel">
+  <thead>
+    <tr><th>Имя</th><th>Средн</th><th>Мин</th><th>Макс</th><th>%</th><th>Вердикт</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+```
+
+```js
+// без изменений: MIN_MARK … makeReport (день 23), makeCells (день 24),
+// VERDICT_CLASS и rowClass (день 25)
+
+// новое: строка таблицы создаётся кодом — как makeItem из раздела 11
+function makeRow(report) {
+  const row = document.createElement("tr");
+  row.classList.add(rowClass(report));
+  row.dataset.name = report.name;
+  makeCells(report).forEach((text) => {
+    const cell = document.createElement("td");
+    cell.textContent = text;
+    row.append(cell);
+  });
+  return row;
+}
+
+const tbody = document.querySelector("#tabel tbody");
+const reports = students.map(makeReport);
+tbody.append(...reports.map(makeRow));
+
+const excellent = reports.filter((r) => r.ok && r.verdict === "отличник").length;
+document.querySelector("#summary").textContent = `Отличников: ${excellent} из ${reports.length}`;
+document.title = `Табель: ${reports.length} студентов`;
+```
+
+<ResultBox>
+<table>
+<thead>
+<tr><th>Имя</th><th>Средн</th><th>Мин</th><th>Макс</th><th>%</th><th>Вердикт</th></tr>
+</thead>
+<tbody>
+<tr style={{background: "#e0f2fe"}}><td>Аман</td><td>4.33</td><td>3</td><td>5</td><td>75%</td><td>хорошист</td></tr>
+<tr style={{background: "#fef9c3"}}><td>Мерет</td><td>3.33</td><td>3</td><td>4</td><td>100%</td><td>троечник</td></tr>
+<tr style={{color: "gray", fontStyle: "italic"}}><td>Гүлнар</td><td>—</td><td>—</td><td>—</td><td>—</td><td>нет годных оценок</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Сапар</td><td>4.75</td><td>4</td><td>5</td><td>100%</td><td>отличник</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Огулджан</td><td>4.50</td><td>4</td><td>5</td><td>67%</td><td>отличник</td></tr>
+</tbody>
+</table>
+
+Отличников: 2 из 5
+</ResultBox>
+
+На экране то же, что вчера. Но теперь таблица растёт вместе с данными. Добавим
+шестого студента — прямо в консоли, не трогая разметку:
+
+```js
+tbody.append(makeRow(makeReport({ name: "Ильяс", marks: [5, 5, "4"] })));
+tbody.children.length;   // 6
+// новая зелёная строка: Ильяс, 4.67, 4, 5, 100%, отличник
+```
+
+Посмотрите, как сложилась программа за три дня модуля. Вчерашние
+`rowClass` и `dataset.name` переехали в `makeRow`
+без единой правки. `makeCells` со дня 24 по-прежнему отдаёт шесть текстов,
+и ей всё равно, пишут их в заготовленные ячейки или в созданные. Расчёт со дня 23
+не заметил ничего. Каждый день менялась одна часть, и ни разу — все сразу.
+
+| День | Что изменилось в «Табеле» |
+| --- | --- |
+| 23 | данные пришли строкой JSON; отчёт стал объектом, показ отделился от расчёта |
+| 24 | вывод переехал в таблицу на странице — в заготовленные строки |
+| 25 | `textContent` вместо `write`, цвет строк классами, имя в `dataset` |
+| 26 | строки создаются кодом, их ровно столько, сколько студентов |
+
+И всё это время числа те же, что на дне 23.
+
+<TryIt>
+Два опыта.
+\
+\
+**Первый.** Вызовите `tbody.append(...reports.map(makeRow))`
+второй раз. Что случилось с таблицей и почему? Как это исправить одной строкой
+из раздела 13?
+\
+\
+**Второй.** Отсортируйте строки таблицы по среднему баллу, как список
+в разделе 14. Подсказка: средний балл лежит в первой ячейке после имени, а строку
+без оценок можно отправить в конец.
+</TryIt>
+
+`makeRow` — готовая заготовка на завтра. В строку добавится седьмая ячейка
+с кнопкой «Удалить», созданная тем же `createElement`, а по щелчку строка
+выполнит `row.remove()`.
+
+## 16. Частые ошибки и что завтра {#mistakes}
+
+| Ошибка | Что увидите | Как правильно |
+| --- | --- | --- |
+| создали, но не вставили | на странице ничего нет | `append` в родителя |
+| `const x = list.append(li)` | `x` — `undefined` | держать `li` в своей переменной |
+| вставили элемент во второе место | из первого он исчез | `cloneNode(true)`, если нужна копия |
+| копия с `id` | два одинаковых `id` | сменить `id` у копии |
+| `for...of` по `children` с `remove` | удалился каждый второй | `querySelectorAll` или цикл по `firstElementChild` |
+| повторный рендер без очистки | всё продублировалось | `textContent = ""` перед вставкой |
+| `appendChild("текст")` | `TypeError` | `append` или `createTextNode` |
+| `replaceChild(старый, новый)` | ошибка или не то | сначала новый; проще `replaceWith` |
+| данные через `innerHTML` в шаблоне | чужие теги стали разметкой | `createElement` + `textContent` |
+| `before` у невставленного элемента | ничего, молча | сначала вставить сам элемент |
+| опечатка в имени тега | элемент без оформления | проверить строку в `createElement` |
+
+### Что будет завтра
+
+Три дня страница менялась сама — по коду, который выполнялся при загрузке.
+Завтра она начнёт **отвечать** человеку: **события**, щелчки,
+нажатия клавиш. Появится кнопка «Удалить» у строки, и `remove` сработает
+по щелчку. А `closest("tr")` из дня 24 и `dataset.name` из дня 25
+подскажут, чью строку удаляют.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Построение дерева](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Building_and_updating_the_DOM_tree) | создаём сверху вниз, прикрепляем снизу вверх | <Full /> |
+| [createElement](https://developer.mozilla.org/en-US/docs/Web/API/Document/createElement) | новый элемент, пока не на странице | <Full /> |
+| [createTextNode](https://developer.mozilla.org/en-US/docs/Web/API/Document/createTextNode) | текстовый узел, разметку не разбирает | <Full /> |
+| [append](https://developer.mozilla.org/en-US/docs/Web/API/Element/append) | в конец, узлы и строки, несколько сразу | <Full /> |
+| [prepend](https://developer.mozilla.org/en-US/docs/Web/API/Element/prepend) | в начало | <Full /> |
+| [remove](https://developer.mozilla.org/en-US/docs/Web/API/Element/remove) | убрать со страницы | <Full /> |
+| [replaceWith](https://developer.mozilla.org/en-US/docs/Web/API/Element/replaceWith) | поставить другое на место элемента | <Full /> |
+| [Node](https://developer.mozilla.org/en-US/docs/Web/API/Node) | общее для всех узлов и старый набор методов | <Full /> |
+| [appendChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/appendChild) | в конец, один узел, возвращает его | <Full /> |
+| [insertBefore](https://developer.mozilla.org/en-US/docs/Web/API/Node/insertBefore) | перед соседом; с `null` — в конец | <Full /> |
+| [removeChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/removeChild) | удалить ребёнка, возвращает его | <Full /> |
+| [replaceChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/replaceChild) | заменить ребёнка: новый, потом старый | <Full /> |
+| [cloneNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/cloneNode) | копия; `true` — с содержимым | <Full /> |
+| [before](https://developer.mozilla.org/en-US/docs/Web/API/Element/before) | соседом перед элементом | <Brief /> |
+| [after](https://developer.mozilla.org/en-US/docs/Web/API/Element/after) | соседом после элемента | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// СОЗДАТЬ — на странице его ещё нет
+const li = document.createElement("li");
+li.textContent = "Ильяс";                  // наполнить до вставки
+li.isConnected;                            // false
+const text = document.createTextNode("текст");   // текстовый узел
+
+// ВСТАВИТЬ — новый набор, строки и несколько аргументов
+const list = document.querySelector("#list");
+list.append(li, "!");                      // внутрь, в конец
+list.prepend(text);                        // внутрь, в начало
+const title = document.querySelector("#title");
+const note = document.createElement("p");
+title.after(note);                         // рядом, после
+title.before("Мары");                      // рядом, до
+list.append(...[...list.children].reverse());   // массив — разом
+
+// ПЕРЕНЕСТИ, СКОПИРОВАТЬ, УДАЛИТЬ, ЗАМЕНИТЬ
+list.prepend(list.lastElementChild);       // вставка существующего = перенос
+const copy = title.cloneNode(true);        // копия с содержимым
+copy.id = "title-2";                       // сменить id у копии!
+li.remove();                               // объект остаётся в переменной
+note.replaceWith(copy);                    // копия встала на место абзаца
+
+// СТАРЫЙ НАБОР NODE — у родителя, один узел, возвращает узел
+list.appendChild(li);                      // <li>Ильяс</li>
+list.insertBefore(li, null);               // null вместо соседа — в конец
+list.removeChild(li);                      // <li>Ильяс</li>
+list.replaceChild(li, list.firstElementChild);   // сначала новый, потом старый
+
+// СОБРАТЬ: создаём сверху вниз, прикрепляем снизу вверх, вставляем один раз
+// ОЧИСТИТЬ ВСЁ
+list.textContent = "";
+// УДАЛИТЬ ВЫБРАННЫХ
+document.querySelectorAll(".note").forEach((el) => el.remove());
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему после `createElement` элемента не видно на странице?
+   <Answer>Он создан в памяти и ни к кому не прикреплён: `isConnected` —
+   `false`. На странице он появится после вставки в элемент,
+   который сам на странице, — например через `append`.</Answer>
+2. Что будет, если вставить через `append` элемент, который уже есть на странице?
+   <Answer>Он переедет: узел не может стоять в двух местах, поэтому вставка забирает
+   его со старого места. Нужна копия — `cloneNode(true)`.</Answer>
+3. Почему цикл `for...of` по `list.children` с `remove`
+   удаляет не все пункты?
+   <Answer>`children` — живая коллекция: после каждого удаления она сжимается,
+   и следующий пункт занимает номер удалённого. Цикл его перешагивает. Перебирать
+   надо снимок `querySelectorAll` или удалять первого, пока он есть.</Answer>
+4. Чем `append` отличается от `appendChild`?
+   <Answer>`append` принимает несколько аргументов и строки, ничего не возвращает.
+   `appendChild` принимает ровно один узел и возвращает его.</Answer>
+5. Почему для данных пользователя лучше `createElement` +
+   `textContent`, чем `innerHTML` с шаблонной строкой?
+   <Answer>`textContent` никогда не разбирает разметку, поэтому чужая строка
+   останется текстом. В шаблонной строке для `innerHTML` она станет
+   разметкой, а то и кодом.</Answer>
+6. В каком порядке собирать элемент с детьми?
+   <Answer>Создать сверху вниз, наполнить, прикрепить детей к родителю снизу вверх
+   и вставить готовый кусок на страницу одним вызовом.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Building_and_updating_the_DOM_tree" />

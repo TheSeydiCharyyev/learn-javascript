@@ -1,0 +1,887 @@
+---
+title: Day 8 — Type conversion and operator precedence
+day: Day 8 • lesson 1
+heading: Type conversion and operator precedence
+lead: Module “Syntax, types and operators” — the last day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #a16207; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #78350f; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- name the three contexts in which the language converts types by itself;
+- predict the result of `Number()`, `String()` and `Boolean()` for any value;
+- explain the mechanism that makes `0 == ""` true and `"0" == ""` false;
+- read the precedence table and put parentheses where they are needed;
+- recognize seven common syntax errors by the text of the message.
+</Goals>
+
+<Toc />
+
+## 1. A debt from yesterday {#why}
+
+Yesterday we took three lines on faith:
+
+```js
+"0" == 0;     // true
+"" == 0;      // true
+"0" == "";    // false
+```
+
+Today we will take apart the mechanism behind them. Along the way we will close the module: this is the last day
+about syntax, types and operators. Next comes the control flow of the program.
+
+The topic is called **type conversion** (or type coercion). We have already run into it
+every day: `"2" + 3` gives `"23"`, `"10" - 5` gives
+`5`, an empty array is truthy in a condition. It is time to put all this into a system.
+
+<Why>
+Why figure this out if you can simply “always write `===` and convert types explicitly”?
+Because you will have to read other people’s code from your first working day. And because conversion
+happens where you did not ask for it: in a condition, in a template literal, when adding. Knowing
+the mechanism turns mysterious bugs into boring ones.
+</Why>
+
+## 2. Three kinds of conversion {#three}
+
+Whatever the code looks like, the language can turn a value into only three things. Everything else is
+a special case.
+
+<Scheme src="scheme-three.svg">Three directions — and each one has its own set of rules</Scheme>
+
+Here is the full table for the values you meet most often. You do not need to learn it, but it is worth
+reading carefully once:
+
+| Value | `String()` | `Number()` | `Boolean()` |
+| --- | --- | --- | --- |
+| `42` | `"42"` | `42` | `true` |
+| `0` | `"0"` | `0` | **`false`** |
+| `"42"` | `"42"` | `42` | `true` |
+| `"abc"` | `"abc"` | **`NaN`** | `true` |
+| `""` | `""` | **`0`** | `false` |
+| `true` | `"true"` | `1` | `true` |
+| `false` | `"false"` | `0` | `false` |
+| `null` | `"null"` | `0` | `false` |
+| `undefined` | `"undefined"` | **`NaN`** | `false` |
+| `[]` | `""` | `0` | **`true`** |
+| `[7]` | `"7"` | `7` | `true` |
+| `[1, 2]` | `"1,2"` | `NaN` | `true` |
+| `{ }` | `"[object Object]"` | `NaN` | `true` |
+
+The surprising answers are in bold. Notice the row with the empty array: converted to a string it gives
+an empty string, to a number — zero, and in a condition it is truthy. One value, three completely different answers —
+because the questions are different.
+
+## 3. Conversion to a string {#tostring}
+
+The most predictable of the three. Primitives turn into what they look like:
+
+```js
+String(42);          // "42"
+String(true);        // "true"
+String(null);        // "null"
+String(undefined);   // "undefined"
+```
+
+An array joins its elements with commas, and a plain object always answers the same way:
+
+```js
+String([1, 2, 3]);   // "1,2,3"
+String([]);          // ""      — an empty array gives an empty string
+String({ a: 1 });    // "[object Object]"
+```
+
+<Important>
+`[object Object]` in the output is **always a sign of a mistake**: you printed
+an object where you expected text. We talked about this on day 6. To see the contents,
+pass the object as a separate argument: `console.log("data:", obj)`.
+</Important>
+
+## 4. Conversion to a number {#tonumber}
+
+This one has the most rules, and this is exactly where the surprises live. Let us start with the simple ones:
+
+```js
+Number("42");      // 42
+Number("  42  ");  // 42    — spaces at the edges are dropped
+Number("1e3");     // 1000  — scientific notation is understood
+Number("0x1f");    // 31    — and hexadecimal too
+Number("abc");     // NaN   — it did not work
+Number("12px");    // NaN   — an “almost number” does not count
+```
+
+And now three answers that catch everyone:
+
+```js
+Number("");          // 0   ← an empty string is ZERO, not NaN
+Number(" ");         // 0   ← and so is a space
+Number(null);        // 0   ← and null is zero too
+Number(undefined);   // NaN ← but undefined is not zero
+```
+
+<Mistake>
+The first line breaks input checks more often than all the others put together. The user typed
+nothing — the field gave an empty string — `Number("")` returned an honest zero — the program
+decided that the person typed 0.
+
+```js
+const input = "";              // nothing was typed
+const age = Number(input);     // 0
+if (Number.isNaN(age)) {       // will not work! zero is not NaN
+  console.log("enter your age");
+}
+```
+
+You have to check *before* converting: `if (input === "")`.
+</Mistake>
+
+Booleans convert in the obvious way: `true` is 1, `false` is 0.
+Hence a funny counting trick that you sometimes meet:
+
+```js
+Number(true) + Number(true) + Number(false);   // 2 — how many times “yes”
+```
+
+### There are other ways too
+
+`Number()` is not the only function that converts to a number. There are two more,
+`parseInt` and `parseFloat`, and they behave differently. We will study them
+on day 17 together with numbers, but the difference is worth seeing now — it explains why the choice
+of function matters:
+
+| String | `Number()` | `parseInt()` | `parseFloat()` |
+| --- | --- | --- | --- |
+| `"42"` | `42` | `42` | `42` |
+| `"42px"` | `NaN` | **`42`** | **`42`** |
+| `"px42"` | `NaN` | `NaN` | `NaN` |
+| `""` | **`0`** | `NaN` | `NaN` |
+| `"3.9"` | `3.9` | **`3`** | `3.9` |
+
+The difference is in the approach. **`Number()` requires the whole string to be a number**;
+if even one extra character gets in the way, you get `NaN`. But **`parseInt` reads
+from the start as much as it can, and stops**: it calmly gets 42 out of `"42px"`.
+
+Hence the rule of choice: for **checking input** take `Number()` —
+it will honestly say “this is not a number”. For **pulling a number out of text** like
+`"16px"` take `parseInt`. And notice the row with the empty
+string: here they differ exactly the other way around, and `parseInt("")` gives `NaN`,
+which is actually more convenient for checking input.
+
+```js
+Number("42px");     // NaN — the whole string must be a number
+parseInt("42px");   // 42 — reads from the start as much as it can
+parseInt("3.9");    // 3 — dropped the fractional part
+parseFloat("3.9");  // 3.9
+parseInt("");       // NaN — while Number("") would give 0
+```
+
+## 5. Conversion to a boolean {#toboolean}
+
+The simplest of the three, because there is one closed rule — we learned it on day 5:
+
+<Important>
+**Six values from day 5 are falsy:** `false`, `0` — zero
+in any form (`-0`, `0n`), `""`, `NaN`,
+`null`, `undefined`.
+**Everything else is truthy** — including `"0"`, `" "`,
+`[]` and `{ }`.
+</Important>
+
+The main difference from the other two conversions: **here there are never errors
+or surprises like `NaN`**. Any value confidently turns into either “yes”
+or “no”. That is why conditions in JavaScript never crash — they just sometimes lead
+down the wrong branch.
+
+```js
+Boolean(0);      // false
+Boolean("0");    // true — a non-empty string, even though there is a zero inside
+Boolean(" ");    // true — a space is a character too
+Boolean([]);     // true — an empty array is truthy
+!!"";            // false — double “not” works like Boolean
+!!"Mary";        // true
+```
+
+## 6. When the language does it by itself {#implicit}
+
+All of this works not only when you write `Number(x)`. Much more often
+the language does it silently. Here is the full list of places you have already met:
+
+| Where | What it converts to | Example |
+| --- | --- | --- |
+| `if`, `while`, `&&`, `\|\|`, `!` | to a boolean | `if ([])` — goes in |
+| `+`, if there is a string next to it | to a string | `"2" + 3` → `"23"` |
+| `-`, `*`, `/`, `%`, `**` | to a number | `"10" - 5` → `5` |
+| unary `+` and `-` | to a number | `+"42"` → `42` |
+| `++` and `--` | to a number | `let s = "5"; s++` → `s` became `6` |
+| `<`, `>`, `<=`, `>=` | to a number, except for two strings | `"10" > 9` → `true` |
+| `==` and `!=` | by the rules (section 7) | `1 == "1"` → `true` |
+| template literals `${ }` | to a string | `` `${[1,2]}` `` → `"1,2"` |
+
+Notice what is **not** in the table: `===` and `!==`.
+They never convert anything at all. That is why we write exactly them for the whole course — they are the only
+comparison operators that do not require you to keep a table of rules in your head.
+
+The rows of the table, checked in the console:
+
+```js
+"2" + 3;      // "23" — a string next to it, joining
+"10" - 5;     // 5 — minus is only numeric
++"42";        // 42
+"10" > 9;     // true — the string became the number 10
+"10" > "9";   // false — two strings are compared character by character: "1" is less than "9"
+```
+
+```js
+let s = "5";
+s++;          // 5 — returned the old value, but already as a number
+s;            // 6
+typeof s;     // "number"
+// but "5"++ — SyntaxError: Invalid left-hand side expression in postfix operation
+```
+
+### One value, four answers
+
+To feel how much everything depends on the place, let us follow one value — an empty
+array — through four contexts:
+
+```js
+const x = [];
+
+if (x) { }        // goes in!    — in a condition an array is truthy
+`${x}`;           // ""          — to a string it became an empty string
+x + 1;            // "1"         — first "", then joining
+x - 1;            // -1          — first "", then 0, then subtraction
+x == false;       // true        — through a number: 0 == 0
+```
+
+Five lines, five different behaviors, one and the same value. And not a single error — everywhere the language
+confidently answered something.
+
+<Important>
+This is the main danger of silent conversion: **it never crashes**.
+A type error in JavaScript is not a red message in the console but a wrong number
+in a report. That is why the habit of converting types explicitly is worth more than knowing all the tables.
+</Important>
+
+## 7. The answer to yesterday’s question {#answer}
+
+Now we can take apart those three lines. The rule of `==` for different types is this:
+**if the types do not match, the values are converted to numbers** (with separate exceptions
+for `null` and objects). And if the types match, the comparison goes directly,
+without conversions.
+
+<Scheme src="scheme-answer.svg">The same operator, different routes — depending on the types of the operands</Scheme>
+
+Let us go step by step.
+
+1. `"0" == 0` — a string and a number, the types are different. The string turns into a number:
+   `Number("0")` gives `0`. We compare `0 == 0` — true.
+2. `"" == 0` — again a string and a number. `Number("")` gives `0`.
+   Again `0 == 0` — true.
+3. `"0" == ""` — **both are strings**. The types match, there is nothing to convert,
+   we compare them as text: `"0"` and `""` are different. False.
+
+```js
+Number("0");   // 0
+Number("");    // 0 — two different strings, one number
+"0" == "";     // false — and here it never got to numbers: both sides are strings
+```
+
+The whole trick is that `Number("0")` and `Number("")` give the same zero,
+although the strings themselves are different. The first two pairs are compared through this zero, and the third
+never gets to numbers at all.
+
+<ProTip>
+Hence the practical conclusion. The non-transitivity of `==` is not a bug and not an accident,
+but a direct consequence of the fact that **the route of a comparison depends on the types**. Different
+types — different rules. That is exactly why `===`, which has only one route, is predictable.
+</ProTip>
+
+## 8. How objects are converted {#objects}
+
+With objects it is one step harder. An object by itself can be neither added nor compared, so the language
+first turns it **into a primitive** — and only then applies the usual rules.
+
+```js
+[] + 1;        // "1"   — [] became "", then joining
+[5] + 1;       // "51"  — [5] became "5", then joining
+[5] - 1;       // 4     — [5] became "5", then the number 5, then subtraction
+[1, 2] - 1;    // NaN   — [1,2] became "1,2", and that is not a number
+```
+
+Notice the second and third lines. The array `[5]` turns into the string
+`"5"` in both cases. But then `+` sees a string and joins,
+while `-` does not understand strings and makes a number out of `"5"`. The same operand,
+two different results — because of the operator.
+
+<Analogy>
+Imagine a postal money transfer. An object is a parcel, and the operators work only with money.
+First the parcel is appraised — turned into a sum — and only then is it added or compared.
+An array has one appraiser (“list the contents separated by commas”), a plain object has
+another one, and it always answers `"[object Object]"`.
+</Analogy>
+
+You do not need to use this on purpose — nobody is going to add arrays. You need to know it
+so as not to get lost when you see `"51"` or `NaN` in the console where you expected a number.
+
+### Where \[object Object\] comes from
+
+This text appears more often than all the other oddities put together, so let us take it apart
+to the end. Here is how it appears:
+
+```js
+const student = { name: "Aman", marks: [5, 4] };
+
+console.log("Student: " + student);
+// "Student: [object Object]"
+
+console.log(`Student: ${student}`);
+// "Student: [object Object]"
+```
+
+In both lines the object got into a string context, and a plain object can turn
+into a string in exactly one way — this very text. It literally means “an object was here”
+and says nothing else.
+
+What to do depends on what you wanted:
+
+```js
+// you wanted one property — take it
+console.log(`Student: ${student.name}`);          // "Student: Aman"
+
+// you wanted to see the contents — pass it as a separate argument
+console.log("Student:", student);                 // the console will expand the object
+
+// you wanted a string with all the contents — JSON.stringify (day 23)
+console.log(JSON.stringify(student));             // {"name":"Aman","marks":[5,4]}
+```
+
+<Important>
+The difference between `console.log("a: " + obj)` and `console.log("a:", obj)`
+is fundamental. In the first case you **join strings**, and the object has to
+turn into text. In the second you **pass two arguments**, there is no
+conversion, and the console shows the object as it is, with a way to expand it.
+A comma instead of a plus — and debugging becomes meaningful.
+</Important>
+
+## 9. Converting by yourself {#explicit}
+
+There is one conclusion from everything before: **do not rely on silent conversion —
+convert yourself, at the entrance**. Here is how:
+
+| To | How to write it | Short form |
+| --- | --- | --- |
+| a number | `Number(x)` | `+x` |
+| a string | `String(x)` | `` `${x}` `` |
+| a boolean | `Boolean(x)` | `!!x` |
+
+The long forms are better than the short ones: they are visible when reading. The short ones you need to recognize in other people’s code.
+And remember from day 5: **never write `new`** before these words —
+you will get a wrapper object, not a primitive.
+
+```js
+const raw = "42";            // from an input field
+
+const num = Number(raw);     // converted right away
+if (Number.isNaN(num)) {
+  console.log("this is not a number");
+}
+// from here on, across the whole program, num is surely a number
+```
+
+<ProTip>
+A rule that removes nine out of ten questions about types: **convert data
+to the right types once, at the boundary of the program** — where it comes from
+the user or from a server. Inside the program let only proper values travel.
+Then you simply will not need any of today’s tables.
+</ProTip>
+
+### What “at the boundary” means
+
+Compare two approaches to one task — calculating the cost of an order from form data.
+
+<Compare>
+<Wrong label="Conversion is scattered">
+```js
+const qty = "3";
+const price = "250";
+
+const total =
+  Number(qty) * Number(price);
+
+if (Number(qty) > 10) {
+  // discount
+}
+console.log(Number(qty) + " pcs");
+```
+</Wrong>
+
+<Right label="Conversion at the boundary">
+```js
+const qty = Number("3");
+const price = Number("250");
+
+const total = qty * price;
+
+if (qty > 10) {
+  // discount
+}
+console.log(qty + " pcs");
+```
+</Right>
+</Compare>
+
+On the left `Number()` is written three times, and if you forget it in one place, a quiet
+mistake appears. On the right the conversion is done once, and from there on, across the whole program, `qty`
+is guaranteed to be a number.
+
+But “at the boundary” means not only “convert”. It also means “check”: the conversion
+may fail, and it is better to find out right away, not at the end of the calculation.
+
+{/* ahead-ok: day 16 */}
+
+```js
+function toMark(input) {
+  if (typeof input !== "string" || input.trim() === "") {
+    return null;                       // empty — refuse right away
+  }
+
+  const mark = Number(input);
+
+  if (Number.isNaN(mark)) {
+    return null;                       // not a number — refuse
+  }
+  return mark;                         // only a real number goes further
+}
+
+console.log(toMark("4"));      // 4
+console.log(toMark("  5  "));  // 5
+console.log(toMark(""));       // null
+console.log(toMark("five"));   // null
+```
+
+Such a function is written once and called everywhere data comes in. After it, the rest of the program
+needs neither `Number.isNaN` nor checks for emptiness — all of this has already been done
+at the entrance. We will apply exactly this technique in the “Report card” in section 14.
+
+## 10. The precedence table {#precedence}
+
+The second half of the lesson is about the order of evaluation. We already touched on it on days 6 and 7; now
+we will put everything together.
+
+In the documentation the precedence table has 18 levels. For Essentials these are enough;
+at the top is what is calculated earlier:
+
+| Turn | Operators | Covered |
+| --- | --- | --- |
+| 1 | `( )` — grouping | today |
+| 2 | `.` and `[ ]` — property access; a call `f()` | days 19, 21 |
+| 3 | `++`, `--`, `!`, unary `+` and `-`, `typeof` | days 5, 6, 7 |
+| 4 | `**` | day 6 |
+| 5 | `*`, `/`, `%` | day 6 |
+| 6 | `+`, `-` | day 6 |
+| 7 | `<`, `<=`, `>`, `>=` | day 7 |
+| 8 | `===`, `!==`, `==`, `!=` | day 7 |
+| 9 | `&&` | day 7 |
+| 10 | `\|\|`, `??` | day 7 |
+| 11 | `? :` — the ternary | day 7 |
+| 12 | `=`, `+=` and the other assignments | day 6 |
+| 13 | `,` — the comma | day 7 |
+
+The full table with all 18 levels is on MDN — the link is in the reference of the day. Nobody needs to learn it
+by heart, including those who have been writing code for twenty years.
+
+Two things worth remembering follow from the table.
+
+**The first: comparisons are calculated after arithmetic.** So parentheses around them
+are not needed:
+
+```js
+1 + 2 === 3 && 2 > 1;       // true — works as expected
+((1 + 2) === 3) && (2 > 1); // the same, just longer
+```
+
+**The second: assignment is almost at the very bottom.** That is why `const total = a + b * c;`
+first calculates everything on the right and only then stores the result.
+
+And here is the case where precedence is forgotten most often. `typeof` is on the third
+row of the table — above arithmetic. So it “grabs” only what stands right after it:
+
+```js
+typeof 1 + 1;      // "number1"  ← not what it seems
+typeof (1 + 1);    // "number"   ← this is the right way
+```
+
+In the first line `typeof 1` worked first and gave the string `"number"`,
+and then the one got joined to this string. The mistake is quiet: there is a result, it even looks
+plausible, and nobody complains.
+
+The same rule applies to `!` and unary minus: they take only the neighboring
+value, not the whole expression. If you need to apply them to a result, **put
+parentheses**.
+
+### Taking an expression apart step by step
+
+Let us see how the table works on a long line. Say the price is 100, 3 items are bought, the discount is 10,
+and the buyer is a member of the program:
+
+```js
+price * count - discount > 200 && isMember
+```
+
+<Scheme src="scheme-precedence.svg">Four steps from top to bottom of the precedence table</Scheme>
+
+You can see a pattern that is useful to remember instead of the whole table: **first the arithmetic
+is calculated, then the results are compared, then the logic is joined**. This is exactly
+the order in which you would reason in words: “calculate the sum, compare it with the threshold, and if they are also
+a member — then yes”.
+
+That is why in 90% of cases parentheses in conditions are not needed — the language already does what you meant.
+Two places remain where they are required: a mix of `&&` with `||`,
+and everything involving `??`.
+
+## 11. Parentheses are an operator {#grouping}
+
+In the documentation parentheses are called the **grouping operator**, and they stand
+at the very top of the table. Their job is to say “calculate this first”, overriding the usual order:
+
+```js
+2 + 3 * 4;      // 14 — multiplication first
+(2 + 3) * 4;    // 20 — the parentheses won
+```
+
+The rule is simple and always holds: **parentheses are calculated first, from the inside out**.
+
+```js
+((2 + 3) * 4) - 1;   // first 2+3=5, then 5*4=20, then 20-1=19
+```
+
+<ProTip>
+Parentheses are free. They do not slow the program down and take no memory — the engine processes them
+when reading the file. So the only argument against extra parentheses is “it got longer”,
+and the argument for them is “it got clear”. Put them when *you* are in doubt or a reader
+might be. Especially where `&&` and `||` are mixed.
+</ProTip>
+
+## 12. Left to right and right to left {#assoc}
+
+Precedence answers the question “what comes first” for *different* operators. And if the operators
+are the same? Then **associativity** works — the direction in which they are calculated.
+
+Almost everything in the language is calculated **from left to right**:
+
+```js
+10 - 5 - 2;     // 3 — this is (10 - 5) - 2, not 10 - (5 - 2)
+"1" + 2 + 3;    // "123" — joined, then joined again
+```
+
+But three things that we know are calculated **from right to left**:
+
+```js
+2 ** 3 ** 2;    // 512 — this is 2 ** (3 ** 2), day 6
+a = b = 7;      // first b = 7, then a = 7, day 6
+!!x;            // first the inner !, then the outer one
+```
+
+Separately — the ternary operator: it is also right to left, and that is why the “ladder” from day 7 works
+without parentheses:
+
+```js
+score >= 90 ? "5" : score >= 75 ? "4" : "3";
+// reads as: score >= 90 ? "5" : (score >= 75 ? "4" : "3")
+```
+
+## 13. Seven syntax errors {#syntaxerrors}
+
+All the errors of this day are syntax errors. Let me remind you of the main property of a `SyntaxError`
+from day 4: it happens **before execution**, and because of it the whole file does not work.
+If it seems that “the script did not load”, look for a red message in the console first.
+
+Each one is in a separate block: the broken line in a comment, the Chrome message and how to do it
+right. You can paste the broken line into the console and see the message yourself.
+
+```js
+// const x = 3px;   → SyntaxError: Invalid or unexpected token — a name right after a number
+const x = "3px";    // this is right: it is text
+```
+
+```js
+// const c = “text”;    → SyntaxError: Invalid or unexpected token — “smart” quotes
+const c = "text";       // straight quotes
+```
+
+```js
+// const s = "first
+// second";          → SyntaxError: Invalid or unexpected token — a line break inside quotes
+const s = "first\nsecond";    // a line break is written as \n
+```
+
+```js
+// 3 = x;   → SyntaxError: Invalid left-hand side in assignment — not a variable on the left
+let y = 1;
+y = 3;      // there is a variable to the left of =
+```
+
+```js
+// function f() {   → SyntaxError: Unexpected end of input — the curly brace was not closed
+function f() { }
+```
+
+```js
+// if true) { }   → SyntaxError: Unexpected token 'true' — no opening parenthesis
+if (true) { }
+```
+
+```js
+// console.log(1,,2);   → SyntaxError: Unexpected token ',' — an extra comma
+console.log(1, 2);
+```
+
+As on day 4, remember: **on MDN these pages are titled with Firefox wording**,
+while Chrome says it differently. Firefox, for example, will say “illegal character” and “unterminated string
+literal” — clearer, but you will search by what you see on your own screen.
+
+<Mistake>
+The second of the seven errors is the most annoying and the most common. It happens when code is copied
+from a messenger, from a Word document or from a site that “improves” quotes:
+
+```js
+const a = "correct straight quotes";
+// const b = “smart quotes from Word”;   → SyntaxError: Invalid or unexpected token
+```
+
+The difference is almost invisible, but the whole file does not work. One more argument
+for typing code by hand rather than copying it.
+</Mistake>
+
+### How to find the cause
+
+A `SyntaxError` has a peculiarity: **the browser shows the place where it
+stumbled, not the place of the mistake**. Sometimes it is the same line — for example, if you forget
+to close a quote, it will point right at it. But not always.
+
+The nastiest case is an unclosed curly brace:
+
+```js
+function greet(name) {          // ← the brace was not closed HERE, line 1
+  console.log("Salam, " + name);
+
+const city = "Mary";
+console.log(city);
+// SyntaxError: Unexpected end of input — in a file of these five lines it shows line 6, right after the last one
+```
+
+The engine read the file, waited for the closing brace and reached the end without getting it. It can report
+only the place where the text ended — that is, the last line. But the real
+mistake is on the first one.
+
+<ProTip>
+Hence two search techniques. The first: **the message
+`Unexpected end of input` almost always means an unclosed bracket** —
+look for it from the top, not on the line shown. The second: watch the indentation. If the code
+in the editor suddenly “drifted” to the right and never came back, that is where a block was not closed. The editor highlights
+paired brackets: put the cursor on an opening one and see where its pair is.
+</ProTip>
+
+The general rule: the line shown is the *end* of the search, not the beginning. Look at it
+and **above**. And check the pairs: every `(` needs a `)`,
+every `{` — a `}`, every quote — the same quote.
+
+### How not to make them
+
+Syntax errors are the only kind of errors that is almost completely cured by habits
+and editor settings. Four things worth starting today.
+
+**Close a bracket right away.** You typed `(` — type
+`)` immediately, and only then write inside. The same with quotes and curly braces. VS Code
+does this by itself, but the habit is more important than the setting: it works in someone else’s editor too, and in an input field
+on a website.
+
+**Watch the indentation.** Even indentation is not decoration but a way to see
+an unclosed block with your own eyes. VS Code has auto-formatting (<Kbd>Shift</Kbd> +
+<Kbd>Alt</Kbd> + <Kbd>F</Kbd>): if after it the code “drifted” to the right
+and never came back, that is where the bracket was lost.
+
+**Do not copy code from messengers and documents.** Quotes, dashes and spaces there
+are replaced with similar but different characters. This is that very second error of the seven.
+
+**Save and look at the console more often.** One mistake in a file of twenty lines
+is found in a minute, in a file of two hundred — in half an hour. The shorter the gap between “wrote”
+and “checked”, the less space there is to search.
+
+## 14. The “Report card”: cleaning the input {#tabel}
+
+Let us put the day together in a program. Yesterday we dropped invalid marks; today we will learn to accept
+them in the form in which they come from a form — as strings.
+
+{/* ahead-ok: day 16 */}
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+
+// this is how data comes from input fields: all strings, and some are empty
+const raw = ["5", "4", "", "  3  ", "five", "9", "5"];
+
+const marks = [];
+const rejected = [];
+
+for (const item of raw) {
+  if (item.trim() === "") {          // empty — we check BEFORE converting
+    rejected.push(`empty`);
+    continue;
+  }
+
+  const mark = Number(item);
+
+  if (Number.isNaN(mark)) {
+    rejected.push(`"${item}" is not a number`);
+  } else if (mark < MIN_MARK || mark > MAX_MARK) {
+    rejected.push(`${mark} is out of range`);
+  } else {
+    marks.push(mark);
+  }
+}
+
+console.log("Accepted:", marks);
+console.log("Rejected:", rejected);
+```
+
+<ResultBox>
+Accepted: (4) \[5, 4, 3, 5\]\
+Rejected: (3) \['empty', '"five" is not a number', '9 is out of range'\]
+</ResultBox>
+
+Three places are worth taking apart.
+
+**`item.trim() === ""`** — a check for emptiness *before* converting.
+Without it the empty string would become an honest zero, pass `Number.isNaN` and run
+into the range check with the confusing message “0 is out of range”. The `trim` method
+removes spaces at the edges; we will cover it on day 16.
+
+**`Number("  3  ")`** gives 3 — the language drops the spaces at the edges by itself.
+So a mark with extra spaces is accepted, and that is right: it is not the user’s fault
+that they pressed the space bar.
+
+**The order of the checks.** First emptiness, then “not a number”, then the range.
+Each next check counts on the previous one having already filtered out its case. Swap them
+around — and the messages will start to lie.
+
+<TryIt>
+Remove the `item.trim() === ""` check and run it. The empty string will end up
+in “out of range” instead of “empty”. Then try adding `"0"`
+and `" "` to the array — and check what the program says about each.
+</TryIt>
+
+## 15. Common mistakes of the day {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| expected `NaN` from `Number("")` | an empty string is zero | check `input === ""` before converting |
+| relying on silent conversion | there are many rules, and they differ for each operator | `Number(x)` at the boundary of the program |
+| `"" + x` to convert to a string | with objects it does not work as expected | `String(x)` or `` ` ${x} ` `` |
+| `a \|\| b && c` without parentheses | `&&` binds tighter | `(a \|\| b) && c` |
+| quotes from Word | `Invalid or unexpected token` | type by hand, do not copy |
+| looking for a `SyntaxError` on the line shown | the browser shows where it stumbled | look above, check the pairs of brackets |
+
+## 16. What comes next {#next}
+
+Today the module “Syntax, types and operators” — days 4–8 — came to an end. Here is what it had:
+
+| Day | Topic | What stays with you |
+| --- | --- | --- |
+| 4 | Variables | `const` by default, `let` if it changes, block scope |
+| 5 | Types and `typeof` | eight types, six falsy values, `Number.isNaN` |
+| 6 | Arithmetic | five operators, the remainder `%`, `+=`, fractional precision |
+| 7 | Comparison and logic | `===` always, `&&` `\|\|` `!`, `??`, the ternary |
+| 8 | Conversion and precedence | three contexts, explicit conversion at the boundary |
+
+If you remember three things from the whole module, here they are: **declare with
+`const`**, **compare with `===`**,
+**convert types explicitly and at the entrance**. These three habits remove most of the mistakes
+we have covered over five days.
+
+Tomorrow a new module begins — **“Conditions and loops”**. On day 9 we will take
+`if`, `else` and `switch`: we have used conditions since day 3,
+but we have never covered them seriously. Along the way it will become clear why we dug so carefully
+into what counts as truthy and what as falsy.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Guide: Expressions and operators](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Expressions_and_operators) | the guide chapter about all the operators and expressions of the language | <Full /> |
+| [Operator precedence](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Operator_precedence) | the full table of 18 levels and associativity | <Full /> |
+| [Grouping operator ( )](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Grouping) | parentheses override the usual order | <Full /> |
+| [Error: unexpected token](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Unexpected_token) | an extra or missing bracket, a comma | <Brief /> |
+| [Error: illegal character](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Illegal_character) | “smart” quotes, a dash instead of a minus | <Brief /> |
+| [Error: unterminated string](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/String_literal_EOL) | a line break inside quotes | <Brief /> |
+| [Error: a name after a number](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Identifier_after_number) | `3px`, `1foo` | <Brief /> |
+| [Error: not a variable on the left](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_assignment_left-hand_side) | `3 = x`, `a + 1 = 5` | <Brief /> |
+| [Error: an unclosed curly brace](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Missing_curly_after_function_body) | `Unexpected end of input` | <Brief /> |
+| [Error: a missing parenthesis in a condition](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Missing_parenthesis_after_condition) | `if true)`, `if (true {` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// three conversions
+Number(x);   +x           // to a number
+String(x);   `${x}`       // to a string
+Boolean(x);  !!x          // to a boolean
+
+Number("");        // 0   ← NOT NaN! the trap of input checks
+Number(" ");       // 0
+Number(null);      // 0
+Number(undefined); // NaN
+Number("12px");    // NaN
+Number("  42  ");  // 42  — spaces at the edges are dropped
+Number("0x1f");    // 31
+
+String([1, 2]);    // "1,2"
+String([]);        // ""
+String({ });       // "[object Object]"  ← a sign of a mistake in the output
+
+// falsy: false 0 "" NaN null undefined (and the forms of zero: -0, 0n)
+
+// why == is not transitive
+"0" == 0;    // different types → both to numbers → 0 == 0 → true
+"" == 0;     // different types → both to numbers → 0 == 0 → true
+"0" == "";   // the types MATCH → compared as text → false
+
+// precedence: ( ) → . [ ] → ! ++ -- → ** → * / % → + -
+//           → < > → === !== → && → || ?? → ? : → =
+
+2 + 3 * 4;      // 14      (2 + 3) * 4;   // 20
+10 - 5 - 2;     // 3       left to right
+2 ** 3 ** 2;    // 512     right to left
+a || b && c;    // && binds tighter — put parentheses!
+
+// SyntaxError: the whole file does not run; look at the line ABOVE the one shown
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why are `"0" == 0` and `"" == 0` true, but `"0" == ""` is not?
+   <Answer>In the first two pairs the types are different, so both strings are converted to a number, and both
+   give `0`. In the third pair the types match, there is nothing to convert, and the strings
+   are compared character by character.</Answer>
+2. What does `Number("")` return, and why is it dangerous?
+   <Answer>`0`, not `NaN`. It is dangerous because an empty input field gives
+   an honest zero and passes the `Number.isNaN` check. Emptiness has to be checked
+   before converting.</Answer>
+3. What are `[5] + 1` and `[5] - 1`, and why are they different?
+   <Answer>`"51"` and `4`. In both cases the array becomes the string
+   `"5"`, but `+` sees a string and joins, while `-`
+   does not understand strings and turns it into a number.</Answer>
+4. What is `2 ** 3 ** 2`, and why not 64?
+   <Answer>`512`. Exponentiation is calculated from right to left, that is
+   `2 ** (3 ** 2)` = `2 ** 9`. For 64 you need parentheses:
+   `(2 ** 3) ** 2`.</Answer>
+5. The console shows a `SyntaxError` on line 12, but everything is correct there. Where should you look?
+   <Answer>Above. The browser shows the place where parsing stumbled, not the place of the mistake.
+   Check the previous non-empty line and the pairs of brackets and quotes.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Expressions_and_operators" />

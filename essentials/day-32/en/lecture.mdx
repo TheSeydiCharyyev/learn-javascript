@@ -1,0 +1,859 @@
+---
+title: "Day 32 — Mini project: a catalog with data from a server"
+day: Day 32 • lesson 1
+heading: "Mini project: a catalog with data from a server"
+lead: A project day after the module “Timers, promises and fetch”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+  h3 { color: #854d0e; }
+  .step-number { background: #eab308; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- build an application that takes its data from a server;
+- show three states: loading, data, error;
+- build buttons and cards from the data, not from the markup;
+- combine search, a filter and favorites in one function;
+- keep a person’s choice between page loads.
+</Goals>
+
+<Toc />
+
+## 1. The last mini project {#why}
+
+On day 29 we built a to-do list out of what the module “DOM and events” gave us. Since then
+timers, promises, `fetch` and storage have appeared. Today we will combine everything in one
+application: a **book catalog**. The list comes from a server, a person searches, picks
+a genre and marks books as favorites, and the favorites are remembered between page loads.
+
+| What we will need | From where |
+| --- | --- |
+| `filter`, `map`, `forEach`, `includes` | days 16, 19–20 |
+| `createElement`, `append`, `dataset`, `classList` | days 25–26 |
+| listeners, delegation, `input`, `change` | days 27–28 |
+| the scheme “data → `render` → page” | day 29 |
+| `fetch`, `async` / `await`, `try...catch...finally` | days 30–31 |
+| `localStorage`, `JSON.stringify` and `JSON.parse` | days 23, 31 |
+
+A catalog is the most common kind of page on the internet: a shop, an events listing, a library, a list
+of courses. They are all built the same way, and after today you will be able to build any of them.
+We work through Live Server: without it `fetch` will not work.
+
+## 2. What the catalog must be able to do {#spec}
+
+| No. | Feature | How to check |
+| --- | --- | --- |
+| 1 | load the books from the server | while it loads — “Loading…”, then eight cards |
+| 2 | report a loading error | no file — a clear text, “Loading…” is gone |
+| 3 | search by title and author | “tolst” — “War and Peace”, case does not matter |
+| 4 | pick a genre | genre buttons, the selected one is highlighted |
+| 5 | mark a book as a favorite and remove the mark | a button on the card, the card is highlighted |
+| 6 | show only the favorites | the “Only favorites” checkbox |
+| 7 | combine search, genre and favorites | all three conditions work together |
+| 8 | a counter “Shown: N of M” | changes after every action |
+| 9 | remember the favorites | reloaded the page — the marks are in place |
+
+What the catalog does not do: it does not change the list of books itself — books can be added and deleted only
+on the server, that is, in the file. It remembers only the favorites; the search and the genre are reset
+after a reload. This is a decision, not an oversight: it is worth remembering what a person marked
+deliberately.
+
+We will build in the order of day 29, one piece at a time: the data on the server, the data in
+the program, the frame, loading, a card, the genre buttons, `render`, actions. After
+each piece — a check in the console. Then any mistake will be found in the last few
+lines, not in the whole file.
+
+## 3. The data on the server {#data}
+
+The folder `day-32/catalog`. Next to the page lies the file `catalog.json` —
+this is our “server”:
+
+```js
+[
+  { "id": 1, "title": "The Captain's Daughter", "author": "Alexander Pushkin", "year": 1836, "genre": "novella" },
+  { "id": 2, "title": "Crime and Punishment", "author": "Fyodor Dostoevsky", "year": 1866, "genre": "novel" },
+  { "id": 3, "title": "War and Peace", "author": "Leo Tolstoy", "year": 1869, "genre": "novel" },
+  { "id": 4, "title": "The Hound of the Baskervilles", "author": "Arthur Conan Doyle", "year": 1902, "genre": "detective" },
+  { "id": 5, "title": "The Hobbit", "author": "John Tolkien", "year": 1937, "genre": "fantasy" },
+  { "id": 6, "title": "The Little Prince", "author": "Antoine de Saint-Exupéry", "year": 1943, "genre": "fairy tale" },
+  { "id": 7, "title": "The Old Man and the Sea", "author": "Ernest Hemingway", "year": 1952, "genre": "novella" },
+  { "id": 8, "title": "Harry Potter and the Philosopher's Stone", "author": "Joanne Rowling", "year": 1997, "genre": "fantasy" }
+]
+```
+
+Every book has an `id` — a permanent number, like the tasks on day 29: by it
+a card will find its book, and the favorites will remember which books are marked. Titles may
+coincide for different editions, a number — never.
+
+Checking the step: while there is not a single line of `app.js`, open the page through Live Server
+and ask the server from the console. If the file is given out, half of the project already works:
+
+```js
+const data = await (await fetch("catalog.json")).json();
+data.length;                                       // 8
+data[4].title;                                     // "The Hobbit"
+data.filter((b) => b.genre === "novel").length;    // 2
+```
+
+And right away — what trouble looks like. A typo in the file name does not crash the request, but gives a 404
+response (day 31):
+
+```js
+(await fetch("katalog.json")).status;   // 404
+```
+
+## 4. The data in the program {#state}
+
+As on day 29, we first decide what the program keeps. Everything the look of the page depends on:
+
+```js
+const KEY = "catalog:favorites";
+let books = [];                                               // will come from the server
+let favorites = JSON.parse(localStorage.getItem(KEY)) ?? [];  // the numbers of favorite books
+let query = "";                                               // the search string
+let genre = "all";                                            // the selected genre
+let onlyFavorites = false;                                    // the “Only favorites” checkbox
+```
+
+Five variables — three kinds of data. `books` comes from the server and is empty at first.
+`favorites` is taken from storage. `query`, `genre` and
+`onlyFavorites` are the person’s choice right now.
+
+The line with `favorites` is read from right to left. There is no key yet —
+`getItem` returns `null`, `JSON.parse(null)` is also
+`null` (day 31), and `??` from day 7 puts in an empty array. There is a key —
+we get the saved numbers. The prefix `catalog:` is there so as not to collide
+with the to-do list and the “Report card” on the same Live Server.
+
+```js
+JSON.parse(null);   // null
+null ?? [];         // [] — the first run: there are no favorites yet
+```
+
+## 5. The markup {#markup}
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Book catalog</title>
+  <style>
+    .cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; }
+    .card.favorite { border-color: #eab308; background: #fefce8; }
+    .genres .active { font-weight: bold; }
+    .error { color: #b91c1c; }
+  </style>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>Book catalog</h1>
+  <p>
+    <input id="search" placeholder="Title or author">
+    <label><input type="checkbox" id="only-favorites"> Only favorites</label>
+  </p>
+  <p class="genres"></p>
+  <p id="loading">Loading…</p>
+  <p id="error" class="error"></p>
+  <ul id="books" class="cards"></ul>
+  <p id="empty" hidden>Nothing found</p>
+  <p id="counter"></p>
+</body>
+</html>
+```
+
+The frame is almost empty: there is not a single book and not a single genre button — all of this will appear from
+the data. The cards are items of a `<ul>` list, and the `grid` rule
+lays them out as tiles: as many in a row as fit. “Loading…” is visible at once —
+after all, when the page opens there is no data yet.
+
+```js
+const search = document.querySelector("#search");
+const favoritesBox = document.querySelector("#only-favorites");
+const genres = document.querySelector(".genres");
+const loading = document.querySelector("#loading");
+const error = document.querySelector("#error");
+const list = document.querySelector("#books");
+const empty = document.querySelector("#empty");
+const counter = document.querySelector("#counter");
+```
+
+Checking the step: the elements were found, there is no data yet, “Loading…” is visible.
+
+```js
+[books.length, favorites, genres.children.length, loading.hidden];   // [0, [], 0, false]
+```
+
+## 6. The main scheme {#idea}
+
+<Scheme src="scheme-idea.svg">The scheme of day 29 with two sources of data added: the server and storage</Scheme>
+
+This is the scheme of day 29: a listener changes the data and calls `render`, which builds
+the page. Two things are new. Part of the data **comes later** — from the server, so
+the first `render` happens only after loading. And part of the data
+**lives longer than the page** — the favorites are read from storage at start and
+written at the end of every `render`, like the tasks on day 31.
+
+The main design decision of the day is where what lives:
+
+| Data | Where | Why |
+| --- | --- | --- |
+| books | the server | shared by everyone; they are changed by the catalog’s owner, not by a reader |
+| favorites | `localStorage` | a personal choice, needed tomorrow too |
+| search, genre, checkbox | only in variables | needed now; after a reload it is more convenient to start from a clean slate |
+
+We do not put the books into storage on purpose: the server is the only source of truth
+about the catalog. If we saved a copy, after a change of the file the person would see an outdated list.
+
+## 7. Loading: three states {#load}
+
+A page that waits for a server always has three states: **loading**,
+**data** or **error**. The person must see each of them:
+
+```js
+async function load() {
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`server replied ${response.status}`);
+    books = await response.json();
+    makeGenreButtons();   // section 9
+    render();             // section 10
+  } catch (err) {
+    error.textContent = `Could not load the catalog: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+  }
+}
+
+load();
+```
+
+| State | When | What is visible |
+| --- | --- | --- |
+| loading | from opening until the response | “Loading…” from the markup |
+| data | the response came, the JSON is parsed | cards, genre buttons, the counter |
+| error | the server is silent, no file, broken JSON | the text of the error; “Loading…” is removed |
+
+Everything is familiar from day 31: a check of `ok`, one `catch` branch for all troubles,
+cleanup in `finally`. Rename `catalog.json` — the page will say
+“Could not load the catalog: server replied 404”.
+
+If you build the project step by step, like we do, a surprise waits here: the functions
+`makeGenreButtons` and `render` do not exist yet. Let us run it as it is:
+
+```js
+error.textContent;   // "Could not load the catalog: makeGenreButtons is not defined"
+books.length;        // 8 — the books came, the next line failed
+```
+
+`catch` catches not only network troubles but also mistakes in our own code — MDN calls
+this one of the merits of promises. That is why the error text on the page is the first thing to read
+for any oddity. Until sections 9 and 10 are written, comment out the two lines
+with the calls, and the step check will pass:
+
+```js
+[books.length, loading.hidden, error.textContent];   // [8, true, ""]
+```
+
+And the error state — rename `catalog.json` and reload the page:
+
+```js
+[books.length, loading.hidden, error.textContent];
+// [0, true, "Could not load the catalog: server replied 404"]
+```
+
+## 8. One book — one card {#card}
+
+<Scheme src="scheme-card.svg">Every field of a book is its own part of the card; the look of the button depends on the favorites</Scheme>
+
+```js
+function makeCard(book) {
+  const card = document.createElement("li");
+  const title = document.createElement("h3");
+  const info = document.createElement("p");
+  const star = document.createElement("button");
+
+  title.textContent = book.title;
+  info.textContent = `${book.author}, ${book.year} · ${book.genre}`;
+  star.textContent = favorites.includes(book.id) ? "★ in favorites" : "☆ to favorites";
+  star.classList.add("fav");
+
+  card.append(title, info, star);
+  card.classList.add("card");
+  card.classList.toggle("favorite", favorites.includes(book.id));
+  card.dataset.id = book.id;
+  return card;
+}
+```
+
+This is `makeItem` of day 29 with different contents. The data goes only through
+`textContent`: the titles came from the server, and they cannot be trusted as markup
+(day 25). One thing is new: the card looks not only at the book but also at
+`favorites` — the label on the button and the `favorite` class depend on it.
+
+```js
+makeCard(books[4]).outerHTML;
+// '<li class="card" data-id="5"><h3>The Hobbit</h3><p>John Tolkien, 1937 · fantasy</p><button class="fav">☆ to favorites</button></li>'
+```
+
+And if the book is among the favorites, the same function gives a different card:
+
+```js
+favorites = [5];
+const hobbit = makeCard(books[4]);
+hobbit.className;                          // "card favorite"
+hobbit.querySelector(".fav").textContent;  // "★ in favorites"
+```
+
+## 9. Genre buttons from the data {#genres}
+
+The genres could be written into the markup, like the filters of day 29. But then a new genre on
+the server would require editing the page. It is more reliable to build the buttons **from the data itself** —
+one for every genre that occurs:
+
+```js
+function makeGenreButtons() {
+  const names = ["all"];
+  books.forEach((book) => {
+    if (!names.includes(book.genre)) names.push(book.genre);
+  });
+  genres.append(...names.map((name) => {
+    const button = document.createElement("button");
+    button.textContent = name;
+    button.dataset.genre = name;
+    return button;
+  }));
+}
+```
+
+A list without repeats is built with the familiar `forEach` and `includes`:
+we add a genre only if it is not there yet. The order is the one in which the genres occur in the file.
+The function is called once, after loading, — that is why `load` calls it,
+and not `render`. From `render` it would add six buttons after
+every action: after the very first click there would be twelve of them. The technique “without repeats”
+is worth remembering separately — on a small example:
+
+```js
+const names = ["all"];
+["novel", "novella", "novel"].forEach((g) => {
+  if (!names.includes(g)) names.push(g);
+});
+names;   // ["all", "novel", "novella"] — the second “novel” was not added
+```
+
+Checking the step on the real data:
+
+```js
+[...genres.children].map((b) => b.textContent);
+// ["all", "novella", "novel", "detective", "fantasy", "fairy tale"]
+```
+
+## 10. `render`: three conditions {#render}
+
+<Scheme src="scheme-render.svg">isVisible lets a book through only if it passed all three checks</Scheme>
+
+```js
+function isVisible(book) {
+  const text = `${book.title} ${book.author}`.toLowerCase();
+  if (!text.includes(query)) return false;
+  if (genre !== "all" && book.genre !== genre) return false;
+  if (onlyFavorites && !favorites.includes(book.id)) return false;
+  return true;
+}
+
+function render() {
+  const visible = books.filter(isVisible);
+  list.textContent = "";
+  list.append(...visible.map(makeCard));
+  empty.hidden = visible.length > 0;
+  counter.textContent = `Shown: ${visible.length} of ${books.length}`;
+  genres.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.genre === genre);
+  });
+  localStorage.setItem(KEY, JSON.stringify(favorites));
+}
+```
+
+In `isVisible` every check can only **refuse**:
+the book did not fit — `return false`, it fit — we go to the next one. `true`
+is returned only at the very end, when all three are passed. That is why the conditions combine by themselves:
+search inside a genre, favorites inside a search. Section 12 will show what happens if this rule
+is broken. The function can be asked directly:
+
+```js
+isVisible(books[4]);   // true — the search is empty, the genre is “all”, the checkbox is off
+genre = "novel";
+isVisible(books[4]);   // false — “The Hobbit” is not a novel
+genre = "all";
+```
+
+`render` has everything from day 29 plus two lines: “Nothing found” is visible only
+when there are zero visible books, and as the last line the favorites go into storage. Let us check
+`render` from the console, without touching a single button:
+
+```js
+query = "tolst";
+render();
+list.children.length;        // 1 — “War and Peace”
+
+query = "";
+genre = "fantasy";
+render();
+counter.textContent;         // "Shown: 2 of 8"
+```
+
+And an empty result — a branch that does not fire on ordinary data:
+
+```js
+query = "xyz";
+genre = "all";
+render();
+[empty.hidden, counter.textContent];   // [false, "Shown: 0 of 8"]
+```
+
+## 11. Search, genres, favorites {#actions}
+
+Four listeners — each follows the scheme of day 29: understand what happened, change the data,
+call `render`.
+
+```js
+search.addEventListener("input", () => {
+  query = search.value.trim().toLowerCase();
+  render();
+});
+
+genres.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  genre = button.dataset.genre;
+  render();
+});
+
+favoritesBox.addEventListener("change", () => {
+  onlyFavorites = favoritesBox.checked;
+  render();
+});
+
+list.addEventListener("click", (event) => {
+  if (!event.target.closest(".fav")) return;
+  const id = Number(event.target.closest(".card").dataset.id);
+  if (favorites.includes(id)) {
+    favorites = favorites.filter((f) => f !== id);   // it was there — remove it
+  } else {
+    favorites.push(id);                                // it was not — add it
+  }
+  render();
+});
+```
+
+The search listens for `input` — on every letter, like the live search of day 28. The string
+is cleaned with `trim` at once and turned to lower case: then “&nbsp;&nbsp;HOBBIT ”
+will find “The Hobbit”, because in `isVisible` the text of the book is in lower case too.
+Waiting for a pause, like the autosave of day 30, is not needed here: the data is already on the page, the filter
+is instant. A pause would be needed if every letter went to the server as a request.
+
+Genres — delegation on the paragraph with the buttons. The checkbox — the `change` event and its
+`checked` (day 28). Favorites — delegation on the list and the familiar bridge
+“element → data” through `data-id` and `Number`. The mark works as
+a toggle: the number is there — we remove it with `filter`, it is not — we add it with
+`push`. Checking the step: typed “tolst”, clicked “novel”, checked the checkbox —
+the listeners wrote everything into the data:
+
+```js
+[query, genre, onlyFavorites];   // ["tolst", "novel", true]
+```
+
+The toggle can also be written in one line — with the ternary operator (day 7) and
+`...` (day 22). Longer does not mean worse: choose the way that is easier to read.
+
+```js
+// inside the list listener, instead of if...else:
+favorites = favorites.includes(id) ? favorites.filter((f) => f !== id) : [...favorites, id];
+```
+
+Now on a clean page we marked “The Hobbit” and “Crime and Punishment”:
+
+```js
+favorites;                                  // [5, 2]
+localStorage.getItem("catalog:favorites");  // "[5,2]"
+```
+
+Reload the page — both cards are highlighted again: `favorites` was read from
+storage even before the books loaded, and the very first `render` drew the stars.
+
+Why are only numbers kept in the favorites, not whole books? Because the book is already in
+`books`, and a second copy would become outdated at the first edit of the file. A number is a reference:
+everything else about the book is always taken fresh from the server. The same principle as
+`data-id` on a card: keep not a copy, but a pointer to where to find it.
+
+## 12. Walkthrough: the search does not work with “all” {#bug-return}
+
+A common first version of `isVisible` — “the simplest first”:
+
+```js
+// do NOT do this
+function isVisible(book) {
+  if (genre === "all") return true;            // “all” means we show it
+  if (book.genre !== genre) return false;
+  if (onlyFavorites && !favorites.includes(book.id)) return false;
+  return `${book.title} ${book.author}`.toLowerCase().includes(query);
+}
+```
+
+**Step 1. The symptom.** Typed “tolst” with the genre “all” — all eight books are visible,
+“Shown: 8 of 8”. Picked “novel” — the search suddenly started working: one book. The checkbox
+“Only favorites” does nothing with “all” either. The console confirms that the data is right:
+
+```js
+[query, genre];          // ["tolst", "all"] — the search is recorded
+counter.textContent;     // "Shown: 8 of 8" — but the filter ignored it
+```
+
+**Step 2. The cause.** With “all” the very first line returns `true`,
+and the other checks are never reached. `return` ends the function at once —
+it has been so since day 12. To allow too early means to skip all the checks below.
+
+**Step 3. We fix it.** The rule for filter functions: every check only
+**refuses**, and `true` comes in one line at the very end, as in
+section 10. The genre “all” does not mean “let it through without checks”, but “skip the genre
+check”: `genre !== "all" && …`.
+
+## 13. Walkthrough: the favorites disappear {#bug-favorites}
+
+The second common version declares the favorites like all the other data:
+
+```js
+let favorites = [];   // do NOT do this: storage is not read
+```
+
+**Step 1. The symptom.** Marked “The Hobbit”, the star is lit. Reloaded the page —
+there is no star.
+
+**Step 2. What is in storage?**
+
+```js
+localStorage.getItem("catalog:favorites");   // "[5]" — before the reload
+// reloaded the page:
+localStorage.getItem("catalog:favorites");   // "[]"
+```
+
+The data was not just left unread — it was **erased**. The empty
+`favorites` lived until the first `render`, and that one, in its last line, wrote
+it into storage over the saved one.
+
+**Step 3. We fix it.** Read storage at the declaration, as in section 4. And
+remember the order: **first read, then write**. Code that writes
+before it has read destroys data silently.
+
+## 14. Walkthrough: there is an error, but “Loading…” hangs {#bug-loading}
+
+The third version removes “Loading…” where “everything worked”:
+
+```js
+// do NOT do this
+async function load() {
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`server replied ${response.status}`);
+    books = await response.json();
+    makeGenreButtons();
+    render();
+    loading.hidden = true;             // only on success
+  } catch (err) {
+    error.textContent = `Could not load the catalog: ${err.message}`;
+  }
+}
+```
+
+**Step 1. The symptom.** While the file is in place, no difference is visible. Let us rename
+`catalog.json` — the page shows “Loading…” and “Could not load the
+catalog: server replied 404” at the same time. The page contradicts itself: it both waits and has already given up.
+
+```js
+[loading.hidden, error.textContent];
+// [false, "Could not load the catalog: server replied 404"]
+```
+
+**Step 2. The cause.** After `throw` the rest of `try` does not
+run, control goes straight to `catch`. The line with
+`loading.hidden` was in the skipped part.
+
+**Step 3. We fix it.** Cleanup needed in any outcome is written in
+`finally` — that is exactly what it exists for (days 30–31). All three walkthroughs in
+one table, with a fourth mistake familiar from day 29:
+
+| Symptom | Cause | Where to look |
+| --- | --- | --- |
+| search and “Only favorites” do not work with “all” | an early `return true` | the first line of `isVisible` |
+| after a reload the favorites are empty, storage has `"[]"` | storage was not read | the declaration of `favorites` |
+| the star does not light up, storage has `["5"]` | the number as a string, without `Number` | the list listener |
+| an error on the page, but “Loading…” hangs | `loading.hidden` is not in `finally` | the end of `load` |
+
+## 15. The whole program {#whole}
+
+Let us gather `app.js` in one place. The order of the parts: data, elements, showing,
+loading, actions, start.
+
+```js
+// 1. Data: the books will come from the server, the rest is the person’s choice
+const KEY = "catalog:favorites";
+let books = [];
+let favorites = JSON.parse(localStorage.getItem(KEY)) ?? [];   // the numbers of favorite books
+let query = "";
+let genre = "all";
+let onlyFavorites = false;
+
+// 2. The elements of the page
+const search = document.querySelector("#search");
+const favoritesBox = document.querySelector("#only-favorites");
+const genres = document.querySelector(".genres");
+const loading = document.querySelector("#loading");
+const error = document.querySelector("#error");
+const list = document.querySelector("#books");
+const empty = document.querySelector("#empty");
+const counter = document.querySelector("#counter");
+
+// 3. Showing
+function makeCard(book) {
+  const card = document.createElement("li");
+  const title = document.createElement("h3");
+  const info = document.createElement("p");
+  const star = document.createElement("button");
+
+  title.textContent = book.title;
+  info.textContent = `${book.author}, ${book.year} · ${book.genre}`;
+  star.textContent = favorites.includes(book.id) ? "★ in favorites" : "☆ to favorites";
+  star.classList.add("fav");
+
+  card.append(title, info, star);
+  card.classList.add("card");
+  card.classList.toggle("favorite", favorites.includes(book.id));
+  card.dataset.id = book.id;
+  return card;
+}
+
+function makeGenreButtons() {
+  const names = ["all"];
+  books.forEach((book) => {
+    if (!names.includes(book.genre)) names.push(book.genre);
+  });
+  genres.append(...names.map((name) => {
+    const button = document.createElement("button");
+    button.textContent = name;
+    button.dataset.genre = name;
+    return button;
+  }));
+}
+
+function isVisible(book) {
+  const text = `${book.title} ${book.author}`.toLowerCase();
+  if (!text.includes(query)) return false;
+  if (genre !== "all" && book.genre !== genre) return false;
+  if (onlyFavorites && !favorites.includes(book.id)) return false;
+  return true;
+}
+
+function render() {
+  const visible = books.filter(isVisible);
+  list.textContent = "";
+  list.append(...visible.map(makeCard));
+  empty.hidden = visible.length > 0;
+  counter.textContent = `Shown: ${visible.length} of ${books.length}`;
+  genres.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.genre === genre);
+  });
+  localStorage.setItem(KEY, JSON.stringify(favorites));
+}
+
+// 4. Loading
+async function load() {
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`server replied ${response.status}`);
+    books = await response.json();
+    makeGenreButtons();
+    render();
+  } catch (err) {
+    error.textContent = `Could not load the catalog: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+  }
+}
+
+// 5. Actions: understand → change the data → render()
+search.addEventListener("input", () => {
+  query = search.value.trim().toLowerCase();
+  render();
+});
+
+genres.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  genre = button.dataset.genre;
+  render();
+});
+
+favoritesBox.addEventListener("change", () => {
+  onlyFavorites = favoritesBox.checked;
+  render();
+});
+
+list.addEventListener("click", (event) => {
+  if (!event.target.closest(".fav")) return;
+  const id = Number(event.target.closest(".card").dataset.id);
+  if (favorites.includes(id)) {
+    favorites = favorites.filter((f) => f !== id);
+  } else {
+    favorites.push(id);
+  }
+  render();
+});
+
+// 6. Start
+load();
+```
+
+The whole file is 116 lines, shorter than the to-do list: the hardest work is done by
+`fetch`, `filter` and storage. A scenario in which every branch fired:
+
+<ResultBox>
+| What we did | What is on the page |
+| --- | --- |
+| opened it | “Loading…”, then eight cards, “Shown: 8 of 8”, six buttons, “all” is highlighted |
+| “&nbsp;&nbsp;hobbit ” | one card “The Hobbit” |
+| “to” | five cards: the letters are in the title or in the author’s name |
+| “xyz” | “Nothing found”, “Shown: 0 of 8” |
+| the genre “novel” | “Crime and Punishment”, “War and Peace” |
+| “☆” at “The Hobbit” and “Crime…” | both cards are highlighted, storage has `[5,2]` |
+| “Only favorites”, the genre “fantasy” | one card “The Hobbit”, “Shown: 1 of 8” |
+| reloaded the page | eight cards, two highlighted, the checkbox is off, the genre is “all” |
+| `catalog.json` renamed | “Could not load the catalog: server replied 404”, “Loading…” is gone |
+</ResultBox>
+
+### Edge cases
+
+| Case | What happens | Why |
+| --- | --- | --- |
+| the search “e” | all eight books | the letter is in every title or name |
+| the search “TOLSTOY” | “War and Peace” | both sides are in lower case |
+| a book was removed from the file, but it is a favorite | its number lies in storage, but there is no card | the favorites keep numbers, not books |
+| a broken string in storage | `app.js` fails on the declaration of `favorites`, “Loading…” hangs | `JSON.parse` stands outside `try` |
+
+```js
+localStorage.setItem("catalog:favorites", "[99]");
+// reloaded the page:
+[favorites, list.querySelectorAll(".favorite").length];   // [[99], 0]
+```
+
+The last two rows of the table are honest shortcomings. The first is harmless: an extra number
+gets in nobody’s way. The second is dangerous: the page stops working altogether. Protecting the reading of storage is
+one of today’s tasks.
+
+### What it has in common with the to-do list
+
+|  | The to-do list (day 29) | The catalog (day 32) |
+| --- | --- | --- |
+| where the data comes from | in the code, later in storage | from a server |
+| what the person changes | the data itself: the tasks | only their own choice: search, genre, favorites |
+| one object → one element | `makeItem` | `makeCard` |
+| what to show | `isVisible`: one filter | `isVisible`: three conditions |
+| what it remembers | all the tasks | the numbers of the favorites |
+
+## 16. What comes next {#next}
+
+The mini projects are over. Ahead is the final project of the course, four days. On day 33 you
+will come up with your own application and break it into tasks, on day 34 — build it, on day 35 —
+polish it and check it on a phone, on day 36 — defend it. The catalog is a good model:
+data from a server, cards, search and filters, memory in storage. Many final projects
+will be built the same way, only with different data.
+
+### How to extend the catalog
+
+| Idea | What you will need |
+| --- | --- |
+| sorting by year or title | a `sort` variable, `toSorted` in `render` (day 20) |
+| protection against broken storage | `try...catch` around reading (day 11) |
+| the search is remembered for the life of the tab | `sessionStorage` (day 31) |
+| a “Try again” button on an error | call `load` once more |
+| the number of favorites in the tab title | `document.title` in `render` (day 24) |
+
+<Ref>
+<p style={{margin: "0 0 8px"}}>There are no new pages — the project uses the ones covered before:</p>
+
+| Page | Where in the project | Day |
+| --- | --- | --- |
+| [fetch()](https://developer.mozilla.org/en-US/docs/Web/API/Window/fetch) | loading `catalog.json` | 31 |
+| [Response.ok](https://developer.mozilla.org/en-US/docs/Web/API/Response/ok) | we turn a 404 into an error | 31 |
+| [Response.json()](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) | the response body — an array of books | 31 |
+| [async function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function) | `load` | 31 |
+| [try...catch](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/try...catch) | a loading error, `finally` | 11, 31 |
+| [getItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/getItem) and [setItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/setItem) | the favorites | 31 |
+| [JSON.parse](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/parse) | the numbers from storage | 23 |
+| [??](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing) | an empty array on the first run | 7 |
+| [Array.includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/includes) | genres without repeats, favorites | 19 |
+| [String.includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/includes) | search in the text | 16 |
+| [Array.filter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter) | the visible books, removing a mark | 20 |
+| [createElement](https://developer.mozilla.org/en-US/docs/Web/API/Document/createElement) | cards, genre buttons | 26 |
+| [closest](https://developer.mozilla.org/en-US/docs/Web/API/Element/closest) | from a button to the card | 24 |
+| [dataset](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/dataset) | `data-id`, `data-genre` | 25 |
+| [input](https://developer.mozilla.org/en-US/docs/Web/API/Element/input_event) | search on every letter | 28 |
+</Ref>
+
+<Cheatsheet>
+```js
+// AN APPLICATION WITH DATA FROM A SERVER
+let books = [];                                             // will come later
+let favorites = JSON.parse(localStorage.getItem(KEY)) ?? [];   // read first!
+
+async function load() {                                     // three states
+  try {
+    const response = await fetch("catalog.json");
+    if (!response.ok) throw new Error(`server replied ${response.status}`);
+    books = await response.json();
+    render();                                               // the first showing — after the data
+  } catch (err) {
+    error.textContent = err.message;                        // error
+  } finally {
+    loading.hidden = true;                                  // cleanup in any outcome
+  }
+}
+
+// A FILTER OF SEVERAL CONDITIONS: every check only refuses
+function isVisible(book) {
+  if (!matchesSearch(book)) return false;
+  if (!matchesGenre(book)) return false;
+  return true;                                              // true — in one line at the end
+}
+
+// A TOGGLE IN AN ARRAY
+favorites = favorites.includes(id) ? favorites.filter((f) => f !== id) : [...favorites, id];
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. What three states does a page that waits for a server have, and what does the person see in each?
+   <Answer>Loading — “Loading…”; data — the cards and the counter; error — a clear text.
+   “Loading…” is removed in `finally` so that it does not stay on an error.</Answer>
+2. Why are the genre buttons built from the data and not written in the markup?
+   <Answer>A new genre on the server gets a button by itself, the page does not have to be edited.
+   The markup is responsible for the frame, the data for the contents.</Answer>
+3. Why can `isVisible` not start with `if (genre === "all") return true`?
+   <Answer>`return` will end the function, and the search and favorites checks will not
+   run. Every check must only refuse, and `true` comes
+   at the very end.</Answer>
+4. What happens if you declare `let favorites = [];` and do not read storage?
+   <Answer>After a reload the favorites are empty, and the first `render` writes
+   `[]` over the saved ones — the data is lost. First read,
+   then write.</Answer>
+5. Why does the search need `toLowerCase` on both sides?
+   <Answer>So that case does not get in the way: “TOLSTOY” and “tolstoy” will find “Leo Tolstoy”. We bring
+   both the query and the text of the book to one case.</Answer>
+6. Why does the search here not wait for a pause in typing, like the autosave of day 30?
+   <Answer>The data is already on the page, the filter works instantly. A pause is needed when every
+   letter would go to the server as a request.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" />

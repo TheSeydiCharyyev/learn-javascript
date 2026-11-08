@@ -1,0 +1,1024 @@
+---
+title: "День 24 — DOM: находим элементы на странице"
+day: День 24 • урок 1
+heading: "DOM: находим элементы на странице"
+lead: Модуль «DOM и события», первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- объяснить, что такое DOM и чем он отличается от HTML-файла;
+- находить элементы по `id`, по селектору и целым списком;
+- ходить по дереву: к родителю, к детям, к соседям;
+- отличать узлы от элементов и не попадаться на пробельный текст;
+- проверять элемент селектором и искать ближайшего предка;
+- вывести «Табель» не в консоль, а в таблицу на странице.
+</Goals>
+
+<Toc />
+
+## 1. Страница глазами программы {#why}
+
+Двадцать три дня наши программы жили в консоли: считали, сравнивали, собирали
+отчёты — и печатали их строками. Сегодня начинается модуль, ради которого JavaScript
+когда-то и придумали: **страница**.
+
+Открывая HTML-файл, браузер читает разметку и строит из неё объекты в памяти —
+по объекту на каждый тег — и связывает их, как родственников в родословной.
+Эта модель называется
+**DOM**, Document Object Model — «объектная модель документа». По ней
+браузер и рисует страницу.
+
+JavaScript работает не с файлом, а с этими объектами: изменили объект — изменилась
+страница на экране, а файл на диске остался прежним. Главный объект лежит в переменной
+`document`.
+
+```js
+// в консоли браузера
+typeof document;   // "object"
+document.title;    // надпись на вкладке, строкой
+
+// тот же код в Node
+typeof document;   // "undefined"
+document.title;    // ReferenceError: document is not defined
+```
+
+Вторая половина примера важна: **DOM — не часть языка**, а возможность
+браузера. Так и было помечено в разборе первой программы на дне 3. В Node переменной
+`document` нет, поэтому сегодняшние примеры запускаются на странице.
+
+<Important>
+<Kbd>Ctrl</Kbd> + <Kbd>U</Kbd> показывает
+**файл**, каким он пришёл, а вкладка Elements (<Kbd>F12</Kbd>) —
+**DOM**, каким он стал сейчас. После работы скрипта они расходятся,
+и верить надо второму.
+</Important>
+
+## 2. Учебная страница {#page}
+
+Все примеры сегодня работают на одной странице. Создайте папку `day-24`,
+в ней файл `index.html` и пустой `app.js`:
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Группа JS-1</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1 id="title">Группа JS-1</h1>
+    <nav>
+      <a href="#list">Список</a>
+      <a href="#info">Расписание</a>
+    </nav>
+  </header>
+  <main>
+    <ul id="list">
+      <li class="student">Аман</li>
+      <li class="student absent">Мерет</li>
+      <li class="student">Гүлнар</li>
+      <li class="student absent">Сапар</li>
+      <li class="student">Огулджан</li>
+    </ul>
+    <p id="info" class="note">Занятия: пн, ср, пт</p>
+  </main>
+  <footer>
+    <p class="note">Мары, 2026</p>
+  </footer>
+</body>
+</html>
+```
+
+Студенты — те же, что в «Табеле». У пунктов списка класс `student`,
+у двоих ещё и `absent` — они пропустили занятие. У заголовка и у списка
+есть `id`. Всё это — зацепки, по которым код будет находить элементы.
+
+Код из примеров пишите в `app.js` или прямо в консоли этой страницы —
+консоль видит тот же `document`. Строка со `<script>`
+знакома по дням 1 и 2, а что будет без `defer`, проверим в разделе 5.
+
+<ProTip>
+Щёлкните правой кнопкой по пункту списка и выберите «Просмотреть код» — элемент
+выделится во вкладке Elements. Теперь `$0` в консоли вернёт именно его.
+Это возможность Chrome, а не языка, но для опытов она очень удобна.
+</ProTip>
+
+## 3. Дерево DOM {#tree}
+
+Теги вложены друг в друга, поэтому DOM получается **деревом** —
+об этом шла речь ещё на дне 2. Вот дерево нашей страницы:
+
+<Scheme src="scheme-tree.svg">Дерево учебной страницы. Каждый прямоугольник — объект в памяти браузера</Scheme>
+
+Слова для дерева встречаются в названиях методов, их стоит выучить сразу:
+
+| Слово | Что значит | На нашей странице |
+| --- | --- | --- |
+| корень | узел без родителя | `document` |
+| родитель (parent) | узел, в котором лежит этот | у каждого `li` — `ul` |
+| дети (children) | узлы, лежащие прямо внутри | у `ul` — пять `li` |
+| соседи (siblings) | дети одного родителя | `header`, `main`, `footer` |
+| предки | родитель, его родитель и так до корня | у `li` — `ul`, `main`, `body`, `html`, `document` |
+| потомки | дети, их дети и так далее | у `main` — `ul`, пять `li` и `p` |
+| лист | узел без детей | `meta` |
+
+Пригодится и **порядок дерева**: сам узел, потом целиком первый ребёнок
+со всеми потомками, потом второй — `body`, `header`,
+`h1`, `nav`, обе ссылки, `main`… Проще говоря,
+в каком порядке теги открываются в файле сверху вниз.
+
+## 4. Узлы: элементы, текст, комментарии {#nodes}
+
+На схеме только теги, но в дереве есть не только они. Любой объект дерева —
+**узел** (node). Тег — узел-**элемент**. Текст внутри тега —
+отдельный **текстовый** узел, ребёнок этого элемента. Комментарий
+`<!-- … -->` и сам `document` — тоже узлы.
+
+Узнать вид узла помогают два свойства: `nodeType` — число и
+`nodeName` — строка.
+
+| Узел | `nodeType` | `nodeName` |
+| --- | --- | --- |
+| элемент | 1 | имя тега большими буквами: `"LI"`, `"BODY"` |
+| текст | 3 | `"#text"` |
+| комментарий | 8 | `"#comment"` |
+| документ | 9 | `"#document"` |
+| `<!DOCTYPE html>` | 10 | `"html"` |
+
+```js
+document.nodeType;        // 9
+document.nodeName;        // "#document"
+document.body.nodeType;   // 1
+document.body.nodeName;   // "BODY"
+
+Node.ELEMENT_NODE;        // 1 — у чисел есть имена
+Node.TEXT_NODE;           // 3
+```
+
+Имена `Node.ELEMENT_NODE` и `Node.TEXT_NODE` — те же числа,
+но `node.nodeType === Node.TEXT_NODE` читается без таблицы.
+
+<Mistake>
+У элементов HTML `nodeName` всегда пишется **большими буквами**,
+как бы тег ни был записан в файле. Поэтому сравнение с маленькими буквами молча
+даёт `false`:
+</Mistake>
+
+```js
+document.body.nodeName === "body";                 // false!
+document.body.nodeName === "BODY";                 // true
+document.body.nodeName.toLowerCase() === "body";   // true
+```
+
+## 5. `document` — вход в дерево {#document}
+
+Браузер создаёт `document` для каждой страницы сам. Из его свойств
+сегодня нужны три готовых ярлыка:
+
+```js
+document.body;    // <body>…</body>
+document.head;    // <head>…</head>
+document.title;   // "Группа JS-1"
+```
+
+Консоль показывает найденный элемент **кусочком разметки**. Стрелка
+раскрывает его содержимое, а наведение мыши подсвечивает элемент на странице.
+
+`document.title` можно и поменять — это первое изменение страницы
+в курсе:
+
+```js
+document.title = "Группа JS-1 — 5 студентов";
+document.title;   // "Группа JS-1 — 5 студентов"
+```
+
+Поменялись и надпись на вкладке, и сам элемент `<title>`
+в `head`. А вот `document.head` только читается. Присваивание ему браузер молча
+проигнорирует, а в строгом режиме бросит `TypeError: Cannot set property head
+of #<Document> which has only a getter` — это тот самый строгий режим,
+с которым мы встречались на дне 4.
+
+### Почему без `defer` ничего не находится
+
+На дне 1 скрипт без `defer` падал, а на дне 2 мы узнали почему.
+Проверим — уберите `defer`:
+
+```html
+<head>
+  <meta charset="UTF-8">
+  <title>Группа JS-1</title>
+  <script src="app.js"></script>   <!-- без defer -->
+</head>
+```
+
+```js
+// app.js, подключённый без defer
+document.head;    // <head>…</head> — уже есть
+document.title;   // "Группа JS-1" — <title> стоит выше скрипта
+document.body;    // null — до <body> браузер ещё не дошёл
+```
+
+Браузер строит дерево **по ходу чтения файла**. Встретив
+`<script>` без `defer`, он сразу выполняет код, а в дереве
+к этому моменту есть только то, что в файле выше скрипта. С `defer` код
+ждёт, пока дерево будет построено целиком.
+
+## 6. `getElementById` {#by-id}
+
+Самый прямой способ — по `id`. Он на странице уникален, поэтому
+ответ всегда один:
+
+```js
+const title = document.getElementById("title");
+
+title;            // <h1 id="title">Группа JS-1</h1>
+title.nodeName;   // "H1"
+```
+
+Три правила, на которых спотыкаются все:
+
+```js
+document.getElementById("#title");   // null — решётка не нужна
+document.getElementById("Title");    // null — регистр важен
+
+document.getElementByID("title");
+// TypeError: document.getElementByID is not a function
+```
+
+Первые две ошибки коварны: они не падают, а молча возвращают `null`.
+Третья падает сразу: в имени метода `Id` — большая `I`,
+маленькая `d`. А если в разметке по ошибке два одинаковых `id`,
+метод вернёт первый элемент.
+
+### Разбор: «Cannot read properties of null»
+
+Самое частое сообщение первой недели работы со страницей.
+
+```js
+const box = document.getElementById("tabel");
+
+box;            // null — молча, без ошибки
+box.nodeName;   // TypeError: Cannot read properties of null (reading 'nodeName')
+```
+
+**Шаг 1. Читаем сообщение буквально.** «Нельзя прочитать свойства
+у `null`, читали `nodeName`». Значит, слева от точки оказался
+`null`.
+
+**Шаг 2. Ищем, откуда он взялся.** Ошибка случилась на второй строке,
+а причина — на первой: `getElementById` ничего не нашёл и вернул
+`null`, не сказав ни слова. Сообщение называет свойство, а не
+`id`, поэтому искать приходится выше по коду.
+
+**Шаг 3. Проверяем три причины.** Опечатка в `id`.
+Скрипт выполнился раньше, чем появился элемент (нет `defer`). Элемент
+на другой странице — к `index.html` подключён чужой скрипт.
+
+**Шаг 4. Защищаемся.** Если элемента может не быть, проверяем сразу
+после поиска — как на дне 23 проверяли строку перед `JSON.parse`:
+
+```js
+const box = document.getElementById("tabel");
+
+if (box === null) {
+  console.log('на странице нет id="tabel" — проверьте разметку и defer');
+}
+```
+
+## 7. `querySelector` и селекторы {#selector}
+
+Универсальный инструмент — `querySelector`. Он принимает
+**селектор** — ту же запись, которой в CSS выбирают элементы для
+оформления, — и возвращает первый подходящий элемент или `null`.
+
+| Селектор | Что ищет | У нас найдёт |
+| --- | --- | --- |
+| `li` | по тегу | Аман |
+| `.student` | по классу | Аман |
+| `#list` | по `id` | список `ul` |
+| `li.absent` | тег и класс вместе | Мерет |
+| `main p` | `p` где-то внутри `main` | абзац с расписанием |
+| `nav > a` | `a` прямо внутри `nav` | ссылку «Список» |
+| `a[href="#info"]` | по атрибуту | ссылку «Расписание» |
+| `li:nth-child(2)` | второй ребёнок своего родителя | Мерет |
+| `li:last-child` | последний ребёнок | Огулджан |
+| `li:not(.absent)` | всё, кроме | Аман |
+| `header a, footer p` | или то, или другое | ссылку «Список» |
+
+```js
+document.querySelector(".student");          // <li class="student">Аман</li>
+document.querySelector("li.absent");         // <li class="student absent">Мерет</li>
+document.querySelector("li:last-child");     // <li class="student">Огулджан</li>
+document.querySelector('a[href="#info"]');   // <a href="#info">Расписание</a>
+document.querySelector(".note");             // <p id="info" class="note">Занятия: пн, ср, пт</p>
+```
+
+Абзацев с классом `note` два, а вернулся тот, что раньше в порядке
+дерева. И ещё: пробел и `>` в селекторе — разные вещи. `main p`
+найдёт абзац на любой глубине внутри `main`, `nav > a` —
+только ссылки прямо в `nav`.
+
+<Mistake>
+Самая частая ошибка — забытая точка. Без неё селектор ищет **тег**,
+а не класс, и молча возвращает `null`.
+</Mistake>
+
+```js
+document.querySelector("student");    // null — ищет тег <student>
+document.querySelector(".student");   // <li class="student">Аман</li>
+```
+
+А селектор с ошибкой в записи сразу бросает исключение:
+
+```js
+document.querySelector("li..student");
+// SyntaxError: Failed to execute 'querySelector' on 'Document':
+// 'li..student' is not a valid selector.
+```
+
+Отсюда различие: **не нашлось — `null`, не понял селектор —
+исключение**. Формально это `DOMException` с именем
+`SyntaxError`, но `try...catch` из дня 11 ловит его как любое другое.
+
+Решётка, лишняя в `getElementById`, в селекторе обязательна:
+
+```js
+document.querySelector("#title") === document.getElementById("title");   // true
+```
+
+Есть у элемента `id` — годится любой из двух, в остальных случаях —
+`querySelector`.
+
+## 8. `querySelectorAll` и `NodeList` {#all}
+
+Чтобы получить **все** подходящие элементы, есть
+`querySelectorAll`. Он возвращает список — `NodeList`:
+
+```js
+const items = document.querySelectorAll(".student");
+
+items;           // NodeList(5) [li.student, li.student.absent, li.student, li.student.absent, li.student]
+items.length;    // 5
+items[0];        // <li class="student">Аман</li>
+items.item(1);   // <li class="student absent">Мерет</li>
+```
+
+В списке консоль пишет элементы языком селекторов: `li.student.absent` —
+тег `li` с двумя классами.
+
+Номера идут с нуля. За краем списка скобки и `item` отвечают
+по-разному, а если не нашлось ничего, получится пустой список:
+
+```js
+items[9];                                    // undefined — за краем
+items.item(9);                               // null
+document.querySelectorAll(".nope").length;   // 0 — пустой список, не null
+```
+
+<Important>
+Отсюда разные проверки. После `querySelector` проверяют
+`=== null`, после `querySelectorAll` —
+`.length === 0`. Пустой список — объект, и условие
+`if (list)` для него всегда истинно.
+</Important>
+
+### Как перебрать список
+
+На дне 11 мы обещали `for...of` для найденных элементов страницы:
+
+```js
+for (const li of items) {
+  console.log(li);
+}
+// <li class="student">Аман</li>
+// <li class="student absent">Мерет</li>
+// … и так все пять
+
+items.forEach((li, i) => console.log(i, li.nodeName));
+// 0 LI
+// 1 LI   … до 4
+```
+
+`forEach` работает, как у массива из дня 20. Но на этом сходство
+заканчивается:
+
+```js
+items.map((li) => li.nodeName);
+// TypeError: items.map is not a function
+```
+
+`NodeList` — не массив: `map`, `filter`,
+`reduce` у него нет. Когда они нужны, список превращают в массив —
+`Array.from` из дня 19 или три точки из дня 22:
+
+```js
+const arr = [...items];         // или Array.from(items)
+
+Array.isArray(items);           // false
+Array.isArray(arr);             // true
+arr.map((li) => li.nodeName);   // ["LI", "LI", "LI", "LI", "LI"]
+arr.at(-1);                     // <li class="student">Огулджан</li>
+```
+
+А `for...in` перебирает не только номера, но и всё, что у списка
+есть в придачу:
+
+```js
+for (const key in document.querySelectorAll(".absent")) {
+  console.log(key);
+}
+// 0, 1, entries, keys, values, forEach, length, item
+```
+
+Элементов два, а ключей восемь. Правило то же, что для массивов:
+**для списков — `for...of` или `forEach`**.
+
+## 9. Поиск внутри элемента {#inside}
+
+`querySelector` и `querySelectorAll` есть и у **любого
+элемента** — тогда они ищут только среди его потомков:
+
+```js
+const main = document.querySelector("main");
+
+main.querySelectorAll("p").length;       // 1 — только внутри main
+document.querySelectorAll("p").length;   // 2 — на всей странице
+main.querySelector(".note");             // <p id="info" class="note">Занятия: пн, ср, пт</p>
+```
+
+Рабочий приём: найти контейнер, потом искать внутри. Лишних совпадений меньше —
+абзац из подвала сюда не попадёт, хотя класс у него тот же.
+
+У `getElementById` такой версии нет:
+
+```js
+main.getElementById("list");
+// TypeError: main.getElementById is not a function
+```
+
+`id` уникален на всей странице, искать его «внутри» незачем.
+
+### Ловушка: селектор смотрит на всю страницу
+
+MDN предупреждает: селектор сверяется со **всей страницей**, а внутри
+элемента должен лежать только результат:
+
+```js
+const list = document.querySelector("#list");
+
+list.querySelectorAll("main li").length;          // 5 — хотя main снаружи!
+list.querySelectorAll(":scope main li").length;   // 0
+list.querySelectorAll(":scope > li").length;      // 5 — прямые дети list
+```
+
+`main li` значит «`li`, у которого где-то выше есть
+`main`», а `main` выше есть, хоть и снаружи `list`.
+`:scope` означает «сам элемент, у которого вызвали поиск» и привязывает
+селектор к нему.
+
+## 10. Старые методы: `getElementsBy…` {#old}
+
+До `querySelector` элементы искали двумя методами, и они до сих пор
+живут в старом коде:
+
+```js
+document.getElementsByClassName("student");   // HTMLCollection(5) [li.student, …]
+document.getElementsByTagName("p").length;    // 2
+
+document.getElementsByTagName("li").forEach((li) => console.log(li));
+// TypeError: document.getElementsByTagName(...).forEach is not a function
+```
+
+Отличий от `querySelectorAll` три. Аргумент — не селектор, а голое имя:
+класс без точки, тег без скобок. Результат — не `NodeList`, а
+`HTMLCollection`, и у неё **нет даже `forEach`**
+(`for...of` и `Array.from` работают). И главное — коллекция
+**живая**.
+
+«Живая» — значит следит за страницей, а `querySelectorAll` делает снимок
+на момент вызова. Разницу видно, если убрать элемент; как это делается — день 26,
+сейчас смотрите только на числа:
+
+```js
+const live = document.getElementsByClassName("absent");
+const snapshot = document.querySelectorAll(".absent");
+
+live.length;       // 2
+snapshot.length;   // 2
+
+document.querySelector(".absent").remove();   // день 26: убрать элемент
+
+live.length;       // 1 — живая коллекция следит за страницей
+snapshot.length;   // 2 — снимок помнит, как было
+```
+
+Опыт удалил Мерет — обновите страницу (<Kbd>F5</Kbd>), а в
+`app.js` сотрите строку с `remove`: дальше нужны все пятеро.
+
+| Способ | Что передать | Что вернёт | Живой? |
+| --- | --- | --- | --- |
+| `getElementById` | `id` без решётки | элемент или `null` | — |
+| `querySelector` | селектор | элемент или `null` | — |
+| `querySelectorAll` | селектор | `NodeList` | нет, снимок |
+| `getElementsByClassName` | класс без точки | `HTMLCollection` | да |
+| `getElementsByTagName` | имя тега | `HTMLCollection` | да |
+
+В новом коде хватает `querySelector` и `querySelectorAll`,
+старые методы достаточно **узнавать**.
+
+## 11. Родители, дети, соседи {#relatives}
+
+От найденного элемента часто нужно пройти к родителю, к соседу, к первому ребёнку.
+Для этого есть свойства-переходы:
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.parentElement;            // <ul id="list">…</ul>
+meret.previousElementSibling;   // <li class="student">Аман</li>
+meret.nextElementSibling;       // <li class="student">Гүлнар</li>
+
+const list = meret.parentElement;
+list.children.length;           // 5
+list.firstElementChild;         // <li class="student">Аман</li>
+list.lastElementChild;          // <li class="student">Огулджан</li>
+```
+
+Названия длинные, но складываются из понятных частей: `parent` —
+родитель, `children` — дети, `first` и `last` —
+первый и последний, `sibling` — сосед, `previous` и
+`next` — предыдущий и следующий. `children` — это
+`HTMLCollection` из прошлого раздела, живая.
+
+На краю дерева переход ведёт в пустоту, и ответ — `null`. Переходы
+можно выстраивать в цепочку:
+
+```js
+list.firstElementChild.previousElementSibling;   // null — левее никого
+list.lastElementChild.nextElementSibling;        // null — правее никого
+meret.parentElement.parentElement;               // <main>…</main>
+```
+
+Длинные цепочки `parentElement.parentElement` хрупкие: лишняя обёртка
+в разметке — и цепочка приведёт не туда. Надёжная замена — `closest`
+из раздела 13.
+
+### Два родителя: `parentElement` и `parentNode`
+
+У каждого узла есть и `parentNode`. Почти всегда он совпадает с
+`parentElement`, а разница видна только на самом верху:
+
+```js
+const html = document.body.parentElement;   // <html lang="ru">…</html>
+
+html.parentElement;   // null — document не элемент
+html.parentNode;      // #document
+
+document.body.contains(meret);   // true — Мерет внутри body
+meret.contains(document.body);   // false
+meret.contains(meret);           // true — узел содержит сам себя
+```
+
+Родитель `html` — `document`, узел, но не элемент, поэтому
+`parentElement` отвечает `null`. `contains` отвечает,
+лежит ли узел внутри, и сам себя узел тоже «содержит».
+
+## 12. Узлы против элементов {#whitespace}
+
+У каждого перехода есть двойник без слова `Element` в имени. Новички
+берут именно их, потому что имена короче:
+
+```js
+const list = document.getElementById("list");
+
+list.firstChild;            // текстовый узел — а не Аман!
+list.firstChild.nodeName;   // "#text"
+list.childNodes.length;     // 11 — а учеников пять
+list.children.length;       // 5
+```
+
+**Шаг 1. Откуда текст?** Между `<ul id="list">`
+и первым `<li>` в файле стоят перенос строки и отступ. Для браузера
+это обычный текст, и в дереве он становится текстовым узлом.
+
+**Шаг 2. Считаем.** Такой текст стоит между всеми пунктами и после
+последнего: пять элементов и шесть кусков пробелов — одиннадцать узлов.
+
+<Scheme src="scheme-whitespace.svg">Одни и те же дети списка двумя глазами: все узлы и только элементы</Scheme>
+
+**Шаг 3. Запоминаем две лестницы.** Левая ходит по всем узлам, правая —
+только по элементам:
+
+| Все узлы | Только элементы |
+| --- | --- |
+| `parentNode` | `parentElement` |
+| `childNodes` (`NodeList`) | `children` (`HTMLCollection`) |
+| `firstChild` | `firstElementChild` |
+| `lastChild` | `lastElementChild` |
+| `previousSibling` | `previousElementSibling` |
+| `nextSibling` | `nextElementSibling` |
+
+Правило: **ищете теги — берите правую колонку**. Левая понадобится,
+когда нужен сам текст, — это завтра. А из списка всех узлов элементы отбирают
+по `nodeType`:
+
+```js
+[...list.childNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE).length;   // 5
+```
+
+Разница хорошо видна в цикле `while` из дня 10 — так обходит соседей
+пример MDN со страницы `nodeName` (там — от `body`):
+
+```js
+let node = document.querySelector("header").firstChild;
+while (node) {
+  console.log(node.nodeName);
+  node = node.nextSibling;
+}
+// #text H1 #text NAV #text
+```
+
+```js
+let el = document.querySelector("header").firstElementChild;
+while (el) {
+  console.log(el.nodeName);
+  el = el.nextElementSibling;
+}
+// H1 NAV
+```
+
+Цикл кончается сам: у последнего соседа следующего нет, переход возвращает
+`null`, а `null` в условии ложен. Узлов пять, элементов два.
+
+## 13. `matches` и `closest` {#closest}
+
+`matches(селектор)` отвечает `true` или `false`:
+подходит ли элемент под селектор.
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.matches(".absent");      // true
+meret.matches("#list > li");   // true
+meret.matches("p");            // false
+```
+
+Зачем проверять найденное? Элемент часто приходит со стороны: параметром функции,
+а с дня 27 — из события «по чему щёлкнули»:
+
+```js
+function kind(el) {
+  if (el.matches("li.absent")) return "пропустил";
+  if (el.matches("li")) return "был";
+  return "не ученик";
+}
+
+kind(document.querySelector(".absent"));   // "пропустил"
+kind(document.querySelector("li"));        // "был"
+kind(document.querySelector("h1"));        // "не ученик"
+```
+
+`closest(селектор)` идёт **вверх**: проверяет сам элемент,
+потом родителя, потом родителя родителя — и возвращает первый подошедший.
+Если до самого верха ничего не нашлось, ответ — `null`.
+
+```js
+meret.closest("ul");         // <ul id="list">…</ul>
+meret.closest("main");       // <main>…</main>
+meret.closest(".student");   // сама Мерет — проверка начинается с себя
+meret.closest("footer");     // null — такого предка нет
+```
+
+<Scheme src="scheme-closest.svg">closest поднимается по предкам, начиная с самого элемента</Scheme>
+
+`meret.closest("main")` найдёт `main`, сколько бы обёрток
+ни появилось между ними. На дне 27 метод станет главным инструментом: щелчок часто
+попадает во вложенный элемент, и `closest("li")` найдёт пункт, по которому
+щёлкнули.
+
+## 14. Обход всего дерева {#walk}
+
+На дне 12 мы говорили, что рекурсия незаменима для деревьев, «например, для обхода
+страницы». Вот он: функция печатает имя элемента и вызывает саму себя для каждого
+ребёнка — с отступом побольше:
+
+```js
+function printTree(el, depth = 0) {
+  console.log("  ".repeat(depth) + el.nodeName);
+  for (const child of el.children) {
+    printTree(child, depth + 1);
+  }
+}
+
+printTree(document.body);
+```
+
+<ResultBox>
+```plain-out
+BODY
+  HEADER
+    H1
+    NAV
+      A
+      A
+  MAIN
+    UL
+      LI
+      LI
+      LI
+      LI
+      LI
+    P
+  FOOTER
+    P
+  SCRIPT
+```
+</ResultBox>
+
+Это дерево из раздела 3, только лёжа, а порядок строк — порядок дерева.
+Строку `SCRIPT` добавил Live Server: он вставляет свой скрипт, как на дне 2.
+Открыв файл двойным щелчком, вы её не увидите.
+
+Одним циклом тут не обойтись: глубина дерева заранее неизвестна — у `h1`
+она одна, у ссылок в `nav` другая. Рекурсия опускается ровно настолько,
+насколько нужно. У элемента без детей цикл внутри функции не выполнится ни разу —
+это и есть условие выхода из дня 12.
+
+Сверить результат можно встроенным средством: селектор `*` означает
+«любой элемент», и `document.body.querySelectorAll("*").length` даёт 16 —
+ровно столько строк под `BODY` в выводе.
+
+## 15. «Табель» на странице {#tabel}
+
+Вчера «Табель» разделил расчёт и показ. Сегодня показ переезжает из консоли
+в таблицу на странице. Файл `index.html`:
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Табель</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>Табель группы JS-1</h1>
+  <table id="tabel">
+    <thead>
+      <tr><th>Имя</th><th>Средн</th><th>Мин</th><th>Макс</th><th>%</th><th>Вердикт</th></tr>
+    </thead>
+    <tbody>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
+```
+
+Шапка таблицы теперь в разметке, а под студентов заготовлено пять пустых строк
+по шесть ячеек. Расчётная часть `app.js` — вчерашняя, без единого изменения,
+поэтому ниже только новое:
+
+```js
+// без изменений со дня 23: MIN_MARK, MAX_MARK, toMark, isValidMark, sum,
+// average, verdict, строка saved, students = JSON.parse(saved), makeReport
+
+// новое: вместо строки таблицы — шесть текстов, по одному на ячейку
+function makeCells(report) {
+  if (!report.ok) {
+    return [report.name, "—", "—", "—", "—", "нет годных оценок"];
+  }
+  return [
+    report.name,
+    report.average.toFixed(2),
+    String(report.min),
+    String(report.max),
+    report.percent + "%",
+    report.verdict,
+  ];
+}
+
+// запись текста в ячейку — тема завтрашнего дня, пока берём готовой
+function write(cell, text) {
+  cell.textContent = text;   // день 25
+}
+
+// новое: находим строки таблицы и раскладываем тексты по ячейкам
+const rows = document.querySelectorAll("#tabel tbody tr");
+const reports = students.map(makeReport);
+
+reports.forEach((report, i) => {
+  const cells = rows[i].children;
+  makeCells(report).forEach((text, j) => write(cells[j], text));
+});
+
+document.title = `Табель: ${reports.length} студентов`;
+```
+
+<ResultBox>
+| Имя | Средн | Мин | Макс | % | Вердикт |
+| --- | --- | --- | --- | --- | --- |
+| Аман | 4.33 | 3 | 5 | 75% | хорошист |
+| Мерет | 3.33 | 3 | 4 | 100% | троечник |
+| Гүлнар | — | — | — | — | нет годных оценок |
+| Сапар | 4.75 | 4 | 5 | 100% | отличник |
+| Огулджан | 4.50 | 4 | 5 | 67% | отличник |
+
+На вкладке: «Табель: 5 студентов».
+</ResultBox>
+
+Числа те же, что на дне 23. Вчерашнее правило «считаем в данных, форматируем
+в конце» окупилось сразу: способ показа сменился, а `makeReport` этого
+даже не заметила.
+
+**Ушло:** `makeHeader`, линии из дефисов, все
+`padStart` и `padEnd` — шапка теперь в разметке, колонки
+выравнивает браузер. Вместо склеенной строки `makeRow` появилась
+`makeCells` с массивом из шести текстов.
+
+**Пришло:** поиск. `querySelectorAll("#tabel tbody tr")`
+находит пять строк тела таблицы; шапка не попадает, её `tr` лежит в
+`thead`. `children` строки — её шесть ячеек. Номер студента
+`i` выбирает строку, номер текста `j` — ячейку. Единственная
+строка из завтрашнего дня спрятана в `write` и помечена.
+
+### Разбор: шестой студент
+
+Строк в разметке столько, сколько заготовили руками. Добавьте в `saved`
+шестого студента — и программа упадёт:
+
+```js
+rows[5];            // undefined — шестой строки в разметке нет
+rows[5].children;   // TypeError: Cannot read properties of undefined (reading 'children')
+```
+
+Это сообщение из раздела 6, только вместо `null` стоит
+`undefined`: номер за краем списка, как в разделе 8. Лечится не лишними
+заготовками, а созданием строк кодом — это день 26.
+
+<TryIt>
+Два опыта.
+\
+\
+**Первый.** Замените `"#tabel tbody tr"` на
+`"#tabel tr"`. Что стало с шапкой и почему последняя строка осталась пустой?
+\
+\
+**Второй.** Уберите слово `defer` и прочитайте ошибку.
+Какое свойство она называет и где на самом деле причина?
+</TryIt>
+
+## 16. Частые ошибки и что завтра {#mistakes}
+
+| Ошибка | Что увидите | Как правильно |
+| --- | --- | --- |
+| скрипт в `head` без `defer` | `null`, потом `Cannot read properties of null` | добавить `defer` |
+| `getElementById("#title")` | `null` | `id` без решётки |
+| `querySelector("student")` | `null` | класс с точкой: `".student"` |
+| `getElementByID` | `… is not a function` | `getElementById` |
+| `map` у `NodeList` | `items.map is not a function` | `[...items]` или `Array.from` |
+| `forEach` у `getElementsBy…` | `… forEach is not a function` | `for...of` или `querySelectorAll` |
+| `firstChild` вместо `firstElementChild` | текстовый узел | переходы со словом `Element` |
+
+Сегодня мы научились **находить**. Завтра — **менять**:
+текст, разметку, атрибуты, классы и стили. Функция `write` раскроется,
+а «Табель» сможет, например, выделить отличников цветом. Дальше модуль идёт так:
+
+| День | Тема |
+| --- | --- |
+| 25 | меняем текст, атрибуты, классы, стили |
+| 26 | создаём и удаляем элементы |
+| 27 | события: щелчки и клавиши |
+| 28 | формы и проверка ввода |
+| 29 | мини-проект: список дел |
+
+И каждый из этих дней начинается с сегодняшнего: прежде чем изменить элемент
+или ответить на щелчок по нему, элемент нужно найти.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [DOM](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model) | обзор: страница как дерево объектов | <Full /> |
+| [Устройство DOM](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Anatomy_of_the_DOM) | узлы, родители, дети, типы узлов | <Full /> |
+| [Поиск и обход](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Selection_and_traversal_on_the_DOM_tree) | поиск по селекторам, снимок против живого списка | <Full /> |
+| [Document](https://developer.mozilla.org/en-US/docs/Web/API/Document) | объект `document` — корень дерева | <Full /> |
+| [document.body](https://developer.mozilla.org/en-US/docs/Web/API/Document/body) | элемент `body` или `null` | <Full /> |
+| [document.title](https://developer.mozilla.org/en-US/docs/Web/API/Document/title) | надпись вкладки: читать и менять | <Full /> |
+| [getElementById](https://developer.mozilla.org/en-US/docs/Web/API/Document/getElementById) | элемент по `id` или `null` | <Full /> |
+| [document.querySelector](https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelector) | первый элемент по селектору | <Full /> |
+| [document.querySelectorAll](https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelectorAll) | все элементы по селектору, снимком | <Full /> |
+| [Element.querySelector](https://developer.mozilla.org/en-US/docs/Web/API/Element/querySelector) | первый среди потомков элемента | <Full /> |
+| [Element.querySelectorAll](https://developer.mozilla.org/en-US/docs/Web/API/Element/querySelectorAll) | все среди потомков; ловушка `:scope` | <Full /> |
+| [matches](https://developer.mozilla.org/en-US/docs/Web/API/Element/matches) | подходит ли элемент под селектор | <Full /> |
+| [closest](https://developer.mozilla.org/en-US/docs/Web/API/Element/closest) | сам элемент или ближайший подходящий предок | <Full /> |
+| [document.head](https://developer.mozilla.org/en-US/docs/Web/API/Document/head) | элемент `head`, только для чтения | <Brief /> |
+| [getElementsByClassName](https://developer.mozilla.org/en-US/docs/Web/API/Document/getElementsByClassName) | по классу, живая `HTMLCollection` | <Brief /> |
+| [getElementsByTagName](https://developer.mozilla.org/en-US/docs/Web/API/Document/getElementsByTagName) | по тегу, живая `HTMLCollection` | <Brief /> |
+| [children](https://developer.mozilla.org/en-US/docs/Web/API/Element/children) | дети-элементы | <Brief /> |
+| [firstElementChild](https://developer.mozilla.org/en-US/docs/Web/API/Element/firstElementChild) | первый ребёнок-элемент | <Brief /> |
+| [lastElementChild](https://developer.mozilla.org/en-US/docs/Web/API/Element/lastElementChild) | последний ребёнок-элемент | <Brief /> |
+| [previousElementSibling](https://developer.mozilla.org/en-US/docs/Web/API/Element/previousElementSibling) | предыдущий сосед-элемент | <Brief /> |
+| [nextElementSibling](https://developer.mozilla.org/en-US/docs/Web/API/Element/nextElementSibling) | следующий сосед-элемент | <Brief /> |
+| [parentElement](https://developer.mozilla.org/en-US/docs/Web/API/Node/parentElement) | родитель-элемент или `null` | <Brief /> |
+| [parentNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/parentNode) | родитель любого вида | <Brief /> |
+| [childNodes](https://developer.mozilla.org/en-US/docs/Web/API/Node/childNodes) | все дети-узлы, вместе с текстом | <Brief /> |
+| [firstChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/firstChild) | первый ребёнок-узел, часто `#text` | <Brief /> |
+| [lastChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/lastChild) | последний ребёнок-узел | <Brief /> |
+| [previousSibling](https://developer.mozilla.org/en-US/docs/Web/API/Node/previousSibling) | предыдущий сосед-узел | <Brief /> |
+| [nextSibling](https://developer.mozilla.org/en-US/docs/Web/API/Node/nextSibling) | следующий сосед-узел | <Brief /> |
+| [contains](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains) | лежит ли узел внутри этого | <Brief /> |
+| [nodeName](https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeName) | имя узла: `"LI"`, `"#text"` | <Brief /> |
+| [nodeType](https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType) | вид узла числом: 1, 3, 9 | <Brief /> |
+| [NodeList](https://developer.mozilla.org/en-US/docs/Web/API/NodeList) | список узлов, не массив | <Brief /> |
+| [NodeList.length](https://developer.mozilla.org/en-US/docs/Web/API/NodeList/length) | сколько в списке | <Brief /> |
+| [NodeList.item](https://developer.mozilla.org/en-US/docs/Web/API/NodeList/item) | элемент по номеру, за краем `null` | <Brief /> |
+| [NodeList.forEach](https://developer.mozilla.org/en-US/docs/Web/API/NodeList/forEach) | перебор, как у массива | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// НАЙТИ ОДИН — элемент или null
+document.getElementById("title");     // id без решётки
+document.querySelector("#title");     // любой селектор
+document.querySelector(".student");   // класс — с точкой!
+
+// НАЙТИ ВСЕ — NodeList, пустой, если нет
+const found = document.querySelectorAll("li.absent");   // снимок
+found.length;                         // 2
+found[0] === found.item(0);           // true
+found.forEach((li) => console.log(li));
+for (const li of found) console.log(li);
+[...found].map((li) => li.nodeName);  // ["LI", "LI"] — map только у массива
+
+// ИСКАТЬ ВНУТРИ ЭЛЕМЕНТА
+const main = document.querySelector("main");
+main.querySelectorAll("p").length;    // 1
+
+// ХОДИТЬ ПО ЭЛЕМЕНТАМ (null на краю)
+const list = document.getElementById("list");
+list.parentElement === main;          // true
+list.children.length;                 // 5
+list.firstElementChild.nextElementSibling === found[0];   // true
+list.lastElementChild.nextElementSibling;                 // null
+
+// ХОДИТЬ ПО УЗЛАМ (с текстом из пробелов)
+list.childNodes.length;               // 11
+list.firstChild.nodeName;             // "#text"
+
+// ПРОВЕРИТЬ
+found[0].matches(".absent");          // true
+found[0].closest("main") === main;    // true — сам или предок, иначе null
+document.body.contains(list);         // true — внутри
+list.nodeName;                        // "UL" — большими буквами
+list.nodeType;                        // 1 элемент, 3 текст, 9 документ
+
+// ДОКУМЕНТ
+document.head;                        // <head>…</head>
+document.title = "новый заголовок";
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем DOM отличается от HTML-файла?
+   <Answer>Файл — текст на диске. DOM — дерево объектов, которое браузер построил
+   из этого текста в памяти. Скрипт меняет DOM, файл остаётся прежним;
+   вкладка Elements показывает DOM, а <Kbd>Ctrl</Kbd> + <Kbd>U</Kbd> — файл.</Answer>
+2. Что вернут `querySelector` и `querySelectorAll`, если
+   ничего не нашли?
+   <Answer>`querySelector` — `null`, `querySelectorAll` —
+   пустой `NodeList` с длиной 0. Поэтому и проверки разные:
+   `=== null` и `.length === 0`.</Answer>
+3. Почему `list.firstChild` — не первый пункт списка?
+   <Answer>Перенос строки и отступ между `<ul>` и первым
+   `<li>` — тоже текст, и он лежит в дереве текстовым узлом.
+   Первый ребёнок-элемент даёт `firstElementChild`.</Answer>
+4. Почему у списка из `querySelectorAll` нет `map`?
+   <Answer>`NodeList` — не массив: у него есть `length`,
+   номера, `item` и `forEach`, но не методы массива.
+   Нужен массив — `[...list]` или `Array.from(list)`.</Answer>
+5. Чем `closest("main")` лучше цепочки
+   `parentElement.parentElement`?
+   <Answer>Цепочка зависит от точного числа уровней и ломается от лишней обёртки.
+   `closest` поднимается сколько нужно и останавливается на первом
+   подошедшем, начиная с самого элемента.</Answer>
+6. Почему скрипт в `head` без `defer` не находит элементы?
+   <Answer>Браузер строит дерево по ходу чтения и выполняет такой скрипт немедленно.
+   Всего, что в файле ниже скрипта, в дереве ещё нет — `document.body`
+   равен `null`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model" />

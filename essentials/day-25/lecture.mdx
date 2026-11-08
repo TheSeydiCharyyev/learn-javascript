@@ -1,0 +1,915 @@
+---
+title: "День 25 — Меняем страницу: текст, разметка, атрибуты, классы, стили"
+day: День 25 • урок 1
+heading: "Меняем страницу: текст, разметка, атрибуты, классы, стили"
+lead: Модуль «DOM и события», второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+---
+
+<Goals>
+- менять текст элемента и выбирать между `textContent` и `innerText`;
+- записывать разметку через `innerHTML` и понимать, чем она опасна;
+- читать, ставить и убирать атрибуты;
+- включать и выключать классы через `classList`;
+- менять оформление через `style` и хранить данные в `dataset`;
+- раскрасить строки «Табеля» по вердикту.
+</Goals>
+
+<Toc />
+
+## 1. От поиска к изменению {#why}
+
+Вчера мы научились находить элементы. Сегодня — менять их. У найденного элемента
+можно поменять пять вещей, и на каждую есть свой инструмент:
+
+| Что меняем | Чем | Пример |
+| --- | --- | --- |
+| текст | `textContent`, `innerText` | `h1.textContent = "Группа JS-2"` |
+| разметку внутри | `innerHTML` | `p.innerHTML = "<b>пн</b>"` |
+| атрибуты | `getAttribute`, `setAttribute` | `a.setAttribute("title", "…")` |
+| классы | `classList` | `li.classList.add("star")` |
+| оформление | `style` | `h1.style.color = "purple"` |
+
+Вчерашняя функция `write` из «Табеля» — это первая строка таблицы.
+Никакой тайны в ней не было:
+
+```js
+function write(cell, text) {
+  cell.textContent = text;   // одно свойство — и весь секрет
+}
+```
+
+Учебная страница — вчерашняя, с добавками: у пунктов списка атрибут `data-id`,
+в расписании жирный `<b>`, ниже — спрятанный абзац, а в `head` —
+стиль для двух классов.
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Группа JS-1</title>
+  <style>
+    .absent { color: gray; text-decoration: line-through; }
+    .star { font-weight: bold; }
+  </style>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1 id="title">Группа JS-1</h1>
+    <nav>
+      <a href="#list">Список</a>
+      <a href="#info">Расписание</a>
+    </nav>
+  </header>
+  <main>
+    <ul id="list">
+      <li class="student" data-id="1">Аман</li>
+      <li class="student absent" data-id="2">Мерет</li>
+      <li class="student" data-id="3">Гүлнар</li>
+      <li class="student absent" data-id="4">Сапар</li>
+      <li class="student" data-id="5">Огулджан</li>
+    </ul>
+    <p id="info" class="note">Занятия: <b>пн, ср, пт</b></p>
+    <p id="secret" hidden>Контрольная в пятницу</p>
+  </main>
+  <footer>
+    <p class="note">Мары, 2026</p>
+  </footer>
+</body>
+</html>
+```
+
+Экспериментируйте смело: код меняет DOM, а не файл, поэтому
+<Kbd>F5</Kbd> вернёт страницу к исходному виду. Примеры одного раздела
+продолжают друг друга, а перед каждым новым разделом обновляйте страницу.
+
+## 2. `Element` и `HTMLElement` {#element}
+
+Откуда у элемента столько свойств? У объектов DOM есть родословная — не как у узлов
+в дереве, а как у видов. Всякий пункт списка — HTML-элемент, всякий HTML-элемент — элемент,
+всякий элемент — узел. Каждый уровень добавляет свои свойства.
+
+<Scheme src="scheme-element.svg">Снизу вверх: пункт списка — HTML-элемент — элемент — узел. Каждый уровень добавляет свойства</Scheme>
+
+Проверить родство помогает `instanceof` — он встречался на дне 23,
+когда оживитель превращал строку в дату:
+
+```js
+const li = document.querySelector("li");
+
+li instanceof HTMLElement;          // true
+li instanceof Element;              // true
+li instanceof Node;                 // true
+
+li.firstChild instanceof Node;      // true — текстовый узел
+li.firstChild instanceof Element;   // false — но не элемент
+```
+
+Отсюда вчерашнее правило «ищете теги — берите переходы со словом `Element`».
+У текстового узла нет ни `classList`, ни `style`: попытка
+добавить ему класс закончится ошибкой `Cannot read properties of undefined`.
+
+### Как узнать, что умеет элемент
+
+Свойств у элемента сотни, и помнить все незачем. `console.log` показывает
+элемент кусочком разметки, а `console.dir` из дня 2 — объектом, который
+раскрывается в полный список свойств:
+
+```js
+console.log(li);   // <li class="student" data-id="1">Аман</li>
+console.dir(li);   // li.student — раскройте стрелку, там все свойства
+```
+
+Второй путь — MDN. На страницах `Element` и `HTMLElement`
+свойства собраны по уровням. Не нашли нужное на странице `HTMLElement` —
+поднимайтесь на уровень выше, как по схеме.
+
+## 3. `textContent`: текст элемента {#text}
+
+Свойство есть у любого узла. Читается — весь текст внутри, пишется — заменяет всё
+содержимое одной строкой текста:
+
+```js
+const title = document.querySelector("#title");
+
+title.textContent;                   // "Группа JS-1"
+title.textContent = "Группа JS-2";   // заголовок на странице сменился
+title.textContent = 42;              // число станет строкой "42"
+```
+
+У контейнера `textContent` склеивает текст всех потомков — теги пропадают,
+а пробелы и переносы из файла остаются:
+
+```js
+document.querySelector("#info").textContent;   // "Занятия: пн, ср, пт" — без <b>
+document.querySelector("#list").textContent;   // "\n      Аман\n      Мерет\n…" — с отступами
+```
+
+Запись стирает **всех** детей. Это заодно самый простой способ
+очистить элемент:
+
+```js
+const list = document.querySelector("#list");
+
+list.children.length;   // 5
+list.textContent = "";
+list.children.length;   // 0 — все пять пунктов исчезли
+```
+
+И главное свойство `textContent`: записанное **не разбирается как
+разметка**. Теги в строке так и останутся буквами:
+
+```js
+title.textContent = "<b>Группа</b> JS-1";
+title.children.length;   // 0 — никакого <b> не появилось, на странице буквально <b>Группа</b>
+```
+
+У самого `document` свойство возвращает `null` — текст
+есть у элементов, а не у документа.
+
+### Разбор: куда делся список
+
+```js
+const list = document.querySelector("#list");
+
+list.textContent = "Студенты группы:";   // хотели подпись над списком…
+list.children.length;                    // 0 — …а пропали все пять пунктов
+```
+
+**Шаг 1. Смотрим, что сделали.** Записали `textContent`
+у самого списка `ul`.
+
+**Шаг 2. Вспоминаем правило.** Запись заменяет **всё**
+содержимое одной строкой. Пункты были содержимым списка — их и заменило.
+
+**Шаг 3. Чиним.** Подпись — отдельный элемент в разметке, например
+`<h2>` над списком, и текст пишем в него. Общий вывод: писать
+`textContent` стоит в элемент, у которого нет нужных детей, — в «лист»
+дерева из дня 24.
+
+## 4. `innerText`: текст, каким его видно {#inner-text}
+
+`innerText` похож на `textContent`, но смотрит глазами человека:
+берёт только то, что показано на экране, и оформляет переносы так, как их видно.
+
+```js
+const main = document.querySelector("main");
+
+main.textContent.includes("Контрольная");   // true — видит и спрятанный абзац
+main.innerText.includes("Контрольная");     // false — на экране его нет
+
+document.querySelector("#list").innerText;  // "Аман\nМерет\nГүлнар\nСапар\nОгулджан"
+```
+
+При записи `innerText` превращает переносы строки `\n`
+в теги `<br>`, а `textContent` оставляет их как есть — и
+на экране они не видны:
+
+```js
+title.innerText = "Группа JS-1\nМары";
+title.innerHTML;   // "Группа JS-1<br>Мары" — две строки на экране
+```
+
+|  | `textContent` | `innerText` |
+| --- | --- | --- |
+| спрятанное | видит | не видит |
+| отступы из файла | оставляет | убирает |
+| `\n` при записи | остаётся символом | становится `<br>` |
+| скорость | быстро | медленнее: браузер пересчитывает оформление |
+
+Правило: **по умолчанию — `textContent`**. Он проще
+и предсказуемее. `innerText` — когда нужен текст ровно таким, каким его видит
+пользователь.
+
+Одна тонкость из MDN: если спрятан **сам** элемент, `innerText`
+отдаёт его текст целиком, как `textContent`. Прячется только спрятанное
+*внутри*:
+
+```js
+document.querySelector("#secret").innerText;   // "Контрольная в пятницу"
+```
+
+## 5. `innerHTML`: разметка строкой {#inner-html}
+
+`innerHTML` читает и пишет содержимое элемента **вместе с тегами**.
+При записи браузер разбирает строку как HTML и строит из неё новые элементы:
+
+```js
+const info = document.querySelector("#info");
+
+info.innerHTML;     // "Занятия: <b>пн, ср, пт</b>"
+info.textContent;   // "Занятия: пн, ср, пт"
+
+info.innerHTML = "Занятия: <b>пн, ср</b> и <i>пт</i>";
+info.children.length;   // 2 — браузер построил <b> и <i>
+```
+
+Как и `textContent`, запись заменяет всё содержимое. Поэтому у
+`innerHTML` есть коварная привычка, связанная с `+=`:
+
+```js
+const bold = info.querySelector("b");
+info.innerHTML += "!";
+
+info.contains(bold);   // false — старый <b> выброшен, на его месте новый
+```
+
+`+=` читает всю разметку строкой, дописывает восклицательный знак и
+записывает обратно. Браузер разбирает её заново и строит **все**
+элементы с нуля. Внешне ничего не изменилось, но сохранённые ссылки ведут
+к выброшенным элементам. А на длинном списке это ещё и медленно. Дописать в конец
+правильнее через `insertAdjacentHTML` из раздела 7.
+
+## 6. Чужие данные и `innerHTML` {#danger}
+
+Раз `innerHTML` разбирает строку как разметку, в разметку превратится всё,
+что в строке окажется. Пока строку пишем мы — это удобно. Когда она приходит из данных —
+опасно:
+
+```js
+const name = "<i>Аман</i>";   // пришло из данных, например из формы
+const p = document.querySelector("footer p");
+
+p.innerHTML = "Староста: " + name;     // «Аман» стал курсивом — строка стала разметкой
+p.textContent = "Староста: " + name;   // на странице буквально: Староста: <i>Аман</i>
+```
+
+<Scheme src="scheme-danger.svg">Одна строка, два свойства. Разница — в том, разбирается ли строка как HTML</Scheme>
+
+Курсив безобиден, но точно так же в разметку попадёт и чужой код. MDN приводит пример:
+
+```js
+const evil = "<img src='x' onerror='alert(1)'>";
+p.innerHTML = evil;   // картинки нет, срабатывает onerror — выполняется чужой код
+```
+
+Картинки по адресу `x` нет, браузер вызывает обработчик ошибки, и код
+из строки выполняется. Тег `<script>`, вставленный через
+`innerHTML`, не запускается, но это не защита: таких обходных путей много.
+Атака называется **XSS** — межсайтовый скриптинг.
+
+<Important>
+Правило на весь курс: **данные показываем через `textContent`**.
+`innerHTML` — только для разметки, которую написали мы сами.
+</Important>
+
+А если нужны и разметка, и данные? Тогда их разделяют: разметку пишем своей строкой,
+а данные кладём в готовый элемент текстом.
+
+```js
+p.innerHTML = "Староста: <b></b>";          // разметка — наша строка
+p.querySelector("b").textContent = name;   // данные — только текстом
+
+p.innerHTML;   // "Староста: <b>&lt;i&gt;Аман&lt;/i&gt;</b>"
+```
+
+Имя стоит жирным, а его теги остались буквами — браузер сам записал их безопасно,
+через `&lt;` и `&gt;`. Сведём три способа вывести строку
+в одну таблицу:
+
+|  | `textContent` | `innerText` | `innerHTML` |
+| --- | --- | --- | --- |
+| теги в строке | остаются буквами | остаются буквами | становятся элементами |
+| данные пользователя | можно | можно | **нельзя** |
+| своя разметка | не выйдет | не выйдет | для этого и нужен |
+| когда брать | почти всегда | нужен текст как на экране | строим разметку сами |
+
+## 7. `insertAdjacentHTML`: вставить рядом {#adjacent}
+
+Метод вставляет разметку в одно из четырёх мест, не трогая того, что уже есть:
+
+```html
+<!-- beforebegin -->
+<h1 id="title">
+  <!-- afterbegin -->
+  Группа JS-1
+  <!-- beforeend -->
+</h1>
+<!-- afterend -->
+```
+
+```js
+const title = document.querySelector("#title");
+
+title.insertAdjacentHTML("beforeend", " <small>(5 студентов)</small>");
+title.innerHTML;   // "Группа JS-1 <small>(5 студентов)</small>"
+
+title.insertAdjacentHTML("inside", "<b>x</b>");
+// SyntaxError: Failed to execute 'insertAdjacentHTML' on 'Element': The value provided
+// ('inside') is not one of 'beforeBegin', 'afterBegin', 'beforeEnd', or 'afterEnd'.
+```
+
+Старое содержимое не пересобирается — в отличие от `innerHTML +=`
+из раздела 5, ссылки на элементы остаются живыми:
+
+```js
+const small = title.querySelector("small");
+title.insertAdjacentHTML("beforeend", " ✓");
+title.contains(small);   // true — старые элементы на месте
+```
+
+Но строка по-прежнему разбирается как HTML, и правило раздела 6 действует и здесь.
+
+## 8. Атрибуты {#attributes}
+
+Атрибуты — это `href`, `id`, `class`,
+`title` и прочие пары «имя = значение» в теге. Для них четыре метода:
+
+```js
+const link = document.querySelector('a[href="#info"]');
+
+link.getAttribute("href");     // "#info"
+link.getAttribute("title");    // null — такого атрибута нет
+link.hasAttribute("href");     // true
+
+link.setAttribute("title", "Когда занятия");   // атрибута не было — появился
+link.removeAttribute("title");                 // и убран
+```
+
+`setAttribute` добавляет атрибут, если его не было, и заменяет значение,
+если был. `removeAttribute` несуществующего атрибута ошибки не даёт.
+
+Значение атрибута — **всегда строка**. Всё, что вы передали,
+превратится в текст, даже `null`:
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.setAttribute("data-mark", 5);
+meret.getAttribute("data-mark");   // "5" — строка, а не число
+
+meret.setAttribute("title", null);
+meret.getAttribute("title");       // "null" — тоже строка!
+```
+
+Поэтому MDN советует: чтобы убрать атрибут, вызывайте `removeAttribute`,
+а не записывайте `null`. Ещё две мелочи: имена атрибутов в HTML приводятся
+к маленьким буквам (`"Data-Level"` станет `data-level`), а имя
+с пробелом браузер отвергнет:
+
+```js
+meret.setAttribute("my attr", "x");
+// InvalidCharacterError: Failed to execute 'setAttribute' on 'Element':
+// 'my attr' is not a valid attribute name.
+```
+
+Крайние случаи удобно держать перед глазами одной таблицей:
+
+| Вызов | Ответ |
+| --- | --- |
+| `getAttribute("нет-такого")` | `null` |
+| `getAttribute("hidden")` у `<p hidden>` | `""` — атрибут есть, значение пустое |
+| `setAttribute("title", 5)` | значение `"5"` |
+| `setAttribute("title", null)` | значение `"null"` |
+| `setAttribute("Data-Level", "B1")` | атрибут `data-level` |
+| `removeAttribute("нет-такого")` | ничего, без ошибки |
+| `setAttribute("my attr", "x")` | `InvalidCharacterError` |
+
+## 9. Атрибут и свойство {#reflect}
+
+Для частых атрибутов у элемента есть готовые свойства. Это называется
+**отражением**: свойство и атрибут — два окна в одно и то же значение.
+
+```js
+const title = document.querySelector("#title");
+
+title.id;                   // "title" — то же, что getAttribute("id")
+title.id = "main-title";    // атрибут в разметке тоже сменился
+title.getAttribute("id");   // "main-title"
+
+document.querySelector("li").id;   // "" — у пункта id нет, пустая строка, а не null
+```
+
+<Scheme src="scheme-reflect.svg">Для частых атрибутов есть свойства; для всех остальных — четыре метода</Scheme>
+
+Имена совпадают не всегда. Атрибуту `class` отвечает свойство
+`className`: слово `class` в языке занято, классы — тема курса 2.
+А значения иногда различаются. У ссылки атрибут хранит то, что написано в разметке,
+а свойство — полный адрес:
+
+```js
+const first = document.querySelector("nav a");
+
+first.getAttribute("href");   // "#list" — как записано в разметке
+first.href;                   // "http://127.0.0.1:5500/index.html#list" — полный адрес
+```
+
+Правило: **есть свойство — берите свойство**, оно короче и понятнее.
+`getAttribute` нужен для атрибутов без свойства и когда важно именно то,
+что записано в разметке.
+
+## 10. `className`: классы строкой {#class-name}
+
+`className` отражает атрибут `class` целиком — одной строкой,
+через пробел. Записанная строка заменяет **все** классы сразу:
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.className;            // "student absent"
+meret.className = "star";   // хотели добавить класс…
+meret.className;            // "star" — …а student и absent пропали
+```
+
+Это самая частая ошибка с классами. Приём `className += " star"`
+работает, но на пробеле перед словом и на повторах легко ошибиться. `className`
+хорош, когда нужно задать классы **целиком** — вернуть элемент в известное
+состояние: `li.className = "student"`. Для всего остального сравните:
+
+| Задача | через `className` | через `classList` |
+| --- | --- | --- |
+| добавить класс | `+= " star"`, не забыв пробел | `add("star")` |
+| убрать класс | без методов строк курса 2 не выйдет | `remove("absent")` |
+| есть ли класс | `includes("star")` ошибётся на `"superstar"` | `contains("star")` |
+| переключить | условие и две ветки | `toggle("star")` |
+
+## 11. `classList`: классы по одному {#class-list}
+
+`classList` — список классов элемента, объект `DOMTokenList`.
+Он похож на вчерашний `NodeList`: есть `length`, номера,
+`forEach`, `for...of` — и пять своих методов.
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.classList;                      // DOMTokenList(2) ['student', 'absent', value: 'student absent']
+meret.classList.contains("absent");   // true
+meret.classList.add("star");          // классы: student absent star
+meret.classList.add("star");          // повтор не добавится
+meret.classList.remove("star");       // классы снова: student absent
+```
+
+`toggle` переключает: класс был — убирает и отвечает `false`,
+не было — добавляет и отвечает `true`. Второй аргумент делает
+переключение односторонним:
+
+```js
+meret.classList.toggle("absent");        // false — класс был, его убрали
+meret.classList.toggle("absent");        // true — класса не было, добавили
+meret.classList.toggle("star", false);   // false — только убрать, добавлять нельзя
+
+meret.classList.replace("absent", "late");   // true — заменил
+meret.classList.replace("нет", "x");         // false — заменять нечего
+```
+
+Несколько классов передают несколькими аргументами. Строка с пробелом — ошибка:
+
+```js
+meret.classList.add("star", "late");   // так правильно
+
+meret.classList.add("star late");
+// InvalidCharacterError: Failed to execute 'add' on 'DOMTokenList': The token provided
+// ('star late') contains HTML space characters, which are not valid in tokens.
+```
+
+Вместе с `querySelectorAll` из дня 24 это даёт обычный рабочий приём —
+изменить все найденные элементы разом:
+
+```js
+document.querySelectorAll(".absent").forEach((li) => li.classList.add("star"));
+```
+
+Второй аргумент `toggle` удобен как раз в таком переборе: условие решает,
+будет у элемента класс или нет.
+
+```js
+document.querySelectorAll("li").forEach((li) => {
+  li.classList.toggle("star", li.dataset.id === "3");   // звезда — только у Гүлнар
+});
+```
+
+<ProTip>
+Называйте классы по смыслу, а не по виду: `absent` («отсутствует»),
+а не `gray`. Решите завтра показывать отсутствующих красным — поменяется
+одна строка CSS, а имя класса и весь код останутся верными.
+</ProTip>
+
+## 12. `style`: оформление из кода {#style}
+
+`style` — это встроенный стиль элемента, атрибут `style`
+в виде объекта. Имена свойств CSS в нём пишутся «верблюдом»: дефис убирается,
+следующая буква становится большой.
+
+```js
+const title = document.querySelector("#title");
+
+title.style.color = "purple";
+title.style.backgroundColor = "#f5f3ff";   // background-color → backgroundColor
+title.style.fontSize = "32px";             // единицы обязательны
+
+title.getAttribute("style");
+// "color: purple; background-color: rgb(245, 243, 255); font-size: 32px;"
+```
+
+Обратите внимание: цвет, записанный как `#f5f3ff`, браузер хранит
+по-своему — `rgb(245, 243, 255)`. Сравнивать прочитанный цвет с тем, что
+записали, бесполезно.
+
+<Mistake>
+`style` не прощает ошибок и не сообщает о них. Все три строки ниже
+**молча** ничего не делают со страницей:
+</Mistake>
+
+```js
+title.style.fontSize = 32;       // число без единиц — проигнорировано
+title.style.color = "краснй";    // опечатка в значении — проигнорировано
+title.style.colour = "red";      // опечатка в имени — просто новое свойство объекта
+```
+
+Второе, что удивляет: `style` видит **только встроенный**
+стиль. Серый цвет Мерет задан классом в `<style>`, и
+`style` о нём не знает:
+
+```js
+document.querySelector(".absent").style.color;   // "" — цвет дал класс, а не атрибут style
+
+title.style.color = "";   // пустая строка убирает встроенное свойство
+```
+
+Отсюда правило: **оформление — классами, `style` — для вычисленного**.
+Цвета и шрифты живут в CSS, а код только включает и выключает класс. `style`
+нужен, когда значение считает программа — например, ширина полоски по проценту:
+`bar.style.width = percent + "%"`.
+
+Итоговый цвет с учётом всех правил CSS умеет узнавать `getComputedStyle`,
+но это уже возможности браузера из курса 4. В нашем курсе хватает простого правила:
+оформление живёт в классах, а в коде проверяем класс — `classList.contains("absent")`.
+
+## 13. `dataset`: свои данные в разметке {#dataset}
+
+Атрибуты с приставкой `data-` придуманы для своих данных: номер записи,
+группа, оценка. Браузер их не трогает, а в коде они собраны в объект `dataset`:
+
+```js
+const meret = document.querySelector(".absent");   // data-id="2"
+
+meret.dataset.id;               // "2" — строка
+meret.dataset.id + 1;           // "21" — склейка строк, как на дне 8
+Number(meret.dataset.id) + 1;   // 3
+
+meret.dataset.groupName = "JS-1";   // в разметке появился data-group-name="JS-1"
+"groupName" in meret.dataset;       // true
+delete meret.dataset.groupName;     // атрибут удалён
+```
+
+| В разметке | В коде |
+| --- | --- |
+| `data-id` | `dataset.id` |
+| `data-group-name` | `dataset.groupName` |
+| `data-date-of-birth` | `dataset.dateOfBirth` |
+
+Приставка `data-` отбрасывается, каждый дефис с буквой после него
+превращается в большую букву. Значения — всегда строки, как у любого атрибута.
+`in` и `delete` работают так же, как с обычным объектом из дня 21.
+
+Зачем хранить данные в разметке? Затем, что элемент потом приходит к нам сам —
+на дне 27 из события «по чему щёлкнули». `li.dataset.id` сразу скажет,
+какой это студент.
+
+### Разбор: сумма номеров
+
+```js
+const items = [...document.querySelectorAll("li")];
+
+items.reduce((sum, li) => sum + li.dataset.id, 0);           // "012345" — а ждали 15
+items.reduce((sum, li) => sum + Number(li.dataset.id), 0);   // 15
+```
+
+**Шаг 1. Смотрим на ответ.** Цифры идут подряд — это склейка строк,
+а не сложение.
+
+**Шаг 2. Прокручиваем первый шаг.** `0 + "1"` — число
+плюс строка, по правилу дня 8 это склейка: `"01"`. Дальше сумма уже строка,
+и каждый номер приклеивается к ней.
+
+**Шаг 3. Чиним там, где читаем.** `Number` — прямо при
+чтении из `dataset`. Общее правило: **всё, что читаем со страницы, —
+строки**. `textContent`, `getAttribute`, `dataset`
+— без исключений. Число получаем через `Number`, как на дне 17.
+
+## 14. Спрятать и прокрутить {#hidden}
+
+Свойство `hidden` отражает одноимённый атрибут: есть атрибут — элемента
+не видно.
+
+```js
+const secret = document.querySelector("#secret");
+
+secret.hidden;           // true
+secret.hidden = false;   // абзац появился, атрибут hidden исчез
+secret.hidden = true;    // и спрятался снова
+```
+
+У таких атрибутов-флажков важно **наличие**, а не значение. Поэтому
+`setAttribute("hidden", "false")` элемент **прячет**: атрибут есть,
+а что в нём написано, не важно. Показать элемент можно только убрав атрибут —
+`removeAttribute("hidden")` или `hidden = false`.
+
+И ловушка с другой стороны: `hidden` прячет элемент через оформление
+браузера по умолчанию. Если в CSS элементу явно задан `display` — например,
+классом с `display: block`, — атрибут `hidden` прятать перестанет.
+`secret.hidden` при этом по-прежнему скажет `true`. Увидели
+«спрятанный» элемент на экране — ищите `display` в стилях.
+
+Метод `scrollIntoView` прокручивает страницу так, чтобы элемент оказался
+на виду. Параметр-объект делает прокрутку плавной:
+
+```js
+const footer = document.querySelector("footer");
+
+footer.scrollIntoView();                       // сразу
+footer.scrollIntoView({ behavior: "smooth" }); // плавно
+```
+
+## 15. «Табель» в цвете {#tabel}
+
+Вчера «Табель» переехал на страницу, но писал в ячейки через одолженную функцию
+`write`. Сегодня она не нужна, а строки получают цвет по вердикту.
+В разметке вчерашнего `index.html` две добавки:
+
+```html
+<!-- в head, перед script -->
+<style>
+  .excellent { background: #dcfce7; }
+  .good      { background: #e0f2fe; }
+  .fair      { background: #fef9c3; }
+  .weak      { background: #fee2e2; }
+  .empty     { color: gray; font-style: italic; }
+</style>
+
+<!-- в body, после таблицы -->
+<p id="summary"></p>
+```
+
+Расчёт — со дня 23, `makeCells` — со дня 24, без изменений. Новое в
+`app.js`:
+
+```js
+// без изменений: MIN_MARK … makeReport (день 23), makeCells (день 24)
+
+// новое: какой класс получает строка
+const VERDICT_CLASS = {
+  "отличник": "excellent",
+  "хорошист": "good",
+  "троечник": "fair",
+  "надо подтянуть": "weak",
+};
+
+function rowClass(report) {
+  return report.ok ? VERDICT_CLASS[report.verdict] : "empty";
+}
+
+const rows = document.querySelectorAll("#tabel tbody tr");
+const reports = students.map(makeReport);
+
+reports.forEach((report, i) => {
+  const row = rows[i];
+  const cells = row.children;
+  makeCells(report).forEach((text, j) => {
+    cells[j].textContent = text;   // write больше не нужна
+  });
+  row.classList.add(rowClass(report));
+  row.dataset.name = report.name;
+});
+
+const excellent = reports.filter((r) => r.ok && r.verdict === "отличник").length;
+document.querySelector("#summary").textContent = `Отличников: ${excellent} из ${reports.length}`;
+document.title = `Табель: ${reports.length} студентов`;
+```
+
+<ResultBox>
+<table>
+<thead>
+<tr><th>Имя</th><th>Средн</th><th>Мин</th><th>Макс</th><th>%</th><th>Вердикт</th></tr>
+</thead>
+<tbody>
+<tr style={{background: "#e0f2fe"}}><td>Аман</td><td>4.33</td><td>3</td><td>5</td><td>75%</td><td>хорошист</td></tr>
+<tr style={{background: "#fef9c3"}}><td>Мерет</td><td>3.33</td><td>3</td><td>4</td><td>100%</td><td>троечник</td></tr>
+<tr style={{color: "gray", fontStyle: "italic"}}><td>Гүлнар</td><td>—</td><td>—</td><td>—</td><td>—</td><td>нет годных оценок</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Сапар</td><td>4.75</td><td>4</td><td>5</td><td>100%</td><td>отличник</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Огулджан</td><td>4.50</td><td>4</td><td>5</td><td>67%</td><td>отличник</td></tr>
+</tbody>
+</table>
+
+Отличников: 2 из 5
+</ResultBox>
+
+Числа прежние. Новое — три вещи, и все три сегодняшние.
+
+**Текст — через `textContent`.** Имена пришли из данных,
+поэтому именно он, а не `innerHTML` (раздел 6).
+
+**Цвет — классом.** Код не знает ни одного цвета: он только выбирает имя
+класса, а цвета живут в `<style>`. Захочется другой зелёный — правка
+в одном месте, код не трогаем. Это правило раздела 12 в деле.
+
+**Имя — в `dataset`.** Пригодится на дне 27: по щелчку
+на строке `closest("tr").dataset.name` скажет, чью строку выбрали. А пока
+строку можно найти селектором по атрибуту из дня 24:
+
+```js
+document.querySelector('[data-name="Сапар"]').className;   // "excellent"
+document.querySelectorAll("tr.excellent").length;          // 2
+```
+
+### Разбор: вердикт, которого нет в таблице классов
+
+Допустим, завтра `verdict` начнёт возвращать новое слово — «отлично» вместо
+«отличник». В `VERDICT_CLASS` такого ключа нет, и
+`VERDICT_CLASS["отлично"]` даст `undefined` (день 21). Ошибки не будет:
+`classList.add(undefined)` превратит аргумент в строку и добавит строке класс
+с именем `"undefined"`. Строка просто останется без цвета, и заметить это
+можно только глазами. Поэтому, когда меняете слова вердикта, меняйте и таблицу классов —
+это одно решение, а не два.
+
+<TryIt>
+Два опыта.
+\
+\
+**Первый.** Замените в цикле `textContent` на
+`innerHTML` и поменяйте имя Амана в `saved` на
+`<b>Аман</b>`. Что изменилось на странице и почему это плохой знак?
+\
+\
+**Второй.** Поменяйте цвет класса `.excellent` в
+`<style>`. Сколько строк кода пришлось тронуть?
+</TryIt>
+
+## 16. Частые ошибки и что завтра {#mistakes}
+
+| Ошибка | Что увидите | Как правильно |
+| --- | --- | --- |
+| данные через `innerHTML` | чужие теги стали разметкой | `textContent` |
+| `innerHTML += …` в цикле | медленно, ссылки на элементы теряются | `insertAdjacentHTML` |
+| `className = "star"` | остальные классы пропали | `classList.add("star")` |
+| `classList.add("a b")` | `InvalidCharacterError` | `add("a", "b")` |
+| `style.fontSize = 32` | ничего, молча | `"32px"` |
+| `style.background-color = …` | `SyntaxError: Invalid left-hand side in assignment` | `style.backgroundColor` |
+| читать цвет класса через `style` | пустая строка | проверять класс: `classList.contains` |
+| `dataset.id + 1` | `"21"` | `Number(dataset.id) + 1` |
+| `setAttribute("hidden", "false")` | элемент спрятан | `hidden = false` |
+| `textContent` у контейнера | все дети пропали | писать в отдельный элемент |
+| число из `textContent` или `dataset` | склейка вместо суммы | `Number(...)` при чтении |
+
+### Модуль: что уже умеем
+
+| День | Умеем | Главные инструменты | «Табель» |
+| --- | --- | --- | --- |
+| 24 | найти элемент и пройти по дереву | `querySelector`, `closest` | переехал в таблицу |
+| 25 | поменять текст, атрибуты, классы, стили | `textContent`, `classList` | строки в цвете |
+| 26 | создать и удалить элемент | `createElement`, `append` | строки по числу студентов |
+
+### Что будет завтра
+
+Сегодня мы меняли то, что уже есть в разметке. Завтра — **создаём и удаляем**
+элементы кодом: `createElement`, `append`, `remove`.
+«Табель» наконец избавится от заготовленных пустых строк: строк станет ровно столько,
+сколько студентов, и шестой студент перестанет ронять программу.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Element](https://developer.mozilla.org/en-US/docs/Web/API/Element) | общее для всех элементов | <Full /> |
+| [HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement) | общее для HTML-элементов | <Full /> |
+| [textContent](https://developer.mozilla.org/en-US/docs/Web/API/Node/textContent) | весь текст; запись — без разбора разметки | <Full /> |
+| [innerText](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/innerText) | текст, каким его видно | <Full /> |
+| [innerHTML](https://developer.mozilla.org/en-US/docs/Web/API/Element/innerHTML) | разметка строкой; опасность с данными | <Full /> |
+| [getAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/getAttribute) | значение атрибута или `null` | <Full /> |
+| [setAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/setAttribute) | поставить или заменить атрибут | <Full /> |
+| [hasAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/hasAttribute) | есть ли атрибут | <Full /> |
+| [removeAttribute](https://developer.mozilla.org/en-US/docs/Web/API/Element/removeAttribute) | убрать атрибут | <Full /> |
+| [id](https://developer.mozilla.org/en-US/docs/Web/API/Element/id) | свойство для атрибута `id` | <Full /> |
+| [className](https://developer.mozilla.org/en-US/docs/Web/API/Element/className) | все классы одной строкой | <Full /> |
+| [classList](https://developer.mozilla.org/en-US/docs/Web/API/Element/classList) | классы по одному | <Full /> |
+| [DOMTokenList](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList) | список классов и его методы | <Full /> |
+| [add](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/add) | добавить класс, повтор не добавится | <Full /> |
+| [remove](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/remove) | убрать класс | <Full /> |
+| [toggle](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/toggle) | переключить, второй аргумент — в одну сторону | <Full /> |
+| [contains](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/contains) | есть ли класс | <Full /> |
+| [style](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/style) | встроенный стиль, имена «верблюдом» | <Full /> |
+| [dataset](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/dataset) | атрибуты `data-*` как объект | <Full /> |
+| [Отражение атрибутов](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Reflected_attributes) | свойство и атрибут — одно значение | <Brief /> |
+| [replace](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/replace) | заменить один класс другим | <Brief /> |
+| [insertAdjacentHTML](https://developer.mozilla.org/en-US/docs/Web/API/Element/insertAdjacentHTML) | вставить разметку в одно из четырёх мест | <Brief /> |
+| [hidden](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/hidden) | спрятать и показать | <Brief /> |
+| [scrollIntoView](https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoView) | прокрутить к элементу | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// ТЕКСТ
+const info = document.querySelector("#info");
+info.textContent;                     // "Занятия: пн, ср, пт" — без тегов
+info.innerText;                       // текст как на экране, без спрятанного
+info.textContent = "<b>пн</b>";       // теги останутся буквами
+info.textContent = "";                // очистить элемент
+
+// РАЗМЕТКА — только своя, не данные!
+info.innerHTML = "Занятия: <b>пн, ср, пт</b>";
+info.insertAdjacentHTML("beforeend", " <i>(каждую неделю)</i>");
+// места: beforebegin, afterbegin, beforeend, afterend
+
+// АТРИБУТЫ — всегда строки
+const link = document.querySelector("nav a");
+link.getAttribute("href");            // "#list", нет атрибута — null
+link.setAttribute("title", "Список группы");
+link.hasAttribute("title");           // true
+link.removeAttribute("title");
+link.href;                            // полный адрес — свойство-отражение
+
+// КЛАССЫ
+const meret = document.querySelector(".absent");
+meret.classList.add("star", "late");
+meret.classList.remove("late");
+meret.classList.toggle("star");       // false — класс был, убрали
+meret.classList.contains("absent");   // true
+meret.classList.replace("absent", "late");   // true
+meret.className;                      // "student late" — все классы строкой
+
+// СТИЛЬ — только встроенный
+const title = document.querySelector("#title");
+const percent = 75;
+title.style.backgroundColor = "#f5f3ff";   // имена «верблюдом»
+title.style.width = percent + "%";         // единицы обязательны
+title.style.backgroundColor = "";          // убрать
+
+// ДАННЫЕ — всегда строки
+meret.dataset.id;                     // "2"
+Number(meret.dataset.id) + 1;         // 3
+meret.dataset.groupName = "JS-1";     // в разметке: data-group-name="JS-1"
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем `textContent = s` отличается от `innerHTML = s`?
+   <Answer>`textContent` вставляет строку как текст: теги останутся буквами.
+   `innerHTML` разбирает её как разметку и строит элементы. Для данных —
+   только `textContent`, иначе чужая строка станет разметкой, а то и кодом.</Answer>
+2. Почему `main.innerText` не содержит спрятанного абзаца, а
+   `main.textContent` содержит?
+   <Answer>`innerText` берёт только то, что показано на экране.
+   `textContent` собирает текст всех потомков, не глядя на оформление.</Answer>
+3. Что станет с классами после `el.className = "star"`?
+   <Answer>Останется один `star`: `className` — вся строка классов,
+   и запись её заменяет. Добавить класс, не трогая остальных, —
+   `classList.add("star")`.</Answer>
+4. Почему `el.style.color` пуст, хотя элемент на экране серый?
+   <Answer>`style` видит только встроенный стиль из атрибута `style`.
+   Серый цвет дал класс из CSS, а о нём `style` не знает.</Answer>
+5. Что вернёт `li.dataset.id + 1`, если в разметке `data-id="2"`?
+   <Answer>`"21"`: значения атрибутов всегда строки, и `+` склеивает.
+   Нужно `Number(li.dataset.id) + 1`.</Answer>
+6. Почему `setAttribute("hidden", "false")` прячет элемент?
+   <Answer>У атрибутов-флажков важно только наличие. Атрибут есть — элемент спрятан,
+   что бы ни было написано в значении. Показать — `hidden = false`
+   или `removeAttribute("hidden")`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Element" />

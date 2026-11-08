@@ -1,0 +1,109 @@
+---
+title: День 31 — конспект
+css: |
+  h1 { border-bottom-color: #6366f1; }
+  h2 { color: #4338ca; background: #eef2ff; border-left-color: #6366f1; }
+---
+
+# День 31. fetch, async/await и localStorage
+
+<Subtitle>Выжимка лекции: запрос к серверу, асинхронные функции, хранилище браузера, кодирование адреса.</Subtitle>
+
+## Запрос и ответ
+
+```js
+async function loadGroup() {
+  const response = await fetch("group.json");   // ответ пришёл: статус и заголовки
+  if (!response.ok) {                            // 404, 500 — для fetch не ошибка!
+    throw new Error(`Сервер ответил ${response.status}`);
+  }
+  return response.json();                        // тело: json() или text(), один раз
+}
+```
+
+<Remember>
+Страницу открывают через Live Server: с `file:///` запросы запрещены.
+`fetch` отклоняется только без ответа — `TypeError: Failed to fetch`.
+Ответ 404 приходит «успешно», с `ok === false`, поэтому `ok` проверяют
+до чтения тела: иначе страница ошибки уйдёт в `json()` и даст
+`Unexpected token '<'`.
+</Remember>
+
+| Беда | Где видна |
+| --- | --- |
+| сервер не отвечает | `fetch` отклонён: `Failed to fetch` |
+| файла нет, ошибка сервера | `ok === false`, `status` 404 или 500 |
+| в ответе не JSON | отклонён `json()`: `SyntaxError` |
+
+Все три удобно свести в один `catch`: плохой статус превращают в ошибку сами,
+через `throw`. Что ушло и что пришло, видно на вкладке Network.
+
+## `async` и `await`
+
+```js
+loadButton.addEventListener("click", async () => {
+  try {
+    const group = await loadGroup();   // значение — только после await
+    // … показать
+  } catch (err) {
+    message.textContent = `Не удалось загрузить: ${err.message}`;
+  } finally {
+    loadButton.hidden = false;         // уборка в любом исходе
+  }
+});
+```
+
+<KeyPoint>
+Асинхронная функция всегда возвращает промис. `await` останавливает только
+свою функцию, страница живёт дальше. `await` работает лишь внутри
+`async`; в консоли Chrome — и вне функции, но это удобство консоли.
+Забытый `await` даёт промис вместо данных: `r.json is not a function`,
+`undefined` вместо длины.
+</KeyPoint>
+
+## Хранилище браузера
+
+```js
+const saved = localStorage.getItem("todo:tasks");             // null, если ключа нет
+const tasks = saved === null ? [] : JSON.parse(saved);
+localStorage.setItem("todo:tasks", JSON.stringify(tasks));   // только строки!
+localStorage.removeItem("todo:tasks");                        // своё — своим ключом
+```
+
+|  | `localStorage` | `sessionStorage` |
+| --- | --- | --- |
+| обновили страницу | на месте | на месте |
+| новая вкладка | на месте | пусто |
+| закрыли вкладку | на месте | пропал |
+
+Без `JSON.stringify` объект сохранится как `"[object Object]"`, а
+`getItem` вернёт число строкой: `"5" + 1` даст `"51"`. Все
+проекты Live Server живут на одном адресе и делят одно хранилище, поэтому у ключей
+приставка проекта, а `clear()` — только для опытов.
+
+## Текст в адресе
+
+Любой текст от человека, который идёт в адрес, пропускают через
+`encodeURIComponent`: иначе `&`, `?` и `#` в нём
+сломают адрес. `decodeURIComponent` — обратно; неверный код даёт
+`URIError: URI malformed`. `encodeURI` — для адреса целиком, знаки
+`&` и `?` он оставляет как есть.
+
+## Список дел и «Табель» помнят
+
+Список дел сохраняет задачи последней строкой `render`, а при запуске читает их
+и восстанавливает счётчик: `Math.max(0, ...tasks.map((t) => t.id)) + 1` — иначе
+номера повторятся. «Табель» при первом запуске берёт данные из `students.json`,
+дальше — из хранилища, а сохраняет в `updateSummary`. Испорченные данные в
+хранилище лечатся `removeItem` своего ключа.
+
+<Homework>
+1. Соберите страницу группы из лекции и пройдите все три беды раздела 6.
+2. Научите список дел помнить задачи и проверьте три строки таблицы раздела 14.
+3. Переведите «Табель» на `students.json` и сохранение, добавьте студента,
+   обновите страницу и найдите данные на вкладке Application.
+4. К дню 32: придумайте, какие данные нужны каталогу — что будет в файле JSON,
+   а что стоит хранить в `localStorage`.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" />

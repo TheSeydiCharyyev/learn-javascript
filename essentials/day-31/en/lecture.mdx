@@ -1,0 +1,815 @@
+---
+title: Day 31 — fetch, async/await and localStorage
+day: Day 31 • lesson 1
+heading: fetch, async/await and localStorage
+lead: Module “Timers, promises and fetch”, the last day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #6366f1; }
+  h2 { color: #4338ca; background: #eef2ff; border-left-color: #6366f1; }
+  h3 { color: #3730a3; }
+  .step-number { background: #6366f1; }
+  .toc a { color: #4338ca; }
+---
+
+<Goals>
+- request data from a server with `fetch` and read the response;
+- tell a response with an error from a network failure;
+- write asynchronous code with `async` and `await`;
+- keep data between page loads in `localStorage`;
+- safely put text into an address with `encodeURIComponent`;
+- teach the to-do list and the “Report card” to remember their data.
+</Goals>
+
+<Toc />
+
+## 1. Data from a server {#why}
+
+Until now the data lived in the code: an array in `app.js`, a JSON string in the variable
+`saved`. Real programs get it from a **server** — another
+program that keeps the data and gives it out on request. Email, a shop, a timetable — everywhere
+the page asks, and the server answers.
+
+We already have a server. On day 2 we opened pages through Live Server and
+agreed: “on day 31, when we start getting data from a server, you will not have to
+relearn anything”. That day has come. Live Server gives out not only `index.html` but also
+any file from the project folder — including a file with data.
+
+| Part | What it is | Example |
+| --- | --- | --- |
+| a request | the page asks for a file at an address | `group.json` |
+| the response status | a number: how it all went | 200 — fine, 404 — not found |
+| the response body | the data itself | a JSON string with the list of the group |
+
+From a page opened with a double click (`file:///…`) requests do not work:
+the browser forbids them. Today we open everything through Live Server.
+
+Live Server is the simplest server: it gives out files as they are. A real server also
+searches, computes and saves, and it is written in other languages or in JavaScript outside the browser.
+But for the page there is no difference: a request, a status and a response body are arranged the same way everywhere.
+Everything that works today with the file `group.json` will work with a real
+server too — only the address will change.
+
+## 2. The study page {#page}
+
+The folder `day-31/group` has three files in it. The page:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Group JS-1</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>Group JS-1</h1>
+  <button id="load">Load</button>
+  <p id="message"></p>
+  <ul id="list"></ul>
+</body>
+</html>
+```
+
+The data is the file `group.json`. This is the “server” of our group: the marks are the same as
+in the “Report card”, only without the junk.
+
+```js
+[
+  { "name": "Aman", "marks": [5, 4, 4] },
+  { "name": "Meret", "marks": [3, 3, 4] },
+  { "name": "Gülnar", "marks": [] },
+  { "name": "Sapar", "marks": [5, 5, 4, 5] },
+  { "name": "Oguljan", "marks": [4, 5] }
+]
+```
+
+And the start of `app.js`:
+
+```js
+const list = document.querySelector("#list");
+const message = document.querySelector("#message");
+const loadButton = document.querySelector("#load");
+```
+
+## 3. `fetch`: the first request {#fetch}
+
+`fetch` gets an address and sends a request. There is no response yet — so
+`fetch` returns a promise, like the functions of day 30:
+
+```js
+fetch("group.json");   // Promise {<pending>}
+```
+
+The address `group.json` is relative: the file is looked for in the same folder as
+the page. The promise is fulfilled with a `Response` object — the server’s response.
+In the Chrome console you can write `await` right in a line; how it works,
+we will cover in section 7, and for now let us look at the response:
+
+```js
+const response = await fetch("group.json");
+response;
+// Response {type: 'basic', url: 'http://127.0.0.1:5500/…/group.json', redirected: false, status: 200, ok: true, …}
+```
+
+<Scheme src="scheme-fetch.svg">Two waits: first the response with the status comes, then the body is read</Scheme>
+
+There are two waits. The first promise is fulfilled as soon as the status and the headers of the response have come —
+the body may still be on its way over the network. The body is read with a separate method, and it also returns a promise.
+For JSON it is `response.json()`: it reads the body and parses it right away, like
+`JSON.parse` from day 23.
+
+```js
+fetch("group.json")
+  .then((response) => response.json())
+  .then((data) => {
+    console.log(data.length, data[1].name);   // 5 Meret
+  });
+```
+
+## 4. The response: `status`, `ok`, `text`, `json` {#response}
+
+`Response` has four main members for today:
+
+| What | Type | What for |
+| --- | --- | --- |
+| `status` | a number | the response code: 200 — all is well, 404 — not found, 500 — an error on the server |
+| `ok` | `true` / `false` | `true` if the status is from 200 to 299 |
+| `text()` | a promise of a string | the body as it is |
+| `json()` | a promise of data | the body parsed as JSON |
+
+```js
+[response.status, response.ok];   // [200, true]
+
+const again = await fetch("group.json");
+(await again.text()).slice(0, 40);
+// '[\n  { "name": "Aman", "marks": [5, 4, 4]'
+```
+
+The body is read **once**. A second call of `json()` on the same
+response will not return the data again — save it in a variable:
+
+```js
+const data = await response.json();
+await response.json();
+// TypeError: Failed to execute 'json' on 'Response': body stream already read
+```
+
+Checking the step: what came? An ordinary array of objects — exactly as if we had
+written it in the code. Everything we can do with arrays since day 20 works:
+
+```js
+data.map((s) => s.name);   // ["Aman", "Meret", "Gülnar", "Sapar", "Oguljan"]
+data[3].marks;             // [5, 5, 4, 5]
+data.filter((s) => s.marks.length === 0).length;   // 1 — Gülnar has no marks
+```
+
+## 5. Walkthrough: the file is missing {#404}
+
+A typo in the file name — `grup.json` instead of `group.json`:
+
+```js
+const data = await (await fetch("grup.json")).json();
+// SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+```
+
+**Step 1. Where did it fail?** Not in `fetch`, but in `json()`: an error
+of parsing JSON. It tried to parse a string starting with `<!DOCTYPE` — that is
+HTML, not data.
+
+**Step 2. Where does the HTML come from?** Let us ask the response itself:
+
+```js
+const missing = await fetch("grup.json");
+[missing.status, missing.ok];   // [404, false]
+await missing.text();           // '<!DOCTYPE html>… <pre>Cannot GET /…/grup.json</pre>…'
+```
+
+The server answered honestly: 404, there is no such file — and attached a page with an explanation. The main thing
+here: **`fetch` does not consider 404 an error**. For it the request succeeded —
+a response came. The promise was fulfilled, `ok` became `false`, and we started
+parsing the error page as JSON. The console does show a red line
+`Failed to load resource: the server responded with a status of 404 (Not Found)`,
+but that is a message of the browser, not an exception: the code does not see it.
+
+**Step 3. We fix it.** Check `ok` before reading the body and turn a bad
+status into an error. This is what the example on the first page of the MDN guide to `fetch` does:
+
+```js
+const response = await fetch("grup.json");
+if (!response.ok) {
+  throw new Error(`Server replied ${response.status}`);
+}
+const data = await response.json();
+// Error: Server replied 404
+```
+
+We throw the error ourselves for a reason: then a 404 gets into the same `catch` as
+a network failure, and the program has one place for all the troubles with loading.
+
+## 6. The server does not answer {#offline}
+
+Stop Live Server (the “Port : 5500” button at the bottom of the editor) and repeat the request:
+
+```js
+await fetch("group.json");
+// TypeError: Failed to fetch
+```
+
+Now there is no response at all, and the `fetch` promise is rejected. Three different troubles —
+three different places where they are visible:
+
+| What happened | What the code does | How to tell |
+| --- | --- | --- |
+| the server does not answer, no network | `fetch` is rejected | `TypeError: Failed to fetch` |
+| no such file, a server error | `fetch` is fulfilled | `ok === false`, `status` 404 or 500 |
+| the response is not JSON | `json()` is rejected | `SyntaxError` |
+
+The browser’s red line in the console gives a hint too. `net::ERR_CONNECTION_REFUSED`
+— the server does not answer. `the server responded with a status of 404 (Not Found)` —
+the server is there, the file is not.
+
+### The Network tab
+
+The developer tools have a **Network** tab — a list of all the requests of
+the page. Reload the page with the tab open: for every request the address, the status
+and the size are visible, and a click on a row shows the headers (Headers) and the response body itself (Response).
+When `fetch` behaves strangely, this is where you look first: did the request go out, to
+which address, what did the server answer.
+
+## 7. `async` and `await` {#async}
+
+`then` chains work, but they are harder to read than ordinary code. That is why the language
+got another way of writing the same promises. A function is marked with the word `async`, and inside
+`await` is written before a promise — “wait and give me the value”:
+
+```js
+async function loadGroup() {
+  const response = await fetch("group.json");
+  if (!response.ok) {
+    throw new Error(`Server replied ${response.status}`);
+  }
+  return response.json();
+}
+```
+
+The code reads from top to bottom, like ordinary code, but it really waits. Two rules.
+
+**An asynchronous function always returns a promise.** What it returned with
+`return` is what the promise is fulfilled with; a thrown error rejects it:
+
+```js
+loadGroup();   // Promise {<pending>} — from outside it is an ordinary promise
+loadGroup().then((group) => console.log(group.length));   // 5
+```
+
+**`await` stops only its own function**, not the page.
+While the function waits, the rest of the code goes on:
+
+```js
+async function show() {
+  console.log("2: started");
+  const group = await loadGroup();
+  console.log(`4: received ${group.length}`);
+}
+
+console.log("1: before");
+show();
+console.log("3: after");
+// 1: before
+// 2: started
+// 3: after
+// 4: received 5
+```
+
+<Scheme src="scheme-async.svg">The function reaches await and gives up control; it will go on when the answer comes</Scheme>
+
+The function runs at once — up to the first `await`. There it “pauses
+itself” and returns a promise, and control goes outside: “3: after” is printed. When
+the answer comes, the function goes on from the same place. All this time the page is alive: clicks
+and timers work. In the Chrome console `await` can be written outside a function too —
+this is a convenience of the console, in `app.js` you cannot do that.
+
+### One task — two ways of writing it
+
+Print how many people are in the group and report an error. First — the chain of day 30,
+below — the same with `async`:
+
+```js
+// day 30: a chain
+fetch("group.json")
+  .then((response) => response.json())
+  .then((group) => console.log(group.length))
+  .catch((err) => console.log(err.message));
+
+// day 31: async and await
+async function printCount() {
+  try {
+    const response = await fetch("group.json");
+    const group = await response.json();
+    console.log(group.length);
+  } catch (err) {
+    console.log(err.message);
+  }
+}
+printCount();   // 5 — just like the chain
+```
+
+Every `then` became a line with `await`, and the intermediate values
+got names — `response`, `group`. Which way to choose is a matter of
+taste; MDN writes new examples with `await`, and chains will turn up in other people’s
+code all the time. An arrow can be asynchronous too:
+`const count = async () => …`.
+
+## 8. `try...catch` around `await` {#try}
+
+If the promise after `await` is rejected, `await` throws an error — like
+`throw`. So it is caught by an ordinary `try...catch` from day 11, and
+`finally` works as it does with promises. The “Load” button in full:
+
+```js
+loadButton.addEventListener("click", async () => {
+  loadButton.hidden = true;
+  message.textContent = "Loading…";
+  try {
+    const group = await loadGroup();
+    list.textContent = "";
+    list.append(...group.map((student) => {
+      const li = document.createElement("li");
+      li.textContent = `${student.name}: ${student.marks.length} marks`;
+      return li;
+    }));
+    message.textContent = "";
+  } catch (err) {
+    message.textContent = `Could not load: ${err.message}`;
+  } finally {
+    loadButton.hidden = false;
+  }
+});
+```
+
+<ResultBox>
+| What we did | What is on the page |
+| --- | --- |
+| “Load” | five items: “Aman: 3 marks” … “Oguljan: 2 marks” |
+| the address `grup.json` in `loadGroup`, “Load” | “Could not load: Server replied 404” |
+| Live Server stopped, “Load” | “Could not load: Failed to fetch” |
+</ResultBox>
+
+Checking the step after “Load”:
+
+```js
+list.children.length;   // 5
+loadButton.hidden;      // false — finally brought the button back
+```
+
+An arrow can be marked `async` too — this way the listener gets the right to
+`await`. Compare with the chain of day 30: `then` became a line with
+`await`, `catch` — a `catch` block, `finally`
+stayed `finally`. The promises are the same, the way of writing is different.
+
+## 9. Mistakes with `await` {#await-mistakes}
+
+| What was written | What you will see | Why |
+| --- | --- | --- |
+| `const r = fetch(…); r.json()` | `r.json is not a function` | without `await`, `r` holds a promise, not a response |
+| `await` in an ordinary function | `SyntaxError: await is only valid in async functions and the top level bodies of modules` | there is no word `async` |
+| `const group = loadGroup();` | `group.length` is `undefined` | the asynchronous function returned a promise |
+| no `try...catch` | `Uncaught (in promise) TypeError: Failed to fetch` | nobody caught the rejected promise |
+
+The trickiest one is the first: without `await` the error comes up not where it
+was made, but a line below, when the promise is used as data:
+
+```js
+const response = await fetch("group.json");
+const group = response.json();   // await was forgotten
+group.length;                    // undefined — group holds a promise, not an array
+group.map((s) => s.name);        // TypeError: group.map is not a function
+```
+
+All four come down to one thing: **the value appears only after
+`await`**, and `await` lives only inside `async`.
+
+## 10. `localStorage`: the memory of a page {#storage}
+
+The to-do list of day 29 forgets everything on reload: the variables disappear together with the page.
+The browser has a storage that survives both a reload and a restart —
+`localStorage`. It holds “key — value” pairs:
+
+```js
+localStorage.setItem("theme", "dark");   // write
+localStorage.getItem("theme");           // "dark" — read
+localStorage.getItem("no such key");     // null — there is no key
+localStorage.removeItem("theme");        // delete one key
+localStorage.clear();                    // delete everything
+```
+
+Reload the page — `getItem("theme")` will return the same `"dark"`.
+The contents can be seen in the developer tools: the Application tab →
+Local Storage. You can also edit them by hand there.
+
+**Only strings are stored.** Everything else turns into a string when written:
+
+```js
+localStorage.setItem("visits", 5);
+localStorage.getItem("visits");       // "5" — already a string
+localStorage.getItem("visits") + 1;   // "51", not 6
+```
+
+Hence the first practical technique — a visit counter. Read the string, convert it to a number,
+add one, write it back:
+
+```js
+const visits = Number(localStorage.getItem("group:visits") ?? 0) + 1;
+localStorage.setItem("group:visits", visits);
+message.textContent = `Visit number ${visits}`;
+// the first opening — “Visit number 1”, after a reload — “Visit number 2”
+```
+
+On the first opening there is no key, `getItem` returns `null`, and the operator
+`??` from day 7 puts in 0. `Number` from day 17 turns the string into a
+number — without it we would get “Visit number 11”.
+
+Two more properties — briefly: `localStorage.length` — how many keys there are,
+`localStorage.key(i)` — the name of a key by its number. The browser chooses the order of the keys
+itself, you cannot rely on it.
+
+## 11. Walkthrough: “\[object Object\]” was saved {#object}
+
+```js
+localStorage.setItem("student", { name: "Aman" });
+localStorage.getItem("student");                // "[object Object]"
+JSON.parse(localStorage.getItem("student"));
+// SyntaxError: "[object Object]" is not valid JSON
+```
+
+**Step 1. What was saved?** Not the object, but the string
+`"[object Object]"`. There is no name in it — the data was lost already when writing.
+
+**Step 2. Why?** `setItem` turned the object into a string
+in the simplest way, and for an object that is always `"[object Object]"`.
+
+**Step 3. We fix it** with the familiar pair from day 23: an object into a string —
+`JSON.stringify`, a string back into an object — `JSON.parse`.
+
+```js
+localStorage.setItem("student", JSON.stringify({ name: "Aman", marks: [5, 4] }));
+localStorage.getItem("student");                     // '{"name":"Aman","marks":[5,4]}'
+JSON.parse(localStorage.getItem("student")).marks;   // [5, 4]
+```
+
+And a handy coincidence: if there is no key, `getItem` returns `null`, and
+`JSON.parse(null)` is `null` too. Missing data does not crash
+the program, it only has to be checked.
+
+Edge cases — what was written, what was read and what `JSON.parse` gives:
+
+| `setItem("x", …)` | `getItem("x")` | `JSON.parse` |
+| --- | --- | --- |
+| `5` | `"5"` | `5` |
+| `true` | `"true"` | `true` |
+| `null` | `"null"` | `null` |
+| `undefined` | `"undefined"` | `SyntaxError: "undefined" is not valid JSON` |
+| `[1, 2]` | `"1,2"` | `SyntaxError: Unexpected non-whitespace character after JSON at position 1 (line 1 column 2)` |
+| `JSON.stringify([1, 2])` | `"[1,2]"` | `[1, 2]` |
+
+Numbers and booleans survive the trip even without `JSON.stringify`, while arrays
+and objects do not. The rule is simple: **everything that is not a string goes through
+`JSON.stringify`**.
+
+## 12. `sessionStorage` and where data lives {#session}
+
+`localStorage` has a twin — `sessionStorage`. The methods are the same,
+but it lives shorter: only while the tab is open.
+
+```js
+sessionStorage.setItem("group:draft", "Ilýas, 5 4 9");
+sessionStorage.getItem("group:draft");   // "Ilýas, 5 4 9"
+// reloaded the page — the draft is in place; opened the same page in a new tab:
+sessionStorage.getItem("group:draft");   // null
+```
+
+This is handy for what is needed “while the person is working”, but not forever: a draft
+of a form, the selected tab, the step of filling in a questionnaire. Closed the tab — started from a clean slate.
+
+<Scheme src="scheme-session.svg">localStorage is shared by all the pages of one address, sessionStorage by only one tab</Scheme>
+
+|  | `localStorage` | `sessionStorage` |
+| --- | --- | --- |
+| the page was reloaded | in place | in place |
+| the same page opened in a new tab | in place | empty |
+| the tab, the browser was closed | in place | gone |
+| what for | settings, lists, everything “forever” | a draft of a form, a step of a wizard |
+
+The storage is divided by the **server address** — the scheme, the name and the port. All
+the projects opened through Live Server have one address: `http://127.0.0.1:5500`.
+So the to-do list and the “Report card” see the same storage. Checked: a key written
+on the `group` page is read on a page from the neighboring folder. That is why keys
+are named with the project prefix — `"todo:tasks"`, `"tabel:reports"`, —
+otherwise two projects will overwrite each other’s data.
+
+For the same reason `clear()` is dangerous: it erases the storage of the whole address, not
+of one project.
+
+```js
+// on the group page:
+localStorage.setItem("todo:tasks", "[]");
+// on a page from the neighboring folder:
+localStorage.clear();
+// on the group page again:
+localStorage.getItem("todo:tasks");   // null — erased by someone else’s clear()
+```
+
+Your own data is deleted with your own keys, through `removeItem`. Leave `clear()`
+for experiments in the console.
+
+## 13. Text in an address: `encodeURIComponent` {#uri}
+
+Data is often passed to a server right in the address, after the question mark:
+`group.json?name=Aman`. But some characters have a special meaning in an address: `&`
+separates parameters, `?` starts them, `#` cuts off the tail. The name
+“Gülnar & Aman”, put in as it is, will be read by the server as two parameters.
+
+```js
+encodeURIComponent("Gülnar & Aman");
+// "G%C3%BClnar%20%26%20Aman"
+decodeURIComponent("G%C3%BClnar%20%26%20Aman");
+// "Gülnar & Aman"
+```
+
+`encodeURIComponent` replaces everything dangerous with codes of the form `%XX`:
+a space — `%20`, `&` — `%26`, every letter outside basic
+Latin, like ü, — with two such codes. `decodeURIComponent` does the reverse. The rule:
+**any text from a person that goes into an address is passed through
+`encodeURIComponent`**.
+
+```js
+const name = "Gülnar & Aman";
+const response = await fetch(`group.json?name=${encodeURIComponent(name)}`);
+response.url;   // '…/group.json?name=G%C3%BClnar%20%26%20Aman' — & is encoded
+```
+
+Briefly about the neighbors. `encodeURI` encodes a **whole** address and
+leaves the characters `&`, `?`, `/` alone — it does not fit a piece of data:
+`encodeURI("?name=Gülnar & Aman")` will leave `&`
+as it is. `decodeURI` is its reverse. And a wrong code gives an error
+when decoding:
+
+```js
+decodeURIComponent("100%");   // URIError: URI malformed
+```
+
+## 14. The to-do list remembers {#todo}
+
+On day 29 we promised: saving will be a tiny change — save at the end of
+`render`, read at the start of the program. And we noted two catches: on the first
+run there is nothing saved, and `nextId` has to be restored too. Here is the change
+in full:
+
+```js
+// 1. The data — from storage; on the first run — three example tasks
+const KEY = "todo:tasks";
+const saved = localStorage.getItem(KEY);
+
+let tasks = saved === null
+  ? [
+      { id: 1, text: "Review day 26", done: true },
+      { id: 2, text: "Do the tasks of day 28", done: false },
+      { id: 3, text: "Read about events on MDN", done: false },
+    ]
+  : JSON.parse(saved);
+let nextId = Math.max(0, ...tasks.map((t) => t.id)) + 1;   // the next free number
+let filter = "all";
+```
+
+```js
+function render() {
+  // … everything as on day 29, and as the last line:
+  localStorage.setItem(KEY, JSON.stringify(tasks));
+}
+```
+
+The first catch is solved by the check for `null` and the ternary operator from day 7. The second —
+by the line with `Math.max` (day 18): the next number is one more than the
+biggest of the saved ones. The zero at the start is needed for an empty list: `Math.max()`
+without arguments gives `-Infinity`, and with a zero — 0, and the first task will get number 1.
+
+<ResultBox>
+| What we did | What is there after reloading the page |
+| --- | --- |
+| opened it for the first time | three example tasks, `nextId` is 4 |
+| added “Buy a notebook”, checked it | four tasks, “Buy a notebook” is crossed out, `nextId` is 5 |
+| deleted all the tasks | empty, “Left: 0 of 0”, `nextId` is 1 |
+</ResultBox>
+
+The scheme “the page is a picture of the data” has paid off: `render` is called after
+every change anyway, so one line at its end saves everything. Not a single listener had
+to be touched. We do not save the filter: after a reload “All” is selected again. Whether it should
+be remembered is a decision of the program’s author, not a rule.
+
+### Walkthrough: what would happen without the line with `Math.max`
+
+Let us leave `let nextId = 4;`, as on day 29. Add “Buy a notebook”, reload
+the page, add “Buy bread” and click the checkbox of the bread. The notebook got crossed out.
+
+```js
+tasks.map((t) => t.id);   // [1, 2, 3, 4, 4]
+```
+
+**Step 1. What is in the data?** Two tasks with number 4. After the reload the counter again
+started from 4, although number 4 is already taken by the saved notebook.
+
+**Step 2. Why was the notebook marked?** `taskOf` looks for a task by its number
+with `find`, and that returns the **first** match — the notebook.
+Deleting breaks the same way: “✕” at the bread will delete the notebook.
+
+**Step 3. We fix it.** `id` promised to be a number that never
+repeats. So the counter is data too, and it has to be restored together with the tasks —
+exactly what the line with `Math.max` does.
+
+## 15. The “Report card”: from a server and with memory {#tabel}
+
+On day 30 the “Report card” got its data from `loadSaved` — a promise that only
+pretended to wait for a server. Now the string `saved` moves to the file
+`students.json` next to `index.html`, and we will wait for real.
+And the changes — added and deleted students — we will save.
+
+```js
+// unchanged: everything from days 23–28 and the form hidden during loading (day 30)
+// removed: the string saved (day 23), loadSaved and the then chain (day 30) — instead of them:
+
+const KEY = "tabel:reports";
+
+async function loadReports() {
+  const stored = localStorage.getItem(KEY);
+  if (stored !== null) return JSON.parse(stored);        // saved before — take our own
+  const response = await fetch("students.json");         // the first time — from the server
+  if (!response.ok) throw new Error(`server replied ${response.status}`);
+  const students = await response.json();
+  return students.map(makeReport);
+}
+
+async function start() {
+  form.hidden = true;
+  try {
+    const loaded = await loadReports();
+    reports.push(...loaded);
+    tbody.append(...loaded.map(makeRow).map(addDeleteButton));
+    updateSummary();
+  } catch (err) {
+    document.querySelector("#summary").textContent = `Could not load: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+    form.hidden = false;
+  }
+}
+
+start();
+```
+
+And one new line in `updateSummary` from day 27. This function is called
+after loading, adding and deleting anyway — the perfect place to save:
+
+```js
+function updateSummary() {
+  // … the two lines from day 27 unchanged
+  localStorage.setItem(KEY, JSON.stringify(reports));   // new
+}
+```
+
+<ResultBox>
+| What we did | What is on the page |
+| --- | --- |
+| opened it for the first time | five rows from `students.json`, “Top students: 2 of 5” |
+| added “Ilýas”, “5 4 9”, reloaded the page | six rows, Ilýas is in place, “Top students: 3 of 6” |
+| deleted Meret, reloaded | five rows without Meret |
+| the storage is empty, the file is renamed | “Could not load: server replied 404” |
+| someone wrote `"[object Object]"` into the storage | “Could not load: "\[object Object\]" is not valid JSON” — and so on every opening |
+</ResultBox>
+
+The last row is a trap of the storage: broken data survives a reload just as
+reliably as good data. The way out is to delete your key, and the “Report card” will take the data
+from the server again:
+
+```js
+localStorage.removeItem("tabel:reports");
+// reloaded the page: five rows from students.json, “Top students: 2 of 5”
+```
+
+We save the already computed reports, not the raw marks: the `reports` objects are clean
+data, strings and numbers, and `JSON.stringify` carries them over without losses. Compare with
+day 30: the chain `then` / `catch` / `finally` became
+`try` / `catch` / `finally`, and the meaning did not change.
+
+## 16. The module summary and what comes next {#next}
+
+| Day | What appeared | The “Report card” |
+| --- | --- | --- |
+| 30 | timers, promises, `then` / `catch` / `finally` | “Loading…”, the data a second later |
+| 31 | `fetch`, `async` / `await`, `localStorage`, encoding an address | the data from a file on a server, the changes are saved |
+
+### The path of the “Report card”
+
+| Day | What appeared |
+| --- | --- |
+| 23 | the data came as a JSON string, a report became an object |
+| 24–26 | a table on the page, the color of rows by classes, rows are created by code |
+| 27 | deleting, selecting, <Kbd>Esc</Kbd>, the total under the table |
+| 28 | an add form with validation, a confirmation of deleting |
+| 30 | “Loading…”, the data through a promise, the form waits for loading |
+| 31 | the data from a file on a server, the changes are saved |
+
+And the calculation inside — the function `makeReport` — has not changed once since day 23: what changed
+was only where the data comes from and where it goes. This is the main lesson of the course about how
+programs are built: the calculation separately, the showing separately, the data separately.
+
+The Essentials course has gone the whole path of the “Report card”: from lines in the console to an application that
+takes data from a server and remembers changes. There will be no new topics any more. Tomorrow,
+on day 32, — the mini project “Catalog”: a list from a server through `fetch`, cards,
+search and a filter, favorites in `localStorage`. Days 33–36 are the final project.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) | an overview: requests and responses | <Full /> |
+| [Using Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch) | a guide: checking `ok`, reading the body | <Full /> |
+| [fetch()](https://developer.mozilla.org/en-US/docs/Web/API/Window/fetch) | send a request; a promise of a response | <Full /> |
+| [Response](https://developer.mozilla.org/en-US/docs/Web/API/Response) | the server’s response | <Full /> |
+| [status](https://developer.mozilla.org/en-US/docs/Web/API/Response/status) | the response code | <Full /> |
+| [ok](https://developer.mozilla.org/en-US/docs/Web/API/Response/ok) | a status from 200 to 299 | <Full /> |
+| [text()](https://developer.mozilla.org/en-US/docs/Web/API/Response/text) | the body as a string | <Full /> |
+| [json()](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) | the body parsed as JSON | <Full /> |
+| [async function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function) | a function that returns a promise | <Full /> |
+| [await](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/await) | wait for a promise inside a function | <Full /> |
+| [Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API) | an overview: two storages | <Full /> |
+| [Using the Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API/Using_the_Web_Storage_API) | a guide: strings, keys, differences | <Full /> |
+| [Storage](https://developer.mozilla.org/en-US/docs/Web/API/Storage) | the storage object and its methods | <Full /> |
+| [localStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage) | the “forever” storage | <Full /> |
+| [sessionStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage) | the storage of a tab | <Full /> |
+| [setItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/setItem) | write a string by a key | <Full /> |
+| [getItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/getItem) | read; `null` if there is no key | <Full /> |
+| [removeItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/removeItem) | delete a key | <Full /> |
+| [clear](https://developer.mozilla.org/en-US/docs/Web/API/Storage/clear) | delete everything | <Full /> |
+| [key](https://developer.mozilla.org/en-US/docs/Web/API/Storage/key) | the name of a key by its number | <Brief /> |
+| [length](https://developer.mozilla.org/en-US/docs/Web/API/Storage/length) | how many keys there are | <Brief /> |
+| [encodeURIComponent](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent) | a piece of data for an address | <Full /> |
+| [decodeURIComponent](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/decodeURIComponent) | back from the codes | <Full /> |
+| [encodeURI](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURI) | a whole address | <Brief /> |
+| [decodeURI](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/decodeURI) | back, for a whole address | <Brief /> |
+| [URIError: URI malformed](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Malformed_URI) | a wrong code when decoding | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// A REQUEST — through Live Server, not file:///
+async function load(url) {
+  const response = await fetch(url);                  // the response came (or TypeError: Failed to fetch)
+  if (!response.ok) throw new Error(`Server replied ${response.status}`);   // 404 is not an error for fetch!
+  return response.json();                             // the body: json() or text(), only once
+}
+
+// ASYNC / AWAIT — await only inside async; an async function returns a promise
+button.addEventListener("click", async () => {
+  try {
+    const data = await load("group.json");
+  } catch (err) {
+    message.textContent = err.message;
+  } finally {
+    // cleanup
+  }
+});
+
+// STORAGE — only strings; a key with the project prefix
+const saved = localStorage.getItem("todo:tasks");   // null if there is none
+const tasks = saved === null ? [] : JSON.parse(saved);
+localStorage.setItem("todo:tasks", JSON.stringify(tasks));
+localStorage.removeItem("todo:tasks");   localStorage.clear();
+// sessionStorage — the same, but only while the tab is open
+
+// THE ADDRESS
+fetch(`search?name=${encodeURIComponent(text)}`);   // & ? # space — encoded
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. A request for a file that does not exist. Will the `fetch` promise be rejected?
+   <Answer>No. The server answered — so for `fetch` the request succeeded: the promise
+   is fulfilled with a response with `status` 404 and `ok` equal to
+   `false`. It is rejected only without a response — for example, when the server is not
+   running.</Answer>
+2. Why check `response.ok` before `response.json()`?
+   <Answer>Otherwise on an error we start parsing the error page as JSON and get
+   an unclear `SyntaxError` instead of a clear “Server replied 404”.</Answer>
+3. What does `async function f() { return 5; }` return when `f()` is called?
+   <Answer>A promise fulfilled with the value 5. An asynchronous function always returns a promise.</Answer>
+4. Does `await` stop the whole page?
+   <Answer>No, only its own function. The code outside goes on, clicks and timers work.</Answer>
+5. Why is an object passed through `JSON.stringify` before `setItem`?
+   <Answer>The storage holds only strings. An object by itself will turn into
+   `"[object Object]"`, and the data will be lost.</Answer>
+6. Why does a key need a prefix like `"todo:"`?
+   <Answer>All the pages of one server address share one storage. Through Live Server all
+   the projects are on `127.0.0.1:5500`, and without prefixes identical keys
+   of different projects will overwrite each other.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" />

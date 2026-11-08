@@ -1,0 +1,874 @@
+---
+title: Day 18 — Math and random numbers
+day: Day 18 • lesson 1
+heading: Math and random numbers
+lead: Module “Strings, numbers, Math and date basics”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- choose between four ways of rounding consciously;
+- round to tens, hundreds and any step;
+- get a random integer in a given range — with the right formula;
+- explain why `Math.round` in this formula spoils the edges;
+- find the biggest and the smallest in a list.
+</Goals>
+
+<Toc />
+
+## 1. `Math` is a set of tools {#what}
+
+`Math` is built differently from `String` and `Number`.
+It is not a type of value: there are no numbers of the kind “mathematics”. It is simply **a box
+of functions and constants** that lies in the language ready to use.
+
+```js
+Math.PI;          // 3.141592653589793
+Math.round(4.6);  // 5
+Math.max(3, 7);   // 7
+```
+
+Two consequences follow. The first: `Math` is not created — `new Math()`
+makes no sense. The second: all its skills are called with a dot from the word
+`Math` itself, not from a number:
+
+```js
+(4.6).toFixed(0);   // "5"  — this is a NUMBER method, it returns a string
+Math.round(4.6);    // 5    — this is a MATH function, it returns a number
+```
+
+The difference matters more than it seems. Yesterday’s `toFixed` is needed for **showing**
+and gives a string. Today’s functions are needed for **calculations** and give numbers.
+Mixing them up is one of the most common mistakes in reports.
+
+## 2. Four ways to round {#rounding}
+
+There are exactly four ways, and the difference between them is where to go when the number is fractional.
+
+```js
+Math.round(4.6);   // 5   to the nearest
+Math.round(4.4);   // 4
+Math.round(4.5);   // 5   exactly a half — up
+```
+
+The other three do not look at which half is closer — each has its own direction:
+
+```js
+Math.floor(4.9);   // 4   always down
+Math.ceil(4.1);    // 5   always up
+Math.trunc(4.9);   // 4   simply drop the fractional part
+```
+
+The difference between `floor` and `ceil` shows on a task that
+comes up all the time: how many boxes are needed if ten items fit into each one.
+
+```js
+const items = 47;
+const perBox = 10;
+
+Math.floor(items / perBox);   // 4   this many boxes will be filled completely
+Math.ceil(items / perBox);    // 5   this many boxes will be needed
+```
+
+Both answers are correct — to different questions. That is exactly why “round” without stating
+the direction is not enough.
+
+<Scheme src="scheme-rounding.svg">Four directions of rounding. For positive numbers there are really three options</Scheme>
+
+Which one to take is decided by the question “what will be wrong if we make a mistake”:
+
+| Task | Method | Why |
+| --- | --- | --- |
+| show the average | `round` | the nearest is needed |
+| how many whole boxes will fit | `floor` | a partly filled one does not count |
+| how many boxes will be needed | `ceil` | the remainder needs one more |
+| drop the kopecks | `trunc` | no rounding, just cut off |
+
+## 3. Negative numbers {#negative}
+
+Here hides a catch that everyone falls for. Check:
+
+```js
+Math.floor(-4.1);   // -5   “down” means toward minus infinity
+Math.trunc(-4.1);   // -4   “drop” means toward zero
+
+Math.ceil(-4.9);    // -4   “up” means toward plus infinity
+Math.round(-4.5);   // -4   exactly a half always goes UP
+```
+
+Two lines are worth remembering separately. **`floor` and `trunc`
+differ on negatives**: the first takes you further from zero, the second simply erases
+the fractional part. On positive numbers they are the same, so the error is not visible until
+a minus gets into the data.
+
+And **`Math.round(-4.5)` gives −4, not −5**. The rule “a half goes
+up” works literally: up along the number line, not “further from zero”.
+There is no symmetry here.
+
+<Mistake>
+If a program has negative values — a temperature difference, a debt, an offset —
+choose the method consciously and write a check on a minus. An error of one unit
+at a boundary takes a very long time to find later.
+</Mistake>
+
+## 4. Rounding to tens and to a step {#steps}
+
+All four methods can round only to integers. But the technique with dividing and multiplying
+gives any step:
+
+```js
+const price = 1234.567;
+
+Math.round(price);              // 1235   to integers
+Math.round(price / 10) * 10;    // 1230   to tens
+Math.round(price / 100) * 100;  // 1200   to hundreds
+Math.floor(price / 5) * 5;      // 1230   down to a multiple of five
+```
+
+It is read from the inside out: **divided by the step, rounded, multiplied back**.
+If the step is 10, after dividing the “tens” take the place of the ones, rounding works
+as usual, and multiplying puts everything back.
+
+The same technique rounds in the other direction too — to hundredths:
+
+```js
+Math.round(4.3333 * 100) / 100;   // 4.33 — a number, not a string
+```
+
+The difference from `toFixed(2)` is fundamental: `toFixed` gives the string
+`"4.33"` for showing, while this form gives the **number** 4.33, which you
+can keep calculating with.
+
+### Money: drop or round
+
+With money both actions are needed, and they must not be mixed up:
+
+```js
+const total = 1234.567;
+
+Math.trunc(total);                 // 1234     dropped the kopecks completely
+Math.round(total * 100) / 100;     // 1234.57  kept the kopecks, rounding them
+```
+
+The first is “how many whole manats”, the second is “the sum to the kopeck”.
+Yesterday’s rule still holds: **it is better to store and calculate right in kopecks**,
+as integers, and divide by a hundred once when printing.
+
+```js
+const kopecks = Math.round(total * 100);   // 123457 — an integer, exact
+kopecks / 100;                             // 1234.57 — only for showing
+```
+
+## 5. Absolute value and sign {#abs-sign}
+
+```js
+Math.abs(-5);    // 5    the distance from zero
+Math.abs(5);     // 5
+
+Math.sign(-5);   // -1   negative
+Math.sign(0);    // 0    zero
+Math.sign(5);    // 1    positive
+```
+
+We already used `Math.abs` yesterday — to compare fractional numbers
+with `Number.EPSILON`. This is its typical job: **“how much they differ”
+without caring which one is bigger**.
+
+```js
+const plan = 4.5;
+const fact = 4.2;
+
+Math.abs(plan - fact) < 0.5;   // true — the deviation is less than half a point
+```
+
+`Math.sign` is needed less often, but it is irreplaceable when only the direction matters:
+whether an indicator grows or falls, whether to move an element up or down.
+
+```js
+const wasAvg = 4.2;
+const nowAvg = 3.9;
+
+Math.sign(nowAvg - wasAvg);          // -1 — it fell
+Math.abs(nowAvg - wasAvg).toFixed(1); // "0.3" — by how much
+```
+
+Together they answer two different questions about the same difference: **where**
+and **how much**. In reports these are often two neighboring columns — an arrow
+and a number.
+
+## 6. Powers and roots {#pow-sqrt}
+
+```js
+Math.pow(2, 10);   // 1024
+2 ** 10;           // 1024 — the same, the operator from day 6
+
+Math.sqrt(144);    // 12    the square root
+Math.sqrt(-1);     // NaN   there is no root of a negative number
+Math.cbrt(27);     // 3     the cube root
+Math.hypot(3, 4);  // 5     the length of the hypotenuse
+```
+
+The `**` operator has two subtleties worth knowing about. It is calculated
+**from right to left**, and it does not get along with a minus in front of a number:
+
+```js
+2 ** 3 ** 2;   // 512 — this is 2 to the power of 9, not 8 squared
+(-2) ** 2;     // 4   the parentheses are required
+```
+
+```js
+// -2 ** 2;   → SyntaxError: Unary operator used immediately before exponentiation expression.
+//                         Parenthesis must be used to disambiguate operator precedence
+-(2 ** 2);    // -4 — “minus of two squared”; (-2) ** 2 is 4
+```
+
+The language does not guess here but honestly demands parentheses: `-2 ** 2` can be read
+both as “minus two, squared” and as “minus of two squared”, and these are different numbers.
+
+`Math.pow` and the `**` operator do the same thing; in new code
+people write the operator, and `pow` stays in old code. `Math.hypot` is
+`sqrt(a² + b²)` in one call: the distance between two points.
+Coordinates of points on the page will appear on day 27, in click events.
+
+## 7. The biggest and the smallest {#max-min}
+
+```js
+Math.max(3, 7, 5);   // 7
+Math.min(3, 7, 5);   // 3
+```
+
+Both functions take any number of arguments — like our functions with a rest
+parameter from day 14. And both behave unexpectedly in two cases:
+
+```js
+Math.max();            // -Infinity   not a single argument
+Math.min();            // Infinity
+Math.max(3, NaN, 5);   // NaN         one NaN spoils everything
+```
+
+The logic of the first two is this: `Math.max` starts from the smallest
+possible value and raises it with each argument. If there are no arguments, there is nothing
+to raise — `-Infinity` remains. It looks strange, but in a loop it is exactly
+a handy starting value.
+
+The main question: **how to find the maximum in an array**, since `Math.max`
+wants the arguments separately. Today we do it with a loop:
+
+```js
+const maxOf = (numbers) => {
+  let best = numbers[0];
+  for (const n of numbers) {
+    best = Math.max(best, n);
+  }
+  return best;
+};
+
+maxOf([3, 5, 4]);   // 5
+```
+
+The same loop is easy to adapt to “the maximum among the suitable ones” — it is enough
+to add a condition:
+
+```js
+const bestValid = (marks) => {
+  let best = -Infinity;
+  for (const m of marks) {
+    if (isValidMark(m)) {
+      best = Math.max(best, m);
+    }
+  }
+  return best;
+};
+```
+
+The check `isValidMark` here is our old friend from the “Report card”.
+And the starting value is `-Infinity`, not the first element: the first one may
+not fit the condition. This is exactly the case for which `Math.max`
+starts counting from minus infinity.
+
+The other side of such a start: if no mark fits, the function will return
+`-Infinity` instead of a clear message. The result will have to be checked
+on the caller’s side.
+
+There is also a short form — with three dots that “unfold” an array
+into separate arguments. We will take it apart on day 22; for now just recognize it:
+
+```js
+Math.max(...[3, 5, 4]);   // 5 — day 22, spread
+```
+
+## 8. How `random` works {#random}
+
+One function, and it has no arguments. It returns a random fractional number
+**from zero inclusive to one exclusive**:
+
+```js
+Math.random();   // 0.5316784922... a new one every time
+Math.random();   // 0.0271633481...
+```
+
+<Scheme src="scheme-random.svg">The path from a fractional number to a dice roll. Each cell has the same width — hence the equal chances</Scheme>
+
+It is the right boundary that matters. One **never comes out**, and this is
+not chance but a condition: thanks to it, after multiplying and rounding down you get
+exactly as many outcomes as intended.
+
+## 9. An integer in a range {#randomint}
+
+A formula worth writing down and remembering:
+
+```js
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+randomInt(1, 6);     // a dice roll
+randomInt(1, 100);   // a number for a game
+randomInt(0, 1);     // heads or tails
+```
+
+Let us take it apart piece by piece so as not to learn it blindly.
+
+| Part | What it does | Example for 1…6 |
+| --- | --- | --- |
+| `max - min + 1` | how many outcomes in all | 6 − 1 + 1 = 6 |
+| `Math.random() * 6` | stretches the segment | 0 … 5.999… |
+| `Math.floor(...)` | divides it into equal cells | 0, 1, 2, 3, 4, 5 |
+| `+ min` | shifts to the start of the range | 1, 2, 3, 4, 5, 6 |
+
+The one in `max - min + 1` is the most commonly forgotten detail. Without it
+the maximum value will simply never come out, and you can notice it only
+by statistics over a thousand rolls.
+
+### A random element of a list
+
+The most common use of the formula is picking at random from a ready list. The indices go
+from zero to `length - 1`, so the range is the same:
+
+```js
+const names = ["Aman", "Meret", "Gülnar", "Sapar"];
+
+const lucky = names[randomInt(0, names.length - 1)];
+```
+
+Since the lower boundary is always zero, the formula can be shortened: `+ min`
+and `- min` cancel out, and `max + 1` turns into the length itself.
+
+```js
+const lucky = names[Math.floor(Math.random() * names.length)];
+```
+
+You will see this form in other people’s code more often than the full formula — it is worth recognizing
+at first sight. Both versions give equally frequent outcomes; this was checked with a counter
+over forty thousand tries.
+
+## 10. Why not `round` {#round-trap}
+
+A simpler form suggests itself — `Math.round(Math.random() * 6)`.
+It gives numbers from 0 to 6 and looks harmless. But their chances are different.
+
+Let us check honestly: sixty thousand rolls and a count of each outcome.
+
+```js
+const counts = {};
+
+for (let i = 0; i < 60000; i++) {
+  const n = Math.round(Math.random() * 6);
+  counts[n] = (counts[n] || 0) + 1;
+}
+
+console.log(counts);
+```
+
+One of the runs in Chrome — your numbers will be different, but the picture is the same:
+
+<ResultBox>
+```plain-out
+{0: 4944, 1: 9976, 2: 9898, 3: 10142, 4: 10130, 5: 9871, 6: 5039}
+```
+</ResultBox>
+
+<Scheme src="scheme-round-trap.svg">The height of a bar is how often an outcome comes out. With `round` the edge cells are half as wide as the others</Scheme>
+
+The reason is visible on the scheme from section 8. `round` gives zero only the segment
+from 0 to 0.5, and one the segment from 0.5 to 1.5, which is twice as wide. The edges get
+half a cell each, the middle a whole cell.
+
+### How to check any random formula
+
+The technique from this section is worth remembering apart from the error itself. Random numbers
+have no “right answer” that can be compared — so they are checked
+**with statistics**:
+
+```js
+function checkRandom(makeNumber, times = 60000) {
+  const counts = {};
+  for (let i = 0; i < times; i++) {
+    const n = makeNumber();
+    counts[n] = (counts[n] || 0) + 1;
+  }
+  return counts;
+}
+
+checkRandom(() => randomInt(1, 6));
+```
+
+The function takes another function — the technique from day 12. Then you look at three things:
+how many different outcomes there are in all, whether there are values outside the range, and whether
+the bars are roughly the same. Each of the three checks catches its own error.
+
+<Important>
+This is an error that **does not break the program and is not visible by eye**.
+The game will work, the die will be rolled, and only after a thousand games will someone
+notice that six comes out half as often. Such a thing is found only with a counter —
+exactly as we did above.
+</Important>
+
+## 11. The game “guess the number” {#game}
+
+Let us build a small game. Notice: the secret number and the player’s answer are **parameters
+of the function**, not something taken from inside. This way the check can be run without a single
+click, as we agreed on day 15.
+
+```js
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function checkGuess(guess, secret) {
+  if (!Number.isInteger(guess)) {
+    return "this is not an integer";
+  }
+  if (guess < secret) {
+    return "higher";
+  }
+  if (guess > secret) {
+    return "lower";
+  }
+  return "you got it!";
+}
+
+const secret = randomInt(1, 100);
+
+checkGuess(50, 7);    // "lower"
+checkGuess(3, 7);     // "higher"
+checkGuess(7, 7);     // "you got it!"
+checkGuess(4.5, 7);   // "this is not an integer"
+```
+
+Four calls check all four branches — a habit from day 15. Real input
+from a player will appear on day 28 together with forms, and until then the function is completely ready
+and checked.
+
+### How many steps it takes to guess
+
+If you name the middle of the remaining segment every time, any number from 1 to 100
+is guessed **in no more than seven moves**. Each move halves the segment:
+100 → 50 → 25 → 13 → 7 → 4 → 2 → 1.
+
+This is the same calculation that stands behind `Math.log2` from the table in section 13:
+how many times a number must be divided in half to get down to one.
+
+## 12. Constants {#constants}
+
+`Math` has eight ready numbers. They are written without parentheses — they are values,
+not functions:
+
+| Constant | Value | What it is |
+| --- | --- | --- |
+| `Math.PI` | 3.14159… | the ratio of a circle’s length to its diameter |
+| `Math.E` | 2.71828… | the base of the natural logarithm |
+| `Math.SQRT2` | 1.41421… | the square root of two |
+| `Math.SQRT1_2` | 0.70710… | the square root of one half |
+| `Math.LN2` | 0.69314… | the natural logarithm of two |
+| `Math.LN10` | 2.30258… | the natural logarithm of ten |
+| `Math.LOG2E` | 1.44269… | the base-2 logarithm of E |
+| `Math.LOG10E` | 0.43429… | the base-10 logarithm of E |
+
+Of these, one comes up in ordinary tasks — `Math.PI`:
+
+```js
+const radius = 5;
+
+const area = Math.PI * radius ** 2;        // 78.539816...
+const length = 2 * Math.PI * radius;       // 31.415926...
+
+area.toFixed(2);   // "78.54"
+```
+
+Both formulas are worth turning into functions — then the radius will not have to be written twice,
+and the rounding will be in one place:
+
+```js
+const round2 = (x) => Math.round(x * 100) / 100;
+
+const circleArea = (r) => round2(Math.PI * r ** 2);
+const circleLength = (r) => round2(2 * Math.PI * r);
+
+circleArea(5);     // 78.54
+circleLength(5);   // 31.42
+```
+
+Notice: `round2` returns a number, not a string. So
+the result can be added, compared and put into the next formula — unlike
+`toFixed`.
+
+## 13. Trigonometry and logarithms {#trig}
+
+Most of `Math` is school mathematics that is rarely needed on the web
+but lies ready. There is no point in taking apart each function; what matters is **to know
+that they exist and to be able to find them**.
+
+| Group | Functions | When to remember them |
+| --- | --- | --- |
+| trigonometry | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` | movement in a circle, angles, animation |
+| hyperbolic | `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | physics and machine learning |
+| logarithms | `log`, `log2`, `log10`, `log1p`, `exp`, `expm1` | scales, growth, “how many times to divide in half” |
+| roots and lengths | `cbrt`, `hypot` | geometry, distances |
+
+Two things are worth knowing about angles. The first: trigonometry works
+**in radians**, not in degrees. The second: the conversion is done through
+`Math.PI` and fits into one line:
+
+```js
+const degrees = 90;
+const radians = degrees * Math.PI / 180;
+
+Math.sin(radians);   // 1
+```
+
+It is handy to turn the conversion in both directions into two small functions and no longer
+think about it:
+
+```js
+const toRadians = (degrees) => degrees * Math.PI / 180;
+const toDegrees = (radians) => radians * 180 / Math.PI;
+
+Math.sin(toRadians(90));   // 1
+toDegrees(Math.PI / 2);    // 90
+```
+
+And right away a check of yesterday’s material: `Math.sin(toRadians(30))` gives
+not exactly 0.5 but 0.49999999999999994. This is the same binary error we talked about
+on day 17 — and the same conclusion: such numbers must not be compared with `===`.
+
+Of the logarithms, `Math.log2` comes up more often than the others — the very answer
+to the question “how many times can you divide in half”. It is what gives seven moves
+in the game from section 11.
+
+## 14. Rare methods {#rare}
+
+Five functions that you will most likely never write yourself, but may
+meet in other people’s code.
+
+| Method | What it does |
+| --- | --- |
+| `Math.fround` | rounds to the precision of a 32-bit number |
+| `Math.f16round` | the same for a 16-bit one |
+| `Math.clz32` | counts the zeros at the start of the binary form |
+| `Math.imul` | multiplication of 32-bit integers |
+| `Math.sumPrecise` | the sum of a list without accumulating error |
+
+The last one deserves a special note. `Math.sumPrecise` solves exactly the
+problem we stumbled over yesterday — adding fractions with an error. But it is
+so new that it is not available everywhere yet: Node 22, for example, does not have it at all.
+**Before taking such a method, check whether it exists in your environment**:
+
+```js
+typeof Math.sumPrecise;   // "function" — it exists; "undefined" — it does not
+```
+
+Such a check takes a second and works for any method of the language. The habit
+will come in handy more than once: new features appear in browsers at different times,
+and a program written with the very newest ones will simply not run for someone.
+
+## 15. The “Report card”: the best and the worst mark {#tabel}
+
+Let us add two columns to the report — the minimum and the maximum — and the share of valid marks
+in percent.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+const toMark = (raw) => Number(String(raw).trim());
+const isValidMark = (m) => Number.isInteger(m) && m >= MIN_MARK && m <= MAX_MARK;
+
+const sum = (numbers) => {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+};
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+// new: the maximum and the minimum of a list
+const maxOf = (numbers) => {
+  let best = numbers[0];
+  for (const n of numbers) {
+    best = Math.max(best, n);
+  }
+  return best;
+};
+
+const minOf = (numbers) => {
+  let worst = numbers[0];
+  for (const n of numbers) {
+    worst = Math.min(worst, n);
+  }
+  return worst;
+};
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+function makeHeader() {
+  return "Name".padEnd(NAME_WIDTH) + "Avg".padStart(6) + "Min".padStart(5)
+    + "Max".padStart(5) + "%".padStart(7) + "  Verdict";
+}
+
+function makeRow(name = "unnamed", ...raw) {
+  const marks = [];
+  for (const r of raw) {
+    marks.push(toMark(r));
+  }
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "no valid marks";
+  }
+
+  const avg = average(valid);
+  const percent = Math.round(valid.length / marks.length * 100);
+
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(minOf(valid)).padStart(5)
+    + String(maxOf(valid)).padStart(5)
+    + (percent + "%").padStart(7)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(56);
+
+console.log(makeHeader());
+console.log(line);
+console.log(makeRow("Aman", 5, "4", " 9 ", 3, 5, 0, "4", 5));
+console.log(makeRow("Meret", "3", 3, 4));
+console.log(makeRow("Gülnar", 9, 0, "five"));
+console.log(makeRow("Sapar", 5, 5, "4", 5));
+console.log(makeRow("Oguljan", "4.5", 4, 5));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Name           Avg  Min  Max      %  Verdict
+--------------------------------------------------------
+Aman          4.33    3    5    75%  good student
+Meret         3.33    3    4   100%  average student
+Gülnar      no valid marks
+Sapar         4.75    4    5   100%  top student
+Oguljan       4.50    4    5    67%  top student
+--------------------------------------------------------
+```
+</ResultBox>
+
+**The percents are rounded to integers.** Aman has six valid marks out of eight —
+that is exactly 75. Oguljan has two of three, that is 66.666…, and `Math.round`
+gives 67. What matters here is that the rounding stands **after** all the division,
+not inside it: this is the rule from yesterday.
+
+**`maxOf` and `minOf` are written with a loop**, not with
+`Math.max(...valid)` — the short form with three dots is waiting for day 22. But
+inside the loop `Math.max` works in its natural form: it compares two
+numbers and returns the bigger one.
+
+**Neither of the two helpers checks for an empty list.** This is not forgetfulness:
+above them there is an early branch that simply does not reach them if there are no valid marks.
+But if you move `maxOf` into another program, you will have to add the check —
+on an empty array it returns `undefined`.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** In `maxOf` replace the starting value
+`numbers[0]` with `-Infinity`. Why will the program keep
+working, and in what way is this variant better and in what way worse?
+\
+\
+**The second.** Calculate the percent with `toFixed(0)` instead of
+`Math.round`. The output will not change — explain why. Then add up the percents
+of Aman and Meret in both variants and compare the answers.
+\
+\
+**The third.** Add a column “spread” — the difference between the maximum
+and the minimum. Who has the largest one? And with what marks would the spread be zero — what does that mean?
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `Math.round(Math.random() * 6)` | the edges come out half as often | `Math.floor(random() * 6)` |
+| the formula without `+ 1` | the maximum will never come out | `(max - min + 1)` |
+| `Math.floor` on negatives as “drop” | `floor(-4.1)` is −5 | `Math.trunc` |
+| `Math.max(marks)` with an array | an array is one argument, you get `NaN` | a loop, or spread from day 22 |
+| `Math.max()` on an empty list | returns `-Infinity` | check the length beforehand |
+| `Math.sin(90)` as “the sine of 90°” | the argument is in radians | `Math.sin(90 * Math.PI / 180)` |
+| `Math.round(x).toFixed(2)` | first lost the fraction, then added zeros | round once, at the end |
+
+### What comes tomorrow
+
+This closes the module “Strings, numbers, Math and date basics”: strings, numbers and `Math`
+are taken apart. From the nineteenth day the module about arrays begins — and it will begin
+with something pleasant: `slice`, `indexOf`, `includes`,
+`at` and `concat` work there exactly the same way as in strings,
+including negative indices and −1 on failure.
+
+And along the way it will become clear why `Math.max` does not accept an array and what
+the three dots fix about it.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Math](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math) | an overview: functions and constants | <Full /> |
+| [round](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/round) | to the nearest; a half goes up | <Full /> |
+| [floor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/floor) | down, toward minus infinity | <Full /> |
+| [ceil](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/ceil) | up, toward plus infinity | <Full /> |
+| [trunc](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/trunc) | drop the fractional part | <Full /> |
+| [abs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/abs) | the absolute value: the distance from zero | <Full /> |
+| [sign](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sign) | −1, 0 or 1 | <Full /> |
+| [pow](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/pow) | a power; the same as `**` | <Full /> |
+| [sqrt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sqrt) | the square root | <Full /> |
+| [max](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/max) | the biggest of the arguments | <Full /> |
+| [min](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/min) | the smallest of the arguments | <Full /> |
+| [random](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random) | a fraction from 0 to 1, one not included | <Full /> |
+| [PI](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/PI) | 3.14159… | <Full /> |
+| [E](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/E) | 2.71828… | <Brief /> |
+| [SQRT2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/SQRT2) | the square root of two | <Brief /> |
+| [SQRT1_2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/SQRT1_2) | the square root of one half | <Brief /> |
+| [LN2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LN2) | the natural logarithm of two | <Brief /> |
+| [LN10](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LN10) | the natural logarithm of ten | <Brief /> |
+| [LOG2E](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LOG2E) | the base-2 logarithm of E | <Brief /> |
+| [LOG10E](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LOG10E) | the base-10 logarithm of E | <Brief /> |
+| [cbrt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/cbrt) | the cube root | <Brief /> |
+| [hypot](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/hypot) | the length of the hypotenuse | <Brief /> |
+| [sin](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sin) | the sine, the argument in radians | <Brief /> |
+| [cos](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/cos) | the cosine | <Brief /> |
+| [tan](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/tan) | the tangent | <Brief /> |
+| [asin](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/asin) | the arcsine | <Brief /> |
+| [acos](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/acos) | the arccosine | <Brief /> |
+| [atan](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/atan) | the arctangent | <Brief /> |
+| [atan2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/atan2) | an angle from two legs | <Brief /> |
+| [sinh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sinh) | the hyperbolic sine | <Brief /> |
+| [cosh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/cosh) | the hyperbolic cosine | <Brief /> |
+| [tanh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/tanh) | the hyperbolic tangent | <Brief /> |
+| [asinh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/asinh) | the inverse hyperbolic sine | <Brief /> |
+| [acosh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/acosh) | the inverse hyperbolic cosine | <Brief /> |
+| [atanh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/atanh) | the inverse hyperbolic tangent | <Brief /> |
+| [log](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log) | the natural logarithm | <Brief /> |
+| [log2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log2) | the base-2 logarithm | <Brief /> |
+| [log10](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log10) | the base-10 logarithm | <Brief /> |
+| [log1p](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log1p) | the logarithm of 1 + x, more precise for small x | <Brief /> |
+| [exp](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/exp) | E to the power of x | <Brief /> |
+| [expm1](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/expm1) | the same minus one, more precise for small x | <Brief /> |
+| [fround](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/fround) | rounding to 32-bit precision | <Brief /> |
+| [f16round](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/f16round) | the same for 16 bits | <Brief /> |
+| [clz32](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/clz32) | the zeros at the start of the binary form | <Brief /> |
+| [imul](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/imul) | multiplication of 32-bit integers | <Brief /> |
+| [sumPrecise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sumPrecise) | an exact sum of a list; very new, not available everywhere | <Brief /> |
+
+Forty-six pages: thirteen in depth, thirty-three for recognition. Trigonometry
+and logarithms are given in one table — they are taken apart when a task gets to them.
+</Ref>
+
+<Cheatsheet>
+```js
+// FOUR KINDS OF ROUNDING
+Math.round(4.5);   // 5   to the nearest, a half goes UP
+Math.floor(4.9);   // 4   always down
+Math.ceil(4.1);    // 5   always up
+Math.trunc(4.9);   // 4   drop the fractional part
+
+// ON NEGATIVES THEY DIFFER
+Math.floor(-4.1);  // -5  down = further from zero
+Math.trunc(-4.1);  // -4  drop = toward zero
+Math.round(-4.5);  // -4  a half still goes UP
+
+// ANY STEP: divide → round → multiply
+const price = 1234.567;
+Math.round(price / 10) * 10;     // 1230     to tens
+Math.round(price * 100) / 100;   // 1234.57  to hundredths, AS A NUMBER (toFixed gives a string)
+
+// ABSOLUTE VALUE, SIGN, POWERS
+Math.abs(-5);       // 5
+Math.sign(-5);      // -1
+Math.sqrt(144);     // 12
+2 ** 10;            // 1024 — the same as Math.pow(2, 10)
+Math.hypot(3, 4);   // 5
+
+// MAXIMUM AND MINIMUM
+Math.max(3, 7, 5);     // 7
+Math.max();            // -Infinity !
+Math.max(3, NaN, 5);   // NaN !
+const marks = [3, 5, 4];
+Math.max(marks);       // NaN — an array is ONE argument
+let best = marks[0];
+for (const n of marks) { best = Math.max(best, n); }   // this is how we do it today
+best;                  // 5
+
+// RANDOM
+Math.random();   // 0 ≤ x < 1, NEVER one
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+Math.round(Math.random() * 6);   // A MISTAKE: 0 and 6 half as often
+
+// CONSTANTS — without parentheses
+Math.PI;   // 3.141592653589793; also Math.E, Math.SQRT2, Math.LN2
+
+// ANGLES IN RADIANS
+Math.sin(90 * Math.PI / 180);   // 1 — the sine of 90 degrees
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. How is `Math.floor` different from `Math.trunc`?
+   <Answer>On positive numbers — in nothing. On negative ones `floor` goes
+   down the line (`-4.1` → `-5`), while `trunc`
+   simply drops the fractional part (`-4.1` → `-4`).</Answer>
+2. Why is there `+ 1` in the formula of a random integer?
+   <Answer>`max - min + 1` is the number of outcomes. Without the one the range
+   will be one shorter, and the maximum value will never come out.</Answer>
+3. What is wrong with `Math.round(Math.random() * 6)`?
+   <Answer>You get seven outcomes (0…6), and the edge ones come out half as often as the others:
+   `round` gives zero only half a cell. The program
+   works anyway, and the error is visible only with a counter over thousands of rolls.</Answer>
+4. What will `Math.max(marks)` return if `marks` is an array?
+   <Answer>`NaN`. The array gets into the function as one argument, and it cannot
+   be turned into a number. You need a loop or the form with spread from day 22.</Answer>
+5. Why is `Math.round(x * 100) / 100` better than
+   `x.toFixed(2)`?
+   <Answer>The first gives a number you can keep calculating with; the second gives a string
+   for showing. If the result goes into further calculations, you need the first
+   variant.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math" />

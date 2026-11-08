@@ -1,0 +1,905 @@
+---
+title: "День 27 — События: слушатели, объект события, всплытие"
+day: День 27 • урок 1
+heading: "События: слушатели, объект события, всплытие"
+lead: Модуль «DOM и события», четвёртый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+---
+
+<Goals>
+- вешать на элементы слушателей и снимать их;
+- читать из объекта события, что случилось и где;
+- отвечать на щелчки мыши и нажатия клавиш;
+- объяснять всплытие и отличать `target` от `currentTarget`;
+- обслуживать много элементов одним слушателем — делегированием;
+- отменять действие браузера и останавливать всплытие;
+- дать каждой строке «Табеля» кнопку «Удалить».
+</Goals>
+
+<Toc />
+
+## 1. Страница, которая отвечает {#why}
+
+Три дня страница менялась сама: код выполнялся при загрузке, и всё. Теперь она начнёт
+**отвечать** человеку. Щелчок, нажатие клавиши, конец загрузки — всё это
+**события**: браузер сообщает, что что-то произошло. Код подписывается
+на нужное событие и получает вызов, когда оно случается.
+
+Учебная страница — вчерашняя, с двумя добавками в конце `main`:
+
+```html
+<button id="hello">Поздороваться</button>
+<p id="log"></p>
+```
+
+```js
+const button = document.querySelector("#hello");
+const log = document.querySelector("#log");
+
+button.addEventListener("click", () => {
+  log.textContent = "Салам!";
+});
+```
+
+Щёлкните по кнопке — под ней появится «Салам!». Всё, что мы знаем о странице,
+теперь можно делать **в ответ** на действие человека: находить (день 24),
+менять (день 25), создавать и удалять (день 26).
+
+Этот код положите в `app.js`, а примеры разделов пишите в консоли. Примеры
+одного раздела продолжают друг друга, а перед каждым новым разделом обновляйте страницу
+(<Kbd>F5</Kbd>): останется только слушатель из `app.js`.
+
+Функцию, которая отвечает на событие, называют **слушателем** или
+**обработчиком**. Она ждёт своего часа: строка с
+`addEventListener` выполняется сразу, а сама функция — только при щелчке,
+и столько раз, сколько щёлкнут.
+
+Событий в браузере сотни: руководство MDN «События DOM» перечисляет их по видам —
+от анимаций до работы с сетью. Нам в этом курсе хватит нескольких:
+
+| Вид | События | Когда разбираем |
+| --- | --- | --- |
+| мышь и касание | `click`, `mousedown`, `mouseup`, `contextmenu` | сегодня |
+| клавиатура | `keydown`, `keyup` | сегодня |
+| фокус | `focus`, `blur` | сегодня, кратко |
+| загрузка | `DOMContentLoaded`, `load` | сегодня |
+| формы | `input`, `change`, `submit` | завтра |
+
+## 2. `addEventListener` {#listen}
+
+Метод есть у всех, кто умеет получать события, — у интерфейса `EventTarget`.
+Это самый верхний уровень родословной из дня 25: он есть у элементов, у
+`document` и у `window`. Аргументов два: **имя события**
+строкой и **функция**.
+
+```js
+function greet(event) {
+  console.log("нажали:", event.type);
+}
+
+button.addEventListener("click", greet);   // функцию передаём, а не вызываем!
+```
+
+Главная ошибка первой недели — скобки после имени функции:
+
+```js
+button.addEventListener("click", greet());
+// TypeError: Cannot read properties of undefined (reading 'type')
+```
+
+Скобки **вызвали** `greet` сразу, при загрузке, — без всякого
+события. Внутри `event` оказался `undefined`, и чтение
+`event.type` упало. Если бы функция не трогала `event`, было бы хуже:
+ошибки нет, в слушатели ушёл бы её результат — `undefined`, — и щелчок молча
+не делал бы ничего.
+
+Имя события пишется без приставки `on` и маленькими буквами: регистр важен.
+Слушатели на `"onclick"` или `"Click"` не сработают никогда —
+таких событий браузер не посылает, а ошибки опять не будет.
+
+Слушателей у одного элемента может быть сколько угодно, они вызываются в порядке
+добавления. Но одну и ту же функцию дважды добавить нельзя: второй вызов
+`addEventListener` с тем же именем и той же функцией ничего не добавит.
+
+```js
+button.addEventListener("click", () => console.log("A"));
+button.addEventListener("click", () => console.log("B"));
+// щелчок: «нажали: click» от greet выше, потом A, потом B
+
+button.addEventListener("click", greet);
+button.addEventListener("click", greet);   // greet уже есть — второй раз не добавится
+```
+
+### Разбор: кнопка не отвечает
+
+Щёлкаете — ничего. Ошибки в консоли нет. Проверяем по порядку, от простого к сложному.
+
+**Шаг 1. Элемент найден?** Опечатка в селекторе — и вместо кнопки
+`null`. Тогда ошибка всё же будет, но при загрузке, а не при щелчке, и её
+легко пропустить:
+
+```js
+document.querySelector("#helo").addEventListener("click", greet);
+// TypeError: Cannot read properties of null (reading 'addEventListener')
+```
+
+**Шаг 2. Слушатель повешен?** В консоли Chrome есть помощник, который
+показывает слушателей элемента. Это возможность самого Chrome, а не языка:
+
+```js
+getEventListeners(button);   // {click: Array(4)} — из app.js, greet, A и B
+```
+
+То же видно во вкладке Elements, на панели Event Listeners справа.
+
+**Шаг 3. Имя события и функция.** `"click"` маленькими буквами
+и без `on`; функция передана без скобок. Эти две ошибки не дают сообщений
+вообще, поэтому их проверяют глазами.
+
+## 3. Объект события {#event}
+
+Слушатель получает один аргумент — **объект события**. Его обычно называют
+`event` или короче `e`. В нём всё о том, что случилось:
+
+```js
+button.addEventListener("click", (event) => {
+  event.type;        // "click" — что случилось
+  event.target;      // <button id="hello">Поздороваться</button> — с чем
+  event.timeStamp;   // например 1234.5 — когда: миллисекунды с открытия страницы
+  event.isTrusted;   // true — событие от человека, а не из кода
+});
+```
+
+У всех событий есть общая часть — интерфейс `Event`. У разных видов событий
+к ней добавлены свои свойства: у мыши — координаты, у клавиатуры — клавиша.
+
+| Событие | Объект | Своё главное |
+| --- | --- | --- |
+| `click` | `PointerEvent`, наследник `MouseEvent` | `clientX`, `clientY`, `button` |
+| `keydown`, `keyup` | `KeyboardEvent` | `key`, `code` |
+| `DOMContentLoaded`, `load` | `Event` | только общее |
+
+Все свойства сразу можно увидеть в консоли:
+
+```js
+button.addEventListener("click", (event) => console.log(event));
+// PointerEvent {isTrusted: true, … } — раскройте стрелку, там все свойства
+```
+
+Так быстрее всего узнать, что вообще есть у незнакомого события: напечатать его
+и посмотреть.
+
+Приём: `timeStamp` двух событий можно вычесть и узнать, сколько прошло между ними.
+
+```js
+let last = 0;
+button.addEventListener("click", (event) => {
+  if (last) console.log("прошло", Math.round(event.timeStamp - last), "мс");
+  last = event.timeStamp;
+});
+// второй щелчок: прошло 138 мс — у вас число будет своё
+```
+
+Так в играх меряют скорость реакции, а в формах отсекают случайный двойной щелчок.
+
+## 4. Щелчок и `MouseEvent` {#mouse}
+
+Событие `click` приходит, когда основную кнопку мыши нажали и отпустили над
+элементом. Но не только: касание пальцем и нажатие <Kbd>Enter</Kbd> или
+<Kbd>Пробел</Kbd> на кнопке в фокусе — тоже `click`.
+Поэтому кнопки на `click` работают и без мыши.
+
+```js
+button.addEventListener("click", (event) => {
+  console.log(event.clientX, event.clientY, event.button);
+});
+// например: 62 264 0 — координаты щелчка и номер кнопки
+```
+
+`clientX` и `clientY` — координаты точки щелчка в пикселях от
+левого верхнего угла **видимой части** окна, а не всей страницы: щелчок
+в левом краю окна всегда даст `clientX`, равный 0, как бы страницу ни
+прокрутили. `button` — номер кнопки мыши:
+
+| `button` | Кнопка | Какие события |
+| --- | --- | --- |
+| 0 | основная, обычно левая | `mousedown`, `mouseup`, `click` |
+| 1 | средняя, колесо | `mousedown`, `mouseup`, `auxclick` |
+| 2 | вторая, обычно правая | `mousedown`, `mouseup`, `auxclick`, `contextmenu` |
+
+Отсюда видно: правый щелчок **не вызывает** `click`. Поэтому
+в слушателе `click` `button` почти всегда 0, а чтобы увидеть
+другие номера, слушают `mousedown` или `mouseup`:
+
+```js
+button.addEventListener("mousedown", (event) => console.log(event.button));
+// левой кнопкой: 0, колесом: 1, правой: 2
+```
+
+## 5. Клавиатура: `keydown` и `keyup` {#keys}
+
+`keydown` приходит при нажатии клавиши, `keyup` — при отпускании.
+Приходят они тому элементу, который сейчас в фокусе, а если такого нет — `body`.
+Всплывая (раздел 6), они доходят до `document`, поэтому клавиши всей страницы
+слушают у него:
+
+```js
+document.addEventListener("keydown", (event) => {
+  console.log(event.key, event.code);
+});
+// a → "a" "KeyA"      1 → "1" "Digit1"
+// Shift+A → сначала "Shift" "ShiftLeft", потом "A" "KeyA"
+// Enter → "Enter" "Enter"      Пробел → " " "Space"      Esc → "Escape" "Escape"
+```
+
+Два свойства отвечают на разные вопросы. `key` — **что напечатано**:
+символ с учётом <Kbd>Shift</Kbd> и раскладки, а для служебных клавиш —
+имя (`"Enter"`, `"Escape"`, `"ArrowUp"`).
+`code` — **какая клавиша физически**: её место на клавиатуре,
+одинаковое при любой раскладке.
+
+Если клавишу держать, `keydown` приходит снова и снова, пока её не отпустят,
+а `keyup` — один раз. Поэтому «нажатие» в смысле человека — это пара
+`keydown` и `keyup`, а действие обычно вешают на `keydown`:
+оно приходит сразу и повторяется при удержании, как буквы в тексте.
+
+| Нажали | `key` | `code` |
+| --- | --- | --- |
+| клавишу A, английская раскладка | `"a"` | `"KeyA"` |
+| ту же клавишу с Shift | `"A"` | `"KeyA"` |
+| ту же клавишу, русская раскладка | `"ф"` | `"KeyA"` |
+| пробел | `" "` | `"Space"` |
+
+Правило: **реагируете на символ или смысл — `key`**
+(`event.key === "Escape"`), **на место клавиши — `code`**.
+Второе нужно играм: <Kbd>W</Kbd><Kbd>A</Kbd><Kbd>S</Kbd><Kbd>D</Kbd>
+должны работать и на русской раскладке, где на этих местах Ц, Ф, Ы, В.
+
+```js
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") console.log("закрыть");
+  if (event.key === "Enter") console.log("подтвердить");
+});
+```
+
+### Разбор: клавиш не слышно
+
+```js
+const info = document.querySelector("#info");
+info.addEventListener("keydown", () => console.log("абзац услышал"));
+// нажимаем клавиши — тишина
+```
+
+**Шаг 1. Кому приходит `keydown`?** Элементу в фокусе,
+а без фокуса — `body`. Абзац фокус не получает, поэтому событие до него
+не доходит.
+
+**Шаг 2. Куда оно всплывает?** От `body` вверх — к
+`document` и `window`. Абзац лежит *ниже* `body`,
+на пути всплытия его нет.
+
+**Шаг 3. Чиним.** Клавиши всей страницы слушают у `document`.
+Клавиши конкретного элемента — только у того, что умеет получать фокус: кнопки,
+ссылки, поля ввода из завтрашнего дня.
+
+## 6. Всплытие и перехват {#bubbling}
+
+Щёлкнули по пункту списка. Но этот пункт лежит в `ul`, тот — в
+`main`, тот — в `body`. Щелчок был по всем сразу. Поэтому событие
+не останавливается на пункте, а **всплывает**: после пункта его получает
+родитель, потом родитель родителя — и так до `document` и `window`.
+
+<Scheme src="scheme-bubbling.svg">Путь события: вниз к цели, на цели, вверх до window. Слушатели по умолчанию ловят третью часть</Scheme>
+
+На самом деле путь двусторонний. Сначала событие спускается от `window` к цели —
+это **перехват**, потом приходит на цель, потом поднимается обратно —
+**всплытие**. Обычный слушатель срабатывает на цели и при всплытии.
+Чтобы поймать событие ещё на спуске, передают третий аргумент —
+`{ capture: true }`.
+
+Проверим на щелчке по Аману, повесив слушатель на каждого предка. Номер в скобках —
+свойство `event.eventPhase`: 1 — перехват, 2 — цель, 3 — всплытие.
+
+```js
+const say = (name) => (event) => console.log(name, event.eventPhase);
+
+document.querySelector("li").addEventListener("click", say("li"));
+list.addEventListener("click", say("ul"));
+list.addEventListener("click", say("ul на спуске"), { capture: true });
+document.body.addEventListener("click", say("body"));
+// щелчок по Аману: ul на спуске 1 → li 2 → ul 3 → body 3
+```
+
+Слушатели на `main`, `document` и `window` встали бы
+в ту же очередь после `body`, все с фазой 3. Весь путь целиком отдаёт метод
+`composedPath`:
+
+```js
+document.querySelector("li").addEventListener("click", (event) => {
+  event.composedPath();   // [li, ul, main, body, html, document, window]
+  event.bubbles;          // true — у click всплытие есть
+});
+```
+
+Всплывают не все события. `focus` и `blur`, которые приходят
+элементу при получении и потере фокуса, не всплывают: у них `bubbles` —
+`false`. Всплывёт или нет, пишет страница события на MDN.
+
+## 7. `target` и `currentTarget` {#target}
+
+Раз одно событие проходит через несколько элементов, в объекте события их двое:
+
+```js
+const info = document.querySelector("#info");   // <p>Занятия: <b>пн, ср, пт</b></p>
+
+info.addEventListener("click", (event) => {
+  event.target.nodeName;          // "B" — щёлкнули по жирному тексту
+  event.currentTarget.nodeName;   // "P" — а слушатель висит на абзаце
+});
+```
+
+`target` — где событие **случилось**: самый глубокий элемент
+под курсором. `currentTarget` — где **сработал этот слушатель**:
+элемент, на который мы его повесили. Когда щёлкают по самому абзацу, это один и тот же
+элемент. Когда по `<b>` внутри — разные.
+
+<Mistake>
+`currentTarget` живёт только пока работает слушатель:
+</Mistake>
+
+```js
+let saved;
+button.addEventListener("click", (event) => {
+  console.log(event.currentTarget.id);   // "hello" — внутри слушателя
+  saved = event;
+});
+// после щелчка:
+saved.currentTarget;   // null — слушатель закончил работу
+saved.target.id;       // "hello" — target остался
+```
+
+Нужен элемент позже — сохраняйте сам элемент, а не событие.
+
+## 8. Делегирование {#delegation}
+
+Всплытие даёт самый полезный приём этого дня. Не нужно вешать слушатель на каждый пункт
+списка: достаточно **одного на весь список**. Щелчок по любому пункту
+всплывёт к `ul`, а `event.target` скажет, по какому именно.
+
+```js
+const list = document.querySelector("#list");
+
+list.addEventListener("click", (event) => {
+  const li = event.target.closest("li");   // день 24: от места щелчка вверх до пункта
+  if (!li) return;                         // щёлкнули мимо пунктов — не наше дело
+  li.classList.toggle("star");             // день 25
+  console.log(li.textContent, li.dataset.id);
+});
+// щелчок по Гүлнар: "Гүлнар" "3", и пункт стал жирным
+```
+
+<Scheme src="scheme-delegation.svg">Один слушатель на родителе вместо слушателя на каждом пункте</Scheme>
+
+Зачем здесь `closest`, а не просто `event.target`? Внутри пункта
+может оказаться вложенный элемент — жирное имя, значок, кнопка. Тогда `target`
+будет он, а `closest("li")` всё равно поднимется до пункта. Так день 24
+и обещал: «щелчок часто попадает во вложенный элемент, и `closest("li")` найдёт
+пункт, по которому щёлкнули».
+
+А `if (!li) return` нужен на случай щелчка по самому списку мимо пунктов —
+по отступу между ними: тогда `closest("li")` вернёт `null`.
+Проверим, что пункты, добавленные после, тоже обслуживаются:
+
+```js
+const ilyas = document.createElement("li");
+ilyas.textContent = "Ильяс";
+ilyas.dataset.id = "6";
+list.append(ilyas);
+// щелчок по Ильясу: "Ильяс" "6" — хотя слушатель повесили до его появления
+```
+
+У делегирования три выгоды. Слушатель один, а не по одному на пункт. Пункты,
+добавленные кодом позже (день 26), обслуживаются сами: слушатель висит на родителе,
+которому всё равно, откуда взялись дети. И `dataset` из дня 25 сразу говорит,
+какой это студент.
+
+Не подходит делегирование только для событий, которые не всплывают, — например,
+`focus` и `blur` (раздел 6). До родителя они не доходят, и слушать
+их приходится на самом элементе.
+
+## 9. Остановить всплытие {#stop}
+
+`event.stopPropagation()` обрывает путь: предки события уже не получат.
+Остальные слушатели **того же** элемента всё равно сработают.
+`stopImmediatePropagation()` останавливает и их.
+
+```js
+const li = document.querySelector("li");   // Аман
+
+li.addEventListener("click", (event) => {
+  console.log("li-1");
+  event.stopPropagation();
+});
+li.addEventListener("click", () => console.log("li-2"));
+list.addEventListener("click", () => console.log("ul"));
+// щелчок по Аману: li-1, li-2 — а до ul не дошло
+```
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.addEventListener("click", (event) => {
+  console.log("li-1");
+  event.stopImmediatePropagation();
+});
+meret.addEventListener("click", () => console.log("li-2"));
+// щелчок по Мерет: только li-1 — ни соседний слушатель, ни предки
+```
+
+<Important>
+Останавливать всплытие приходится редко, и почти всегда это ломает что-то другое:
+делегирование на родителе, общий слушатель на `document`, чужой код.
+Прежде чем писать `stopPropagation`, проверьте, нельзя ли в слушателе
+родителя просто посмотреть на `event.target`.
+</Important>
+
+## 10. `preventDefault`: отменить действие браузера {#default}
+
+У многих событий есть **действие по умолчанию** — то, что браузер сделает
+сам, если его не остановить:
+
+| Событие | Что сделает браузер |
+| --- | --- |
+| `click` по ссылке | перейдёт по адресу |
+| `keydown` Пробела | прокрутит страницу |
+| `contextmenu` | покажет меню правой кнопки |
+| `submit` формы | отправит её и перезагрузит страницу — завтра |
+
+`event.preventDefault()` говорит браузеру: не делай этого, я разберусь сам.
+
+```js
+const link = document.querySelector('a[href="#info"]');
+
+link.addEventListener("click", (event) => {
+  event.preventDefault();
+  console.log(event.defaultPrevented);   // true — действие отменено
+});
+// щелчок по ссылке: адрес не сменился, location.hash остался ""
+```
+
+Отменить можно не всё. Свойство `cancelable` отвечает, можно ли отменить
+это событие: у `click` — да, у `DOMContentLoaded` — нет.
+`defaultPrevented` говорит, отменил ли кто-то действие, — это видят и
+слушатели выше по всплытию:
+
+```js
+document.addEventListener("click", (event) => {
+  console.log(event.defaultPrevented);
+});
+// щелчок по «Расписанию»: true — его отменила ссылка
+// щелчок по «Списку»: false — там никто не отменял
+```
+
+Не путайте два метода: `preventDefault` отменяет действие **браузера**,
+но событие всплывает дальше; `stopPropagation` обрывает всплытие, но действие
+браузера остаётся. Завтра `preventDefault` станет главной строкой каждой формы:
+без него отправка перезагружает страницу.
+
+## 11. Снять слушателя {#remove}
+
+`removeEventListener` принимает те же аргументы, что и
+`addEventListener`. Снимается слушатель, только если передана **та же
+самая функция**:
+
+```js
+function greet() { console.log("greet"); }
+
+button.addEventListener("click", greet);
+button.removeEventListener("click", greet);   // снят
+
+button.addEventListener("click", () => console.log("стрелка"));
+button.removeEventListener("click", () => console.log("стрелка"));   // НЕ снят
+```
+
+Во второй паре — две разные функции, хоть и написаны одинаково (день 21: два одинаковых
+объекта не равны). Поэтому слушателя, которого придётся снимать, делают именованной
+функцией или держат в переменной:
+
+```js
+const onClick = () => console.log("onClick");
+button.addEventListener("click", onClick);
+button.removeEventListener("click", onClick);   // снят: это та же самая функция
+```
+
+А для частого случая «сработать один раз» есть готовый параметр:
+
+```js
+button.addEventListener("click", () => console.log("только первый щелчок"), { once: true });
+```
+
+## 12. Свойства `onclick` {#onevent}
+
+В старом коде вместо `addEventListener` встречаются свойства с приставкой
+`on`: `onclick`, `onkeydown`, `onload`.
+
+```js
+button.onclick = () => console.log("onclick 1");
+button.onclick = () => console.log("onclick 2");      // заменил первый!
+button.addEventListener("click", () => console.log("listener"));
+// щелчок: onclick 2, listener
+```
+
+У свойства место **одно**: новая функция вытесняет старую, а убрать её —
+записать `null`: `button.onclick = null`. Слушатели
+`addEventListener` независимы и друг другу не мешают — поэтому MDN называет
+его рекомендуемым способом. Третий вариант — атрибут в разметке:
+
+```html
+<button onclick="console.log('так не делаем')">Поздороваться</button>
+```
+
+MDN его прямо не рекомендует: код смешивается с вёрсткой, а место у атрибута то же
+одно, что у свойства `onclick`. На дне 2 мы для того и выносили код в отдельный
+файл, чтобы разметка и скрипт не перемешивались.
+
+## 13. `DOMContentLoaded` и `load` {#load}
+
+Два события сообщают о загрузке страницы.
+
+<Scheme src="scheme-load.svg">DOMContentLoaded — дерево готово; load — загружено вообще всё</Scheme>
+
+`DOMContentLoaded` приходит на `document`, когда HTML разобран
+полностью и выполнены скрипты с `defer`. Картинок он не ждёт.
+`load` приходит на `window`, когда загружено вообще всё, включая
+картинки и стили.
+
+```js
+// app.js, подключённый с defer
+console.log("скрипт", document.readyState);   // "interactive" — дерево уже готово
+
+document.addEventListener("DOMContentLoaded", () => console.log("DOMContentLoaded"));
+window.addEventListener("load", () => console.log("load", document.readyState));   // "complete"
+// порядок: скрипт → DOMContentLoaded → load
+```
+
+Отсюда важный вывод для нас: скрипт с `defer` **уже**
+выполняется при готовом дереве, поэтому оборачивать код в слушатель
+`DOMContentLoaded` ему не нужно. В чужом коде такая обёртка встречается
+часто — это наследие скриптов без `defer` из дня 24. `load`
+нужен, только когда код ждёт картинки, — например, чтобы узнать их размеры.
+
+```js
+window.addEventListener("load", () => {
+  document.addEventListener("DOMContentLoaded", () => console.log("опоздал"));
+});
+// «опоздал» не напечатается никогда: DOMContentLoaded уже был, события не повторяются
+```
+
+## 14. События из кода {#synthetic}
+
+**Фокус** — это элемент, который сейчас получает клавиатуру. Его двигает
+клавиша <Kbd>Tab</Kbd>: на нашей странице первое нажатие уводит фокус на ссылку
+«Список», второе — на «Расписание», третье — на кнопку. Фокус получают не все элементы:
+ссылки, кнопки и поля ввода — да, абзацы и пункты списка — нет (раздел 5).
+
+Событие можно вызвать и без человека. Самое простое — `el.click()`:
+он запускает `click` на элементе. Методы `focus()` и `blur()`
+переводят фокус на элемент и снимают его — с событиями `focus` и
+`blur`.
+
+```js
+button.addEventListener("click", (e) => console.log("click", e.isTrusted));
+
+button.click();   // click false — из кода
+                  // настоящий щелчок: click true
+
+button.focus();   // теперь клавиши получает кнопка: Enter и Пробел дадут click
+```
+
+Можно придумать и своё событие: создать объект конструктором `Event`
+и отправить его методом `dispatchEvent`. Слушатели вызываются сразу, прямо
+внутри `dispatchEvent`:
+
+```js
+button.addEventListener("hello", (e) => console.log("своё событие", e.type));
+
+button.dispatchEvent(new Event("hello"));                    // своё событие hello
+button.dispatchEvent(new Event("hello", { bubbles: true })); // так оно ещё и всплывёт
+```
+
+По умолчанию своё событие не всплывает и не отменяется — это включают параметрами
+`bubbles` и `cancelable`. Если событие отменяемое и кто-то вызвал
+`preventDefault`, `dispatchEvent` вернёт `false`:
+
+```js
+button.addEventListener("check", (event) => event.preventDefault());
+
+button.dispatchEvent(new Event("check", { cancelable: true }));   // false — отменили
+button.dispatchEvent(new Event("check"));                         // true — отменять нельзя
+```
+
+Конструктор `EventTarget()` создаёт объект, который умеет только одно —
+принимать слушателей и рассылать события. Это «почтовый ящик» без всякой страницы.
+В курсе 2 на нём строят свои классы.
+
+```js
+const bus = new EventTarget();
+bus.addEventListener("ping", (event) => console.log("получено", event.type));
+bus.dispatchEvent(new Event("ping"));   // получено ping
+```
+
+Ещё два свойства из справочника пригодятся позже. `composed` говорит,
+выходит ли событие за границу «теневого DOM» — скрытых внутренностей элементов вроде
+`<video>`; это тема курса 4. `composedPath()` мы уже видели
+в разделе 6: он возвращает весь путь события.
+
+## 15. «Табель» с кнопками {#tabel}
+
+Вчера обещали: у каждой строки кнопка «Удалить», и строка исчезает по щелчку. Добавим
+ещё выделение строки щелчком и снятие выделения клавишей <Kbd>Esc</Kbd>.
+В разметке — седьмая пустая ячейка шапки и правило `.selected`:
+
+```html
+<style>
+  .excellent { background: #dcfce7; }
+  .good      { background: #e0f2fe; }
+  .fair      { background: #fef9c3; }
+  .weak      { background: #fee2e2; }
+  .empty     { color: gray; font-style: italic; }
+  .selected  { outline: 2px solid #8b5cf6; }
+</style>
+
+<tr><th>Имя</th><th>Средн</th><th>Мин</th><th>Макс</th><th>%</th><th>Вердикт</th><th></th></tr>
+```
+
+```js
+// без изменений: MIN_MARK … makeReport (день 23), makeCells (день 24),
+// VERDICT_CLASS и rowClass (день 25), makeRow (день 26)
+
+// новое: седьмая ячейка с кнопкой
+function addDeleteButton(row) {
+  const button = document.createElement("button");
+  button.textContent = "Удалить";
+  button.classList.add("delete");
+  const cell = document.createElement("td");
+  cell.append(button);
+  row.append(cell);
+  return row;
+}
+
+const tbody = document.querySelector("#tabel tbody");
+const reports = students.map(makeReport);
+tbody.append(...reports.map(makeRow).map(addDeleteButton));
+
+function updateSummary() {
+  const excellent = reports.filter((r) => r.ok && r.verdict === "отличник").length;
+  document.querySelector("#summary").textContent = `Отличников: ${excellent} из ${reports.length}`;
+  document.title = `Табель — студентов: ${reports.length}`;
+}
+updateSummary();
+
+// новое: один слушатель на всё тело таблицы
+tbody.addEventListener("click", (event) => {
+  const row = event.target.closest("tr");
+  if (event.target.closest(".delete")) {
+    const i = reports.findIndex((r) => r.name === row.dataset.name);
+    reports.splice(i, 1);   // из данных
+    row.remove();           // и со страницы
+    updateSummary();
+    return;
+  }
+  row.classList.toggle("selected");
+});
+
+// новое: Esc снимает выделение со всех строк
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    document.querySelectorAll("tr.selected").forEach((tr) => tr.classList.remove("selected"));
+  }
+});
+```
+
+<ResultBox>
+<table>
+<thead>
+<tr><th>Имя</th><th>Средн</th><th>Мин</th><th>Макс</th><th>%</th><th>Вердикт</th><th></th></tr>
+</thead>
+<tbody>
+<tr style={{background: "#e0f2fe"}}><td>Аман</td><td>4.33</td><td>3</td><td>5</td><td>75%</td><td>хорошист</td><td><button type="button">Удалить</button></td></tr>
+<tr style={{color: "gray", fontStyle: "italic"}}><td>Гүлнар</td><td>—</td><td>—</td><td>—</td><td>—</td><td>нет годных оценок</td><td><button type="button">Удалить</button></td></tr>
+<tr style={{background: "#dcfce7"}}><td>Огулджан</td><td>4.50</td><td>4</td><td>5</td><td>67%</td><td>отличник</td><td><button type="button">Удалить</button></td></tr>
+</tbody>
+</table>
+
+После удаления Мерет и Сапара: «Отличников: 1 из 3», на вкладке «Табель — студентов: 3».
+</ResultBox>
+
+Разберём, что здесь от сегодняшнего дня.
+
+**Делегирование.** Слушатель один — на `tbody`, а не по
+одному на каждую кнопку. Щелчок по кнопке всплывает до тела таблицы, и
+`closest(".delete")` отвечает, была ли это кнопка. Строки, добавленные позже,
+обслуживаются сами — если студента добавить и в данные, и на страницу:
+
+```js
+const ilyas = makeReport({ name: "Ильяс", marks: [5, 5, "4"] });
+reports.push(ilyas);                             // в данные
+tbody.append(addDeleteButton(makeRow(ilyas)));   // и на страницу
+updateSummary();                                 // на странице: «Отличников: 3 из 6»
+```
+
+<Mistake>
+Вчерашний способ — только `tbody.append(…)` — здесь подводит. У новой строки
+нет пары в `reports`, `findIndex` вернёт `-1`, а
+`reports.splice(-1, 1)` молча удалит последнего студента — Огулджан.
+Строка Ильяса уйдёт, а итог соврёт: строк пять, а на странице «Отличников: 1 из 4».
+</Mistake>
+
+**Две ветки одного слушателя.** Щелчок по кнопке удаляет строку, щелчок
+по любому другому месту строки переключает выделение. `return` после удаления
+не даёт выполниться второй ветке: строки уже нет, выделять нечего.
+
+Эта схема — слушатель на контейнере, `closest` для кнопки и строки,
+данные и страница меняются вместе — станет основой мини-проекта на дне 29. Список дел
+устроен так же: добавить, отметить сделанным, удалить.
+
+**Данные и страница вместе.** Строка удаляется в двух местах: из массива
+`reports` (`findIndex` и `splice` из дней 19–20) и со страницы.
+Итог считается по данным, поэтому «Отличников: 1 из 3» совпадает с тем, что видно.
+
+**Заголовок вкладки.** Раньше он был «Табель: 5 студентов». Теперь
+число меняется, и получилось бы «4 студентов» — по-русски неверно. Правильное окончание
+зависит от числа (1 студент, 2 студента, 5 студентов), и выбирать его умеет
+`Intl` из следующих курсов. Пока — «Табель — студентов: 4».
+
+<TryIt>
+**Опыт.** Уберите `return` после `updateSummary()`
+и удалите строку. Будет ли ошибка в консоли? Какая строка кода после этого
+поработала с уже удалённой строкой — и почему это хуже, чем ошибка?
+</TryIt>
+
+## 16. Частые ошибки и что завтра {#mistakes}
+
+| Ошибка | Что увидите | Как правильно |
+| --- | --- | --- |
+| `addEventListener("click", greet())` | функция сработала сразу, щелчок — ничего | без скобок: `greet` |
+| `"onclick"` или `"Click"` | ничего, молча | `"click"` |
+| слушатель на каждом пункте | работает, но новые пункты — без него | делегирование на родителе |
+| `event.target` там, где нужен пункт | иногда вложенный `<b>` | `event.target.closest("li")` |
+| снять стрелку, написанную заново | слушатель остался | именованная функция |
+| `click` для правой кнопки | не приходит | `mousedown` / `contextmenu` |
+| `code` для проверки символа | на другой раскладке не то | `key` |
+| `stopPropagation` «на всякий случай» | ломается делегирование выше | проверять `event.target` |
+| два `onclick` подряд | работает только второй | `addEventListener` |
+
+### Модуль: что уже умеем
+
+| День | Умеем | «Табель» |
+| --- | --- | --- |
+| 24 | найти элемент и пройти по дереву | переехал в таблицу на странице |
+| 25 | поменять текст, атрибуты, классы, стили | строки в цвете |
+| 26 | создать и удалить элемент | строки по числу студентов |
+| 27 | ответить на щелчок и клавишу | удаление, выделение, Esc |
+
+### Что будет завтра
+
+Завтра — **формы**: поля ввода, флажки, кнопка отправки. События
+`input`, `change` и `submit`, а в слушателе
+`submit` — сегодняшний `preventDefault`. «Табель» получит форму,
+через которую можно добавить студента без консоли, — и проверку, что оценки введены правильно.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [События DOM](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Events) | обзор видов событий и способов слушать | <Full /> |
+| [EventTarget](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget) | всё, что получает события | <Full /> |
+| [addEventListener](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener) | подписаться на событие | <Full /> |
+| [removeEventListener](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/removeEventListener) | снять — та же функция | <Full /> |
+| [Event](https://developer.mozilla.org/en-US/docs/Web/API/Event) | общее для всех событий | <Full /> |
+| [type](https://developer.mozilla.org/en-US/docs/Web/API/Event/type) | имя события | <Full /> |
+| [target](https://developer.mozilla.org/en-US/docs/Web/API/Event/target) | где событие случилось | <Full /> |
+| [currentTarget](https://developer.mozilla.org/en-US/docs/Web/API/Event/currentTarget) | где сработал слушатель | <Full /> |
+| [bubbles](https://developer.mozilla.org/en-US/docs/Web/API/Event/bubbles) | всплывает ли | <Full /> |
+| [preventDefault](https://developer.mozilla.org/en-US/docs/Web/API/Event/preventDefault) | отменить действие браузера | <Full /> |
+| [stopPropagation](https://developer.mozilla.org/en-US/docs/Web/API/Event/stopPropagation) | остановить всплытие | <Full /> |
+| [click](https://developer.mozilla.org/en-US/docs/Web/API/Element/click_event) | щелчок, касание, Enter на кнопке | <Full /> |
+| [MouseEvent](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent) | события мыши | <Full /> |
+| [clientX](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/clientX) | координата по горизонтали в окне | <Full /> |
+| [clientY](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/clientY) | координата по вертикали в окне | <Full /> |
+| [button](https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button) | какая кнопка мыши: 0, 1, 2 | <Full /> |
+| [keydown](https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event) | клавишу нажали | <Full /> |
+| [keyup](https://developer.mozilla.org/en-US/docs/Web/API/Element/keyup_event) | клавишу отпустили | <Full /> |
+| [KeyboardEvent](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent) | события клавиатуры | <Full /> |
+| [key](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key) | что напечатано | <Full /> |
+| [code](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code) | какая клавиша физически | <Full /> |
+| [DOMContentLoaded](https://developer.mozilla.org/en-US/docs/Web/API/Document/DOMContentLoaded_event) | дерево построено | <Full /> |
+| [load](https://developer.mozilla.org/en-US/docs/Web/API/Window/load_event) | загружено всё, с картинками | <Brief /> |
+| [cancelable](https://developer.mozilla.org/en-US/docs/Web/API/Event/cancelable) | можно ли отменить | <Brief /> |
+| [defaultPrevented](https://developer.mozilla.org/en-US/docs/Web/API/Event/defaultPrevented) | отменил ли кто-то | <Brief /> |
+| [stopImmediatePropagation](https://developer.mozilla.org/en-US/docs/Web/API/Event/stopImmediatePropagation) | остановить и соседних слушателей | <Brief /> |
+| [eventPhase](https://developer.mozilla.org/en-US/docs/Web/API/Event/eventPhase) | фаза: 1, 2, 3 | <Brief /> |
+| [composedPath](https://developer.mozilla.org/en-US/docs/Web/API/Event/composedPath) | весь путь события | <Brief /> |
+| [composed](https://developer.mozilla.org/en-US/docs/Web/API/Event/composed) | выходит ли из теневого DOM | <Brief /> |
+| [isTrusted](https://developer.mozilla.org/en-US/docs/Web/API/Event/isTrusted) | от человека или из кода | <Brief /> |
+| [timeStamp](https://developer.mozilla.org/en-US/docs/Web/API/Event/timeStamp) | когда, в миллисекундах | <Brief /> |
+| [Event()](https://developer.mozilla.org/en-US/docs/Web/API/Event/Event) | создать своё событие | <Brief /> |
+| [dispatchEvent](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/dispatchEvent) | отправить событие | <Brief /> |
+| [EventTarget()](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/EventTarget) | свой получатель событий | <Brief /> |
+| [click()](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/click) | щелчок из кода | <Brief /> |
+| [focus()](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/focus) | перевести фокус | <Brief /> |
+| [blur()](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/blur) | снять фокус | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// ПОДПИСАТЬСЯ — функцию передаём, не вызываем
+function greet(event) { console.log("нажали:", event.type); }
+const list = document.querySelector("#list");
+button.addEventListener("click", greet);
+button.removeEventListener("click", greet);                 // та же функция!
+button.addEventListener("click", greet, { once: true });    // один раз
+list.addEventListener("click", greet, { capture: true });   // на спуске
+
+// ОБЪЕКТ СОБЫТИЯ — внутри слушателя
+document.addEventListener("keydown", (event) => {
+  console.log(event.type, event.target.nodeName, event.isTrusted);
+  console.log(event.key, event.code);   // "a" "KeyA": что напечатано и какая клавиша
+});
+button.addEventListener("mousedown", (event) => {
+  console.log(event.clientX, event.clientY, event.button);   // 0 левая, 1 колесо, 2 правая
+});
+
+// ВСПЛЫТИЕ И ДЕЙСТВИЯ
+const link = document.querySelector('a[href="#info"]');
+link.addEventListener("click", (event) => {
+  event.preventDefault();    // браузер не сделает своё: ссылка, форма
+  event.stopPropagation();   // дальше вверх не пойдёт
+});
+
+// ДЕЛЕГИРОВАНИЕ — один слушатель на родителе
+list.addEventListener("click", (event) => {
+  const li = event.target.closest("li");
+  if (!li) return;
+  console.log(event.currentTarget.nodeName, li.textContent);   // "UL" и имя
+});
+
+// ЗАГРУЗКА
+document.addEventListener("DOMContentLoaded", () => console.log("дерево готово"));
+window.addEventListener("load", () => console.log("и картинки тоже"));
+
+// ИЗ КОДА
+button.click();
+button.focus();
+button.blur();
+button.dispatchEvent(new Event("hello", { bubbles: true }));
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Что не так в `button.addEventListener("click", greet())`?
+   <Answer>Скобки вызывают `greet` сразу, и в слушатели уходит её результат —
+   `undefined`. Щелчок потом ничего не делает. Нужно передать саму функцию:
+   `greet` без скобок.</Answer>
+2. Чем `event.target` отличается от `event.currentTarget`?
+   <Answer>`target` — элемент, где событие случилось, самый глубокий под курсором.
+   `currentTarget` — элемент, на котором висит сработавший слушатель.</Answer>
+3. Почему делегирование обслуживает и пункты, добавленные позже?
+   <Answer>Слушатель висит на родителе, а щелчок по любому ребёнку всплывает к нему.
+   Родителю всё равно, когда появились дети.</Answer>
+4. Чем `key` отличается от `code`?
+   <Answer>`key` — напечатанный символ или имя клавиши, с учётом Shift и раскладки.
+   `code` — физическое место клавиши, одинаковое при любой раскладке.</Answer>
+5. Чем `preventDefault` отличается от `stopPropagation`?
+   <Answer>`preventDefault` отменяет действие браузера, но событие всплывает дальше.
+   `stopPropagation` обрывает всплытие, но действие браузера остаётся.</Answer>
+6. Почему скрипту с `defer` не нужна обёртка `DOMContentLoaded`?
+   <Answer>Такой скрипт выполняется, когда дерево уже построено, — прямо перед
+   `DOMContentLoaded`. Все элементы уже можно находить.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Events" />

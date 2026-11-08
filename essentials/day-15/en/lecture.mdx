@@ -1,0 +1,1053 @@
+---
+title: Day 15 — Splitting a task into functions
+day: Day 15 • lessons 1–3, mixed day
+heading: Splitting a task into functions
+lead: Module “Functions”, the last day. Each lesson has 20 minutes of theory and 25 minutes of practice.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #a16207; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #78350f; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- spot the places in a solid program that ask for a function;
+- give functions names that make clear what they do;
+- find an error in a function in three steps: input, body, output;
+- read the call stack and understand who called whom;
+- figure out someone else’s function without running it.
+</Goals>
+
+<Important>
+**Today is a day without new reference pages.** Three days in a row we took
+functions apart piece by piece: day 12 — what they are, day 13 — how to write them, day 14 — what they take.
+Today we learn to *use* them: to cut a task, to look for errors, to read someone else’s code.
+The lesson is built differently: three times “a little theory — practice right away”.
+</Important>
+
+<Toc>
+1. [A program in one pile](#pile)
+2. [Where to cut: four signs](#where)
+3. [What we got](#cut)
+4. [A function name is a contract](#names)
+5. [One function — one job](#one-thing)
+6. [How many parameters and what to return](#params)
+7. [Three places where a function breaks](#three-places)
+8. [Printing at the boundaries](#borders)
+9. [The call stack](#stack)
+10. [Four errors of the module in one place](#errors)
+11. [Shrink the input](#minimal)
+12. [How to read an unfamiliar function](#read)
+13. [Edge cases](#edges)
+14. [Rewriting in small steps](#rewrite)
+15. [The whole “Report card”](#tabel)
+16. [What comes tomorrow](#next)
+</Toc>
+
+## Part 1, section 1. A program in one pile {#pile}
+
+Here is a working program. It counts how many people came to a class and names those
+who are absent. Everything is correct, everything works:
+
+```js
+const names = ["Aman", "Meret", "Gülnar", "Sapar", "Oguljan"];
+const present = [1, 0, 1, 1, 0];
+
+let came = 0;
+for (const p of present) {
+  if (p === 1) {
+    came += 1;
+  }
+}
+
+let missing = "";
+let i = 0;
+for (const name of names) {
+  if (present[i] === 0) {
+    if (missing !== "") {
+      missing += ", ";
+    }
+    missing += name;
+  }
+  i += 1;
+}
+
+const percent = came / names.length * 100;
+
+console.log("Present " + came + " of " + names.length + " (" + percent.toFixed(0) + "%)");
+if (missing !== "") {
+  console.log("Absent: " + missing);
+}
+```
+
+<ResultBox>
+Present 3 of 5 (60%)\
+Absent: Meret, Oguljan
+</ResultBox>
+
+Twenty-eight lines, and it is already hard to find your way in them. Try to answer without rereading:
+what does the variable `i` do? And is `came` counted before or after
+`missing`? To answer, you have to read everything in a row.
+
+And this is with five students. Add being late, two classes a day, sick days —
+and the program will become unreadable. And it will be easy to break and hard to find the breakage:
+**all the variables live in one place and see each other**.
+
+## Part 1, section 2. Where to cut: four signs {#where}
+
+Cutting at random makes no sense. There are four signs by which a piece of code asks
+to become a separate function. Check them on the program above.
+
+**The first: the piece can be named with one verb.** “Count those present”,
+“collect the list of absent ones”, “convert to percent”. If you need a sentence to name it,
+the piece is still too big.
+
+**The second: you want to write a heading comment above the piece.** If your hand reaches
+for `// counting how many came`, you have already invented the name of a function.
+A comment gets old and lies, a function name does not.
+
+**The third: the piece repeats.** Even twice. Copying a third time is no longer allowed:
+when an error is found, it will be fixed in one place out of three.
+
+**The fourth: you want to check the piece separately.** If you catch yourself thinking
+“is the percent calculated correctly here”, you will have to check the whole program —
+or move the percent into a function and check that one alone.
+
+<Important>
+Notice: none of the signs is about length. “A function is no longer than twenty lines” is
+a bad rule. There are honest functions of thirty lines and pointless ones of three.
+**You cut by meaning, not by length.**
+</Important>
+
+## Part 1, section 3. What we got {#cut}
+
+Let us apply the signs to the program. We find three pieces with names and one that puts
+everything together:
+
+```js
+function countPresent(present) {
+  let came = 0;
+  for (const p of present) {
+    if (p === 1) {
+      came += 1;
+    }
+  }
+  return came;
+}
+
+function listMissing(names, present) {
+  let missing = "";
+  let i = 0;
+  for (const name of names) {
+    if (present[i] === 0) {
+      if (missing !== "") {
+        missing += ", ";
+      }
+      missing += name;
+    }
+    i += 1;
+  }
+  return missing;
+}
+
+function percentOf(part, total) {
+  if (total === 0) {
+    return 0;
+  }
+  return part / total * 100;
+}
+
+function makeReport(names, present) {
+  const came = countPresent(present);
+  const missing = listMissing(names, present);
+  const share = percentOf(came, names.length);
+
+  let report = `Present ${came} of ${names.length} (${share.toFixed(0)}%)`;
+  if (missing !== "") {
+    report += `\nAbsent: ${missing}`;
+  }
+  return report;
+}
+
+console.log(makeReport(["Aman", "Meret", "Gülnar", "Sapar", "Oguljan"], [1, 0, 1, 1, 0]));
+```
+
+<ResultBox>
+Present 3 of 5 (60%)\
+Absent: Meret, Oguljan
+</ResultBox>
+
+The result is the same — this is the first thing to check after any cutting. There are
+more lines, but reading became easier: to understand the program, it is now enough to read
+`makeReport`. Three calls at its start — and they show the whole structure.
+
+<Scheme src="scheme-cut.svg">The program now has two floors: the order of actions on top, the actions themselves below</Scheme>
+
+There is a direct gain too: `percentOf` will now come in handy in any other program,
+and along the way it got the check `total === 0`, which the pile did not have at all —
+there nobody simply thought about an empty list.
+
+### Checking each piece separately
+
+Here is the main reward for cutting, and it is worth getting right away. Before, to
+check the counting, you had to run the whole program and look at the final line.
+Now each function can be called in the console on its own:
+
+```js
+countPresent([1, 0, 1]);   // 2
+countPresent([1, 1]);      // 2
+countPresent([0, 0]);      // 0
+countPresent([]);          // 0
+```
+
+Four calls — and the counting is checked on all the cases there are: some came,
+all came, nobody came, there is no list at all. The same with collecting names:
+
+```js
+listMissing(["Aman"], [0]);              // "Aman"
+listMissing(["Aman"], [1]);              // ""
+listMissing(["Aman", "Meret"], [0, 0]);  // "Aman, Meret"
+```
+
+The third call checks what was hardest to check in the pile — the comma
+between names. It is put **before** a name and only if the string is already
+not empty; otherwise the report would start or end with a comma.
+
+```js
+percentOf(3, 5);   // 60
+percentOf(5, 5);   // 100
+percentOf(0, 0);   // 0   — and no NaN at all
+```
+
+Such a check is done not once while writing but every time the function is edited:
+half a minute catches almost all breakages.
+
+## Part 1, section 4. A function name is a contract {#names}
+
+The name is the thing that is read most often. You get into the body of a function once a month,
+but you see the name at every call. So the agreements are these.
+
+**A name starts with a verb**, because a function is an action:
+`countPresent`, `makeReport`, `listMissing`.
+The name `data` or `report` is the name of a variable, not of a function.
+
+**Checks start with `is` or `has`** and return
+only `true` or `false`. This is how we wrote them:
+`isValidMark`, `isFive`. Seeing `if (isValidMark(mark))`,
+the reader understands the whole line and does not look inside.
+
+| Bad | Good | Why |
+| --- | --- | --- |
+| `f`, `doIt`, `process` | `countPresent` | a name must answer “what it does” |
+| `average` prints | `showAverage` prints, `getAverage` returns | a name promises a result — let it return one |
+| `check(mark)` | `isValidMark(mark)` | “check” and returning `true` are different things |
+| `getData2` | `getMarksOfMonth` | a digit in a name is a sign that no meaning was found |
+
+We take English names not because of fashion: all the built-in functions of the language are named the same way,
+and the code reads evenly. In comments, write in your own language as much as you like.
+
+## Part 1, section 5. One function — one job {#one-thing}
+
+There is a simple check: **if “and” appears in an honest name of a function, there is more than
+one job**. Here is a function that both counts and prints:
+
+```js
+function countAndPrint(present) {
+  let came = 0;
+  for (const p of present) {
+    if (p === 1) {
+      came += 1;
+    }
+  }
+  console.log("Present: " + came);
+  return came;
+}
+```
+
+It works. But it is inconvenient to use: you can no longer count without printing. And printing
+in the middle of a calculation always means garbage in the console once the program grows.
+
+The split looks like this: one function counts, another shows.
+
+```js
+const count = countPresent(present);
+console.log("Present: " + count);
+```
+
+The second consequence of the same rule: **a function must not secretly change what does not
+belong to it**. Compare:
+
+```js
+let total = 0;
+
+function addMark(mark) {
+  total += mark;      // secretly changes an outer variable
+}
+
+function withMark(sumSoFar, mark) {
+  return sumSoFar + mark;   // honest: returns a result from what it was given
+}
+```
+
+The first one cannot be checked on its own — you need the whole file. The second can be called in the console
+and you see the answer right away. Functions that depend only on their parameters are handy
+exactly for this reason: they have no backstory.
+
+## Part 1, section 6. How many parameters and what to return {#params}
+
+The rule about the number of parameters is approximate but useful: **zero, one, two are
+good; three is still fine; four or more is a sign that the function does too much**.
+
+```js
+function makeLine(name, value, unit = "", prefix = "", suffix = "", total = 0) {
+  let line = prefix + name + ": " + value + unit + suffix;
+  if (total > 0) {
+    line += " (" + (value / total * 100).toFixed(0) + "%)";
+  }
+  return line;
+}
+
+makeLine("Present", 3, undefined, undefined, "", 5);  // "Present: 3 (60%)"
+```
+
+The call is unreadable: two `undefined` and an empty string are needed only to get
+to the last parameter — exactly the trouble we talked about yesterday. Two simple functions
+instead of one complex one solve it:
+
+```js
+function line(name, value, unit = "") {
+  return name + ": " + value + unit;
+}
+
+function withPercent(text, part, total) {
+  if (total === 0) {
+    return text;
+  }
+  return text + " (" + (part / total * 100).toFixed(0) + "%)";
+}
+
+line("Present", 3);                                // "Present: 3"
+withPercent(line("Present", 3, " people"), 3, 5);  // "Present: 3 people (60%)"
+```
+
+There are two rules about returning. **The first: return, do not print.**
+Printing is the end of the road; nothing more can be done with the result. `sum`
+here is the same as in the “Report card”:
+
+```js
+function showAverage(marks) {
+  console.log(sum(marks) / marks.length);
+}
+
+const a = showAverage([5, 4]);   // 4.5 in the console, but undefined in a
+a.toFixed(1);
+// TypeError: Cannot read properties of undefined (reading 'toFixed')
+```
+
+```js
+function getAverage(marks) {
+  return sum(marks) / marks.length;
+}
+
+const b = getAverage([5, 4]);   // 4.5
+b.toFixed(1);                   // "4.5"  — you can keep working with the result
+```
+
+**The second: always return the same type.** If a function sometimes
+gives a number and sometimes the string “no data”, every caller has to remember it —
+and one day will forget. It is better to return `0`, or an empty string, or
+`undefined`, but consistently.
+
+### A function without a return is a function too
+
+The rule “return, do not print” sounds as if `return` were always
+required. It is not. There are functions whose job is exactly showing:
+
+```js
+function showReport(names, present) {
+  console.log(makeReport(names, present));
+}
+```
+
+It returns nothing — and rightly so, it has nothing to return. The difference is this:
+**`showReport` calculates nothing**, all the calculations stayed
+in `makeReport`. “Printing” is not bad; “calculating and printing at the same time” is.
+
+Functions that change the page or save data (days 25 and 31) are built the same way:
+their result is a change outside.
+
+But an accidental `undefined` from a forgotten `return` is a completely
+different matter. Telling one from the other is simple: **look at the name**.
+If the name promises an answer (`get`, `count`, `make`,
+`is`), there must be a `return`. If the name promises an action
+(`show`, `print`, `save`), there need not be.
+
+<Important>
+**Now tasks 1–3** — 25 minutes. Come back to part 2 after them.
+</Important>
+
+## Part 2, section 7. Three places where a function breaks {#three-places}
+
+A function is small and closed, so looking for an error in it is easier than in a pile.
+There are only three places: **input, body, output**. The order of checking is the same.
+
+<Scheme src="scheme-three-places.svg">The route for debugging a function. The body comes last — most often the trouble is at a boundary</Scheme>
+
+The order matters. Beginners go straight into the body and reread the loop ten times, although
+in half of the cases the function simply got something other than expected — and the body has nothing to do with it.
+
+## Part 2, section 8. Printing at the boundaries {#borders}
+
+A technique for every day: two lines of `console.log` — at the very start of the function
+and right before `return`.
+
+```js
+function countPresent(present) {
+  console.log("in:", present);
+  let came = 0;
+  for (const p of present) {
+    if (p === 1) {
+      came += 1;
+    }
+  }
+  console.log("out:", came);
+  return came;
+}
+```
+
+Now a call tells about itself:
+
+```js
+countPresent([1, 0, 1]);
+// in: (3) [1, 0, 1]
+// out: 2
+```
+
+And here is what happens if a string got into the function instead of an array:
+
+```js
+countPresent("101");
+// in: 101
+// out: 0     ← no error, but the answer is wrong
+```
+
+The program did not crash. `for...of` from day 11 honestly went through the string character by character,
+and each character `"1"` was compared with the number `1` through `===` —
+the strict comparison from day 7 said “not equal”. The result: zero.
+
+<Important>
+This is the most dangerous kind of error: **the program does not crash, it lies**.
+A crash is seen right away; a lie can travel around a project for months. Two prints at the boundaries
+catch it in half a minute.
+</Important>
+
+Print the parameter whole, not a piece of it: `console.log("in:", present)`,
+not `console.log(present.length)`. A string has a length too, and you would not notice
+anything.
+
+### When there are many prints
+
+Three or four prints are still readable. Thirty are not: the console shows a column of numbers, and it is unclear
+which came from where. **Labels** save you — the first argument is always a word:
+
+```js
+const groups = [[1, 0, 1], [1, 1], [0, 0, 0]];
+let n = 1;
+for (const group of groups) {
+  console.log("group " + n + ":", group, "->", countPresent(group));
+  n += 1;
+}
+```
+
+<ResultBox>
+in: (3) \[1, 0, 1\]\
+out: 2\
+group 1: (3) \[1, 0, 1\] -> 2\
+in: (2) \[1, 1\]\
+out: 2\
+group 2: (2) \[1, 1\] -> 2\
+in: (3) \[0, 0, 0\]\
+out: 0\
+group 3: (3) \[0, 0, 0\] -> 0
+</ResultBox>
+
+Now you see the input, the output, and who is who. If there is a lot of data,
+`console.table` from day 2 comes in handy — it lays the list out as a table
+and reads much more easily than a column.
+
+The main rule about debugging prints: **remove them as soon as you have found
+the error**. A forgotten `console.log` gets in the way of finding the next trouble —
+and spoils the impression in someone else’s project.
+
+### A breakpoint instead of printing
+
+Printing is not the only way. The browser has a debugger: in the
+**Sources** tab you can click on a line number, and the program will stop
+right on it. Then you see all the variables at once, without a single `console.log`.
+
+The word `debugger`, which we talked about on day 2, does the same from code:
+
+```js
+function countPresent(present) {
+  debugger;        // the program stops here if the debugger is open
+  let came = 0;
+  for (const p of present) {
+    if (p === 1) {
+      came += 1;
+    }
+  }
+  return came;
+}
+```
+
+Printing is handier when a value changes **many times in a row**; a breakpoint
+is handier when you need to look at **the whole state at once**. In the course we
+get by with printing, but it is worth knowing about the second option.
+
+## Part 2, section 9. The call stack {#stack}
+
+When a function does crash, the browser shows not only the error but also the **chain
+of calls** — who called whom. Not everyone can read it, but it is worth it: it tells you right away
+where to look.
+
+```js
+function sum(numbers) {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+}
+
+function averageMark(marks) {
+  return sum(marks) / marks.length;
+}
+
+function makeReport(name, marks) {
+  return name + ": " + averageMark(marks).toFixed(2);
+}
+
+console.log(makeReport("Aman"));
+```
+
+A page with this `app.js`, opened via Live Server, will show in the console:
+
+```plain-out
+TypeError: numbers is not iterable
+    at sum (http://127.0.0.1:5500/app.js:3:19)
+    at averageMark (http://127.0.0.1:5500/app.js:10:10)
+    at makeReport (http://127.0.0.1:5500/app.js:14:24)
+    at http://127.0.0.1:5500/app.js:17:13
+```
+
+It is read from the bottom up, like a story: on line 17 someone called `makeReport`,
+it called `averageMark`, and that one called `sum`, and there everything broke.
+
+**The top line is the place of the crash, the bottom one is the place of the cause.** It crashed
+in `sum`, but it is not to blame: it was given `undefined`, because
+at the very bottom, on line 17, the second argument was forgotten. You need to fix line 17, not
+`sum`.
+
+Hence the reading rule: **go up the stack from the bottom until you find your own
+line**. If the top lines are the insides of the browser or of someone else’s library,
+the error is still almost certainly yours: you gave them the wrong thing.
+
+## Part 2, section 10. Four errors of the module in one place {#errors}
+
+In three days we have collected four errors that repeat more often than the others. Here they are side by side,
+so that you recognize them at a single glance.
+
+| What you see | What happened | From |
+| --- | --- | --- |
+| `TypeError: x is not a function` | something that is not a function was called | day 12 |
+| the result is `undefined`, no error | `return` was forgotten | day 12 |
+| an arrow returned `undefined` | curly braces switched off the implicit return | day 13 |
+| an argument “did not arrive” | the order of parameters is mixed up | day 14 |
+
+**The first** usually means that the variable holds not a function but its result.
+One extra pair of parentheses when saving — and there is nothing left to call:
+
+```js
+const found = countPresent([1, 0, 1]);   // found holds the number 2
+found();                                 // TypeError: found is not a function
+```
+
+Next to it lives its close relative — a typo in the name. The text is different, and that is a hint:
+“not a function” means “found it but cannot call it”, and “not defined” means “did not find it at all”:
+
+```js
+countPresnt([1, 0, 1]);
+// ReferenceError: countPresnt is not defined
+```
+
+The second one is the most common in the module. It looks like this:
+
+```js
+function countPresent(present) {
+  let came = 0;
+  for (const p of present) {
+    if (p === 1) {
+      came += 1;
+    }
+  }
+}                          // ← return forgotten
+
+const answer = countPresent([1, 0, 1]);
+console.log(answer);                      // undefined
+console.log(percentOf(answer, 3));        // NaN
+console.log(`Present ${answer} of 3`);    // "Present undefined of 3"
+```
+
+Notice how the error spreads: first `undefined`, then
+`NaN`, then the word “undefined” right in the text of the report. When you see `NaN`
+or “undefined” in a finished string, **look for a forgotten `return`**.
+
+**The third** is the same forgotten return, only in an arrow function,
+where it is easy to miss. Curly braces switch off the implicit return:
+
+```js
+const isFive = (mark) => { mark === 5 };
+
+isFive(5);                  // undefined, not true
+[5, 4, 5].filter(isFive);   // [] — not a single five was found
+```
+
+The trouble is that `filter` does not complain: for it `undefined` simply
+means “did not fit”, and it honestly selects an empty list. Remove the braces — and everything falls into place:
+
+```js
+const isFive = (mark) => mark === 5;
+
+[5, 4, 5].filter(isFive);   // [5, 5]
+```
+
+The fourth error is trickier: the program does not crash and prints nothing suspicious.
+
+```js
+percentOf(3, 5);   // 60   — 3 of 5 present
+percentOf(5, 3);   // 166.66666666666669 — the same call, arguments swapped
+```
+
+No error at all: both arguments are numbers, the division works. Only a check
+on familiar data saves you — if you know that the answer is about 60, a number over a hundred
+will catch your eye right away.
+
+## Part 2, section 11. Shrink the input {#minimal}
+
+The last debugging technique, and the strongest one. If a function crashes or lies on a list
+of a hundred students, **do not read the list — shrink it**.
+
+Suppose the check `total === 0` was forgotten in `percentOf` — as
+in the pile from section 1. On the full register a `NaN` shows up somewhere in the reports:
+
+```js
+makeReport(["Aman", "Meret"], [1, 1]);   // "Present 2 of 2 (100%)" — fine
+makeReport(["Aman"], [1]);               // "Present 1 of 1 (100%)" — fine
+makeReport([], []);                      // "Present 0 of 0 (NaN%)" — here it is
+```
+
+The smallest call on which the trouble is still visible is your case. From here on it
+fits in your head completely: zero divided by zero is `NaN`.
+
+Most often the minimal call with an error turns out to be exactly an empty one — `[]`,
+`""`, `0`, a call without arguments. Almost any function written
+without looking around breaks on emptiness: division by zero, access to the first element
+of a list that does not exist, a loop that never ran.
+
+<Important>
+**Now tasks 4–6** — 25 minutes. Come back to part 3 after them.
+</Important>
+
+## Part 3, section 12. How to read an unfamiliar function {#read}
+
+Half of a programmer’s work is reading someone else’s code: a textbook, a library, a classmate,
+yourself half a year ago. Reading it in a row, line by line, is the slowest way.
+There is a better order.
+
+```js
+function f(a, b) {
+  let r = "";
+  for (const x of a) {
+    if (x.length > b) {
+      r = r + x + " ";
+    }
+  }
+  return r;
+}
+```
+
+The names say nothing — this happens often. We take it apart layer by layer.
+
+<Scheme src="scheme-read.svg">We read not from top to bottom but from the result back to the start. The name is the result of the analysis, not its start</Scheme>
+
+Let us check the guess with one call:
+
+```js
+const names = ["Aman", "Meret", "Gülnar", "Sapar", "Oguljan"];
+f(names, 5);    // "Gülnar Oguljan "
+```
+
+It matches: names longer than five letters, separated by spaces. “Meret” and “Sapar” have exactly five,
+so they are not there — `>`, not `>=`. Such small things are checked
+with a call, not by reading.
+
+### If you do not understand it at all
+
+Sometimes the four layers do not help: the code is too tangled. Then a rough
+but reliable technique works — **run it on the smallest input that is
+possible** and watch what happens.
+
+```js
+function h(s, c) {
+  let n = 0;
+  for (const x of s) n += x === c ? 1 : 0;
+  return n;
+}
+
+h("a", "a");     // 1
+h("b", "a");     // 0
+h("aba", "a");   // 2
+```
+
+Three calls of one to three letters, and the function has revealed itself: the letter matched — one,
+it did not match — zero, “aba” has two “a” — two. So it counts **how many times
+a letter occurs in a string**. You could read this from the code, but this way it is faster
+and more reliable.
+
+The technique is the same as “shrink the input” from part 2, only the goal is different: there we looked for an error,
+here for the meaning. The same thing helps: the example must fit in your head completely.
+
+## Part 3, section 13. Edge cases {#edges}
+
+You have taken it apart — now check it at the edges. Four calls worth making with any
+unfamiliar function:
+
+| Call | What we check | Our case |
+| --- | --- | --- |
+| `f([], 5)` | empty input | `""` — good |
+| `f(names, 10)` | nothing fit | `""` — good |
+| `f(names, 0)` | everything fit | all five names |
+| `f()` | no arguments | `TypeError` — crashes |
+
+Three of the four are fine, the fourth crashes. This is not necessarily bad: a function that
+is called from one place has the right to count on normal input. Something else is bad —
+**the returned string ends with an extra space**, and you see it only
+if you look carefully:
+
+```js
+f(names, 5);              // "Gülnar Oguljan " ← a space at the end
+f(names, 5).length;       // 15, not 14
+```
+
+Such tails show up later in the most inconvenient place. They are easy to catch: look
+at the result in quotes, not by eye.
+
+## Part 3, section 14. Rewriting in small steps {#rewrite}
+
+We rewrite, and after each step we check that the answer has not changed. There are four steps.
+
+**Step 1 — the names.** We touch nothing but words. The answer must stay
+the same.
+
+```js
+function longNames(names, minLength) {
+  let result = "";
+  for (const name of names) {
+    if (name.length > minLength) {
+      result = result + name + " ";
+    }
+  }
+  return result;
+}
+```
+
+**Step 2 — fixing the tail.** We put the separator not after an element but before it —
+except for the very first one. The technique is the same as in `listMissing` from part 1.
+
+```js
+function longNames(names, minLength) {
+  let result = "";
+  for (const name of names) {
+    if (name.length > minLength) {
+      if (result !== "") {
+        result += ", ";
+      }
+      result += name;
+    }
+  }
+  return result;
+}
+
+longNames(names, 5);   // "Gülnar, Oguljan" — no tail
+```
+
+**Step 3 — a default.** Five letters is a reasonable default threshold, and yesterday’s
+day lets us write it in the header:
+
+```js
+function longNames(names, minLength = 5) {   // only the header changed
+  let result = "";
+  for (const name of names) {
+    if (name.length > minLength) {
+      if (result !== "") {
+        result += ", ";
+      }
+      result += name;
+    }
+  }
+  return result;
+}
+
+longNames(names);      // "Gülnar, Oguljan"
+longNames(names, 3);   // "Aman, Meret, Gülnar, Sapar, Oguljan"
+```
+
+**Step 4 — checking the edges once more.** `longNames([])` gives
+an empty string, `longNames(names, 100)` too. Done.
+
+<Important>
+The main thing in this section is **the steps, not the result**. The temptation to rewrite everything
+at once is great, but then at the first breakage it is unclear which of the five changes
+is to blame. One step — one check.
+</Important>
+
+### Checklist: the function is ready
+
+Six questions worth asking your function before you consider it done.
+Go through them with `longNames` — it passes them.
+
+| Question | What we check |
+| --- | --- |
+| Does the name say what it does? | a verb or `is`/`has`, no digits and no “and” |
+| Is there one job? | an honest name has no “and” |
+| No more than three parameters? | otherwise split it in two |
+| Does it always return one type? | not a number in one case and a string in another |
+| Does it work on empty input? | `[]`, `""`, `0`, a call without arguments |
+| Does it depend only on its parameters? | it does not read or change outer variables |
+
+The last question is the most underrated one. A function that depends only on its parameters
+can be checked with one call, moved to another file and called in any order.
+With one that reads an outer variable, this will not work:
+
+```js
+let minLength = 5;
+
+function longNamesBad(names) {
+  // the threshold comes from outside — the call means nothing on its own
+}
+
+function longNames(names, minLength = 5) {
+  // the threshold is visible in the call: longNames(names, 3)
+}
+```
+
+The second version also documents itself: the call `longNames(names, 3)`
+shows everything, while for `longNamesBad(names)` you have to go and find what
+`minLength` equals right now.
+
+## Part 3, section 15. The whole “Report card” {#tabel}
+
+Let us put together the course program in the shape the whole module has brought it to. It has everything
+from four days: declarations and `return` from day 12, arrows from day 13, defaults
+and a rest parameter from day 14 — and today’s splitting by meaning.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+
+// checks — arrow functions with a short body
+const isValidMark = (mark) =>
+  typeof mark === "number"
+  && !Number.isNaN(mark)
+  && mark >= MIN_MARK
+  && mark <= MAX_MARK;
+
+const isFive = (mark) => mark === MAX_MARK;
+
+// calculations — each in its own function
+const sum = (numbers) => {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+};
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+// building the report — one function on top
+function makeReport(name = "unnamed", ...marks) {
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return `${name}: no valid marks`;
+  }
+
+  const avg = average(valid);
+  return `${name}: ${valid.length} of ${marks.length}, `
+    + `average ${avg.toFixed(2)} — ${verdict(avg)}, `
+    + `fives ${valid.filter(isFive).length}`;
+}
+
+console.log(makeReport("Aman", 5, 4, 9, 3, 5, 0, 4, 5));
+console.log(makeReport("Meret", 3, 3, 4));
+console.log(makeReport("Gülnar", 9, 0, "five"));
+console.log(makeReport("Sapar", 5, 5, 4, 5));
+console.log(makeReport("Oguljan"));
+```
+
+<ResultBox>
+Aman: 6 of 8, average 4.33 — good student, fives 3\
+Meret: 3 of 3, average 3.33 — average student, fives 0\
+Gülnar: no valid marks\
+Sapar: 4 of 4, average 4.75 — top student, fives 3\
+Oguljan: no valid marks
+</ResultBox>
+
+The third and fifth lines changed compared with yesterday. Yesterday “Gülnar”
+got “needs work” although she has no valid marks at all — the program honestly
+calculated an average of zero and passed a verdict. That was not true, and yesterday’s experiment
+asked exactly to fix it.
+
+The fix is three lines of an early branch in `makeReport`. Notice where
+it stands: **right after the selection and before all the calculations**. This is how checks
+for emptiness are placed — before anyone tries to calculate anything.
+
+<TryIt>
+Check on this program everything today taught you.
+\
+\
+**The first.** Remove `return` from `sum` and run it.
+There will be no error, and no stack either. Find where the trouble does show in the reports, and trace
+its path: `sum` → `average` → `makeReport`.
+\
+\
+**The second.** Reorder the parameters of `verdict(avg, excellent, good, pass)`
+— put `pass` first. What happens to the reports, and why will there be no error?
+\
+\
+**The third.** Find a function in the program whose name asks for “and”,
+and split it. If there is none, explain why `makeReport` is not one,
+although it does the selection, the calculation and the building of the string.
+</TryIt>
+
+## Part 3, section 16. What comes tomorrow {#next}
+
+The module “Functions” is finished. From now on a function will be not the topic of a lesson but a way of writing:
+everything we write from this day on consists of functions.
+
+Tomorrow, on day 16, the module about built-in objects begins, and the first of them is strings.
+We have already joined them, compared them and counted their length; now we take up their methods: find a piece,
+cut it off, bring it to one case, remove extra spaces at the edges.
+
+By the way, that very tail from section 13 is removed tomorrow with one call.
+Today we fixed it by hand — and that is more useful than learning the ready tool right away.
+
+### How the whole module is built
+
+| Day | Question of the day | What you now have |
+| --- | --- | --- |
+| 12 | what a function is | `function`, parameters, `return`, a function as a value |
+| 13 | how to write it | three forms, shortening arrows, hoisting |
+| 14 | what it takes | defaults, the rest parameter |
+| 15 | how to use them | cutting, debugging in three places, reading someone else’s code |
+
+<Ref>
+There are no new pages. Here are all the pages of the module — for review.
+
+| Page | Day | How we cover it |
+| --- | --- | --- |
+| [Guide: Functions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Functions) | 12 | <Review /> |
+| [Reference: Functions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions) | 12 | <Review /> |
+| [function declaration](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function) | 12 | <Review /> |
+| [return](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/return) | 12 | <Review /> |
+| [Arrow function expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions) | 13 | <Review /> |
+| [function expression](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/function) | 13 | <Review /> |
+| [Default parameters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Default_parameters) | 14 | <Review /> |
+| [Rest parameters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/rest_parameters) | 14 | <Review /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// WHERE TO CUT — four signs
+// 1. the piece can be named with one verb
+// 2. you want to write a heading comment above the piece
+// 3. the piece repeats
+// 4. you want to check the piece separately
+
+// NAMES
+// countPresent, makeReport, listMissing   — verb + what
+// isValidMark, isFive                     — checks: is/has, give true/false
+// f, doIt, process, getData2              — do not name them like this
+
+// ONE FUNCTION — ONE JOB
+// “and” appeared in an honest name — so there are two jobs
+// countAndPrint(present) — counts AND prints: split it
+
+// PARAMETERS AND RETURN
+// 0-2 good, 3 fine, 4+ — the function does too much
+// return, do not print; always the same type
+
+// DEBUGGING: INPUT → BODY → OUTPUT
+function countPresent(present) {
+  console.log("in:", present);      // print the boundary whole
+  let came = 0;
+  // ... the loop
+  console.log("out:", came);
+  return came;
+}
+
+// THE CALL STACK is read FROM THE BOTTOM UP
+// at sum          ← where it crashed
+// at averageMark
+// at makeReport
+// at .../app.js:17:13  ← where the cause is
+
+// FOUR ERRORS OF THE MODULE
+// TypeError: x is not a function     called a non-function     day 12
+// result undefined, no error         forgot return             day 12
+// an arrow returned undefined        braces switched it off    day 13
+// an argument “did not arrive”       mixed-up order            day 14
+
+// SHRINK THE INPUT: a hundred students → two → one → empty
+// emptiness breaks almost everything: [], "", 0, a call without arguments
+
+// READING SOMEONE ELSE’S CODE: return → parameters → branches → name
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. By what signs does a piece of code ask to become a separate function?
+   <Answer>It can be named with one verb; you want to write a heading comment
+   above it; it repeats; you want to check it separately.
+   The length of the piece is not a sign.</Answer>
+2. A function returned `undefined`, but there is no error in the console. What do you check first?
+   <Answer>A forgotten `return`. In an arrow function also the curly braces,
+   which switch off the implicit return. Then the error spreads:
+   `undefined` turns into `NaN` or into the word
+   “undefined” inside a finished string.</Answer>
+3. In what order is the call stack read, and what is in its bottom line?
+   <Answer>From the bottom up. At the bottom is the place where it all started, usually your line
+   and the real cause. At the top is the place where the program crashed, and it is often
+   not to blame at all.</Answer>
+4. Why is `console.log("in:", present)` better than
+   `console.log(present.length)`?
+   <Answer>Both a string and an array have a length, so the length alone does not show that
+   the wrong thing came into the function. Printing the whole value shows both the contents
+   and the type.</Answer>
+5. In what order is an unfamiliar function taken apart?
+   <Answer>First `return` — it tells you what the function is for. Then
+   the parameters: the way they are used tells their type. Then the branches: what the function
+   skips and what it takes. The name is invented last — and written into the code right away.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Functions" />

@@ -1,0 +1,915 @@
+---
+title: Day 6 — Arithmetic and assignment
+day: Day 6 • lesson 1
+heading: Arithmetic and assignment
+lead: Module “Syntax, types and operators”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #f59e0b; }
+  h2 { color: #a16207; background: #fffbeb; border-left-color: #f59e0b; }
+  h3 { color: #78350f; }
+  .step-number { background: #f59e0b; }
+  .toc a { color: #a16207; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- calculate with the five arithmetic operators and predict the type of the result;
+- explain when `+` adds and when it joins;
+- use the remainder `%` for parity, the last digit and circular counters;
+- tell `i++` from `++i` and know when the difference matters;
+- shorten code with `+=` and not fall for fractional precision.
+</Goals>
+
+<Toc />
+
+## 1. What an operator is {#what}
+
+An operator is a sign that does something with values. The values it is applied to
+are called **operands**.
+
+```js
+2 + 3
+// 2 and 3 are operands, + is the operator, all together is an expression
+```
+
+The language has many operators, and they are divided by the number of operands:
+
+| Kind | How many operands | Example |
+| --- | --- | --- |
+| binary | two, the operator in the middle | `2 + 3`, `a * b` |
+| unary | one | `-5`, `+"42"`, `i++` |
+| ternary | three | `a ? b : c` — day 7 |
+
+There are about fifty operators in the language, and they are split into groups. Here is the whole map — so that you
+can see where we are:
+
+| Group | Examples | Where we cover it |
+| --- | --- | --- |
+| arithmetic | `+ - * / % **` | **today** |
+| assignment | `= += -= ++ --` | **today** |
+| comparison | `=== == < > <= >=` | day 7 |
+| logical | `&& \|\| ! ??` | day 7 |
+| conditional (ternary) | `a ? b : c` | day 7 |
+| working with properties | `. [ ] ?. delete in` | days 21–22 |
+| bitwise | `& \| ^ << >>` | course 3 |
+| others | `typeof instanceof new ...` | with their own topics |
+
+Today we cover the first two rows. We will put together the full table of all operators with their precedence
+on day 8 — then it will be clear what is calculated before what.
+
+## 2. Five arithmetic operators {#five}
+
+There are five main ones, and you know four of them from school:
+
+| Operator | What it does | Example | Result |
+| --- | --- | --- | --- |
+| `+` | addition *or* joining strings | `2 + 3` | `5` |
+| `-` | subtraction | `7 - 2` | `5` |
+| `*` | multiplication | `3 * 4` | `12` |
+| `/` | division | `10 / 4` | `2.5` |
+| `%` | the **remainder** of division | `10 % 3` | `1` |
+
+The fifth is the only new one. `%` is not percent, as everyone thinks the first time,
+but the remainder of division. We will come back to it in a separate section: it will turn out to be the most useful
+of the five.
+
+There is also a sixth, rare one: `**` — exponentiation. We will talk about it too.
+
+## 3. Plus: two operators in one {#plus}
+
+The `+` sign in JavaScript does **two different things**, and this causes the most
+confusion for beginners. The engine’s rule is this:
+
+<Scheme src="scheme-plus.svg">Plus looks at the types first and only then decides what to do</Scheme>
+
+```js
+2 + 3;          // 5    — both are numbers, addition
+"a" + "b";      // "ab" — both are strings, joining
+2 + "3";        // "23" — one string, so joining
+"2" + 3;        // "23" — it does not matter on which side
+```
+
+The trick is that operators run **from left to right**, and the same
+expression with its parts swapped gives different results:
+
+```js
+1 + 2 + "3";    // "33"  — first 1+2=3, then joining with "3"
+"1" + 2 + 3;    // "123" — joining right away, and everything after is joined too
+```
+
+<Mistake>
+The most common case at work: a value from an input field is **always a string**,
+even if the user typed digits.
+
+```js
+const a = "10";     // from an input field
+const b = "5";
+console.log(a + b);          // "105" — but we expected 15
+console.log(Number(a) + Number(b));   // 15 — correct
+```
+
+The cure is what we studied yesterday: convert to a number *at the entrance*, and then calculate calmly.
+</Mistake>
+
+With yesterday’s special values plus behaves like this:
+
+```js
+true + true;       // 2   — booleans turn into 1 and 0
+null + 1;          // 1   — null becomes zero
+undefined + 1;     // NaN — undefined does not turn into anything
+```
+
+### And what about objects
+
+Plus will take an object or an array too — and give something strange. We warn you in advance, because
+people often see these results in the console and get scared:
+
+```js
+[] + [];          // ""                 — two empty arrays gave an empty string
+[1, 2] + [3];     // "1,23"             — each became a string and they were joined
+[] + { };         // "[object Object]"
+"" + { a: 1 };    // "[object Object]"
+```
+
+There is logic here. Plus cannot work with objects, so it first turns each operand
+into a primitive. An array becomes a string of its elements separated by commas — `[1,2]`
+gives `"1,2"`, and an empty array gives an empty string. A plain object cannot really convert
+and gives `"[object Object]"`.
+
+<Important>
+`[object Object]` in the output is **a sure sign that you printed an object
+where you expected text**. So somewhere you forgot to take the right property of the object.
+To see what is inside, print the object as a separate argument:
+`console.log("data:", obj)` — then the console shows its contents.
+</Important>
+
+Hence a practical piece of advice from the MDN documentation: **do not convert to a string
+with `"" + x`**. For objects this form does not work the same way as a template literal,
+and the difference sometimes bites. Write `String(x)` or `` `${x}` ``.
+
+## 4. Minus, multiplication, division {#others}
+
+The other four operators are simpler: they have no choice, they **always calculate with numbers**.
+So they silently turn a string into a number:
+
+```js
+"10" - 5;    // 5   — the string became a number
+"10" * 2;    // 20
+"10" / 2;    // 5
+"a" - 1;     // NaN — the conversion did not work
+```
+
+<Important>
+Hence the asymmetry everyone stumbles on: `"10" + 5` gives
+`"105"`, but `"10" - 5` gives `5`. Plus is overloaded with joining,
+the others are not.
+</Important>
+
+Division has two features we already saw on day 5:
+
+```js
+10 / 3;    // 3.3333333333333335 — there are no separate whole and fractional numbers
+10 / 0;    // Infinity — division by zero is not an error
+0 / 0;     // NaN — but this is an indeterminate form
+```
+
+### Special values in arithmetic
+
+Yesterday we studied `NaN`, `Infinity`, `null`
+and `undefined`. Here is how they behave with all five operators — this table is worth
+reading in full once:
+
+| x | `x + 2` | `x - 2` | `x * 2` | `x / 2` | `x % 2` |
+| --- | --- | --- | --- | --- | --- |
+| `NaN` | `NaN` | `NaN` | `NaN` | `NaN` | `NaN` |
+| `Infinity` | `Infinity` | `Infinity` | `Infinity` | `Infinity` | `NaN` |
+| `null` | `2` | `-2` | `0` | `0` | `0` |
+| `undefined` | `NaN` | `NaN` | `NaN` | `NaN` | `NaN` |
+| `true` | `3` | `-1` | `2` | `0.5` | `1` |
+| `""` | `2` | `-2` | `0` | `0` | `0` |
+| `"5"` | **`"52"`** | `3` | `10` | `2.5` | `1` |
+
+Three conclusions from the table.
+
+**The first.** The string `"5"` is the only string in the table, and it stands out only
+in the `+` column: there it is joining, everywhere else it is the number 5. This is the same
+asymmetry of plus.
+
+**The second.** `null` and the empty string behave like zero, and
+`undefined` like `NaN`. In practice this means: a missing value
+poisons the whole calculation with `NaN`, while a forgotten `null` quietly counts as zero
+and gives a wrong number without a single message. The second is more dangerous.
+
+**The third.** `NaN` is contagious in all five columns. If it got into a calculation,
+everything after it will be `NaN` — and you have to look for the very first place where it appeared, not the one
+where you noticed it.
+
+## 5. The remainder: the most useful one {#remainder}
+
+The `%` operator returns the **remainder** of division. Divide 10 by 3: you get
+3 whole times and 1 left over — that one is what it returns.
+
+```js
+10 % 3;    // 1   — 3 * 3 = 9, 1 is left
+7 % 7;     // 0   — divided evenly
+5 % 10;    // 5   — the dividend is smaller than the divisor, all of it is the remainder
+5.5 % 2;   // 1.5 — it works with fractions too
+10 % 0;    // NaN — you cannot divide by zero here
+```
+
+<Why>
+Why does `10 / 0` give `Infinity`, while `10 % 0` gives `NaN`?
+Division has a meaningful answer: the smaller the divisor, the bigger the quotient, and in the limit you get
+infinity. The remainder has no such limit: you cannot put 10 things into groups “of zero” even once,
+and the question “how many are left” makes no sense. That is why the language honestly answers “not a number”.
+</Why>
+
+<Scheme src="scheme-remainder.svg">Division answers “how many whole groups”, the remainder answers “how many did not fit”</Scheme>
+
+It looks like a school trifle, but in practice `%` is used all the time. Here are four techniques
+worth writing down in your notebook.
+
+### Parity
+
+```js
+const n = 7;
+
+if (n % 2 === 0) {
+  console.log("even");
+} else {
+  console.log("odd");   // here
+}
+```
+
+A number is even exactly when the remainder of dividing it by 2 is zero. This is how every other row of a table
+gets colored, cards are dealt in turn, people are split into teams.
+
+### The last digit
+
+```js
+1234 % 10;    // 4 — the last digit
+1234 % 100;   // 34 — the last two
+```
+
+### A circular counter
+
+The most valuable technique. You need a counter to reach the end and start again — an image carousel,
+the days of the week, players taking turns in a circle:
+
+```js
+const days = ["Mon", "Tue", "Wed"];
+let i = 0;
+
+for (let k = 0; k < 7; k++) {
+  console.log(days[i]);
+  i = (i + 1) % days.length;   // 0, 1, 2, 0, 1, 2, 0...
+}
+// Mon Tue Wed Mon Tue Wed Mon
+```
+
+Without the remainder you would have to write a condition “if we reached the end, reset to zero”. With the remainder it is
+one line that never goes beyond the bounds of the array.
+
+### Time from seconds
+
+The fourth technique combines the remainder with division. The task: turn seconds into hours, minutes
+and seconds. It appears in every timer and player.
+
+```js
+const total = 3725;   // seconds
+
+const hours = Math.floor(total / 3600);        // 1   — how many whole hours
+const minutes = Math.floor(total / 60) % 60;   // 2   — minutes without the hours
+const seconds = total % 60;                    // 5   — seconds without the minutes
+
+console.log(`${hours}:${minutes}:${seconds}`);   // "1:2:5"
+```
+
+The scheme is always the same: **division answers “how many whole ones”, the remainder answers “how many
+are left”**. Divide by 3600 — you get the hours; take the remainder of 60 — you cut off everything bigger
+and keep only the minutes.
+
+The output `"1:2:5"` reads badly — usually leading zeros are added with the
+`padStart` method (day 16), and you get the familiar `"1:02:05"`.
+We will study `Math.floor`, which rounds down here, on day 18; for now it is enough to know
+that it drops the fractional part.
+
+## 6. The remainder of negative numbers {#negative}
+
+And here begins what confuses even experienced people. Look:
+
+```js
+10 % 3;     // 1
+-10 % 3;    // -1  ← a minus!
+10 % -3;    // 1
+-10 % -3;   // -1
+```
+
+**The sign of the result matches the sign of the dividend** — the one on the left. The sign of the divisor
+has no effect at all.
+
+<Why>
+School math has the “modulo” operation, and it works differently: there the sign of the result
+comes from the *divisor*. So −10 modulo 3 is 2, not −1. In some languages
+(Python, Perl) the `%` sign means modulo, in others (JavaScript, C, Java) — the remainder.
+The same sign with a different meaning — that is why code rewritten from Python letter for letter sometimes
+calculates the wrong thing.
+</Why>
+
+If you need exactly the modulo — an always non-negative result — there is a ready formula:
+
+```js
+const mod = (n, d) => ((n % d) + d) % d;
+
+mod(-10, 3);   // 2  — not -1
+mod(10, 3);    // 1  — the same for positive numbers
+```
+
+<Mistake>
+Where it really bites is in a circular counter if you go **backward**:
+
+```js
+let i = 0;
+(i - 1) % 3;              // -1 — and arr[-1] gives undefined
+((i - 1) % 3 + 3) % 3;    // 2 — the right jump to the end
+```
+
+A carousel that breaks on the “back” button is a classic mistake of a first project.
+</Mistake>
+
+## 7. Exponentiation {#power}
+
+The `**` operator raises to a power:
+
+```js
+2 ** 10;    // 1024
+2 ** 0.5;   // 1.4142135623730951 — a fractional power is a root
+9 ** 0.5;   // 3
+```
+
+It has two behaviors that differ from all other operators.
+
+**The first: it is right-associative.** All other operators are calculated from left to right,
+but this one from right to left:
+
+```js
+2 ** 3 ** 2;      // 512, because it is 2 ** (3 ** 2) = 2 ** 9
+(2 ** 3) ** 2;    // 64 — if you need it the other way, put parentheses
+```
+
+**The second: with a unary minus the language requires parentheses.** It does not silently choose the order
+but refuses to run the code:
+
+```js
+-2 ** 2;
+// SyntaxError: Unary operator used immediately before exponentiation expression.
+// Parenthesis must be used to disambiguate operator precedence
+
+(-2) ** 2;    // 4   — “minus two squared”
+-(2 ** 2);    // -4  — “minus (two squared)”
+```
+
+This is a rare and pleasant case: instead of giving a wrong answer, the language makes you
+say it more precisely. Remember the `SyntaxError` with the long word `Parenthesis` —
+it is cured by parentheses alone.
+
+## 8. Unary plus and minus {#unary}
+
+Plus and minus also come with one operand. Minus changes the sign — that is clear. But unary plus
+does something useful: it **turns a value into a number**.
+
+```js
++"42";        // 42  — a short form of Number("42")
++true;        // 1
++"";          // 0
++"abc";       // NaN
++null;        // 0
++undefined;   // NaN
+
+-"42";        // -42 — minus converts too, while changing the sign
+-true;        // -1
+```
+
+So `+x` is the same as `Number(x)`, only shorter.
+The form is common and you need to recognize it. But in your own code it is better to write `Number(x)`:
+a lone plus in front of a variable is easy to miss when reading.
+
+Where unary plus really fits is in short places where the meaning is clear anyway. For example,
+a date: `+new Date()` gives a number of milliseconds, and everyone writes this form:
+
+{/* ahead-ok: day 17 */}
+
+```js
+const t = +new Date();   // a number, not a date object
+typeof t;                // "number"
+```
+
+<Mistake>
+Do not confuse unary plus with binary plus. The difference is in how many values there are around the sign:
+
+```js
+const a = "5";
+const b = "3";
+
+console.log(+a + +b);   // 8   — two unary pluses, then addition
+console.log(a + b);     // "53" — one binary plus, joining
+```
+
+The form `+a + +b` looks like a typo, but it is correct. That is exactly why
+in teaching code `Number(a) + Number(b)` is better.
+</Mistake>
+
+## 9. Assignment is an expression {#assign}
+
+The `=` sign puts a value into a variable. But something else matters more: **assignment itself
+is an expression** and returns what it assigned.
+
+```js
+let x;
+console.log(x = 5);   // 5 — the expression returned the assigned value
+```
+
+This leads to a chain you will meet in other people’s code:
+
+```js
+let p, q, r;
+p = q = r = 7;        // all three get 7
+console.log(p, q, r); // 7 7 7
+```
+
+It works from right to left: first `r = 7` returned 7, then this 7 went into `q`,
+then into `p`. Just remember the trap of day 4: if `q` and `r`
+are not declared, they silently become globals.
+
+You can assign not only to a variable. On the left of `=` can stand anything that
+can hold a value — a property of an object or an element of an array:
+
+```js
+const user = { };
+user.name = "Aman";        // to a property of an object
+
+const marks = [5, 4, 3];
+marks[0] = 2;              // to an element of an array
+
+user.count = 5;
+user.count += 1;           // compound assignment works too
+marks[0]++;                // and increment
+```
+
+Notice: the object and the array are declared with `const`, and that does not get in the way — on day 4 we saw
+why. A constant holds the name, not the contents.
+
+There is one more form of assignment — **destructuring**, when an object or an array is taken apart
+into several variables at once:
+
+{/* ahead-ok: day 22 */}
+
+```js
+const [first, second] = [5, 4];      // first = 5, second = 4
+const { name } = { name: "Aman" };   // name = "Aman"
+```
+
+The technique is handy and very common in real code. We study it on day 22, but for now it is enough
+to recognize the form.
+
+<Mistake>
+Since assignment is an expression, it can be put into a condition by accident instead of a comparison:
+
+```js
+let x = 5;
+
+if (x = 0) {          // we assigned zero! and the condition became false
+  console.log("will not be printed");
+}
+console.log(x);       // 0 — the variable is spoiled
+```
+
+One stick instead of three — and the program quietly works wrongly. We study comparison
+tomorrow, but remember the rule today: **a condition must contain `===`**.
+</Mistake>
+
+## 10. Compound assignment {#compound}
+
+Every arithmetic operator has a short pair with assignment:
+
+| Short | Full form | Example | Was 10, became |
+| --- | --- | --- | --- |
+| `x += 5` | `x = x + 5` | addition | `15` |
+| `x -= 5` | `x = x - 5` | subtraction | `5` |
+| `x *= 2` | `x = x * 2` | multiplication | `20` |
+| `x /= 4` | `x = x / 4` | division | `2.5` |
+| `x %= 3` | `x = x % 3` | remainder | `1` |
+| `x **= 2` | `x = x ** 2` | exponentiation | `100` |
+
+The most common one is `+=` — it is used to accumulate a sum:
+
+```js
+let sum = 0;
+for (const mark of [5, 4, 5]) {
+  sum += mark;        // shorter than sum = sum + mark
+}
+console.log(sum);     // 14
+```
+
+<Mistake>
+`+=` inherits joining strings from plus. If there is a string on the right, the number
+turns into text, and everything goes wrong from there:
+
+```js
+let x = 10;
+x += "5";
+console.log(x);          // "105"
+console.log(typeof x);   // "string" — the variable changed its type
+```
+
+This is exactly how counters that add up values from input fields break.
+</Mistake>
+
+## 11. Increment and decrement {#incdec}
+
+Adding one is needed so often that there is a separate operator for it: `++`.
+And its pair `--`, to subtract.
+
+```js
+let i = 5;
+i++;              // the same as i += 1 and as i = i + 1
+console.log(i);   // 6
+```
+
+Simple so far. But these operators have **two forms**, and they differ in
+what they return.
+
+<Scheme src="scheme-incdec.svg">The difference is visible only if the result is used somewhere</Scheme>
+
+```js
+let i = 5;
+const a = i++;           // a = 5, i = 6
+console.log(a, i);       // 5 6
+
+let j = 5;
+const b = ++j;           // b = 6, j = 6
+console.log(b, j);       // 6 6
+```
+
+<Important>
+If the result goes nowhere — and that is 95% of cases — **there is no difference**.
+The line `i++;` on its own does exactly the same as `++i;`. That is why
+in a loop `for (let i = 0; i < 5; i++)` you can write either form: the counter
+increases the same way.
+</Important>
+
+A practical piece of advice: **do not mix increment with other actions on one line**.
+Such expressions read badly, and even a specialist can easily make a mistake:
+
+```js
+let x = 1;
+console.log(x++ + ++x);   // 4 — but who can work this out at first glance?
+```
+
+Decrement `--` works exactly the same way, only it subtracts. Its classic place is
+a countdown:
+
+{/* ahead-ok: day 10 */}
+
+```js
+let lives = 3;
+
+while (lives > 0) {
+  console.log(lives);
+  lives--;
+}
+// 3 2 1
+```
+
+We will study loops on day 10, but the idea is visible: while there are more than zero lives, show the number and take
+one away. Without decrement you would have to write `lives = lives - 1`.
+
+Two small things at the end. `++` works only with something that can be assigned to — that is why
+on a constant it fails with the error from day 4. And it turns the value into a number:
+
+```js
+const c = 1;
+c++;             // TypeError: Assignment to constant variable.
+
+let s = "5";
+s++;
+console.log(s, typeof s);   // 6 "number" — the string became a number
+```
+
+## 12. The order of operations {#order}
+
+As in math, multiplication and division run before addition and subtraction:
+
+```js
+2 + 3 * 4;      // 14, not 20
+(2 + 3) * 4;    // 20 — parentheses change the order
+```
+
+Here is the order for today’s operators; at the top is what runs earlier:
+
+| Turn | Operators |
+| --- | --- |
+| 1 | `( )` — parentheses |
+| 2 | `++`, `--`, unary `+` and `-` |
+| 3 | `**` — exponentiation (right to left) |
+| 4 | `*`, `/`, `%` |
+| 5 | `+`, `-` |
+| 6 | `=`, `+=` and the other assignments (right to left) |
+
+<ProTip>
+Do not learn the table by heart — **put parentheses**. The expression `(a + b) / 2`
+reads unambiguously for you, for a colleague and for you again half a year later. The full table of precedence
+with all the operators of the language will be on day 8, and you will not have to learn it by heart either.
+</ProTip>
+
+### Building a formula
+
+The most common precedence mistake is the arithmetic mean. Compare:
+
+```js
+const a = 5, b = 4, c = 3;
+
+a + b + c / 3;      // 10 — first 3/3=1, then 5+4+1. Wrong!
+(a + b + c) / 3;    // 4  — correct
+```
+
+Division ran before addition, and the result is quite different. The mistake is quiet: the numbers look
+plausible, nobody complains.
+
+Now a harder task — you will meet it in the very first project with a shopping cart.
+*An item costs 1200, 3 of them are bought, there is a 10% discount, then 5% tax. How much to pay?*
+
+The temptation is to write it on one line. Do not give in: split it into steps, give each a name,
+and the formula becomes checkable:
+
+```js
+const price = 1200;
+const count = 3;
+const discount = 10;    // percent
+const tax = 5;          // percent
+
+const subtotal = price * count;                          // 3600
+const afterDiscount = subtotal - (subtotal * discount) / 100;   // 3240
+const total = afterDiscount + (afterDiscount * tax) / 100;      // 3402
+
+console.log(`To pay: ${total.toFixed(2)}`);   // "To pay: 3402.00"
+```
+
+Three lines instead of one, but each can be printed to the console and checked separately. And if
+tomorrow it turns out that the tax is calculated from the sum *before* the discount, you will have to edit one line,
+not puzzle out a long expression.
+
+<Important>
+Notice `(subtotal * discount) / 100`. The parentheses are not required here —
+multiplication and division go from left to right anyway. But they tell the reader: “first we calculated
+the size of the discount, then turned it into percent”. **Parentheses are put not only for the engine
+but also for a person.**
+</Important>
+
+## 13. Fractional precision and money {#precision}
+
+Let us come back to what we saw on day 3 and left “for later”. Later has come:
+
+```js
+0.1 + 0.2;                 // 0.30000000000000004
+0.1 + 0.2 === 0.3;         // false
+```
+
+The reason is not JavaScript. Fractional numbers are stored in binary, and 0.1 in binary is
+an endless fraction, just like 1/3 in decimal. It has to be cut off, and a tiny error
+builds up. Almost all languages work this way.
+
+What to do about it depends on the task.
+
+**For display** rounding is enough. The `toFixed(n)` method returns
+a string with the needed number of digits:
+
+```js
+(0.1 + 0.2).toFixed(2);   // "0.30" — a string, for output
+```
+
+**For money** it is more reliable to calculate in the smallest units — tenge,
+cents — that is, in whole numbers, and divide only at the end:
+
+```js
+const price = 1250;        // 12 manat 50 tenge, stored in tenge
+const count = 3;
+const total = price * count;          // 3750 — whole, without error
+console.log(`${total / 100} manat`);  // "37.5 manat"
+```
+
+<Mistake>
+Rounding can surprise you too — for the same reason:
+
+```js
+Math.round(1.005 * 100) / 100;   // 1, not 1.01
+```
+
+Because `1.005 * 100` is actually 100.49999999999999. This is one more
+argument for whole numbers: where every cent matters, fractions cannot be trusted.
+We will study `Math.round` on day 18.
+</Mistake>
+
+**For comparing** fractional numbers there is a third technique. Since exact equality cannot be achieved,
+you check that the numbers differ by less than a tiny amount. This amount already exists in the language —
+`Number.EPSILON`:
+
+```js
+console.log(Number.EPSILON);   // 2.220446049250313e-16 — a very small number
+
+0.1 + 0.2 === 0.3;                              // false
+Math.abs((0.1 + 0.2) - 0.3) < Number.EPSILON;   // true — “practically equal”
+```
+
+It reads like this: “the absolute value of the difference is smaller than the error — so we consider them equal”.
+`Math.abs` takes a number without its sign, so that it does not matter which of the two is bigger.
+
+So there are three ways, and you choose by the task:
+
+| Task | Technique |
+| --- | --- |
+| show to the user | `toFixed(2)` — round to a string |
+| calculate money | keep it in whole numbers, divide only for output |
+| compare two fractions | the difference is smaller than `Number.EPSILON` |
+
+## 14. The “Report card”: real calculations {#tabel}
+
+Let us improve the program so that it uses today’s operators. We add the sum, a percentage
+and coloring every other row.
+
+```js
+const MAX_MARK = 5;
+const student = {
+  name: "Aman",
+  marks: [5, 4, 5, 3, 5, 4],
+};
+
+let sum = 0;
+for (const mark of student.marks) {
+  sum += mark;                       // accumulating with +=
+}
+
+const count = student.marks.length;
+const average = sum / count;
+const percent = (average / MAX_MARK) * 100;
+
+console.log(`Marks: ${count}`);
+console.log(`Sum: ${sum}`);
+console.log(`Average: ${average.toFixed(2)}`);
+console.log(`That is ${percent.toFixed(0)}% of the maximum`);
+
+// every other row — this is how long tables are colored
+for (let i = 0; i < count; i++) {
+  let stripe = "";
+  if (i % 2 !== 0) {
+    stripe = "  (gray row)";
+  }
+  console.log(`${i + 1}. ${student.marks[i]}${stripe}`);
+}
+```
+
+<ResultBox>
+```plain-out
+Marks: 6
+Sum: 26
+Average: 4.33
+That is 87% of the maximum
+1. 5
+2. 4  (gray row)
+3. 5
+4. 3  (gray row)
+5. 5
+6. 4  (gray row)
+```
+</ResultBox>
+
+All of today’s operators work here. Let us go through the lines and see which one is responsible for what:
+
+| Line | Operator | What for |
+| --- | --- | --- |
+| `sum += mark;` | `+=` | accumulate the sum without rewriting `sum = sum + mark` |
+| `sum / count` | `/` | the arithmetic mean |
+| `(average / MAX_MARK) * 100` | `/` and `*` | the share of the maximum in percent; the parentheses are for the reader |
+| `i % 2 !== 0` | `%` | parity: we color every other row |
+| `i++` | `++` | we move the loop counter |
+| `i + 1` | `+` | numbering for a person — from one, not from zero |
+| `average.toFixed(2)` | — | round for display, so there is no 4.333333 |
+
+Notice the last row of the table and the one before it. `toFixed(2)` is needed
+exactly because `26 / 6` gives 4.333333333333333 — a fraction nobody wants to see
+in a report card. And `i + 1` — because arrays count from zero and people from one, and this
+difference will have to be translated in every list output.
+
+Coloring every other row works like this: we create an empty mark, and if the number is odd,
+we put text into it. Notice that `stripe` is declared with `let`
+and **before** `if`, not inside it: otherwise, as we saw on day 4,
+it would not live until the output line.
+
+Tomorrow you will see that such a “choose one of two values” form can be shortened to one
+line — but first you need yesterday’s and today’s material.
+
+## 15. Common mistakes of the day {#mistakes}
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `"10" + 5` instead of 15 | a plus with a string joins | `Number("10") + 5` |
+| `x += "5"` in a counter | the variable becomes a string | convert to a number at the entrance |
+| taking `%` for percent | it is the remainder of division | percent is `x / 100 * p` |
+| `(i - 1) % n` for going backward | gives −1; the sign comes from the dividend | `((i - 1) % n + n) % n` |
+| `-2 ** 2` | the language requires parentheses | `(-2) ** 2` or `-(2 ** 2)` |
+| `if (x = 5)` | assigned instead of comparing | `if (x === 5)` |
+| `0.1 + 0.2 === 0.3` | fractions are stored approximately | calculate in whole numbers, round for display |
+
+## 16. What comes tomorrow {#next}
+
+Today we calculated. Tomorrow, on day 7, we will **compare and decide**:
+`===` and `==`, `<` and `>`, the logical
+`&&`, `||`, `!`, the `??` operator
+and the ternary operator — the very short form of choosing between two values that
+we have just mentioned.
+
+Today’s material will be useful right away: you already know that one stick `=` in a condition is
+assignment, not comparison. Tomorrow it will become clear how two sticks differ from three
+and why we write three for the whole course.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Addition +](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Addition) | adds numbers or joins strings | <Full /> |
+| [Subtraction −](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Subtraction) | always calculates with numbers | <Full /> |
+| [Multiplication \*](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Multiplication) | the product | <Full /> |
+| [Division /](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Division) | the quotient; division by zero gives `Infinity` | <Full /> |
+| [Remainder %](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Remainder) | the remainder; the sign comes from the dividend | <Full /> |
+| [Assignment =](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Assignment) | puts in a value and returns it | <Full /> |
+| [Addition assignment +=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Addition_assignment) | accumulating a sum; joins with a string | <Full /> |
+| [Increment ++](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Increment) | two forms: `i++` and `++i` | <Full /> |
+| [Decrement −−](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Decrement) | the same, but one less | <Full /> |
+| [All operators (overview)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators) | a list of all operators of the language; the full table — day 8 | <Brief /> |
+| [Exponentiation \*\*](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Exponentiation) | right-associative; parentheses are needed with a unary minus | <Brief /> |
+| [Unary plus +x](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unary_plus) | a short form of `Number(x)` | <Brief /> |
+| [Unary minus −x](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Unary_negation) | changes the sign and also converts to a number | <Brief /> |
+| [−=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Subtraction_assignment) | subtraction with assignment | <Brief /> |
+| [\*=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Multiplication_assignment) | multiplication with assignment | <Brief /> |
+| [/=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Division_assignment) | division with assignment | <Brief /> |
+| [%=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Remainder_assignment) | remainder with assignment | <Brief /> |
+| [\*\*=](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Exponentiation_assignment) | exponentiation with assignment | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+2 + 3;        // 5      addition
+"2" + 3;      // "23"   joining — at least one operand is a string
+"10" - 5;     // 5      the other operators always calculate with numbers
+10 / 3;       // 3.3333333333333335 — there are no separate whole and fractional numbers
+10 / 0;       // Infinity
+10 % 3;       // 1      the remainder, not percent
+2 ** 10;      // 1024   exponentiation, right to left
+
+// the remainder: three techniques
+const n = 7;
+const arr = ["Mon", "Tue", "Wed"];
+let i = 0;
+n % 2 === 0;                                        // false — parity
+1234 % 10;                                          // 4 — the last digit
+((i - 1) % arr.length + arr.length) % arr.length;   // 2 — a step back around the circle
+i = (i + 1) % arr.length;                           // 1 — a step forward around the circle
+
++"42";        // 42     unary plus = Number()
+// -2 ** 2;   → SyntaxError: Unary operator used immediately before exponentiation expression…
+
+let x = 10;
+x += 5;       // 15 — the same with -=, *=, /=, %=, **=
+
+let k = 5;
+k++;          // returns 5, k becomes 6   (postfix)
+let m = 5;
+++m;          // returns 6, m becomes 6   (prefix)
+
+2 + 3 * 4;    // 14 — multiplication first; in doubt, put parentheses
+0.1 + 0.2;    // 0.30000000000000004 — count money in whole numbers
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. What do `"10" + 5` and `"10" - 5` give, and why differently?
+   <Answer>`"105"` and `5`. Plus is overloaded with joining strings: if at least one
+   operand is a string, it joins. Minus has no such overload and always turns
+   the operands into numbers.</Answer>
+2. What is `-10 % 3`, and what does the sign depend on?
+   <Answer>`-1`. The sign of the result matches the sign of the dividend — the one on the left.
+   The sign of the divisor has no effect. For an always positive result you need the formula
+   `((n % d) + d) % d`.</Answer>
+3. `let i = 5; const a = i++;` — what are `a` and `i`?
+   <Answer>`a` is 5, `i` is 6. The postfix form first gives back
+   the old value and only then increases. With `++i` both would be 6.</Answer>
+4. Why does `-2 ** 2` not work?
+   <Answer>The language does not try to guess what was meant — “minus two squared” or
+   “minus (two squared)” — and requires parentheses: `(-2) ** 2` gives 4,
+   `-(2 ** 2)` gives −4.</Answer>
+5. How do you make a counter `i` go around 0, 1, 2, 0, 1, 2?
+   <Answer>`i = (i + 1) % 3;` The remainder of division by the length never goes
+   beyond the bounds of the array.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators" />

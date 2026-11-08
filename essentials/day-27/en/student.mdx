@@ -1,0 +1,129 @@
+---
+title: Day 27 — notes
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+---
+
+# Day 27. Events
+
+<Subtitle>A summary of the lecture: listeners, the event object, bubbling, delegation.</Subtitle>
+
+## The main points
+
+<Definition>
+An **event** is the browser’s message “something happened”: a click, a key,
+the end of loading. A **listener** is a function the browser calls when
+the event happens, passing it the **event object**.
+</Definition>
+
+```js
+button.addEventListener("click", (event) => {
+  log.textContent = "Salam!";
+});
+```
+
+<Remember>
+A function is **passed**, not called: `greet`, not `greet()`.
+The event name goes without `on` and in lowercase: `"click"`, not
+`"onclick"` or `"Click"`. There is no error in these cases — a click
+simply does nothing.
+</Remember>
+
+## The event object
+
+| Property | What it is |
+| --- | --- |
+| `type` | the event name: `"click"` |
+| `target` | where it happened — the deepest element |
+| `currentTarget` | where the fired listener hangs |
+| `clientX`, `clientY` | the click point in the visible part of the window |
+| `button` | the mouse button: 0 left, 1 wheel, 2 right |
+| `key` | what was typed: `"a"`, `"A"`, `"q"`, `"Enter"` |
+| `code` | which key it physically is: `"KeyA"` |
+| `isTrusted` | from a person (`true`) or from code (`false`) |
+
+A right click gives no `click` — only `mousedown`,
+`mouseup`, `auxclick` and `contextmenu`. Keys come to the element in focus,
+and without focus — to `body`, so the keys of the page are listened for on `document`.
+
+## Bubbling and delegation
+
+An event comes to an element and rises to its ancestors: `li` → `ul` →
+`main` → `body` → `document` → `window`.
+That is why **one listener on the parent** is enough:
+
+```js
+list.addEventListener("click", (event) => {
+  const li = event.target.closest("li");   // up to the item, even if a <b> in it was clicked
+  if (!li) return;                         // a click past the items
+  li.classList.toggle("star");
+});
+```
+
+<KeyPoint>
+Delegation also serves elements added later: the listener hangs on the parent.
+`focus` and `blur` do not bubble — they are listened for on the element itself.
+</KeyPoint>
+
+## Stop and cancel
+
+```js
+const link = document.querySelector('a[href="#info"]');
+
+link.addEventListener("click", (event) => {
+  event.stopPropagation();   // it will not go further to the ancestors
+  event.preventDefault();    // the browser will not do its own thing: follow a link, a menu, send a form
+});
+```
+
+These are different things: `preventDefault` does not prevent bubbling, `stopPropagation`
+does not cancel the browser’s action. You rarely have to stop bubbling: it breaks
+delegation higher up.
+
+## Remove, loading, events from code
+
+```js
+function greet(event) {
+  console.log("clicked:", event.type);
+}
+
+button.removeEventListener("click", greet);    // only THE SAME function
+button.addEventListener("click", greet, { once: true });   // once
+button.onclick = greet;                        // the old way: one slot
+
+document.addEventListener("DOMContentLoaded", () => {});   // the tree is ready
+window.addEventListener("load", () => {});                 // and the images too
+
+button.click();                                // a click from code, isTrusted is false
+button.dispatchEvent(new Event("hello", { bubbles: true }));
+```
+
+<Remember>
+An anonymous arrow cannot be removed: written anew, it is a different function. A script
+with `defer` does not need a `DOMContentLoaded` wrapper: it already runs
+when the tree is ready. A listener added after the event will not fire: events do not repeat.
+</Remember>
+
+## Three silent mistakes
+
+| What was written | What happens |
+| --- | --- |
+| `addEventListener("click", greet())` | `greet` ran on load, a click does nothing |
+| `addEventListener("onclick", …)` | the listener never fires |
+| `removeEventListener` with an arrow written anew | the listener stayed |
+
+All three have one thing in common: the console is silent. If a button “does not work”, check them
+first, and `getEventListeners(button)` in the Chrome console shows which
+listeners actually hang on the element.
+
+<Homework>
+1. Add a click counter to the button that writes the result on the page.
+2. Print `key` and `code` for ten keys, including
+   on another layout, and explain the difference.
+3. Add listeners to an item, the list and `body` and write down the order of calls.
+4. Add a “Delete” button to every row of the “Report card” — with one listener on
+   `tbody`.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Events" />

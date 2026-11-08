@@ -37,9 +37,11 @@ export type Frontmatter = {
 type Node = { type: string; children?: Node[]; value?: string; depth?: number; lang?: string | null; meta?: string | null; name?: string; attributes?: unknown[]; url?: string; data?: Record<string, unknown>; [k: string]: unknown };
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
-const HEADING_ID = /^(#{1,6} .*?)[ \t]+\{#([A-Za-z][\w-]*)\}[ \t]*$/gm;
+// an id may start with a digit ("{#404}", day 31 of Essentials) — HTML allows it
+const HEADING_ID = /^(#{1,6} .*?)[ \t]+\{#([\w-]+)\}[ \t]*$/gm;
 
-export function splitFrontmatter(rel: string, source: string): { data: Frontmatter; body: string } {
+// firstLine: the file's line number where the text after the frontmatter starts (for messages)
+export function splitFrontmatter(rel: string, source: string): { data: Frontmatter; body: string; firstLine: number } {
   const m = FRONTMATTER.exec(source);
   if (!m) throw new Error(`${rel}: no frontmatter (--- … ---) at the top`);
   const data = YAML.parse(m[1]) as Frontmatter;
@@ -47,7 +49,7 @@ export function splitFrontmatter(rel: string, source: string): { data: Frontmatt
   const known = new Set(["title", "day", "heading", "lead", "css"]);
   const unknown = Object.keys(data).filter((k) => !known.has(k));
   if (unknown.length) throw new Error(`${rel}: unknown frontmatter keys: ${unknown.join(", ")}`);
-  return { data, body: source.slice(m[0].length) };
+  return { data, body: source.slice(m[0].length), firstLine: m[0].split("\n").length };
 }
 
 function walk(node: Node, visit: (n: Node, parent: Node | null, index: number) => void, parent: Node | null = null, index = 0) {
@@ -63,7 +65,7 @@ function remarkHeadingIds() {
       if (n.type !== "heading" || !n.children?.length) return;
       const last = n.children[n.children.length - 1];
       if (last.type !== "text") return;
-      const m = /[ \t]*\{#([A-Za-z][\w-]*)\}$/.exec(last.value ?? "");
+      const m = /[ \t]*\{#([\w-]+)\}$/.exec(last.value ?? "");
       if (!m) return;
       last.value = last.value!.slice(0, m.index);
       n.data = { ...n.data, hProperties: { ...((n.data?.hProperties as object) ?? {}), id: m[1] } };
@@ -84,8 +86,10 @@ function remarkCodeBlocks() {
     });
 }
 
-// <Toc /> without children gets the list of the page's ## headings: a link to each id, the heading's own text
-// with the number in front ("1. ") dropped.
+// <Toc /> without children gets the list of the page's ## headings: a link to each id, the heading's text as plain
+// text (the HTML pages' tables of contents drop the <code> of their headings — 159 times, 08.11.2026; two items that
+// keep it are written out as <Toc> with a list) with the number in front ("1. ") dropped.
+const plainText = (n: Node): string => (n.type === "text" || n.type === "inlineCode" ? n.value ?? "" : (n.children ?? []).map(plainText).join(""));
 function remarkToc() {
   return (tree: Node) => {
     const items: Node[] = [];
@@ -93,9 +97,8 @@ function remarkToc() {
       if (n.type !== "heading" || n.depth !== 2) return;
       const id = (n.data?.hProperties as { id?: string } | undefined)?.id;
       if (!id) return;
-      const kids = structuredClone(n.children ?? []) as Node[];
-      if (kids[0]?.type === "text") kids[0].value = kids[0].value!.replace(/^\d+\.\s*/, "");
-      items.push({ type: "listItem", spread: false, children: [{ type: "paragraph", children: [{ type: "link", url: `#${id}`, children: kids }] }] });
+      const text = plainText(n).replace(/^\d+\.\s*/, "");
+      items.push({ type: "listItem", spread: false, children: [{ type: "paragraph", children: [{ type: "link", url: `#${id}`, children: [{ type: "text", value: text }] }] }] });
     });
     walk(tree, (n) => {
       if ((n.type === "mdxJsxFlowElement" && n.name === "Toc") && !n.children?.length) {
@@ -108,14 +111,18 @@ function remarkToc() {
 const compiled = new Map<string, Promise<ComponentType<{ components?: Record<string, unknown> }>>>();
 
 // The page's MDX as a React component (compiled once per build).
-export function mdxContent(rel: string, body: string) {
+export function mdxContent(rel: string, body: string, firstLine = 1) {
   if (!compiled.has(rel)) {
     const escaped = body.replace(HEADING_ID, "$1 \\{#$2\\}");
     compiled.set(
       rel,
       evaluate(escaped, { ...runtime, remarkPlugins: [remarkGfm, remarkHeadingIds, remarkCodeBlocks, remarkToc], development: false })
         .then((m) => m.default as ComponentType<{ components?: Record<string, unknown> }>)
-        .catch((e: Error) => { throw new Error(`${rel}: ${e.message}`); }),
+        .catch((e: Error & { line?: number; column?: number }) => {
+          // MDX names the place in the text after the frontmatter (escaping heading ids keeps the lines)
+          const at = e.line ? `:${e.line + firstLine - 1}:${e.column}` : "";
+          throw new Error(`${rel.replace(/\.html$/, ".mdx")}${at}: ${e.message}`);
+        }),
     );
   }
   return compiled.get(rel)!;

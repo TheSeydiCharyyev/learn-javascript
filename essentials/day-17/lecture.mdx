@@ -1,0 +1,826 @@
+---
+title: День 17 — Числа и первые даты
+day: День 17 • урок 1
+heading: Числа и первые даты
+lead: Модуль «Строки, числа, Math и основы дат». 45 минут.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.78rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- превращать строку в число тремя способами и выбирать нужный;
+- отличать `isNaN` от `Number.isNaN` и знать, почему это важно;
+- округлять до нужного знака и понимать, почему `0.1 + 0.2` не равно `0.3`;
+- собрать дату, разобрать её на части и показать по-русски;
+- узнавать неверную дату до того, как она испортит отчёт.
+</Goals>
+
+<Toc />
+
+## 1. Одно число на все случаи {#one-type}
+
+В большинстве языков чисел несколько видов: отдельно целые, отдельно дробные, ещё
+и разной величины. В JavaScript вид один. Целое, дробное, положительное, отрицательное —
+всё это `number`:
+
+```js
+typeof 5;      // "number"
+typeof 4.5;    // "number"
+typeof -273;   // "number"
+typeof NaN;    // "number" — да, «не число» тоже число по типу
+```
+
+Это и удобно, и опасно. Удобно — не надо думать о видах. Опасно — за простотой
+прячутся два подвоха: дробные числа хранятся приблизительно (раздел 8), а очень
+большие целые перестают быть точными (раздел 6).
+
+Сегодня мы разберём и встроенный объект `Number` с его проверками
+и константами, и три функции, которые живут сами по себе: `parseInt`,
+`parseFloat`, `isNaN`. А во второй половине урока возьмёмся
+за даты — ровно настолько, чтобы поставить дату в отчёт и посчитать разницу.
+
+## 2. Из строки в число {#parse}
+
+Данные почти всегда приходят строками: из формы на странице, из файла, с сервера.
+Значит, первым делом их надо превратить в числа. Способов три, и они ведут себя
+по-разному.
+
+```js
+Number("42");      // 42
+Number("4.5");     // 4.5
+Number("42px");    // NaN     — либо всё число, либо ничего
+Number("");        // 0       — пустая строка это ноль
+Number("   ");     // 0       — и пробелы тоже
+Number(null);      // 0
+Number(undefined); // NaN
+Number(true);      // 1
+```
+
+`Number()` строгий: если в строке есть хоть один лишний символ, ответ
+`NaN`. Две функции-разборщика, наоборот, читают строку слева и
+останавливаются, где получится:
+
+```js
+parseInt("42px");     // 42     прочитал, сколько смог
+parseInt("  42  ");   // 42     пробелы по краям не мешают
+parseInt("px42");     // NaN    не смог прочитать даже начало
+parseInt("4.9");      // 4      «Int» — значит, дробная часть отбрасывается
+
+parseFloat("4.5кг");  // 4.5    этот понимает точку
+parseFloat("4,5");    // 4      запятая не разделитель — чтение кончилось
+```
+
+<Scheme src="scheme-parse.svg">Одна и та же строка через три функции даёт три разных ответа. Обратите внимание на строки `"4.5"` и `""`</Scheme>
+
+### Запятая вместо точки
+
+Отдельная беда для нас: у нас принято писать дробь через запятую, а язык понимает
+только точку. Поэтому самое обычное, что напечатает человек, читается неправильно:
+
+```js
+Number("4,5");      // NaN   — запятая не разделитель
+parseFloat("4,5");  // 4     — прочитал до запятой и остановился
+Number("1 000");    // NaN   — пробел между тысячами тоже мешает
+```
+
+Вторая строка опаснее первой: `NaN` заметен сразу, а четвёрка вместо
+четырёх с половиной тихо уедет в расчёты. Ещё один довод в пользу
+`Number()`.
+
+Лечится это заменой запятой на точку перед преобразованием. Метод замены
+в строках мы разберём в курсе 2, но выглядит это так:
+
+```js
+Number("4,5".replace(",", "."));   // 4.5   — replace разбираем в курсе 2
+```
+
+<Important>
+Договорённость курса: **для данных из формы берём `Number()`**.
+Он честно говорит «это не число» вместо того, чтобы молча прочитать половину.
+`parseInt` и `parseFloat` нужны там, где хвост ожидаем
+и не мешает, — например, `"14px"` из настроек страницы.
+</Important>
+
+## 3. `parseInt` и системы счисления {#radix}
+
+У `parseInt` есть второй параметр — **основание системы
+счисления**. По умолчанию десятичная, но можно попросить другую:
+
+```js
+parseInt("1010", 2);    // 10    двоичное 1010
+parseInt("ff", 16);     // 255   шестнадцатеричное ff
+parseInt("0x1F");       // 31    запись 0x язык узнаёт сам
+parseInt("08");         // 8     ноль впереди не мешает
+```
+
+Последние две строки стоит запомнить отдельно. Когда-то `parseInt("08")`
+давал ноль, потому что ведущий ноль означал восьмеричную систему, и на этом сломалось
+множество программ с датами. Сегодня такого поведения нет, но привычка осталась:
+**если система счисления известна, указывайте её явно**.
+
+```js
+const day = "08";
+parseInt(day, 10);   // 8 — «читай как десятичное», так пишут в надёжном коде
+```
+
+## 4. `NaN` — «не число» {#nan}
+
+С `NaN` мы знакомы с дня 5: это результат вычисления, которое не удалось.
+Сегодня разберём, как его ловить, — и это место, где язык ставит подножку.
+
+Функций-проверок две, называются почти одинаково, а работают по-разному:
+
+```js
+isNaN("abc");          // true    — сначала превратил в число, получил NaN
+Number.isNaN("abc");   // false   — строка это не NaN, это строка
+
+isNaN(NaN);            // true
+Number.isNaN(NaN);     // true
+
+isNaN("42");           // false   — "42" превратилось в 42, это число
+```
+
+Разница в одном: **старая `isNaN` сначала преобразует аргумент
+к числу, а `Number.isNaN` — нет**. Поэтому старая отвечает
+на вопрос «это нельзя считать числом», а новая — на вопрос «это именно `NaN`».
+
+<Important>
+В новом коде пишут **`Number.isNaN`**. Старая `isNaN`
+осталась ради совместимости; встретив её в чужом коде, помните про скрытое
+преобразование.
+</Important>
+
+И главное свойство `NaN`, о котором мы говорили на дне 7:
+**он не равен сам себе**. Поэтому проверять его сравнением бесполезно:
+
+```js
+const x = Number("пять");
+
+x === NaN;             // false — всегда false, даже когда x это NaN
+Number.isNaN(x);       // true  — вот так правильно
+```
+
+## 5. Бесконечность и границы {#limits}
+
+Деление на ноль в JavaScript не ошибка — получается `Infinity`.
+Проверяют его парой функций, устроенной так же, как предыдущая:
+
+```js
+isFinite("42");          // true    — строку сначала превратил в число
+Number.isFinite("42");   // false   — строка не число, значит, не конечное число
+Number.isFinite(42);     // true
+Number.isFinite(1 / 0);  // false   — это Infinity
+```
+
+У самого объекта `Number` есть набор констант — крайние значения, которые
+иногда нужно знать:
+
+| Константа | Значение | Что это |
+| --- | --- | --- |
+| `Number.MAX_VALUE` | 1.797…e+308 | самое большое число |
+| `Number.MIN_VALUE` | 5e-324 | самое маленькое положительное |
+| `Number.MAX_SAFE_INTEGER` | 9007199254740991 | граница точных целых |
+| `Number.MIN_SAFE_INTEGER` | −9007199254740991 | та же граница в минус |
+| `Number.POSITIVE_INFINITY` | Infinity | то же, что `Infinity` |
+| `Number.NEGATIVE_INFINITY` | −Infinity | минус бесконечность |
+| `Number.EPSILON` | 2.22…e-16 | наименьшая заметная разница (раздел 8) |
+| `Number.NaN` | NaN | то же, что `NaN` |
+
+В обычных задачах из этого списка нужны две-три строки, но знать про сам список
+полезно: увидев в чужом коде `Number.MAX_SAFE_INTEGER`, вы сразу поймёте,
+что автор боится потери точности на больших числах.
+
+## 6. Целое или нет {#integer}
+
+Две проверки из того же набора:
+
+```js
+Number.isInteger(4);        // true
+Number.isInteger(4.0);      // true  — 4.0 и 4 это одно и то же число
+Number.isInteger(4.5);      // false
+Number.isInteger("4");      // false — строка, а не число
+
+Number.isSafeInteger(2 ** 53);   // false — за границей точности
+```
+
+Вторая функция спрашивает не «целое ли», а «целое *и* точное ли». Дело
+в том, что после `MAX_SAFE_INTEGER` целые числа начинают слипаться:
+
+```js
+Number.MAX_SAFE_INTEGER;   // 9007199254740991
+```
+
+За этой границей соседние целые числа перестают различаться, и арифметика начинает
+тихо врать. Для оценок, цен и счётчиков это неважно, а вот для идентификаторов
+из базы данных — очень даже. Там берут строки или `BigInt`, о котором
+речь в курсе 2.
+
+`Number.isInteger` же полезен прямо сегодня: это лучшая проверка «пришло
+ли целое число», и она заменяет две наши старые проверки — `typeof`
+и `Number.isNaN`.
+
+## 7. `toFixed` и округление {#tofixed}
+
+Мы пользуемся им с третьего дня, ни разу не разобрав. `toFixed(n)`
+оставляет ровно `n` знаков после точки:
+
+```js
+(4.333).toFixed(2);      // "4.33"
+(7).toFixed(2);          // "7.00"   — дописал нули
+(1234.5678).toFixed(1);  // "1234.6" — округлил
+```
+
+<Mistake>
+**`toFixed` возвращает строку, а не число.** Это главная
+ловушка метода: `typeof (4.333).toFixed(2)` — это `"string"`.
+Поэтому складывать результаты нельзя (получится склейка), а вот выравнивать
+через `padStart` из вчерашнего дня — самое то.
+</Mistake>
+
+Округление у `toFixed` «как в школе», но с оговоркой, которая удивляет:
+
+```js
+(4.5).toFixed(0);    // "5"
+(2.5).toFixed(0);    // "3"
+(1.005).toFixed(2);  // "1.00" — а ожидали "1.01"!
+(1.015).toFixed(2);  // "1.01"
+```
+
+Третья строка не опечатка. Число `1.005` хранится внутри чуть меньше,
+чем 1.005, и округление честно идёт вниз. Почему так — в следующем разделе.
+
+### Где округлять
+
+Правило, которое стоит усвоить сразу: **округляют один раз, в самом конце,
+при выводе**. Считают же полными числами, со всеми знаками.
+
+```js
+const valid = 5;
+const total = 7;
+
+const percent = valid / total * 100;   // 71.42857142857143
+percent.toFixed(1);                    // "71.4" — только для показа
+```
+
+Почему нельзя округлять раньше, видно на простом примере. Разделим целое на три
+равные части и округлим каждую:
+
+```js
+Math.round(1 / 3 * 100);   // 33
+// три такие доли в сумме дают 99, а не 100
+```
+
+Один процент потерялся. В отчёте это выглядит как ошибка, хотя каждое округление
+было правильным. Если бы мы сложили точные доли и округлили результат, получилось бы
+ровно сто.
+
+Отсюда и практический вывод для нашего «Табеля»: средний балл считается полностью,
+а `toFixed(2)` появляется только в той строке, где отчёт превращается
+в текст.
+
+## 8. Почему `0.1 + 0.2` не `0.3` {#float}
+
+Самый известный сюрприз языка. Проверьте в консоли:
+
+```js
+0.1 + 0.2;             // 0.30000000000000004
+0.1 + 0.2 === 0.3;     // false
+```
+
+Это не ошибка JavaScript — так устроены дробные числа почти во всех языках.
+Компьютер хранит их в двоичной системе, а в двоичной `0.1` — бесконечная
+дробь, как `1/3` в десятичной. Её приходится обрывать, и появляется
+крошечная погрешность.
+
+<Scheme src="scheme-float.svg">Дробные числа хранятся приблизительно. Это свойство не языка, а двоичной записи</Scheme>
+
+Практических следствий два, и оба простые.
+
+**Первое: дробные числа не сравнивают через `===`.** Сравнивают
+разницу с маленьким порогом — для этого и нужна константа `Number.EPSILON`:
+
+```js
+Math.abs(0.1 + 0.2 - 0.3) < Number.EPSILON;   // true
+```
+
+**Второе: деньги и оценки держат в целых, а дроби показывают только
+на выходе.** Копейки считают в копейках, а не в манатах с дробью; проценты —
+в целых, а делят один раз при выводе через `toFixed`.
+
+### Разбор: почему сумма не сходится
+
+Так эта беда выглядит в настоящей программе. Три цены, сумма должна быть 60.60:
+
+```js
+const prices = [10.10, 20.20, 30.30];
+
+let bill = 0;
+for (const p of prices) {
+  bill += p;
+}
+
+bill;             // 60.599999999999994
+bill === 60.6;    // false
+```
+
+**Шаг 1. Смотрим на само число.** Не на `toFixed`, а на то,
+что лежит в переменной. `toFixed(2)` показал бы `"60.60"`
+и спрятал бы проблему.
+
+**Шаг 2. Понимаем, что это не ошибка кода.** Складывались три
+приблизительных числа, и погрешности сложились тоже. Искать опечатку в цикле
+бессмысленно — её там нет.
+
+**Шаг 3. Меняем единицу измерения.** Считаем не в манатах, а в копейках —
+то есть в целых числах, с которыми таких сюрпризов не бывает:
+
+```js
+let kopecks = 0;
+for (const p of prices) {
+  kopecks += Math.round(p * 100);
+}
+
+kopecks;                 // 6060
+kopecks / 100 === 60.6;  // true
+```
+
+**Шаг 4. Округляем при входе, а не при выходе.** Обратите внимание
+на `Math.round(p * 100)`: умножение тоже даёт приблизительный результат,
+поэтому к целому его приводят сразу.
+
+<Important>
+Правило целиком: **храните в целых, считайте в целых, делите один раз —
+при показе**. Оно касается денег, процентов, времени в минутах и вообще
+всего, что потом сравнивают.
+</Important>
+
+## 9. Другие системы счисления {#tostring}
+
+У чисел есть свой `toString`, и он умеет больше строкового: вторым
+аргументом берёт основание системы счисления, от 2 до 36.
+
+```js
+(255).toString(2);    // "11111111"
+(255).toString(16);   // "ff"
+(35).toString(36);    // "z"       — дальше цифр не хватает, идут буквы
+```
+
+Основания за пределами 2…36 дают ошибку:
+
+```js
+(255).toString(1);
+// RangeError: toString() radix argument must be between 2 and 36
+```
+
+Обратная операция — уже знакомый `parseInt` с тем же основанием.
+Вместе они дают удобный приём: перевести число в короткую запись и обратно.
+
+```js
+const short = (255).toString(36);   // "73"
+parseInt(short, 36);                // 255
+```
+
+## 10. Остальное про числа {#other}
+
+Три метода, которые стоит узнавать в чужом коде, но писать приходится редко.
+
+```js
+(1234.5).toExponential(2);   // "1.23e+3"  — научная запись
+(1234.5).toPrecision(3);     // "1.23e+3"  — всего три значащие цифры
+(0.000123).toPrecision(2);   // "0.00012"
+(42).valueOf();              // 42         — само число
+```
+
+У `toExponential` и `toPrecision` та же ошибка, что у
+`toFixed`, когда просят слишком много знаков. Сообщения различаются
+названием метода и границами:
+
+```js
+(4.5).toFixed(101);
+// RangeError: toFixed() digits argument must be between 0 and 100
+
+(4.5).toPrecision(0);
+// RangeError: toPrecision() argument must be between 1 and 100
+```
+
+## 11. Дата — это число {#date}
+
+Переходим ко второй половине урока. Главное, что нужно понять про даты: внутри дата —
+это **одно число**, количество миллисекунд, прошедших с полуночи 1 января
+1970 года. Всё остальное — способы это число собрать и показать.
+
+```js
+const now = Date.now();          // миллисекунды прямо сейчас
+typeof now;                      // "number"
+
+const d = new Date(2026, 8, 22, 14, 5);   // 22 сентября 2026, 14:05
+d.getTime();                     // то же число для этой даты
+```
+
+Раз дата — число, даты можно вычитать. Так считают разницу:
+
+```js
+const start = new Date(2026, 8, 1);
+const end = new Date(2026, 8, 22);
+
+const days = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+days;   // 21
+```
+
+Знаменатель читается справа налево: 1000 миллисекунд в секунде, 60 секунд в минуте,
+60 минут в часе, 24 часа в сутках. Такую строку пишут один раз и выносят в константу.
+
+### Дата прямо сейчас
+
+Без аргументов `new Date()` даёт текущий момент — со всеми часами,
+минутами и секундами:
+
+```js
+const now = new Date();
+
+now.getFullYear();   // текущий год
+now.getHours();      // текущий час — у вас и у соседа будет одинаково
+now.getSeconds();    // а вот это отличается уже через секунду
+```
+
+Именно поэтому во всех примерах этого дня даты собраны руками:
+`new Date(2026, 8, 22)`. Результат такого примера можно напечатать в уроке
+и сверить — а с `new Date()` сверять нечего, он у каждого свой.
+
+Правило для ваших программ такое же: **там, где результат надо проверять,
+дату передают параметром, а не берут изнутри**. Это тот же приём из дня 15 —
+функция, зависящая только от параметров, проверяется одним вызовом. В «Табеле»
+сегодняшнего дня дата так и сделана: параметр с умолчанием.
+
+## 12. Месяцы с нуля {#months}
+
+Теперь самое главное про даты в этом языке — и источник бесконечных ошибок.
+**Месяцы нумеруются с нуля.** Январь — это 0, сентябрь — 8, декабрь — 11.
+
+```js
+new Date(2026, 0, 1).getMonth();    // 0   — январь
+new Date(2026, 8, 22).getMonth();   // 8   — сентябрь
+new Date(2026, 11, 31).getMonth();  // 11  — декабрь
+```
+
+Дни при этом нумеруются с единицы, как у людей. Логики в этом нет — так сложилось
+исторически, и с этим просто живут.
+
+<Scheme src="scheme-months.svg">Части даты. Месяц выбивается из общего правила, остальное совпадает с привычным</Scheme>
+
+Из нумерации с нуля вытекает ещё одна особенность: если передать месяц 12, дата
+не сломается, а переедет в следующий год:
+
+```js
+const d = new Date(2026, 12, 1);
+
+d.getFullYear();       // 2027
+d.getMonth();          // 0 — январь
+```
+
+Это свойство иногда используют нарочно — чтобы получить «через месяц», не думая
+о конце года. Но чаще оно прячет опечатку, поэтому месяц лучше проверять.
+
+## 13. Показываем по-человечески {#locale}
+
+Даты для вывода не собирают из кусков руками. Для этого есть два метода, которые
+сами знают, как принято записывать дату в нужной стране:
+
+```js
+const d = new Date(2026, 8, 22, 14, 5);
+
+d.toLocaleDateString("ru-RU");   // "22.09.2026"
+d.toLocaleTimeString("ru-RU");   // "14:05:00"
+d.toLocaleDateString("en-US");   // "9/22/2026" — в США сначала месяц
+```
+
+Без аргумента берётся язык, настроенный в браузере или системе. Это удобно
+для пользователя, но неудобно для проверки: у вас и у однокурсника может получиться
+по-разному. **В примерах и тестах язык указывают явно.**
+
+<Important>
+У этих методов есть ещё один аргумент — настройки: показать ли день недели, писать
+месяц словом или цифрой, нужны ли секунды. Настройки живут в объекте
+`Intl`, и это тема курса 2. Пока нам хватает двух видов —
+`"22.09.2026"` и `"14:05:00"`.
+</Important>
+
+Отдельно стоит знать про часовые пояса. Дата внутри — число, одинаковое во всём мире,
+а вот `getHours` и вывод зависят от пояса компьютера. В Туркменистане это
+`UTC+5`, и все примеры этого дня посчитаны для него. Полный разбор поясов
+и современная замена `Date` под именем `Temporal` — курс 2.
+
+## 14. Неверная дата {#invalid}
+
+Если дату собрать не удалось, ошибки не будет. Получится особое значение — «неверная
+дата», которая ведёт себя примерно как `NaN`:
+
+```js
+const bad = new Date("не дата");
+
+String(bad);            // "Invalid Date"
+bad.getTime();          // NaN
+bad.getFullYear();      // NaN
+```
+
+Проверяют её через `getTime` и уже знакомый `Number.isNaN`:
+
+```js
+function isValidDate(d) {
+  return !Number.isNaN(d.getTime());
+}
+
+isValidDate(new Date(2026, 8, 22));   // true
+isValidDate(new Date("не дата"));     // false
+```
+
+А вот попытка перевести неверную дату в строгий формат уже бросает ошибку —
+единственную ошибку дат в нашем справочнике:
+
+```js
+new Date("не дата").toISOString();
+// RangeError: Invalid time value
+```
+
+## 15. «Табель»: оценки из формы и дата отчёта {#tabel}
+
+Собираем день вместе. Программа получает оценки так, как они приходят из формы, —
+вперемешку числами и строками, — и ставит на отчёт дату.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+// новое: оценка может прийти строкой
+function toMark(raw) {
+  return Number(String(raw).trim());
+}
+
+// новое: одна проверка вместо двух
+const isValidMark = (mark) =>
+  Number.isInteger(mark) && mark >= MIN_MARK && mark <= MAX_MARK;
+
+const isFive = (mark) => mark === MAX_MARK;
+
+const sum = (numbers) => {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+};
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "отличник";
+  if (avg >= good) return "хорошист";
+  if (avg >= pass) return "троечник";
+  return "надо подтянуть";
+}
+
+// новое: дата отчёта
+function makeTitle(date = new Date(2026, 8, 22)) {
+  return "Табель на " + date.toLocaleDateString("ru-RU");
+}
+
+function makeHeader() {
+  return "Имя".padEnd(NAME_WIDTH) + "Средн".padStart(6) + "Оц".padStart(4) + "  Вердикт";
+}
+
+function makeRow(name = "без имени", ...raw) {
+  const marks = [];
+  for (const r of raw) {
+    marks.push(toMark(r));
+  }
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "нет годных оценок";
+  }
+
+  const avg = average(valid);
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(valid.length).padStart(4)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(40);
+
+console.log(makeTitle());
+console.log(line);
+console.log(makeHeader());
+console.log(line);
+console.log(makeRow("Аман", 5, "4", " 9 ", 3, 5, 0, "4", 5));
+console.log(makeRow("Мерет", "3", 3, 4));
+console.log(makeRow("Гүлнар", 9, 0, "пять"));
+console.log(makeRow("Сапар", 5, 5, "4", 5));
+console.log(makeRow("Огулджан", "4.5", 4, 5));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Табель на 22.09.2026
+----------------------------------------
+Имя          Средн  Оц  Вердикт
+----------------------------------------
+Аман          4.33   6  хорошист
+Мерет         3.33   3  троечник
+Гүлнар      нет годных оценок
+Сапар         4.75   4  отличник
+Огулджан      4.50   2  отличник
+----------------------------------------
+```
+</ResultBox>
+
+Первые четыре строки совпали со вчерашними — и это главная проверка. Часть оценок
+теперь приходит строками (`"4"`, `" 9 "`), но `toMark`
+приводит их к числам до всякого отбора, и дальше программа работает как раньше.
+
+Внутри `toMark` стоит `String(raw)`, и это не лишнее: оценка
+может прийти и числом, а у числа нет метода `trim`. Превращаем в строку,
+чистим края, и только потом разбираем обратно в число — тогда функция принимает
+и число `5`, и строку `" 5 "` совершенно одинаково.
+
+**Проверка стала строже.** Раньше годной считалась любая дробь в диапазоне
+от 2 до 5; теперь `Number.isInteger` отсекает и её. Это видно в последней
+строке: у «Огулджан» оценка `"4.5"` отброшена, осталось две из трёх.
+Прежняя проверка её бы пропустила и посчитала среднее по трём.
+
+**`Number.isInteger` заменил два условия** —
+`typeof` и проверку на `NaN` — и добавил новое: оценка должна
+быть целой. `NaN` от нечитаемой оценки по-прежнему не проходит, потому что
+`NaN` не целое число.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Замените `toMark` на `parseInt`
+и запустите. У кого изменился результат и почему? Подсказка: посмотрите на «Огулджан»
+и на `"пять"`.
+\
+\
+**Второй.** Передайте `makeTitle` дату `new Date(2026, 12, 1)`
+и объясните, какое число появилось в заголовке.
+\
+\
+**Третий.** Добавьте в отчёт колонку «Дней до конца четверти», считая
+от даты отчёта до `new Date(2026, 11, 25)`. Проверьте на двух разных
+датах отчёта.
+</TryIt>
+
+## 16. Частые ошибки и что завтра {#mistakes}
+
+| Ошибка | Почему | Как правильно |
+| --- | --- | --- |
+| `x === NaN` | `NaN` не равен сам себе | `Number.isNaN(x)` |
+| `isNaN("42")` как проверка типа | сначала превращает в число | `Number.isNaN` или `Number.isInteger` |
+| `total + price.toFixed(2)` | `toFixed` возвращает строку | складывать числа, округлять при выводе |
+| `0.1 + 0.2 === 0.3` | дроби хранятся приблизительно | сравнивать разницу с `Number.EPSILON` |
+| `new Date(2026, 9, 22)` как сентябрь | месяцы с нуля: 9 — это октябрь | `new Date(2026, 8, 22)` |
+| `Number("4,5")` | разделитель — точка, не запятая | заменить запятую заранее |
+| проверять дату через `if (date)` | неверная дата — тоже объект, она истинна | `!Number.isNaN(date.getTime())` |
+
+### Что будет завтра
+
+День 18 — `Math`: округление во все стороны, случайные числа, степени
+и корни. Оттуда же придёт `Math.random`, без которого не обходится
+ни одна игра, и `Math.max` с `Math.min`, которые давно просятся
+в наш «Табель».
+
+После этого модуль «Строки, числа, Math и основы дат» закроется числами и строками, и мы перейдём
+к массивам — дни 19 и 20. Там, кстати, встретятся знакомые имена: у массивов есть
+и `slice`, и `indexOf`, и `includes`, и `at`,
+работающие по вчерашним правилам.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Guide: числа и строки](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Numbers_and_strings) | глава учебника: числа, строки, преобразования | <Full /> |
+| [Number](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number) | обзор: проверки и константы | <Full /> |
+| [Number()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/Number) | строка в число целиком или `NaN` | <Full /> |
+| [parseInt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/parseInt) | читает целое слева, знает системы счисления | <Full /> |
+| [parseFloat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/parseFloat) | читает дробное слева | <Full /> |
+| [Number.parseInt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/parseInt) | то же самое под именем `Number` | <Full /> |
+| [Number.parseFloat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/parseFloat) | то же самое под именем `Number` | <Full /> |
+| [isNaN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/isNaN) | старая проверка, преобразует аргумент | <Full /> |
+| [Number.isNaN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN) | честная проверка на `NaN` | <Full /> |
+| [isFinite](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/isFinite) | старая проверка на конечность | <Full /> |
+| [Number.isFinite](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite) | честная проверка на конечность | <Full /> |
+| [Number.isInteger](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger) | целое ли число | <Full /> |
+| [MAX_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER) | граница точных целых | <Full /> |
+| [toFixed](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toFixed) | знаки после точки; возвращает строку | <Full /> |
+| [Number.toString](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toString) | система счисления от 2 до 36 | <Full /> |
+| [Date](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date) | обзор: дата как число миллисекунд | <Full /> |
+| [new Date()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/Date) | собрать дату; месяц с нуля | <Full /> |
+| [Date.now](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/now) | миллисекунды прямо сейчас | <Full /> |
+| [getTime](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTime) | дата как число — для разницы | <Full /> |
+| [getFullYear](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getFullYear) | год целиком | <Full /> |
+| [getMonth](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getMonth) | месяц от 0 до 11 | <Full /> |
+| [getDate](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getDate) | число месяца от 1 до 31 | <Full /> |
+| [getHours](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getHours) | часы по местному поясу | <Full /> |
+| [getMinutes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getMinutes) | минуты | <Full /> |
+| [toLocaleDateString](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toLocaleDateString) | дата в привычном для страны виде | <Full /> |
+| [toLocaleTimeString](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toLocaleTimeString) | время в привычном для страны виде | <Full /> |
+| [EPSILON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/EPSILON) | порог для сравнения дробей | <Brief /> |
+| [isSafeInteger](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger) | целое и точное | <Brief /> |
+| [MAX_VALUE](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_VALUE) | самое большое число | <Brief /> |
+| [MIN_VALUE](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_VALUE) | самое маленькое положительное | <Brief /> |
+| [MIN_SAFE_INTEGER](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_SAFE_INTEGER) | граница точных целых в минус | <Brief /> |
+| [Number.NaN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/NaN) | то же, что `NaN` | <Brief /> |
+| [POSITIVE_INFINITY](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/POSITIVE_INFINITY) | плюс бесконечность | <Brief /> |
+| [NEGATIVE_INFINITY](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/NEGATIVE_INFINITY) | минус бесконечность | <Brief /> |
+| [toExponential](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toExponential) | научная запись | <Brief /> |
+| [toPrecision](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toPrecision) | заданное число значащих цифр | <Brief /> |
+| [Number.valueOf](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/valueOf) | само число | <Brief /> |
+| [Ошибка: основание вне 2…36](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Bad_radix) | в Chrome — `toString() radix argument must be between 2 and 36` | <Brief /> |
+| [Ошибка: слишком много знаков](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Precision_range) | в Chrome — `toFixed() digits argument must be between 0 and 100` | <Brief /> |
+| [Ошибка: неверная дата](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_date) | в Chrome — `Invalid time value` | <Brief /> |
+
+Сорок страниц: двадцать шесть подробно, четырнадцать для узнавания. Остальные
+методы `Date` — разбор строк, UTC, сеттеры — и современная замена
+`Temporal` идут в курсе 2.
+</Ref>
+
+<Cheatsheet>
+```js
+// СТРОКА → ЧИСЛО
+Number("42");          // 42    строгий: "42px" → NaN, "" → 0
+parseInt("42px");      // 42    читает слева, дробную часть отбрасывает
+parseFloat("4.5кг");   // 4.5
+parseInt("1010", 2);   // 10    основание указывать явно
+
+// ПРОВЕРКИ — брать те, что с Number.
+Number.isNaN("abc");     // false — честная
+isNaN("abc");            // true  — старая: сначала превращает
+Number.isFinite(42);     // true;  Number.isFinite("42") → false
+Number.isInteger(4);     // true  — лучшая проверка «пришло целое»
+const x = Number("пять");
+x === NaN;               // false — ВСЕГДА, так не проверяют
+
+// ОКРУГЛЕНИЕ
+(4.333).toFixed(2);   // "4.33" — СТРОКА, не число!
+(1.005).toFixed(2);   // "1.00" — двоичная погрешность
+0.1 + 0.2 === 0.3;    // false
+Math.abs(0.1 + 0.2 - 0.3) < Number.EPSILON;   // true
+
+// СИСТЕМЫ СЧИСЛЕНИЯ
+(255).toString(16);   // "ff"
+parseInt("ff", 16);   // 255
+// (255).toString(1)  → RangeError: toString() radix argument must be between 2 and 36
+
+// ДАТА = ЧИСЛО МИЛЛИСЕКУНД
+Date.now();                                // сейчас, число
+const d = new Date(2026, 8, 22, 14, 5);    // МЕСЯЦ С НУЛЯ: 8 = сентябрь
+d.getMonth();                              // 8; ещё getFullYear, getDate, getHours, getMinutes
+const start = new Date(2026, 8, 1);
+const end = new Date(2026, 8, 22);
+(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);   // 21 — разница в днях
+
+// ПОКАЗАТЬ
+d.toLocaleDateString("ru-RU");   // "22.09.2026"
+d.toLocaleTimeString("ru-RU");   // "14:05:00"
+
+// НЕВЕРНАЯ ДАТА
+const bad = new Date("не дата");
+String(bad);                     // "Invalid Date"
+!Number.isNaN(bad.getTime());    // false — так проверяют
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем `Number("42px")` отличается от `parseInt("42px")`?
+   <Answer>`Number` требует, чтобы вся строка была числом, и на лишнем
+   символе даёт `NaN`. `parseInt` читает слева, сколько
+   получится, и возвращает 42. Для данных из формы берут `Number`:
+   он честно сообщает о мусоре.</Answer>
+2. Почему `isNaN("abc")` и `Number.isNaN("abc")` дают разные
+   ответы?
+   <Answer>Старая `isNaN` сначала превращает аргумент в число: из
+   `"abc"` получается `NaN`, ответ `true`.
+   `Number.isNaN` ничего не преобразует и честно отвечает, что
+   строка — это не `NaN`.</Answer>
+3. Что не так с выражением `total + price.toFixed(2)`?
+   <Answer>`toFixed` возвращает строку, поэтому плюс склеит их, а не
+   сложит. Числа складывают числами, а округляют один раз — в момент вывода.</Answer>
+4. Какую дату даст `new Date(2026, 9, 22)`?
+   <Answer>22 октября 2026 года, а не сентября: месяцы нумеруются с нуля, поэтому
+   девятка — это десятый месяц. Сентябрь — это 8.</Answer>
+5. Как проверить, что дата собралась правильно?
+   <Answer>`!Number.isNaN(date.getTime())`. Проверка через
+   `if (date)` не работает: неверная дата — тоже объект, а значит,
+   истинна.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number" />

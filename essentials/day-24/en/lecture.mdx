@@ -1,0 +1,1024 @@
+---
+title: "Day 24 — DOM: finding elements on the page"
+day: Day 24 • lesson 1
+heading: "DOM: finding elements on the page"
+lead: Module “DOM and events”, the first day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- explain what the DOM is and how it differs from an HTML file;
+- find elements by `id`, by a selector and as a whole list;
+- walk the tree: to the parent, to the children, to the siblings;
+- tell nodes from elements and not fall for whitespace text;
+- check an element with a selector and find the nearest ancestor;
+- show the “Report card” not in the console but in a table on the page.
+</Goals>
+
+<Toc />
+
+## 1. The page through the program’s eyes {#why}
+
+For twenty-three days our programs lived in the console: they counted, compared, built
+reports — and printed them as strings. Today begins the module JavaScript was
+invented for in the first place: **the page**.
+
+When it opens an HTML file, the browser reads the markup and builds objects in memory from it —
+one object per tag — and links them like relatives in a family tree.
+This model is called the
+**DOM**, the Document Object Model. The browser
+draws the page from it.
+
+JavaScript works not with the file but with these objects: change an object, and the page
+on the screen changes, while the file on the disk stays the same. The main object lives in the variable
+`document`.
+
+```js
+// in the browser console
+typeof document;   // "object"
+document.title;    // the text on the tab, as a string
+
+// the same code in Node
+typeof document;   // "undefined"
+document.title;    // ReferenceError: document is not defined
+```
+
+The second half of the example matters: **the DOM is not part of the language** but a feature
+of the browser. That is how it was marked in the walkthrough of the first program on day 3. Node has no
+`document` variable, so today’s examples run on a page.
+
+<Important>
+<Kbd>Ctrl</Kbd> + <Kbd>U</Kbd> shows the
+**file** as it arrived, and the Elements tab (<Kbd>F12</Kbd>) shows the
+**DOM** as it is now. After a script runs they diverge,
+and the second one is the one to trust.
+</Important>
+
+## 2. The study page {#page}
+
+All of today’s examples work on one page. Create a folder `day-24`,
+and in it a file `index.html` and an empty `app.js`:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Group JS-1</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1 id="title">Group JS-1</h1>
+    <nav>
+      <a href="#list">List</a>
+      <a href="#info">Schedule</a>
+    </nav>
+  </header>
+  <main>
+    <ul id="list">
+      <li class="student">Aman</li>
+      <li class="student absent">Meret</li>
+      <li class="student">Gülnar</li>
+      <li class="student absent">Sapar</li>
+      <li class="student">Oguljan</li>
+    </ul>
+    <p id="info" class="note">Classes: Mon, Wed, Fri</p>
+  </main>
+  <footer>
+    <p class="note">Mary, 2026</p>
+  </footer>
+</body>
+</html>
+```
+
+The students are the same as in the “Report card”. The list items have the class `student`,
+and two of them also have `absent` — they missed a class. The heading and the list
+have an `id`. All of these are hooks by which the code will find elements.
+
+Write the code from the examples in `app.js` or right in the console of this page —
+the console sees the same `document`. The line with `<script>`
+is familiar from days 1 and 2, and what happens without `defer`, we will check in section 5.
+
+<ProTip>
+Right-click a list item and choose “Inspect” — the element
+gets highlighted in the Elements tab. Now `$0` in the console returns exactly that element.
+This is a feature of Chrome, not of the language, but it is very handy for experiments.
+</ProTip>
+
+## 3. The DOM tree {#tree}
+
+Tags are nested inside each other, so the DOM turns out to be a **tree** —
+we talked about this back on day 2. Here is the tree of our page:
+
+<Scheme src="scheme-tree.svg">The tree of the study page. Each rectangle is an object in the browser’s memory</Scheme>
+
+The words for the tree appear in method names, so they are worth learning right away:
+
+| Word | What it means | On our page |
+| --- | --- | --- |
+| root | a node without a parent | `document` |
+| parent | the node this one lies in | for every `li` — `ul` |
+| children | the nodes lying directly inside | for `ul` — five `li` |
+| siblings | children of one parent | `header`, `main`, `footer` |
+| ancestors | the parent, its parent and so on up to the root | for `li` — `ul`, `main`, `body`, `html`, `document` |
+| descendants | the children, their children and so on | for `main` — `ul`, five `li` and `p` |
+| leaf | a node without children | `meta` |
+
+The **tree order** will also come in handy: the node itself, then the whole first child
+with all its descendants, then the second — `body`, `header`,
+`h1`, `nav`, both links, `main`… Simply put,
+the order in which the tags open in the file from top to bottom.
+
+## 4. Nodes: elements, text, comments {#nodes}
+
+The scheme shows only tags, but the tree holds more than tags. Any object of the tree is a
+**node**. A tag is an **element** node. The text inside a tag is
+a separate **text** node, a child of that element. A comment
+`<!-- … -->` and `document` itself are nodes too.
+
+Two properties tell you the kind of a node: `nodeType`, a number, and
+`nodeName`, a string.
+
+| Node | `nodeType` | `nodeName` |
+| --- | --- | --- |
+| element | 1 | the tag name in capital letters: `"LI"`, `"BODY"` |
+| text | 3 | `"#text"` |
+| comment | 8 | `"#comment"` |
+| document | 9 | `"#document"` |
+| `<!DOCTYPE html>` | 10 | `"html"` |
+
+```js
+document.nodeType;        // 9
+document.nodeName;        // "#document"
+document.body.nodeType;   // 1
+document.body.nodeName;   // "BODY"
+
+Node.ELEMENT_NODE;        // 1 — the numbers have names
+Node.TEXT_NODE;           // 3
+```
+
+The names `Node.ELEMENT_NODE` and `Node.TEXT_NODE` are the same numbers,
+but `node.nodeType === Node.TEXT_NODE` reads without a table.
+
+<Mistake>
+For HTML elements `nodeName` is always written in **capital letters**,
+however the tag was written in the file. That is why a comparison with lowercase letters silently
+gives `false`:
+</Mistake>
+
+```js
+document.body.nodeName === "body";                 // false!
+document.body.nodeName === "BODY";                 // true
+document.body.nodeName.toLowerCase() === "body";   // true
+```
+
+## 5. `document` — the entrance to the tree {#document}
+
+The browser creates `document` for every page by itself. Of its properties,
+today we need three ready-made shortcuts:
+
+```js
+document.body;    // <body>…</body>
+document.head;    // <head>…</head>
+document.title;   // "Group JS-1"
+```
+
+The console shows a found element as a **piece of markup**. The arrow
+expands its contents, and hovering the mouse highlights the element on the page.
+
+`document.title` can also be changed — this is the first change to the page
+in the course:
+
+```js
+document.title = "Group JS-1 — 5 students";
+document.title;   // "Group JS-1 — 5 students"
+```
+
+Both the text on the tab and the `<title>` element itself
+in `head` changed. But `document.head` can only be read. The browser silently ignores
+an assignment to it, and in strict mode it throws `TypeError: Cannot set property head
+of #<Document> which has only a getter` — the same strict mode
+we met on day 4.
+
+### Why nothing is found without `defer`
+
+On day 1 the script without `defer` crashed, and on day 2 we learned why.
+Let us check — remove `defer`:
+
+```html
+<head>
+  <meta charset="UTF-8">
+  <title>Group JS-1</title>
+  <script src="app.js"></script>   <!-- without defer -->
+</head>
+```
+
+```js
+// app.js, loaded without defer
+document.head;    // <head>…</head> — already there
+document.title;   // "Group JS-1" — <title> stands above the script
+document.body;    // null — the browser has not reached <body> yet
+```
+
+The browser builds the tree **as it reads the file**. When it meets
+`<script>` without `defer`, it runs the code at once, and at that moment
+the tree holds only what is above the script in the file. With `defer` the code
+waits until the whole tree is built.
+
+## 6. `getElementById` {#by-id}
+
+The most direct way is by `id`. It is unique on the page, so
+the answer is always one element:
+
+```js
+const title = document.getElementById("title");
+
+title;            // <h1 id="title">Group JS-1</h1>
+title.nodeName;   // "H1"
+```
+
+Three rules everyone stumbles over:
+
+```js
+document.getElementById("#title");   // null — no hash needed
+document.getElementById("Title");    // null — case matters
+
+document.getElementByID("title");
+// TypeError: document.getElementByID is not a function
+```
+
+The first two mistakes are treacherous: they do not crash, they silently return `null`.
+The third crashes at once: in the method name `Id` has a capital `I` and
+a lowercase `d`. And if the markup has two identical `id`s by mistake,
+the method returns the first element.
+
+### Walkthrough: “Cannot read properties of null”
+
+The most common message of the first week of working with the page.
+
+```js
+const box = document.getElementById("tabel");
+
+box;            // null — silently, without an error
+box.nodeName;   // TypeError: Cannot read properties of null (reading 'nodeName')
+```
+
+**Step 1. We read the message literally.** “Properties of `null`
+cannot be read; `nodeName` was being read”. So there was a
+`null` to the left of the dot.
+
+**Step 2. We look for where it came from.** The error happened on the second line,
+but the cause is on the first: `getElementById` found nothing and returned
+`null` without a word. The message names the property, not the
+`id`, so you have to look higher up in the code.
+
+**Step 3. We check three causes.** A typo in the `id`.
+The script ran before the element appeared (no `defer`). The element
+is on another page — someone else’s script is linked to `index.html`.
+
+**Step 4. We protect ourselves.** If the element may be missing, we check right
+after the search — the way we checked the string before `JSON.parse` on day 23:
+
+```js
+const box = document.getElementById("tabel");
+
+if (box === null) {
+  console.log('the page has no id="tabel" — check the markup and defer');
+}
+```
+
+## 7. `querySelector` and selectors {#selector}
+
+The universal tool is `querySelector`. It takes
+a **selector** — the same notation CSS uses to choose elements for
+styling — and returns the first matching element or `null`.
+
+| Selector | What it looks for | On our page it finds |
+| --- | --- | --- |
+| `li` | by tag | Aman |
+| `.student` | by class | Aman |
+| `#list` | by `id` | the list `ul` |
+| `li.absent` | tag and class together | Meret |
+| `main p` | `p` somewhere inside `main` | the paragraph with the schedule |
+| `nav > a` | `a` directly inside `nav` | the link “List” |
+| `a[href="#info"]` | by attribute | the link “Schedule” |
+| `li:nth-child(2)` | the second child of its parent | Meret |
+| `li:last-child` | the last child | Oguljan |
+| `li:not(.absent)` | everything except | Aman |
+| `header a, footer p` | either one or the other | the link “List” |
+
+```js
+document.querySelector(".student");          // <li class="student">Aman</li>
+document.querySelector("li.absent");         // <li class="student absent">Meret</li>
+document.querySelector("li:last-child");     // <li class="student">Oguljan</li>
+document.querySelector('a[href="#info"]');   // <a href="#info">Schedule</a>
+document.querySelector(".note");             // <p id="info" class="note">Classes: Mon, Wed, Fri</p>
+```
+
+There are two paragraphs with the class `note`, and the one that comes earlier in tree
+order was returned. And one more thing: a space and `>` in a selector are different things. `main p`
+finds a paragraph at any depth inside `main`, `nav > a` —
+only the links directly in `nav`.
+
+<Mistake>
+The most common mistake is a forgotten dot. Without it the selector looks for a **tag**,
+not a class, and silently returns `null`.
+</Mistake>
+
+```js
+document.querySelector("student");    // null — looks for a tag <student>
+document.querySelector(".student");   // <li class="student">Aman</li>
+```
+
+And a selector written wrongly throws an exception right away:
+
+```js
+document.querySelector("li..student");
+// SyntaxError: Failed to execute 'querySelector' on 'Document':
+// 'li..student' is not a valid selector.
+```
+
+Hence the difference: **nothing found — `null`, the selector not understood —
+an exception**. Formally it is a `DOMException` named
+`SyntaxError`, but `try...catch` from day 11 catches it like any other.
+
+The hash that is unnecessary in `getElementById` is required in a selector:
+
+```js
+document.querySelector("#title") === document.getElementById("title");   // true
+```
+
+If an element has an `id`, either of the two will do; in all other cases —
+`querySelector`.
+
+## 8. `querySelectorAll` and `NodeList` {#all}
+
+To get **all** the matching elements, there is
+`querySelectorAll`. It returns a list — a `NodeList`:
+
+```js
+const items = document.querySelectorAll(".student");
+
+items;           // NodeList(5) [li.student, li.student.absent, li.student, li.student.absent, li.student]
+items.length;    // 5
+items[0];        // <li class="student">Aman</li>
+items.item(1);   // <li class="student absent">Meret</li>
+```
+
+In a list the console writes the elements in the language of selectors: `li.student.absent` is
+an `li` tag with two classes.
+
+The numbers start from zero. Beyond the end of the list square brackets and `item` answer
+differently, and if nothing was found, you get an empty list:
+
+```js
+items[9];                                    // undefined — beyond the end
+items.item(9);                               // null
+document.querySelectorAll(".nope").length;   // 0 — an empty list, not null
+```
+
+<Important>
+Hence different checks. After `querySelector` you check
+`=== null`, after `querySelectorAll` —
+`.length === 0`. An empty list is an object, and the condition
+`if (list)` is always true for it.
+</Important>
+
+### How to go through the list
+
+On day 11 we promised `for...of` for elements found on the page:
+
+```js
+for (const li of items) {
+  console.log(li);
+}
+// <li class="student">Aman</li>
+// <li class="student absent">Meret</li>
+// … and so on, all five
+
+items.forEach((li, i) => console.log(i, li.nodeName));
+// 0 LI
+// 1 LI   … up to 4
+```
+
+`forEach` works like the array one from day 20. But that is where the similarity
+ends:
+
+```js
+items.map((li) => li.nodeName);
+// TypeError: items.map is not a function
+```
+
+A `NodeList` is not an array: it has no `map`, `filter` or
+`reduce`. When you need them, the list is turned into an array —
+with `Array.from` from day 19 or three dots from day 22:
+
+```js
+const arr = [...items];         // or Array.from(items)
+
+Array.isArray(items);           // false
+Array.isArray(arr);             // true
+arr.map((li) => li.nodeName);   // ["LI", "LI", "LI", "LI", "LI"]
+arr.at(-1);                     // <li class="student">Oguljan</li>
+```
+
+And `for...in` goes not only through the numbers but also through everything the list
+has in addition:
+
+```js
+for (const key in document.querySelectorAll(".absent")) {
+  console.log(key);
+}
+// 0, 1, entries, keys, values, forEach, length, item
+```
+
+There are two elements but eight keys. The rule is the same as for arrays:
+**for lists — `for...of` or `forEach`**.
+
+## 9. Searching inside an element {#inside}
+
+`querySelector` and `querySelectorAll` also exist on **any
+element** — then they search only among its descendants:
+
+```js
+const main = document.querySelector("main");
+
+main.querySelectorAll("p").length;       // 1 — only inside main
+document.querySelectorAll("p").length;   // 2 — on the whole page
+main.querySelector(".note");             // <p id="info" class="note">Classes: Mon, Wed, Fri</p>
+```
+
+A working technique: find the container, then search inside it. There are fewer extra matches —
+the paragraph from the footer will not get in here, although it has the same class.
+
+`getElementById` has no such version:
+
+```js
+main.getElementById("list");
+// TypeError: main.getElementById is not a function
+```
+
+An `id` is unique on the whole page; there is no point in searching for it “inside”.
+
+### A trap: the selector looks at the whole page
+
+MDN warns: the selector is matched against the **whole page**, and only
+the result has to lie inside the element:
+
+```js
+const list = document.querySelector("#list");
+
+list.querySelectorAll("main li").length;          // 5 — although main is outside!
+list.querySelectorAll(":scope main li").length;   // 0
+list.querySelectorAll(":scope > li").length;      // 5 — the direct children of list
+```
+
+`main li` means “an `li` that has a `main` somewhere
+above it”, and there is a `main` above, even though it is outside `list`.
+`:scope` means “the element itself on which the search was called” and ties
+the selector to it.
+
+## 10. Old methods: `getElementsBy…` {#old}
+
+Before `querySelector` elements were found with two methods, and they still
+live in old code:
+
+```js
+document.getElementsByClassName("student");   // HTMLCollection(5) [li.student, …]
+document.getElementsByTagName("p").length;    // 2
+
+document.getElementsByTagName("li").forEach((li) => console.log(li));
+// TypeError: document.getElementsByTagName(...).forEach is not a function
+```
+
+There are three differences from `querySelectorAll`. The argument is not a selector but a bare name:
+a class without a dot, a tag without brackets. The result is not a `NodeList` but an
+`HTMLCollection`, and it has **not even `forEach`**
+(`for...of` and `Array.from` work). And most importantly, the collection
+is **live**.
+
+“Live” means it follows the page, while `querySelectorAll` takes a snapshot
+at the moment of the call. The difference shows if you remove an element; how that is done is day 26,
+for now look only at the numbers:
+
+```js
+const live = document.getElementsByClassName("absent");
+const snapshot = document.querySelectorAll(".absent");
+
+live.length;       // 2
+snapshot.length;   // 2
+
+document.querySelector(".absent").remove();   // day 26: remove an element
+
+live.length;       // 1 — the live collection follows the page
+snapshot.length;   // 2 — the snapshot remembers how it was
+```
+
+The experiment removed Meret — reload the page (<Kbd>F5</Kbd>), and in
+`app.js` delete the line with `remove`: all five are needed from here on.
+
+| Method | What to pass | What it returns | Live? |
+| --- | --- | --- | --- |
+| `getElementById` | an `id` without a hash | an element or `null` | — |
+| `querySelector` | a selector | an element or `null` | — |
+| `querySelectorAll` | a selector | `NodeList` | no, a snapshot |
+| `getElementsByClassName` | a class without a dot | `HTMLCollection` | yes |
+| `getElementsByTagName` | a tag name | `HTMLCollection` | yes |
+
+In new code `querySelector` and `querySelectorAll` are enough;
+it is enough to **recognize** the old methods.
+
+## 11. Parents, children, siblings {#relatives}
+
+From a found element you often need to go to the parent, to a sibling, to the first child.
+There are transition properties for this:
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.parentElement;            // <ul id="list">…</ul>
+meret.previousElementSibling;   // <li class="student">Aman</li>
+meret.nextElementSibling;       // <li class="student">Gülnar</li>
+
+const list = meret.parentElement;
+list.children.length;           // 5
+list.firstElementChild;         // <li class="student">Aman</li>
+list.lastElementChild;          // <li class="student">Oguljan</li>
+```
+
+The names are long, but they are built from plain words: `parent`,
+`children`, `first` and `last`,
+`sibling`, `previous` and
+`next` — so they read almost like a phrase. `children` is the
+`HTMLCollection` from the previous section, a live one.
+
+At the edge of the tree a transition leads into emptiness, and the answer is `null`. Transitions
+can be lined up in a chain:
+
+```js
+list.firstElementChild.previousElementSibling;   // null — nobody to the left
+list.lastElementChild.nextElementSibling;        // null — nobody to the right
+meret.parentElement.parentElement;               // <main>…</main>
+```
+
+Long chains of `parentElement.parentElement` are fragile: one extra wrapper
+in the markup — and the chain leads to the wrong place. A reliable replacement is `closest`
+from section 13.
+
+### Two parents: `parentElement` and `parentNode`
+
+Every node also has a `parentNode`. It almost always matches
+`parentElement`, and the difference shows only at the very top:
+
+```js
+const html = document.body.parentElement;   // <html lang="en">…</html>
+
+html.parentElement;   // null — document is not an element
+html.parentNode;      // #document
+
+document.body.contains(meret);   // true — Meret is inside body
+meret.contains(document.body);   // false
+meret.contains(meret);           // true — a node contains itself
+```
+
+The parent of `html` is `document`, a node but not an element, so
+`parentElement` answers `null`. `contains` answers whether
+a node lies inside, and a node “contains” itself too.
+
+## 12. Nodes versus elements {#whitespace}
+
+Every transition has a twin without the word `Element` in its name. Beginners
+take exactly those, because the names are shorter:
+
+```js
+const list = document.getElementById("list");
+
+list.firstChild;            // a text node — not Aman!
+list.firstChild.nodeName;   // "#text"
+list.childNodes.length;     // 11 — but there are five students
+list.children.length;       // 5
+```
+
+**Step 1. Where does the text come from?** Between `<ul id="list">`
+and the first `<li>` the file has a line break and indentation. For the browser
+this is ordinary text, and in the tree it becomes a text node.
+
+**Step 2. We count.** Such text stands between all the items and after
+the last one: five elements and six pieces of whitespace — eleven nodes.
+
+<Scheme src="scheme-whitespace.svg">The same children of the list seen two ways: all nodes and only elements</Scheme>
+
+**Step 3. We remember two ladders.** The left one walks through all nodes, the right one —
+only through elements:
+
+| All nodes | Only elements |
+| --- | --- |
+| `parentNode` | `parentElement` |
+| `childNodes` (`NodeList`) | `children` (`HTMLCollection`) |
+| `firstChild` | `firstElementChild` |
+| `lastChild` | `lastElementChild` |
+| `previousSibling` | `previousElementSibling` |
+| `nextSibling` | `nextElementSibling` |
+
+The rule: **when you look for tags, take the right column**. The left one will be needed
+when you need the text itself — that is tomorrow. And from the list of all nodes, elements are picked out
+by `nodeType`:
+
+```js
+[...list.childNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE).length;   // 5
+```
+
+The difference is clearly visible in a `while` loop from day 10 — this is how the MDN example
+on the `nodeName` page goes through siblings (there it starts from `body`):
+
+```js
+let node = document.querySelector("header").firstChild;
+while (node) {
+  console.log(node.nodeName);
+  node = node.nextSibling;
+}
+// #text H1 #text NAV #text
+```
+
+```js
+let el = document.querySelector("header").firstElementChild;
+while (el) {
+  console.log(el.nodeName);
+  el = el.nextElementSibling;
+}
+// H1 NAV
+```
+
+The loop ends by itself: the last sibling has no next one, the transition returns
+`null`, and `null` is falsy in a condition. Five nodes, two elements.
+
+## 13. `matches` and `closest` {#closest}
+
+`matches(selector)` answers `true` or `false`:
+whether the element fits the selector.
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.matches(".absent");      // true
+meret.matches("#list > li");   // true
+meret.matches("p");            // false
+```
+
+Why check what was found? An element often comes from outside: as a function parameter,
+and from day 27 — from an event, “what was clicked”:
+
+```js
+function kind(el) {
+  if (el.matches("li.absent")) return "absent";
+  if (el.matches("li")) return "present";
+  return "not a student";
+}
+
+kind(document.querySelector(".absent"));   // "absent"
+kind(document.querySelector("li"));        // "present"
+kind(document.querySelector("h1"));        // "not a student"
+```
+
+`closest(selector)` goes **up**: it checks the element itself,
+then the parent, then the parent’s parent — and returns the first one that fits.
+If nothing is found all the way to the top, the answer is `null`.
+
+```js
+meret.closest("ul");         // <ul id="list">…</ul>
+meret.closest("main");       // <main>…</main>
+meret.closest(".student");   // Meret herself — the check starts with the element itself
+meret.closest("footer");     // null — there is no such ancestor
+```
+
+<Scheme src="scheme-closest.svg">closest climbs through the ancestors, starting with the element itself</Scheme>
+
+`meret.closest("main")` finds `main` no matter how many wrappers
+appear between them. On day 27 the method will become the main tool: a click often
+lands on a nested element, and `closest("li")` finds the item that
+was clicked.
+
+## 14. Walking the whole tree {#walk}
+
+On day 12 we said that recursion is irreplaceable for trees, “for example, for going through
+a page”. Here it is: the function prints the element’s name and calls itself for each
+child — with a bigger indent:
+
+```js
+function printTree(el, depth = 0) {
+  console.log("  ".repeat(depth) + el.nodeName);
+  for (const child of el.children) {
+    printTree(child, depth + 1);
+  }
+}
+
+printTree(document.body);
+```
+
+<ResultBox>
+```plain-out
+BODY
+  HEADER
+    H1
+    NAV
+      A
+      A
+  MAIN
+    UL
+      LI
+      LI
+      LI
+      LI
+      LI
+    P
+  FOOTER
+    P
+  SCRIPT
+```
+</ResultBox>
+
+This is the tree from section 3, only lying on its side, and the order of the lines is the tree order.
+The `SCRIPT` line was added by Live Server: it inserts its own script, as on day 2.
+If you open the file with a double click, you will not see it.
+
+One loop is not enough here: the depth of the tree is not known in advance — `h1`
+has one depth, the links in `nav` another. Recursion goes down exactly as far
+as needed. For an element without children the loop inside the function does not run even once —
+this is the exit condition from day 12.
+
+You can check the result with a built-in tool: the selector `*` means
+“any element”, and `document.body.querySelectorAll("*").length` gives 16 —
+exactly as many lines as there are under `BODY` in the output.
+
+## 15. The “Report card” on the page {#tabel}
+
+Yesterday the “Report card” separated computing from display. Today the display moves from the console
+into a table on the page. The file `index.html`:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Report card</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>Report card of group JS-1</h1>
+  <table id="tabel">
+    <thead>
+      <tr><th>Name</th><th>Avg</th><th>Min</th><th>Max</th><th>%</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
+```
+
+The table header is now in the markup, and five empty rows of six cells each are prepared for the students.
+The calculation part of `app.js` is yesterday’s, without a single change,
+so below is only what is new:
+
+```js
+// unchanged since day 23: MIN_MARK, MAX_MARK, toMark, isValidMark, sum,
+// average, verdict, the saved string, students = JSON.parse(saved), makeReport
+
+// new: instead of a table row — six texts, one per cell
+function makeCells(report) {
+  if (!report.ok) {
+    return [report.name, "—", "—", "—", "—", "no valid marks"];
+  }
+  return [
+    report.name,
+    report.average.toFixed(2),
+    String(report.min),
+    String(report.max),
+    report.percent + "%",
+    report.verdict,
+  ];
+}
+
+// writing text into a cell is tomorrow’s topic; for now we take it ready-made
+function write(cell, text) {
+  cell.textContent = text;   // day 25
+}
+
+// new: we find the table rows and put the texts into the cells
+const rows = document.querySelectorAll("#tabel tbody tr");
+const reports = students.map(makeReport);
+
+reports.forEach((report, i) => {
+  const cells = rows[i].children;
+  makeCells(report).forEach((text, j) => write(cells[j], text));
+});
+
+document.title = `Report card: ${reports.length} students`;
+```
+
+<ResultBox>
+| Name | Avg | Min | Max | % | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| Aman | 4.33 | 3 | 5 | 75% | good student |
+| Meret | 3.33 | 3 | 4 | 100% | average student |
+| Gülnar | — | — | — | — | no valid marks |
+| Sapar | 4.75 | 4 | 5 | 100% | top student |
+| Oguljan | 4.50 | 4 | 5 | 67% | top student |
+
+On the tab: “Report card: 5 students”.
+</ResultBox>
+
+The numbers are the same as on day 23. Yesterday’s rule “compute in data, format
+at the end” paid off at once: the way of display changed, and `makeReport`
+did not even notice.
+
+**Gone:** `makeHeader`, the lines of hyphens, all
+the `padStart` and `padEnd` — the header is now in the markup, and the browser
+aligns the columns. Instead of the glued-together string of `makeRow` came
+`makeCells` with an array of six texts.
+
+**New:** the search. `querySelectorAll("#tabel tbody tr")`
+finds the five rows of the table body; the header does not get in, its `tr` lies in
+`thead`. The `children` of a row are its six cells. The student’s number
+`i` picks the row, the text’s number `j` picks the cell. The only
+line from tomorrow is hidden in `write` and marked.
+
+### Walkthrough: the sixth student
+
+There are as many rows in the markup as were prepared by hand. Add a sixth student
+to `saved` — and the program will crash:
+
+```js
+rows[5];            // undefined — there is no sixth row in the markup
+rows[5].children;   // TypeError: Cannot read properties of undefined (reading 'children')
+```
+
+This is the message from section 6, only with `undefined` instead of `null`:
+a number beyond the end of the list, as in section 8. The cure is not extra
+prepared rows but creating rows with code — that is day 26.
+
+<TryIt>
+Two experiments.
+\
+\
+**The first.** Replace `"#tabel tbody tr"` with
+`"#tabel tr"`. What happened to the header, and why did the last row stay empty?
+\
+\
+**The second.** Remove the word `defer` and read the error.
+Which property does it name, and where is the real cause?
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | What you will see | How to do it right |
+| --- | --- | --- |
+| a script in `head` without `defer` | `null`, then `Cannot read properties of null` | add `defer` |
+| `getElementById("#title")` | `null` | an `id` without a hash |
+| `querySelector("student")` | `null` | a class with a dot: `".student"` |
+| `getElementByID` | `… is not a function` | `getElementById` |
+| `map` on a `NodeList` | `items.map is not a function` | `[...items]` or `Array.from` |
+| `forEach` on `getElementsBy…` | `… forEach is not a function` | `for...of` or `querySelectorAll` |
+| `firstChild` instead of `firstElementChild` | a text node | transitions with the word `Element` |
+
+Today we learned to **find**. Tomorrow — to **change**:
+text, markup, attributes, classes and styles. The `write` function will open up,
+and the “Report card” will be able, for example, to highlight top students with color. The module goes on like this:
+
+| Day | Topic |
+| --- | --- |
+| 25 | we change text, attributes, classes, styles |
+| 26 | we create and remove elements |
+| 27 | events: clicks and keys |
+| 28 | forms and input validation |
+| 29 | a mini-project: a to-do list |
+
+And each of these days starts with today: before you change an element
+or respond to a click on it, you have to find the element.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [DOM](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model) | an overview: the page as a tree of objects | <Full /> |
+| [Anatomy of the DOM](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Anatomy_of_the_DOM) | nodes, parents, children, node types | <Full /> |
+| [Selection and traversal](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Selection_and_traversal_on_the_DOM_tree) | searching by selectors, a snapshot versus a live list | <Full /> |
+| [Document](https://developer.mozilla.org/en-US/docs/Web/API/Document) | the `document` object — the root of the tree | <Full /> |
+| [document.body](https://developer.mozilla.org/en-US/docs/Web/API/Document/body) | the `body` element or `null` | <Full /> |
+| [document.title](https://developer.mozilla.org/en-US/docs/Web/API/Document/title) | the text on the tab: read it and change it | <Full /> |
+| [getElementById](https://developer.mozilla.org/en-US/docs/Web/API/Document/getElementById) | an element by `id` or `null` | <Full /> |
+| [document.querySelector](https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelector) | the first element by a selector | <Full /> |
+| [document.querySelectorAll](https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelectorAll) | all elements by a selector, as a snapshot | <Full /> |
+| [Element.querySelector](https://developer.mozilla.org/en-US/docs/Web/API/Element/querySelector) | the first among the element’s descendants | <Full /> |
+| [Element.querySelectorAll](https://developer.mozilla.org/en-US/docs/Web/API/Element/querySelectorAll) | all among the descendants; the `:scope` trap | <Full /> |
+| [matches](https://developer.mozilla.org/en-US/docs/Web/API/Element/matches) | whether the element fits a selector | <Full /> |
+| [closest](https://developer.mozilla.org/en-US/docs/Web/API/Element/closest) | the element itself or the nearest fitting ancestor | <Full /> |
+| [document.head](https://developer.mozilla.org/en-US/docs/Web/API/Document/head) | the `head` element, read-only | <Brief /> |
+| [getElementsByClassName](https://developer.mozilla.org/en-US/docs/Web/API/Document/getElementsByClassName) | by class, a live `HTMLCollection` | <Brief /> |
+| [getElementsByTagName](https://developer.mozilla.org/en-US/docs/Web/API/Document/getElementsByTagName) | by tag, a live `HTMLCollection` | <Brief /> |
+| [children](https://developer.mozilla.org/en-US/docs/Web/API/Element/children) | child elements | <Brief /> |
+| [firstElementChild](https://developer.mozilla.org/en-US/docs/Web/API/Element/firstElementChild) | the first child element | <Brief /> |
+| [lastElementChild](https://developer.mozilla.org/en-US/docs/Web/API/Element/lastElementChild) | the last child element | <Brief /> |
+| [previousElementSibling](https://developer.mozilla.org/en-US/docs/Web/API/Element/previousElementSibling) | the previous sibling element | <Brief /> |
+| [nextElementSibling](https://developer.mozilla.org/en-US/docs/Web/API/Element/nextElementSibling) | the next sibling element | <Brief /> |
+| [parentElement](https://developer.mozilla.org/en-US/docs/Web/API/Node/parentElement) | the parent element or `null` | <Brief /> |
+| [parentNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/parentNode) | a parent of any kind | <Brief /> |
+| [childNodes](https://developer.mozilla.org/en-US/docs/Web/API/Node/childNodes) | all child nodes, text included | <Brief /> |
+| [firstChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/firstChild) | the first child node, often `#text` | <Brief /> |
+| [lastChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/lastChild) | the last child node | <Brief /> |
+| [previousSibling](https://developer.mozilla.org/en-US/docs/Web/API/Node/previousSibling) | the previous sibling node | <Brief /> |
+| [nextSibling](https://developer.mozilla.org/en-US/docs/Web/API/Node/nextSibling) | the next sibling node | <Brief /> |
+| [contains](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains) | whether a node lies inside this one | <Brief /> |
+| [nodeName](https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeName) | the node’s name: `"LI"`, `"#text"` | <Brief /> |
+| [nodeType](https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType) | the kind of node as a number: 1, 3, 9 | <Brief /> |
+| [NodeList](https://developer.mozilla.org/en-US/docs/Web/API/NodeList) | a list of nodes, not an array | <Brief /> |
+| [NodeList.length](https://developer.mozilla.org/en-US/docs/Web/API/NodeList/length) | how many are in the list | <Brief /> |
+| [NodeList.item](https://developer.mozilla.org/en-US/docs/Web/API/NodeList/item) | an element by number; beyond the end, `null` | <Brief /> |
+| [NodeList.forEach](https://developer.mozilla.org/en-US/docs/Web/API/NodeList/forEach) | going through, as with an array | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// FIND ONE — an element or null
+document.getElementById("title");     // id without a hash
+document.querySelector("#title");     // any selector
+document.querySelector(".student");   // a class — with a dot!
+
+// FIND ALL — a NodeList, empty if there are none
+const found = document.querySelectorAll("li.absent");   // a snapshot
+found.length;                         // 2
+found[0] === found.item(0);           // true
+found.forEach((li) => console.log(li));
+for (const li of found) console.log(li);
+[...found].map((li) => li.nodeName);  // ["LI", "LI"] — map only on an array
+
+// SEARCH INSIDE AN ELEMENT
+const main = document.querySelector("main");
+main.querySelectorAll("p").length;    // 1
+
+// WALK THROUGH ELEMENTS (null at the edge)
+const list = document.getElementById("list");
+list.parentElement === main;          // true
+list.children.length;                 // 5
+list.firstElementChild.nextElementSibling === found[0];   // true
+list.lastElementChild.nextElementSibling;                 // null
+
+// WALK THROUGH NODES (with text made of whitespace)
+list.childNodes.length;               // 11
+list.firstChild.nodeName;             // "#text"
+
+// CHECK
+found[0].matches(".absent");          // true
+found[0].closest("main") === main;    // true — itself or an ancestor, otherwise null
+document.body.contains(list);         // true — inside
+list.nodeName;                        // "UL" — in capital letters
+list.nodeType;                        // 1 element, 3 text, 9 document
+
+// DOCUMENT
+document.head;                        // <head>…</head>
+document.title = "a new title";
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. How does the DOM differ from an HTML file?
+   <Answer>The file is text on a disk. The DOM is a tree of objects that the browser built
+   from that text in memory. A script changes the DOM, and the file stays the same;
+   the Elements tab shows the DOM, and <Kbd>Ctrl</Kbd> + <Kbd>U</Kbd> shows the file.</Answer>
+2. What do `querySelector` and `querySelectorAll` return if
+   they found nothing?
+   <Answer>`querySelector` returns `null`, `querySelectorAll` returns
+   an empty `NodeList` with length 0. That is why the checks differ too:
+   `=== null` and `.length === 0`.</Answer>
+3. Why is `list.firstChild` not the first item of the list?
+   <Answer>The line break and indentation between `<ul>` and the first
+   `<li>` are text too, and they lie in the tree as a text node.
+   The first child element is given by `firstElementChild`.</Answer>
+4. Why does the list from `querySelectorAll` have no `map`?
+   <Answer>A `NodeList` is not an array: it has `length`,
+   numbers, `item` and `forEach`, but not the array methods.
+   If you need an array — `[...list]` or `Array.from(list)`.</Answer>
+5. Why is `closest("main")` better than the chain
+   `parentElement.parentElement`?
+   <Answer>The chain depends on the exact number of levels and breaks from an extra wrapper.
+   `closest` climbs as far as needed and stops at the first
+   match, starting with the element itself.</Answer>
+6. Why does a script in `head` without `defer` not find elements?
+   <Answer>The browser builds the tree as it reads and runs such a script immediately.
+   Nothing that is below the script in the file exists in the tree yet — `document.body`
+   is `null`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model" />

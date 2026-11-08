@@ -1,0 +1,815 @@
+---
+title: День 31 — fetch, async/await и localStorage
+day: День 31 • урок 1
+heading: fetch, async/await и localStorage
+lead: Модуль «Таймеры, промисы и fetch», последний день. 45 минут.
+css: |
+  h1 { border-bottom-color: #6366f1; }
+  h2 { color: #4338ca; background: #eef2ff; border-left-color: #6366f1; }
+  h3 { color: #3730a3; }
+  .step-number { background: #6366f1; }
+  .toc a { color: #4338ca; }
+---
+
+<Goals>
+- запрашивать данные у сервера через `fetch` и читать ответ;
+- отличать ответ с ошибкой от сбоя сети;
+- писать асинхронный код через `async` и `await`;
+- сохранять данные между загрузками страницы в `localStorage`;
+- безопасно вставлять текст в адрес через `encodeURIComponent`;
+- научить список дел и «Табель» помнить свои данные.
+</Goals>
+
+<Toc />
+
+## 1. Данные с сервера {#why}
+
+До сих пор данные жили в коде: массив в `app.js`, строка JSON в переменной
+`saved`. Настоящие программы берут их у **сервера** — другой
+программы, которая хранит данные и отдаёт по запросу. Почта, магазин, расписание — везде
+страница просит, а сервер отвечает.
+
+Сервер у нас уже есть. На дне 2 мы открывали страницы через Live Server и
+договорились: «на дне 31, когда мы начнём получать данные с сервера, ничего не придётся
+переучивать». Этот день настал. Live Server отдаёт не только `index.html`, но и
+любой файл из папки проекта — в том числе файл с данными.
+
+| Часть | Что это | Пример |
+| --- | --- | --- |
+| запрос | страница просит файл по адресу | `group.json` |
+| статус ответа | число: как всё прошло | 200 — хорошо, 404 — не найдено |
+| тело ответа | сами данные | строка JSON со списком группы |
+
+Со страницы, открытой двойным щелчком (`file:///…`), запросы не работают:
+браузер их запрещает. Сегодня всё открываем через Live Server.
+
+Live Server — самый простой сервер: он отдаёт файлы как есть. Настоящий сервер ещё
+ищет, считает и сохраняет, и пишут его на других языках или на JavaScript вне браузера.
+Но для страницы разницы нет: запрос, статус и тело ответа везде устроены одинаково.
+Всё, что сегодня получится с файлом `group.json`, заработает и с настоящим
+сервером — поменяется только адрес.
+
+## 2. Учебная страница {#page}
+
+Папка `day-31/group`, в ней три файла. Страница:
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Группа JS-1</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>Группа JS-1</h1>
+  <button id="load">Загрузить</button>
+  <p id="message"></p>
+  <ul id="list"></ul>
+</body>
+</html>
+```
+
+Данные — файл `group.json`. Это «сервер» нашей группы: оценки те же, что и
+в «Табеле», только без мусора.
+
+```js
+[
+  { "name": "Аман", "marks": [5, 4, 4] },
+  { "name": "Мерет", "marks": [3, 3, 4] },
+  { "name": "Гүлнар", "marks": [] },
+  { "name": "Сапар", "marks": [5, 5, 4, 5] },
+  { "name": "Огулджан", "marks": [4, 5] }
+]
+```
+
+И начало `app.js`:
+
+```js
+const list = document.querySelector("#list");
+const message = document.querySelector("#message");
+const loadButton = document.querySelector("#load");
+```
+
+## 3. `fetch`: первый запрос {#fetch}
+
+`fetch` получает адрес и отправляет запрос. Ответа ещё нет — поэтому
+`fetch` возвращает промис, как функции дня 30:
+
+```js
+fetch("group.json");   // Promise {<pending>}
+```
+
+Адрес `group.json` — относительный: файл ищется в той же папке, что и
+страница. Промис выполняется объектом `Response` — ответом сервера.
+В консоли Chrome можно писать `await` прямо в строке; как это устроено,
+разберём в разделе 7, а пока посмотрим на ответ:
+
+```js
+const response = await fetch("group.json");
+response;
+// Response {type: 'basic', url: 'http://127.0.0.1:5500/…/group.json', redirected: false, status: 200, ok: true, …}
+```
+
+<Scheme src="scheme-fetch.svg">Два ожидания: сначала приходит ответ со статусом, потом читается тело</Scheme>
+
+Ожиданий два. Первый промис выполняется, как только пришли статус и заголовки ответа —
+тело может ещё идти по сети. Тело читают отдельным методом, и он тоже возвращает промис.
+Для JSON это `response.json()`: он читает тело и сразу разбирает его, как
+`JSON.parse` из дня 23.
+
+```js
+fetch("group.json")
+  .then((response) => response.json())
+  .then((data) => {
+    console.log(data.length, data[1].name);   // 5 Мерет
+  });
+```
+
+## 4. Ответ: `status`, `ok`, `text`, `json` {#response}
+
+У `Response` четыре главных члена на сегодня:
+
+| Что | Тип | Для чего |
+| --- | --- | --- |
+| `status` | число | код ответа: 200 — всё хорошо, 404 — не найдено, 500 — ошибка на сервере |
+| `ok` | `true` / `false` | `true`, если статус от 200 до 299 |
+| `text()` | промис строки | тело как есть |
+| `json()` | промис данных | тело, разобранное как JSON |
+
+```js
+[response.status, response.ok];   // [200, true]
+
+const again = await fetch("group.json");
+(await again.text()).slice(0, 40);
+// '[\n  { "name": "Аман", "marks": [5, 4, 4]'
+```
+
+Тело читается **один раз**. Второй вызов `json()` на том же
+ответе не вернёт данные повторно — сохраните их в переменную:
+
+```js
+const data = await response.json();
+await response.json();
+// TypeError: Failed to execute 'json' on 'Response': body stream already read
+```
+
+Проверка шага: что пришло? Обычный массив объектов — ровно такой, как если бы мы
+написали его в коде. Всё, что умеем с массивами со дня 20, работает:
+
+```js
+data.map((s) => s.name);   // ["Аман", "Мерет", "Гүлнар", "Сапар", "Огулджан"]
+data[3].marks;             // [5, 5, 4, 5]
+data.filter((s) => s.marks.length === 0).length;   // 1 — у Гүлнар оценок нет
+```
+
+## 5. Разбор: файла нет {#404}
+
+Опечатка в имени файла — `grup.json` вместо `group.json`:
+
+```js
+const data = await (await fetch("grup.json")).json();
+// SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+```
+
+**Шаг 1. Где упало?** Не в `fetch`, а в `json()`: ошибка
+разбора JSON. Разбирать пытались строку, начинающуюся с `<!DOCTYPE`, — это
+HTML, а не данные.
+
+**Шаг 2. Откуда HTML?** Спросим сам ответ:
+
+```js
+const missing = await fetch("grup.json");
+[missing.status, missing.ok];   // [404, false]
+await missing.text();           // '<!DOCTYPE html>… <pre>Cannot GET /…/grup.json</pre>…'
+```
+
+Сервер честно ответил: 404, файла нет — и приложил страницу с объяснением. Главное
+здесь: **`fetch` не считает 404 ошибкой**. Для него запрос удался —
+ответ пришёл. Промис выполнился, `ok` стал `false`, и мы стали
+разбирать страницу ошибки как JSON. В консоли при этом есть красная строка
+`Failed to load resource: the server responded with a status of 404 (Not Found)`,
+но это сообщение браузера, а не исключение: код её не видит.
+
+**Шаг 3. Чиним.** Проверять `ok` до чтения тела и превращать плохой
+статус в ошибку. Так делает пример на первой странице руководства MDN по `fetch`:
+
+```js
+const response = await fetch("grup.json");
+if (!response.ok) {
+  throw new Error(`Сервер ответил ${response.status}`);
+}
+const data = await response.json();
+// Error: Сервер ответил 404
+```
+
+Ошибку бросаем сами не случайно: тогда 404 попадёт в тот же `catch`, что и
+сбой сети, и у программы будет одно место для всех бед с загрузкой.
+
+## 6. Сервер не отвечает {#offline}
+
+Остановите Live Server (кнопка «Port : 5500» внизу редактора) и повторите запрос:
+
+```js
+await fetch("group.json");
+// TypeError: Failed to fetch
+```
+
+Теперь ответа нет вовсе, и промис `fetch` отклоняется. Три разных беды —
+три разных места, где их видно:
+
+| Что случилось | Что делает код | Как узнать |
+| --- | --- | --- |
+| сервер не отвечает, нет сети | `fetch` отклоняется | `TypeError: Failed to fetch` |
+| файла нет, ошибка сервера | `fetch` выполняется | `ok === false`, `status` 404 или 500 |
+| в ответе не JSON | отклоняется `json()` | `SyntaxError` |
+
+Подсказку даёт и красная строка браузера в консоли. `net::ERR_CONNECTION_REFUSED`
+— сервер не отвечает. `the server responded with a status of 404 (Not Found)` —
+сервер есть, файла нет.
+
+### Вкладка Network
+
+В инструментах разработчика есть вкладка **Network** — список всех запросов
+страницы. Обновите страницу при открытой вкладке: для каждого запроса видны адрес, статус
+и размер, а щелчок по строке покажет заголовки (Headers) и само тело ответа (Response).
+Когда `fetch` ведёт себя странно, первым делом смотрят сюда: ушёл ли запрос, по
+какому адресу, что ответил сервер.
+
+## 7. `async` и `await` {#async}
+
+Цепочки `then` работают, но читать их труднее обычного кода. Поэтому в язык
+добавили другую запись тех же промисов. Функцию помечают словом `async`, а внутри
+перед промисом пишут `await` — «дождись и дай значение»:
+
+```js
+async function loadGroup() {
+  const response = await fetch("group.json");
+  if (!response.ok) {
+    throw new Error(`Сервер ответил ${response.status}`);
+  }
+  return response.json();
+}
+```
+
+Код читается сверху вниз, как обычный, а ждёт по-настоящему. Два правила.
+
+**Асинхронная функция всегда возвращает промис.** Что она вернула через
+`return`, тем промис и выполнится; брошенная ошибка его отклонит:
+
+```js
+loadGroup();   // Promise {<pending>} — снаружи это обычный промис
+loadGroup().then((group) => console.log(group.length));   // 5
+```
+
+**`await` останавливает только свою функцию**, а не страницу.
+Пока функция ждёт, остальной код идёт дальше:
+
+```js
+async function show() {
+  console.log("2: начали");
+  const group = await loadGroup();
+  console.log(`4: пришло ${group.length}`);
+}
+
+console.log("1: до");
+show();
+console.log("3: после");
+// 1: до
+// 2: начали
+// 3: после
+// 4: пришло 5
+```
+
+<Scheme src="scheme-async.svg">Функция доходит до await и отдаёт управление; продолжит, когда придёт ответ</Scheme>
+
+Функция выполняется сразу — до первого `await`. Там она «ставит себя на
+паузу» и возвращает промис, а управление уходит наружу: печатается «3: после». Когда
+придёт ответ, функция продолжит с того же места. Страница всё это время живёт: щелчки
+и таймеры работают. В консоли Chrome `await` можно писать и вне функции —
+это удобство консоли, в `app.js` так нельзя.
+
+### Одна задача — две записи
+
+Напечатать, сколько человек в группе, и сообщить об ошибке. Сначала — цепочка дня 30,
+ниже — то же через `async`:
+
+```js
+// день 30: цепочка
+fetch("group.json")
+  .then((response) => response.json())
+  .then((group) => console.log(group.length))
+  .catch((err) => console.log(err.message));
+
+// день 31: async и await
+async function printCount() {
+  try {
+    const response = await fetch("group.json");
+    const group = await response.json();
+    console.log(group.length);
+  } catch (err) {
+    console.log(err.message);
+  }
+}
+printCount();   // 5 — как и у цепочки
+```
+
+Каждый `then` стал строкой с `await`, а промежуточные значения
+получили имена — `response`, `group`. Какую запись выбрать — дело
+вкуса; MDN в новых примерах пишет через `await`, а цепочки встретятся в чужом
+коде постоянно. Асинхронной бывает и стрелка:
+`const count = async () => …`.
+
+## 8. `try...catch` вокруг `await` {#try}
+
+Если промис после `await` отклонён, `await` бросает ошибку — как
+`throw`. Значит, её ловит обычный `try...catch` из дня 11, а
+`finally` работает как у промисов. Кнопка «Загрузить» целиком:
+
+```js
+loadButton.addEventListener("click", async () => {
+  loadButton.hidden = true;
+  message.textContent = "Загрузка…";
+  try {
+    const group = await loadGroup();
+    list.textContent = "";
+    list.append(...group.map((student) => {
+      const li = document.createElement("li");
+      li.textContent = `${student.name}: оценок ${student.marks.length}`;
+      return li;
+    }));
+    message.textContent = "";
+  } catch (err) {
+    message.textContent = `Не удалось загрузить: ${err.message}`;
+  } finally {
+    loadButton.hidden = false;
+  }
+});
+```
+
+<ResultBox>
+| Что сделали | Что на странице |
+| --- | --- |
+| «Загрузить» | пять пунктов: «Аман: оценок 3» … «Огулджан: оценок 2» |
+| в `loadGroup` адрес `grup.json`, «Загрузить» | «Не удалось загрузить: Сервер ответил 404» |
+| Live Server остановлен, «Загрузить» | «Не удалось загрузить: Failed to fetch» |
+</ResultBox>
+
+Проверка шага после «Загрузить»:
+
+```js
+list.children.length;   // 5
+loadButton.hidden;      // false — finally вернул кнопку
+```
+
+Стрелку тоже можно пометить `async` — так слушатель получает право на
+`await`. Сравните с цепочкой дня 30: `then` стал строкой с
+`await`, `catch` — блоком `catch`, `finally`
+остался `finally`. Промисы те же, запись другая.
+
+## 9. Ошибки с `await` {#await-mistakes}
+
+| Что написали | Что увидите | Почему |
+| --- | --- | --- |
+| `const r = fetch(…); r.json()` | `r.json is not a function` | без `await` в `r` промис, а не ответ |
+| `await` в обычной функции | `SyntaxError: await is only valid in async functions and the top level bodies of modules` | нет слова `async` |
+| `const group = loadGroup();` | `group.length` — `undefined` | асинхронная функция вернула промис |
+| нет `try...catch` | `Uncaught (in promise) TypeError: Failed to fetch` | отклонённый промис никто не поймал |
+
+Самая коварная — первая: без `await` ошибка всплывает не там, где её
+сделали, а строкой ниже, когда промис пытаются использовать как данные:
+
+```js
+const response = await fetch("group.json");
+const group = response.json();   // забыли await
+group.length;                    // undefined — в group промис, а не массив
+group.map((s) => s.name);        // TypeError: group.map is not a function
+```
+
+Все четыре сводятся к одному: **значение появляется только после
+`await`**, а `await` живёт только внутри `async`.
+
+## 10. `localStorage`: память страницы {#storage}
+
+Список дел дня 29 забывает всё при обновлении: переменные исчезают вместе со страницей.
+У браузера есть хранилище, которое переживает и обновление, и перезапуск, —
+`localStorage`. Это пары «ключ — значение»:
+
+```js
+localStorage.setItem("theme", "dark");   // записать
+localStorage.getItem("theme");           // "dark" — прочитать
+localStorage.getItem("нет такого");      // null — ключа нет
+localStorage.removeItem("theme");        // удалить один ключ
+localStorage.clear();                    // удалить всё
+```
+
+Обновите страницу — `getItem("theme")` вернёт то же `"dark"`.
+Посмотреть содержимое можно в инструментах разработчика: вкладка Application →
+Local Storage. Там же его можно поправить руками.
+
+**Хранятся только строки.** Всё остальное превращается в строку при записи:
+
+```js
+localStorage.setItem("visits", 5);
+localStorage.getItem("visits");       // "5" — уже строка
+localStorage.getItem("visits") + 1;   // "51", а не 6
+```
+
+Отсюда первый практический приём — счётчик посещений. Прочитали строку, перевели в число,
+прибавили, записали обратно:
+
+```js
+const visits = Number(localStorage.getItem("group:visits") ?? 0) + 1;
+localStorage.setItem("group:visits", visits);
+message.textContent = `Вы открыли страницу ${visits}-й раз`;
+// первое открытие — «1-й раз», после обновления — «2-й раз»
+```
+
+При первом открытии ключа нет, `getItem` вернёт `null`, и оператор
+`??` из дня 7 подставит 0. `Number` из дня 17 превращает строку в
+число — без него получилось бы «11-й раз».
+
+Ещё два свойства — кратко: `localStorage.length` — сколько ключей,
+`localStorage.key(i)` — имя ключа по номеру. Порядок ключей браузер выбирает
+сам, полагаться на него нельзя.
+
+## 11. Разбор: сохранился «\[object Object\]» {#object}
+
+```js
+localStorage.setItem("student", { name: "Аман" });
+localStorage.getItem("student");                // "[object Object]"
+JSON.parse(localStorage.getItem("student"));
+// SyntaxError: "[object Object]" is not valid JSON
+```
+
+**Шаг 1. Что сохранилось?** Не объект, а строка
+`"[object Object]"`. Имени в ней нет — данные потеряны уже при записи.
+
+**Шаг 2. Почему?** `setItem` превратил объект в строку
+самым простым способом, а для объекта это всегда `"[object Object]"`.
+
+**Шаг 3. Чиним** знакомой парой из дня 23: объект в строку —
+`JSON.stringify`, строку обратно в объект — `JSON.parse`.
+
+```js
+localStorage.setItem("student", JSON.stringify({ name: "Аман", marks: [5, 4] }));
+localStorage.getItem("student");                     // '{"name":"Аман","marks":[5,4]}'
+JSON.parse(localStorage.getItem("student")).marks;   // [5, 4]
+```
+
+И удобное совпадение: если ключа нет, `getItem` вернёт `null`, а
+`JSON.parse(null)` — тоже `null`. Отсутствие данных не роняет
+программу, его нужно только проверить.
+
+Крайние случаи — что записали, что прочитали и что даст `JSON.parse`:
+
+| `setItem("x", …)` | `getItem("x")` | `JSON.parse` |
+| --- | --- | --- |
+| `5` | `"5"` | `5` |
+| `true` | `"true"` | `true` |
+| `null` | `"null"` | `null` |
+| `undefined` | `"undefined"` | `SyntaxError: "undefined" is not valid JSON` |
+| `[1, 2]` | `"1,2"` | `SyntaxError: Unexpected non-whitespace character after JSON at position 1 (line 1 column 2)` |
+| `JSON.stringify([1, 2])` | `"[1,2]"` | `[1, 2]` |
+
+Числа и логические значения переживают поездку и без `JSON.stringify`, а массивы
+и объекты — нет. Правило простое: **всё, что не строка, — через
+`JSON.stringify`**.
+
+## 12. `sessionStorage` и где живут данные {#session}
+
+У `localStorage` есть близнец — `sessionStorage`. Методы те же,
+а живёт он меньше: только пока открыта вкладка.
+
+```js
+sessionStorage.setItem("group:draft", "Ильяс, 5 4 9");
+sessionStorage.getItem("group:draft");   // "Ильяс, 5 4 9"
+// обновили страницу — черновик на месте; открыли ту же страницу в новой вкладке:
+sessionStorage.getItem("group:draft");   // null
+```
+
+Это удобно для того, что нужно «пока человек работает», но не навсегда: черновик
+формы, выбранная вкладка, шаг заполнения анкеты. Закрыл вкладку — начал с чистого листа.
+
+<Scheme src="scheme-session.svg">localStorage делят все страницы одного адреса, sessionStorage — только одна вкладка</Scheme>
+
+|  | `localStorage` | `sessionStorage` |
+| --- | --- | --- |
+| обновили страницу | на месте | на месте |
+| открыли ту же страницу в новой вкладке | на месте | пусто |
+| закрыли вкладку, браузер | на месте | пропал |
+| для чего | настройки, списки, всё «навсегда» | черновик формы, шаг мастера |
+
+Хранилище делится по **адресу сервера** — схеме, имени и порту. У всех
+проектов, открытых через Live Server, адрес один: `http://127.0.0.1:5500`.
+Значит, список дел и «Табель» видят одно и то же хранилище. Проверено: ключ, записанный
+на странице `group`, читается на странице из соседней папки. Поэтому ключи
+называют с приставкой проекта — `"todo:tasks"`, `"tabel:reports"`, —
+иначе два проекта перепишут данные друг друга.
+
+По той же причине опасен `clear()`: он стирает хранилище всего адреса, а не
+одного проекта.
+
+```js
+// на странице group:
+localStorage.setItem("todo:tasks", "[]");
+// на странице из соседней папки:
+localStorage.clear();
+// снова на странице group:
+localStorage.getItem("todo:tasks");   // null — стёрто чужим clear()
+```
+
+Свои данные удаляют своими ключами, через `removeItem`. `clear()`
+оставьте для опытов в консоли.
+
+## 13. Текст в адресе: `encodeURIComponent` {#uri}
+
+Серверу часто передают данные прямо в адресе, после вопросительного знака:
+`group.json?name=Аман`. Но в адресе у некоторых знаков особый смысл: `&`
+разделяет параметры, `?` начинает их, `#` отрезает хвост. Имя
+«Гүлнар & Аман», вставленное как есть, сервер прочитает как два параметра.
+
+```js
+encodeURIComponent("Гүлнар & Аман");
+// "%D0%93%D2%AF%D0%BB%D0%BD%D0%B0%D1%80%20%26%20%D0%90%D0%BC%D0%B0%D0%BD"
+decodeURIComponent("%D0%93%D2%AF%D0%BB%D0%BD%D0%B0%D1%80%20%26%20%D0%90%D0%BC%D0%B0%D0%BD");
+// "Гүлнар & Аман"
+```
+
+`encodeURIComponent` заменяет всё опасное кодами вида `%XX`:
+пробел — `%20`, `&` — `%26`, каждая буква не из
+латиницы — двумя такими кодами. `decodeURIComponent` делает обратное. Правило:
+**любой текст от человека, который идёт в адрес, пропускают через
+`encodeURIComponent`**.
+
+```js
+const name = "Гүлнар & Аман";
+const response = await fetch(`group.json?name=${encodeURIComponent(name)}`);
+response.url;   // '…/group.json?name=%D0%93…%20%26%20%D0%90…' — & закодирован
+```
+
+Кратко о соседях. `encodeURI` кодирует адрес **целиком** и
+знаки `&`, `?`, `/` не трогает — для кусочка данных
+он не годится: `encodeURI("?name=Гүлнар & Аман")` оставит `&`
+как есть. `decodeURI` — обратная ему. А неверный код при раскодировании даёт
+ошибку:
+
+```js
+decodeURIComponent("100%");   // URIError: URI malformed
+```
+
+## 14. Список дел помнит {#todo}
+
+На дне 29 мы обещали: сохранение будет крошечной правкой — сохранить в конце
+`render`, прочитать в начале программы. И отметили два подвоха: при первом
+запуске сохранённого нет, а `nextId` тоже надо восстановить. Вот правка
+целиком:
+
+```js
+// 1. Данные — из хранилища; при первом запуске — три дела для примера
+const KEY = "todo:tasks";
+const saved = localStorage.getItem(KEY);
+
+let tasks = saved === null
+  ? [
+      { id: 1, text: "Повторить день 26", done: true },
+      { id: 2, text: "Сделать задания дня 28", done: false },
+      { id: 3, text: "Прочитать про события на MDN", done: false },
+    ]
+  : JSON.parse(saved);
+let nextId = Math.max(0, ...tasks.map((t) => t.id)) + 1;   // следующий свободный номер
+let filter = "all";
+```
+
+```js
+function render() {
+  // … всё как на дне 29, и последней строкой:
+  localStorage.setItem(KEY, JSON.stringify(tasks));
+}
+```
+
+Первый подвох решает проверка на `null` и тернарный оператор из дня 7. Второй —
+строка с `Math.max` (день 18): следующий номер на единицу больше самого
+большого из сохранённых. Ноль в начале нужен для пустого списка: `Math.max()`
+без аргументов даёт `-Infinity`, а с нулём — 0, и первое дело получит номер 1.
+
+<ResultBox>
+| Что сделали | Что после обновления страницы |
+| --- | --- |
+| открыли впервые | три дела для примера, `nextId` — 4 |
+| добавили «Купить тетрадь», отметили её | четыре дела, «Купить тетрадь» зачёркнута, `nextId` — 5 |
+| удалили все дела | пусто, «Осталось: 0 из 0», `nextId` — 1 |
+</ResultBox>
+
+Схема «страница — картинка данных» окупилась: `render` и так вызывается после
+каждого изменения, поэтому одна строка в её конце сохраняет всё. Ни один слушатель не
+пришлось трогать. Фильтр мы не сохраняем: после обновления снова выбраны «Все». Нужно ли
+его помнить — решение автора программы, а не правило.
+
+### Разбор: что было бы без строки с `Math.max`
+
+Оставим, как на дне 29, `let nextId = 4;`. Добавим «Купить тетрадь», обновим
+страницу, добавим «Купить хлеб» и щёлкнем флажок у хлеба. Зачеркнулась тетрадь.
+
+```js
+tasks.map((t) => t.id);   // [1, 2, 3, 4, 4]
+```
+
+**Шаг 1. Что в данных?** Два дела с номером 4. После обновления счётчик снова
+начал с 4, хотя номер 4 уже занят сохранённой тетрадью.
+
+**Шаг 2. Почему отметилась тетрадь?** `taskOf` ищет дело по номеру
+через `find`, а тот возвращает **первое** подходящее — тетрадь.
+Удаление сломается так же: «✕» у хлеба удалит тетрадь.
+
+**Шаг 3. Чиним.** `id` обещал быть номером, который не повторяется
+никогда. Значит, счётчик тоже данные, и его нужно восстанавливать вместе с делами —
+ровно это делает строка с `Math.max`.
+
+## 15. «Табель»: с сервера и с памятью {#tabel}
+
+На дне 30 «Табель» получал данные из `loadSaved` — промиса, который лишь
+делал вид, что ждёт сервер. Теперь строка `saved` переезжает в файл
+`students.json` рядом с `index.html`, и ждать будем по-настоящему.
+А изменения — добавленных и удалённых студентов — будем сохранять.
+
+```js
+// без изменений: всё со дней 23–28 и спрятанная на время загрузки форма (день 30)
+// убраны: строка saved (день 23), loadSaved и цепочка then (день 30) — вместо них:
+
+const KEY = "tabel:reports";
+
+async function loadReports() {
+  const stored = localStorage.getItem(KEY);
+  if (stored !== null) return JSON.parse(stored);        // уже сохраняли — берём своё
+  const response = await fetch("students.json");         // первый раз — с сервера
+  if (!response.ok) throw new Error(`сервер ответил ${response.status}`);
+  const students = await response.json();
+  return students.map(makeReport);
+}
+
+async function start() {
+  form.hidden = true;
+  try {
+    const loaded = await loadReports();
+    reports.push(...loaded);
+    tbody.append(...loaded.map(makeRow).map(addDeleteButton));
+    updateSummary();
+  } catch (err) {
+    document.querySelector("#summary").textContent = `Не удалось загрузить: ${err.message}`;
+  } finally {
+    loading.hidden = true;
+    form.hidden = false;
+  }
+}
+
+start();
+```
+
+И одна новая строка в `updateSummary` со дня 27. Эта функция и так
+вызывается после загрузки, добавления и удаления — идеальное место, чтобы сохранять:
+
+```js
+function updateSummary() {
+  // … две строки со дня 27 без изменений
+  localStorage.setItem(KEY, JSON.stringify(reports));   // новое
+}
+```
+
+<ResultBox>
+| Что сделали | Что на странице |
+| --- | --- |
+| открыли впервые | пять строк из `students.json`, «Отличников: 2 из 5» |
+| добавили «Ильяс», «5 4 9», обновили страницу | шесть строк, Ильяс на месте, «Отличников: 3 из 6» |
+| удалили Мерет, обновили | пять строк без Мерет |
+| хранилище пусто, файл переименован | «Не удалось загрузить: сервер ответил 404» |
+| в хранилище кто-то записал `"[object Object]"` | «Не удалось загрузить: "\[object Object\]" is not valid JSON» — и так при каждом открытии |
+</ResultBox>
+
+Последняя строка — ловушка хранилища: испорченные данные переживают обновление так же
+надёжно, как хорошие. Выход — удалить свой ключ, и «Табель» снова возьмёт данные
+с сервера:
+
+```js
+localStorage.removeItem("tabel:reports");
+// обновили страницу: пять строк из students.json, «Отличников: 2 из 5»
+```
+
+Сохраняем уже посчитанные отчёты, а не сырые оценки: объекты `reports` — чистые
+данные, строки и числа, и `JSON.stringify` переносит их без потерь. Сравните с
+днём 30: цепочка `then` / `catch` / `finally` стала
+`try` / `catch` / `finally`, а смысл не изменился.
+
+## 16. Итоги модуля и что дальше {#next}
+
+| День | Что появилось | «Табель» |
+| --- | --- | --- |
+| 30 | таймеры, промисы, `then` / `catch` / `finally` | «Загрузка…», данные через секунду |
+| 31 | `fetch`, `async` / `await`, `localStorage`, кодирование адреса | данные из файла на сервере, изменения сохраняются |
+
+### Путь «Табеля»
+
+| День | Что появилось |
+| --- | --- |
+| 23 | данные пришли строкой JSON, отчёт стал объектом |
+| 24–26 | таблица на странице, цвет строк классами, строки создаются кодом |
+| 27 | удаление, выделение, <Kbd>Esc</Kbd>, итог под таблицей |
+| 28 | форма добавления с проверкой, подтверждение удаления |
+| 30 | «Загрузка…», данные через промис, форма ждёт загрузки |
+| 31 | данные из файла на сервере, изменения сохраняются |
+
+А расчёт внутри — функция `makeReport` — с дня 23 не изменился ни разу: менялось
+только, откуда приходят данные и куда уходят. Это и есть главный урок курса про устройство
+программ: расчёт отдельно, показ отдельно, данные отдельно.
+
+Курс Essentials прошёл весь путь «Табеля»: от строк в консоли до приложения, которое
+берёт данные с сервера и помнит изменения. Новых тем больше не будет. Завтра,
+на дне 32, — мини-проект «Каталог»: список с сервера через `fetch`, карточки,
+поиск и фильтр, избранное в `localStorage`. Дни 33–36 — итоговый проект.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) | обзор: запросы и ответы | <Full /> |
+| [Using Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch) | руководство: проверка `ok`, чтение тела | <Full /> |
+| [fetch()](https://developer.mozilla.org/en-US/docs/Web/API/Window/fetch) | отправить запрос; промис ответа | <Full /> |
+| [Response](https://developer.mozilla.org/en-US/docs/Web/API/Response) | ответ сервера | <Full /> |
+| [status](https://developer.mozilla.org/en-US/docs/Web/API/Response/status) | код ответа | <Full /> |
+| [ok](https://developer.mozilla.org/en-US/docs/Web/API/Response/ok) | статус от 200 до 299 | <Full /> |
+| [text()](https://developer.mozilla.org/en-US/docs/Web/API/Response/text) | тело строкой | <Full /> |
+| [json()](https://developer.mozilla.org/en-US/docs/Web/API/Response/json) | тело, разобранное как JSON | <Full /> |
+| [async function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function) | функция, возвращающая промис | <Full /> |
+| [await](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/await) | дождаться промиса внутри функции | <Full /> |
+| [Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API) | обзор: два хранилища | <Full /> |
+| [Using the Web Storage API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API/Using_the_Web_Storage_API) | руководство: строки, ключи, отличия | <Full /> |
+| [Storage](https://developer.mozilla.org/en-US/docs/Web/API/Storage) | объект хранилища и его методы | <Full /> |
+| [localStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage) | хранилище «навсегда» | <Full /> |
+| [sessionStorage](https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage) | хранилище вкладки | <Full /> |
+| [setItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/setItem) | записать строку по ключу | <Full /> |
+| [getItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/getItem) | прочитать; `null`, если ключа нет | <Full /> |
+| [removeItem](https://developer.mozilla.org/en-US/docs/Web/API/Storage/removeItem) | удалить ключ | <Full /> |
+| [clear](https://developer.mozilla.org/en-US/docs/Web/API/Storage/clear) | удалить всё | <Full /> |
+| [key](https://developer.mozilla.org/en-US/docs/Web/API/Storage/key) | имя ключа по номеру | <Brief /> |
+| [length](https://developer.mozilla.org/en-US/docs/Web/API/Storage/length) | сколько ключей | <Brief /> |
+| [encodeURIComponent](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent) | кусок данных для адреса | <Full /> |
+| [decodeURIComponent](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/decodeURIComponent) | обратно из кодов | <Full /> |
+| [encodeURI](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURI) | адрес целиком | <Brief /> |
+| [decodeURI](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/decodeURI) | обратно для адреса целиком | <Brief /> |
+| [URIError: URI malformed](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Malformed_URI) | неверный код при раскодировании | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// ЗАПРОС — через Live Server, не file:///
+async function load(url) {
+  const response = await fetch(url);                  // ответ пришёл (или TypeError: Failed to fetch)
+  if (!response.ok) throw new Error(`Сервер ответил ${response.status}`);   // 404 — не ошибка для fetch!
+  return response.json();                             // тело: json() или text(), только один раз
+}
+
+// ASYNC / AWAIT — await только внутри async; async-функция возвращает промис
+button.addEventListener("click", async () => {
+  try {
+    const data = await load("group.json");
+  } catch (err) {
+    message.textContent = err.message;
+  } finally {
+    // уборка
+  }
+});
+
+// ХРАНИЛИЩЕ — только строки; ключ с приставкой проекта
+const saved = localStorage.getItem("todo:tasks");   // null, если нет
+const tasks = saved === null ? [] : JSON.parse(saved);
+localStorage.setItem("todo:tasks", JSON.stringify(tasks));
+localStorage.removeItem("todo:tasks");   localStorage.clear();
+// sessionStorage — то же, но только пока открыта вкладка
+
+// АДРЕС
+fetch(`search?name=${encodeURIComponent(text)}`);   // & ? # пробел — закодированы
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Запрос к несуществующему файлу. Отклонится ли промис `fetch`?
+   <Answer>Нет. Сервер ответил — значит, для `fetch` запрос удался: промис
+   выполнится ответом со `status` 404 и `ok`, равным
+   `false`. Отклоняется он только без ответа — например, когда сервер не
+   запущен.</Answer>
+2. Зачем проверять `response.ok` до `response.json()`?
+   <Answer>Иначе при ошибке мы начнём разбирать страницу ошибки как JSON и получим
+   непонятный `SyntaxError` вместо ясного «Сервер ответил 404».</Answer>
+3. Что вернёт `async function f() { return 5; }` при вызове `f()`?
+   <Answer>Промис, выполненный значением 5. Асинхронная функция всегда возвращает промис.</Answer>
+4. Останавливает ли `await` всю страницу?
+   <Answer>Нет, только свою функцию. Код снаружи идёт дальше, щелчки и таймеры работают.</Answer>
+5. Почему объект перед `setItem` пропускают через `JSON.stringify`?
+   <Answer>Хранилище держит только строки. Объект сам превратится в
+   `"[object Object]"`, и данные потеряются.</Answer>
+6. Зачем ключу приставка вроде `"todo:"`?
+   <Answer>У всех страниц одного адреса сервера одно хранилище. Через Live Server все
+   проекты — на `127.0.0.1:5500`, и без приставок одинаковые ключи
+   разных проектов перепишут друг друга.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" />

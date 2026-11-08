@@ -1,0 +1,919 @@
+---
+title: Day 16 — Strings and their methods
+day: Day 16 • lesson 1
+heading: Strings and their methods
+lead: Module “Strings, numbers, Math and date basics”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+  /* program output aligned in columns: monospace, but not highlighted */
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.78rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- get any character and any piece out of a string;
+- search in a string and understand why the search is case-sensitive;
+- clean user input before comparing it;
+- align the columns of a report without typing a single space by hand;
+- choose between `slice` and `substring` consciously.
+</Goals>
+
+<Toc />
+
+## 1. A string does not change {#immutable}
+
+We have been writing strings since day three: joining, comparing, printing them. Today we will learn that
+they have a couple of dozen built-in skills — and almost all of them will be needed already in the projects
+of this course.
+
+We have to start with the main property, without which half of the methods look strange.
+**A string cannot be changed.** Not at all. Try to replace the first letter:
+
+```js
+const name = "aman";
+name[0] = "A";
+
+console.log(name);   // "aman" — nothing changed
+```
+
+There is no error; the assignment simply did not work. In strict mode from day 4 the language at least
+says what the matter is:
+
+```js
+"use strict";
+const name = "aman";
+name[0] = "A";
+// TypeError: Cannot assign to read only property '0' of string 'aman'
+```
+
+<Important>
+This is the third case in the course where behavior depends on the mode: in normal mode — silence,
+in strict mode — an error. The first two were on day 4 (writing to an undeclared variable)
+and on day 14 (two parameters with the same name).
+</Important>
+
+So how do you “change” a letter? You do not — you **build a new string**:
+
+```js
+let firstName = "aman";
+firstName = "A" + firstName.slice(1);
+
+console.log(firstName);   // "Aman"
+```
+
+Hence a rule that will be useful all day: **no string method changes
+the string itself**. They all return a new one, and the old one stays as it was. So
+the result of a method must be put somewhere, otherwise it is lost:
+
+```js
+let input = "  Aman  ";
+input.trim();           // returned "Aman", but it was not stored anywhere
+console.log(input);     // "  Aman  " — as it was
+
+input = input.trim();   // this is the right way
+console.log(input);     // "Aman"
+```
+
+### Hence chains
+
+The property “always return a new string” has a pleasant consequence. Since the result is
+a string too, you can call the next method on it right away. And one more. You get a chain:
+
+```js
+"  AmAn  ".trim().toLowerCase();                       // "aman"
+"  AmAn  ".trim().toLowerCase().at(0).toUpperCase();   // "A"
+```
+
+It is read from left to right, step by step: took the string, cut off the spaces, converted it to lower
+case, took the first character, raised it to upper case. Each step makes a new string
+and passes it on, while the original stays untouched.
+
+Four steps — and messy input became a proper first letter. Chains of two or three
+links like this are written all the time; making them longer than four is not worth it, because they become
+hard to read.
+
+Only one thing matters: **the order of the steps changes the result**. Compare:
+
+```js
+"  Aman  ".slice(0, 4);          // "  Am"   cut together with the spaces
+"  Aman  ".trim().slice(0, 4);   // "Aman"   cleaned first
+```
+
+## 2. Length and characters {#index}
+
+The length is the `length` property, without parentheses. We have already used it for
+arrays; for strings it counts characters:
+
+```js
+"Aman".length;     // 4
+"Gülnar".length;   // 6
+"".length;         // 0
+```
+
+Characters are numbered from zero, like everything in the language. You can get one character in three ways,
+and they are slightly different:
+
+```js
+const name = "Gülnar";
+
+name[0];         // "G"
+name.charAt(0);  // "G"
+name.at(0);      // "G"
+```
+
+<Scheme src="scheme-index.svg">Indices from the start and from the end. The last character is `length - 1` or simply `at(-1)`</Scheme>
+
+The difference between the three ways shows at the edges — when there is no character at that index:
+
+| Request | `name[i]` | `charAt(i)` | `at(i)` |
+| --- | --- | --- | --- |
+| the character exists | "G" | "G" | "G" |
+| index 99 | `undefined` | `""` | `undefined` |
+| index −1 | `undefined` | `""` | **"r"** |
+
+```js
+const name = "Gülnar";
+
+name.at(-1);                // "r"      the last character
+name[name.length - 1];      // "r"      the same, but longer
+name.charAt(99);            // ""       an empty string, not undefined!
+name.at(99);                // undefined
+```
+
+<Mistake>
+`charAt` returns **an empty string** where the other two give
+`undefined`. This is a trap in checks: `if (name.charAt(99))`
+will not work, because an empty string is falsy — but `if (name.at(99))`
+will not work either, for the same reason. Check the length instead.
+</Mistake>
+
+One more thing, important for the future: `length` counts not “letters” but the units a string
+is built from inside. For the letters of any alphabet this is the same thing, but not for emoji:
+
+```js
+"Aman".length;   // 4
+"🙂".length;     // 2 — one icon, but the length is two
+```
+
+For now just remember this fact; it is taken apart in detail in course 2, where there will be a chapter
+about encodings.
+
+## 3. Searching for a piece {#search}
+
+Three methods that answer the question “is this in the string”.
+
+```js
+const text = "Aman Meret Aman";
+
+text.indexOf("Aman");       // 0    the first match
+text.indexOf("Aman", 1);    // 11   search starting from position 1
+text.lastIndexOf("Aman");   // 11   the last match
+text.indexOf("Sapar");      // -1   not found
+```
+
+`indexOf` gives a position, and if it found nothing — **minus one**.
+Not zero, not `undefined`. Zero here means “found at the very start”, and this is
+an eternal source of confusion:
+
+```js
+if (text.indexOf("Aman")) {      // A MISTAKE: 0 is falsy
+  console.log("found");
+}
+
+if (text.indexOf("Aman") !== -1) {   // correct
+  console.log("found");
+}
+```
+
+This is exactly why `includes` appeared — it answers `true` or
+`false`, and there is nothing to confuse:
+
+```js
+text.includes("Meret");   // true
+text.includes("meret");   // false — case matters!
+```
+
+<Important>
+**Searching in a string tells capital and small letters apart.** This applies to all
+the methods of the day. How to live with it — in section 7.
+</Important>
+
+### How to find all matches
+
+The second argument of `indexOf` — “search starting from here” — is needed exactly for this.
+On its own the method finds only the first match, but if you move the starting point
+past the found one each time, you go through all of them:
+
+```js
+const text = "Aman Meret Aman Sapar Aman";
+let from = 0;
+let pos = text.indexOf("Aman", from);
+
+while (pos !== -1) {
+  console.log("found at position", pos);  // 0, then 11, then 22
+  from = pos + 1;
+  pos = text.indexOf("Aman", from);
+}
+```
+
+The `while` loop from day 10 fits here better than `for`: you do not know in advance
+how many turns there will be. And notice `from = pos + 1` — without moving at least by one,
+the search would find the same place again, and the loop would never end.
+
+## 4. The start and the end {#edges}
+
+A special case of searching is checking the start or the end of a string. There are two methods
+with telling names for this:
+
+```js
+const text = "Aman Meret Aman";
+
+text.startsWith("Aman");     // true
+text.endsWith("Aman");       // true
+text.startsWith("Meret");    // false
+text.startsWith("Meret", 5); // true — checking starting from position 5
+```
+
+The second argument of `startsWith` moves the starting point. In `endsWith`
+it works differently — it sets where the string is considered to end.
+
+These methods read better than `indexOf(...) === 0`, and that is exactly why they are
+worth preferring. Compare two ways of writing the same thing:
+
+```js
+const fileName = "index.html";
+
+if (fileName.indexOf(".html") === fileName.length - 5) { }   // go figure
+if (fileName.endsWith(".html")) { }                          // clear at once
+```
+
+## 5. Cutting: slice {#slice}
+
+The main method for cutting out a piece. It takes two boundaries: **from where**
+and **up to where, not including it**.
+
+```js
+const word = "Turkmenistan";
+
+word.slice(0, 4);   // "Turk"      from 0 to 4, the fourth is not included
+word.slice(4);      // "menistan"  without a second boundary — to the end
+word.slice(-6);     // "nistan"    a negative one — counting from the end
+```
+
+<Scheme src="scheme-slice.svg">Boundaries stand *between* characters. The second boundary is not included in the result</Scheme>
+
+It is convenient to think like this: **a boundary is not a character but a gap between characters**.
+Then `slice(0, 4)` reads as “from the start to gap number 4”, and the length
+of the result is exactly `4 − 0`.
+
+If the boundaries are swapped, `slice` honestly gives an empty string:
+
+```js
+word.slice(4, 2);   // "" — the second boundary is to the left of the first
+```
+
+### What happens at the edges
+
+`slice` never crashes and never complains about boundaries outside the string —
+it simply trims them to sensible ones. This is handy and worth knowing by heart:
+
+```js
+word.slice(0, 100);   // "Turkmenistan"  boundary beyond the length — to the end
+word.slice(100);      // ""              start past the end — empty
+word.slice(-100);     // "Turkmenistan"  too far back — from the start
+
+word.slice(0, -1);    // "Turkmenista"   everything except the last
+word.slice(-4, -1);   // "sta"           three characters before the last
+```
+
+As you can see, the second boundary can be negative too: this is exactly how the technique “cut off the last
+character” is written.
+
+| Call | What it means |
+| --- | --- |
+| `slice(n)` | from `n` to the end |
+| `slice(0, n)` | the first `n` characters |
+| `slice(-n)` | the last `n` characters |
+| `slice(0, -n)` | everything except the last `n` |
+
+These four forms cover almost all cutting tasks. If you need something
+more complex, most likely you are looking not for `slice` but for the search from section 3.
+
+## 6. `substring` and its oddities {#substring}
+
+There is a second method for the same thing — `substring`. It works almost the same way,
+but in two cases it behaves unexpectedly, and you need to know this, because in other people’s code
+it is met often.
+
+```js
+const word = "Turkmenistan";
+
+word.substring(0, 4);    // "Turk"   — like slice
+word.substring(4, 2);    // "rk"     — SWAPS the boundaries!
+word.substring(-3, 4);   // "Turk"   — treats a negative one as zero
+```
+
+| Case | `slice` | `substring` |
+| --- | --- | --- |
+| an ordinary call | the same | the same |
+| boundaries the other way around | `""` | swaps them |
+| a negative boundary | counts from the end | treats it as zero |
+
+<Important>
+The agreement of the course: **we write `slice`**. It is predictable
+and can count from the end. You need to know `substring` to read other people’s code,
+but there is no need to write it.
+</Important>
+
+## 7. Case {#case}
+
+Two methods convert a whole string to one case:
+
+```js
+"Aman".toUpperCase();   // "AMAN"
+"AMAN".toLowerCase();   // "aman"
+```
+
+Their main use is not beauty but **comparison**. Search and `===`
+tell case apart, but a person typing a name does not:
+
+```js
+const typed = "  AmAn  ";
+
+typed === "Aman";                          // false
+typed.trim().toLowerCase() === "aman";     // true
+```
+
+Hence a general technique: **before comparing, both sides are brought to one form**.
+Both — not just one, otherwise the comparison will still fall apart.
+
+```js
+function sameName(a, b) {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+sameName("  AmAn ", "aman");   // true
+```
+
+### Walkthrough: why the name did not match
+
+This is the most common complaint in programs with input: “I typed it right, but it does not accept it”.
+Let us take it apart step by step — with the technique from day 15.
+
+```js
+const saved = "Aman";
+const typed = "aman ";
+
+typed === saved;   // false, although on the screen the strings look the same
+```
+
+**Step 1. We look at the boundaries of the strings.** A space at the end is not visible by eye,
+so we print each string in brackets — this way you see where it starts and ends:
+
+```js
+console.log("[" + typed + "]", "[" + saved + "]");
+// [aman ] [Aman]
+```
+
+Two differences are already visible: a space on the right and a small first letter.
+
+**Step 2. We check the lengths.** If the strings are “the same” but the lengths differ,
+the matter is an invisible character:
+
+```js
+typed.length;   // 5
+saved.length;   // 4
+```
+
+**Step 3. We fix one cause at a time.** First the space:
+
+```js
+typed.trim() === saved;   // still false — so there was a second cause
+
+// step 4: now the case
+typed.trim().toLowerCase() === saved.toLowerCase();   // true
+```
+
+Notice step 3: after the first fix the comparison **still did not
+work**. This is normal and very useful — it means there were two causes, and if we
+had fixed both at once, we would not have learned about it. Fixing one cause at a time and checking
+after each one is the same habit as rewriting code in small steps.
+
+<Mistake>
+For Turkish these methods have a flaw: they do not know about the letter
+`ı` without a dot. `"I".toLowerCase()` gives `"i"`,
+although by the rules of the language it should be `"ı"`. There is a variant
+that takes the language into account — `toLocaleLowerCase("tr")` — and it gives the right answer,
+but we will take it apart in course 2 together with the basics of `Intl`.
+</Mistake>
+
+## 8. Cleaning the edges {#trim}
+
+A user almost always brings extra spaces: copied something with a space, pressed space
+before sending. Three methods remove them at the edges — and only at the edges:
+
+```js
+const messy = "   Aman   ";
+
+messy.trim();        // "Aman"
+messy.trimStart();   // "Aman   "
+messy.trimEnd();     // "   Aman"
+```
+
+Spaces inside the string stay untouched: `"Aman  Meret".trim()` will keep
+its two spaces in the middle. Removing them is a task for the regular expressions
+of course 2.
+
+The rule is simple: **everything that came from a person gets `trim` first**.
+This is one of those lines that are written without thinking.
+
+### What counts as a space
+
+The “spaces” for `trim` are not only the space itself. It also removes the tab
+`\t`, the line break `\n` and a few rare characters that
+look like empty space. Among them is the **non-breaking space**, the very one
+that comes from Word and from web pages: `trim` removes it too.
+
+But there are also characters that look like emptiness yet do not count as spaces. The most
+famous one is the “zero-width space”. A string with it stays longer after `trim`
+than it seems, and the comparison will not work, although everything looks the same on the screen.
+
+<Mistake>
+If a name does not match and `trim` has already been called, compare the `length`
+of both strings. A difference in length with the same look means an invisible
+character sits inside, one that `trim` does not know. Removing such characters is a task for the regular
+expressions of course 2.
+</Mistake>
+
+## 9. Padding to a width {#pad}
+
+The opposite task: make a string of the right length by adding characters. On the left —
+`padStart`, on the right — `padEnd`.
+
+```js
+"5".padStart(3, "0");      // "005"
+"Aman".padEnd(10, ".");    // "Aman......"
+"Aman".padEnd(10);         // "Aman      " — a space by default
+```
+
+The first argument is not “how much to add” but **what length the result
+must have**. If the string is already longer, nothing happens:
+
+```js
+"Turkmenistan".padStart(5, "0");   // "Turkmenistan" — unchanged
+```
+
+The padding can be made of several characters; then it is repeated and cut to fit:
+
+```js
+"7".padStart(5, "ab");   // "abab7"
+```
+
+The main use is aligning columns in output, and that is exactly what we will do in section 15.
+The second most common one is numbers with leading zeros: time, numbers, codes.
+
+```js
+const hours = 9;
+const minutes = 5;
+
+console.log(String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0"));
+// "09:05"
+```
+
+## 10. Repeating {#repeat}
+
+The `repeat` method repeats a string a given number of times. Most often it is used
+to draw separator lines:
+
+```js
+"-".repeat(40);    // forty hyphens
+"ab".repeat(3);    // "ababab"
+"ab".repeat(0);    // ""
+"ab".repeat(3.5);  // "ababab" — a fraction is rounded down
+```
+
+It has two errors, and both are a `RangeError`, that is, “a number outside the allowed
+range”:
+
+```js
+"abc".repeat(-1);
+// RangeError: Invalid count value: -1
+
+"abc".repeat(Infinity);
+// RangeError: Invalid count value: Infinity
+
+"abc".repeat(1e10);
+// RangeError: Invalid string length — the argument is fine, the string did not fit
+```
+
+The difference between the second and the third message deserves attention: `Invalid count value`
+means “a bad argument”, `Invalid string length` means “the argument is fine,
+but the string came out too long”. On MDN these pages are titled with the Firefox wordings
+and look completely different — they are marked in the reference of the day.
+
+## 11. Joining {#concat}
+
+The `concat` method joins strings:
+
+```js
+"Aman".concat(" ", "Meret");   // "Aman Meret"
+"Aman" + " " + "Meret";        // "Aman Meret" — the same
+```
+
+The ordinary plus from day 6 does exactly the same, and it is almost always the one that is written.
+
+Why `concat`, then? It takes any number of arguments and is sometimes
+handy when strings lie in a rest parameter from day 14. But in ordinary code
+the agreement is this: **for two or three pieces — a plus, for anything more complex —
+a template literal from the next section**.
+
+## 12. Template literals {#template}
+
+You have seen them since day three and used them without taking them apart. It is time to take them apart. A template
+literal is written in backticks, and you can insert values into it with
+`${}`:
+
+```js
+const name = "Aman";
+const avg = 4.333;
+
+`${name}: average ${avg.toFixed(2)}`;   // "Aman: average 4.33"
+```
+
+Compare with a plus: `name + ": average " + avg.toFixed(2)` — the same thing,
+but you have to count the quotes and the spaces inside them by eye.
+
+Any expression fits inside `${}`, not only a variable name:
+a method call, arithmetic, even the ternary operator from day 7.
+
+```js
+`name length: ${name.length}, in upper case: ${name.toUpperCase()}`;
+// "name length: 4, in upper case: AMAN"
+
+`Result: ${avg >= 4.5 ? "excellent" : "good"}`;
+// "Result: good"
+```
+
+The second skill of template literals is **a line break right in the text**.
+In ordinary quotes you cannot do this:
+
+```js
+const multi = `First line
+Second line`;
+
+console.log(multi);
+// First line
+// Second line
+```
+
+If you need the dollar sign with a curly brace itself inside a template literal, it is written
+in ordinary quotes and substituted:
+
+```js
+`curly braces: ${"${not substituted}"}`;
+// "curly braces: ${not substituted}"
+```
+
+## 13. Character codes {#codes}
+
+Inside, every character is a number. Four methods convert there and back; in everyday
+work they are rarely needed, but they are worth knowing.
+
+```js
+"Aman".charCodeAt(0);        // 65     the code of the first character
+"Aman".codePointAt(0);       // 65     the same for ordinary letters
+String.fromCharCode(65, 109);      // "Am"
+String.fromCodePoint(128578);      // "🙂"
+```
+
+The difference between the pairs shows up on the same emoji whose `length` is two:
+
+```js
+"🙂".charCodeAt(0);    // 55357  — half of the icon, meaningless on its own
+"🙂".codePointAt(0);   // 128578 — the whole icon
+```
+
+`fromCodePoint` has its own error — when the number cannot be the code of a character:
+
+```js
+String.fromCodePoint(-1);
+// RangeError: Invalid code point -1
+
+String.fromCodePoint(3.14);
+// RangeError: Invalid code point 3.14
+```
+
+## 14. Turning into a string {#convert}
+
+Three ways to get a string from anything. We already met them on day 8, when
+we took apart type conversion — now we look at them from the side of strings.
+
+```js
+String(5);           // "5"
+String(null);        // "null"
+String(undefined);   // "undefined"
+
+(5).toString();      // "5"
+(5).toString(2);     // "101" — in the binary system
+
+"Aman".valueOf();    // "Aman"
+```
+
+The difference is only at the edges: `String()` copes with anything,
+while `toString()` cannot be called on `null` and `undefined` —
+you get a `TypeError`. So in code people write `String(x)`.
+
+`toString` has a bonus for numbers: the second argument is the numeral system.
+And `valueOf` for an ordinary string simply returns the string itself and is really needed
+only with “string objects”, which we will not meet in this course.
+
+## 15. The “Report card”: aligning the table {#tabel}
+
+Until now the report was just lines. Today’s methods turn it into a table
+with even columns — and all of it without a single space typed by hand.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+const isValidMark = (mark) =>
+  typeof mark === "number"
+  && !Number.isNaN(mark)
+  && mark >= MIN_MARK
+  && mark <= MAX_MARK;
+
+const isFive = (mark) => mark === MAX_MARK;
+
+const sum = (numbers) => {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+};
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "top student";
+  if (avg >= good) return "good student";
+  if (avg >= pass) return "average student";
+  return "needs work";
+}
+
+// new: the header and a row of the table
+function makeHeader() {
+  return "Name".padEnd(NAME_WIDTH) + "Avg".padStart(6) + "Num".padStart(4) + "  Verdict";
+}
+
+function makeRow(name = "unnamed", ...marks) {
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "no valid marks";
+  }
+
+  const avg = average(valid);
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(valid.length).padStart(4)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(40);
+
+console.log(makeHeader());
+console.log(line);
+console.log(makeRow("Aman", 5, 4, 9, 3, 5, 0, 4, 5));
+console.log(makeRow("Meret", 3, 3, 4));
+console.log(makeRow("Gülnar", 9, 0, "five"));
+console.log(makeRow("Sapar", 5, 5, 4, 5));
+console.log(makeRow("Oguljan", 4, 4, 5));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Name           Avg Num  Verdict
+----------------------------------------
+Aman          4.33   6  good student
+Meret         3.33   3  average student
+Gülnar      no valid marks
+Sapar         4.75   4  top student
+Oguljan       4.33   3  good student
+----------------------------------------
+```
+</ResultBox>
+
+The first four have the same numbers as yesterday — only the presentation changed. “Oguljan”
+now has marks: 4, 4 and 5. Let us take apart what works where.
+
+**`padEnd(12)` for the name** pads on the right, so all the names
+start in one column. “Oguljan” is seven long, “Aman” is four, and the gap after
+them differs exactly enough for the next column to line up.
+
+**`padStart(6)` for the average** pads on the left, and the numbers
+are aligned to the right edge, as in an accounting table. For numbers it is always so:
+ones under ones.
+
+**`String(valid.length)`** — because `padStart`
+exists only on strings. The number is first turned into a string, and this is exactly the case
+from section 14 for which `String()` exists.
+
+**`"-".repeat(40)`** — a line of the right width in one call
+instead of forty hyphens in quotes.
+
+<TryIt>
+Three experiments.
+\
+\
+**The first.** Change `NAME_WIDTH` to 6 and run it. What happened
+to the columns, and why is “Oguljan” to blame? How do you choose the width so that the table
+does not fall apart on any names?
+\
+\
+**The second.** Replace `padStart(6)` with `padEnd(6)`
+for the average. Compare the two outputs and explain why numbers are usually
+aligned to the right.
+\
+\
+**The third.** The line “no valid marks” breaks the columns. Make it
+stand in the “Verdict” column, with dashes in the “Avg” and “Num” columns.
+</TryIt>
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+### A map of the day’s methods
+
+Eighteen methods are a lot if you keep them as a list. By job they fall into
+four groups, and the question “which method to take” is almost always settled by choosing the group.
+
+<Scheme src="scheme-mistakes.svg">Four tasks that string methods solve. The fifth group — character codes — is rarely needed</Scheme>
+
+| Mistake | Why | How to do it right |
+| --- | --- | --- |
+| `text.trim()` without an assignment | methods do not change the string | `text = text.trim()` |
+| `if (text.indexOf("a"))` | 0 means “found at the start”, but it is falsy | `!== -1` or `includes` |
+| `name[name.length]` | the last index is `length - 1` | `name.at(-1)` |
+| `substring(4, 2)` expecting emptiness | it swaps the boundaries | `slice` |
+| `padStart(3)` as “add three” | it is the length of the result, not an addition | calculate the whole length you need |
+| `(5).padStart(2)` | a number has no string methods | `String(5).padStart(2, "0")` |
+| comparing without bringing to one case | “Aman” and “aman” are different strings | `trim().toLowerCase()` on both sides |
+
+### What we did not have today
+
+We skipped three string methods on purpose: `split`, `replace`
+and `match`. They really open up together with regular expressions,
+and taking them apart separately would only confuse. All of this is module I6 of course 2.
+
+Tomorrow, on day 17, we take up numbers: `Number`, `parseInt`,
+`toFixed`, and in the second half of the day — a first acquaintance with dates.
+By the way, we have been using `toFixed` since day three without ever taking it apart —
+tomorrow this debt will be closed.
+
+### Where today’s topics come up later
+
+This day is one of those that pay off right away. Strings lie at the base of everything we will
+do next, and almost every following module relies on today’s methods.
+
+| Day | Where it comes in handy |
+| --- | --- |
+| 17 | `toFixed` returns a string — so everything from today applies to it |
+| 19–20 | arrays have `slice`, `indexOf`, `includes` and `at` with the same rules |
+| 25 | text on the page is changed with a string, and the string is built with a template literal |
+| 28 | form validation is almost entirely `trim`, `length` and `includes` |
+| 31 | the address of a request to the server is built from pieces, and the answer comes as a string |
+
+The second row of the table is especially worth noting: `slice`, `at`,
+`indexOf` and `includes` work exactly the same way for arrays, including
+negative indices and −1 on failure. Having learned them once for strings, you get
+them for arrays for free.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [String](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String) | an overview of all the skills of strings | <Full /> |
+| [length](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/length) | the length in units, not in letters | <Full /> |
+| [at](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/at) | a character by index, understands negative ones | <Full /> |
+| [charAt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/charAt) | a character by index; past the edge — an empty string | <Full /> |
+| [includes](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/includes) | whether a piece is there: `true` / `false` | <Full /> |
+| [indexOf](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/indexOf) | the position of the first match or −1 | <Full /> |
+| [lastIndexOf](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/lastIndexOf) | the position of the last match | <Full /> |
+| [startsWith](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/startsWith) | whether the string starts with a piece | <Full /> |
+| [endsWith](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/endsWith) | whether the string ends with a piece | <Full /> |
+| [slice](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/slice) | a piece by two boundaries, understands negative ones | <Full /> |
+| [substring](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/substring) | the same, but swaps the boundaries | <Full /> |
+| [toLowerCase](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/toLowerCase) | everything in small letters | <Full /> |
+| [toUpperCase](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/toUpperCase) | everything in capital letters | <Full /> |
+| [trim](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/trim) | remove spaces from both edges | <Full /> |
+| [trimStart](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/trimStart) | remove spaces on the left | <Full /> |
+| [trimEnd](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/trimEnd) | remove spaces on the right | <Full /> |
+| [padStart](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/padStart) | pad on the left to the right length | <Full /> |
+| [padEnd](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/padEnd) | pad on the right to the right length | <Full /> |
+| [repeat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/repeat) | repeat a string N times | <Full /> |
+| [concat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/concat) | join strings; people usually write `+` | <Full /> |
+| [Template literals](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals) | backticks, `${}`, a line break | <Full /> |
+| [String()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/String) | turn anything into a string | <Brief /> |
+| [toString](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/toString) | a string from a value; for numbers also the numeral system | <Brief /> |
+| [valueOf](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/valueOf) | the string itself; needed with string objects | <Brief /> |
+| [charCodeAt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/charCodeAt) | the code of a unit by index | <Brief /> |
+| [codePointAt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/codePointAt) | the code of a whole character | <Brief /> |
+| [fromCharCode](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/fromCharCode) | a string from unit codes | <Brief /> |
+| [fromCodePoint](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/fromCodePoint) | a string from character codes | <Brief /> |
+| [Error: a negative repeat count](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Negative_repetition_count) | in Chrome — `Invalid count value: -1` | <Brief /> |
+| [Error: the string is too long](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Resulting_string_too_large) | in Chrome — `Invalid string length` | <Brief /> |
+| [Error: not a code point](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Not_a_valid_code_point) | in Chrome — `Invalid code point -1` | <Brief /> |
+
+Thirty-one pages — the biggest reference since the start of the course. Twenty-one are
+covered in depth, ten are given for recognition.
+</Ref>
+
+<Cheatsheet>
+```js
+// A STRING DOES NOT CHANGE — all methods return a new one
+let input = "  Aman  ";
+input = input.trim();   // without an assignment the result is lost
+
+// LENGTH AND CHARACTERS
+const name = "Gülnar";
+name.length;          // 6, the last index is 5
+name[0];  name.charAt(0);  name.at(0);   // "G"
+name.at(-1);          // "r" — only at understands negative ones
+name.charAt(99);      // "" an empty string; name.at(99) — undefined
+
+// SEARCH
+const group = "Aman Meret Aman";
+group.indexOf("Aman");       // 0, not found → -1
+group.lastIndexOf("Aman");   // 11 — from the end
+group.includes("Meret");     // true/false — prefer it
+group.startsWith("Aman");  group.endsWith("Aman");   // true
+// CASE MATTERS in all four
+
+// CUT
+const word = "Turkmenistan";
+word.slice(0, 4);       // "Turk"      the second boundary is NOT included
+word.slice(4);          // "menistan"  to the end
+word.slice(-6);         // "nistan"    from the end
+word.slice(4, 2);       // "" — boundaries the other way around
+word.substring(4, 2);   // "rk" — SWAPS them; write slice
+
+// ADJUST
+"Aman".toUpperCase();   // "AMAN"
+"AMAN".toLowerCase();   // "aman"
+const a = "  AmAn ";
+const b = "aman";
+a.trim().toLowerCase() === b.trim().toLowerCase();   // true — a human-like comparison
+"  Aman  ".trimStart();   // "Aman  "
+"  Aman  ".trimEnd();     // "  Aman"
+
+// PAD AND REPEAT
+"5".padStart(3, "0");         // "005" — 3 is the LENGTH OF THE RESULT
+"Aman".padEnd(10, ".");       // "Aman......"
+"-".repeat(40);               // a line
+String(5).padStart(2, "0");   // "05" — a number has no string methods
+
+// BUILD
+const avg = 4.333;
+`${name}: ${avg.toFixed(2)}`;   // "Gülnar: 4.33" — a template literal
+`a line break
+right inside the text`;
+
+// ERRORS (all RangeError)
+// "abc".repeat(-1)           → Invalid count value: -1
+// "abc".repeat(1e10)         → Invalid string length
+// String.fromCodePoint(-1)   → Invalid code point -1
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why does `text.trim()` on its own fix nothing?
+   <Answer>A string cannot be changed, so all methods return a **new**
+   string, and the old one stays the same. The result must be assigned:
+   `text = text.trim()`.</Answer>
+2. Why is `indexOf` dangerous in a condition, and what do you write instead?
+   <Answer>When the piece is found at the very start, `indexOf` returns 0,
+   and zero in a condition is falsy. You need to compare with −1 explicitly
+   (`!== -1`) or use `includes`.</Answer>
+3. What will `"Turkmenistan".slice(4, 2)` return, and what will
+   `substring(4, 2)` return?
+   <Answer>`slice` will return an empty string, because the second boundary is to the left
+   of the first. `substring` will silently swap the boundaries and return
+   `"rk"`. That is why in the course we write `slice`.</Answer>
+4. What does the number 3 mean in the call `"5".padStart(3, "0")`?
+   <Answer>The length of the result, not the number of characters to add. You get
+   `"005"` — three characters in all. If the string is already longer than three,
+   the method changes nothing.</Answer>
+5. Why will `"AmAn".trim()` not help to compare a name with what the user
+   typed?
+   <Answer>`trim` removes only the spaces at the edges and leaves the case as it is.
+   To compare, you need to bring both sides to one case:
+   `a.trim().toLowerCase() === b.trim().toLowerCase()`.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String" />

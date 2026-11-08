@@ -1,0 +1,874 @@
+---
+title: День 18 — Math и случайные числа
+day: День 18 • урок 1
+heading: Math и случайные числа
+lead: Модуль «Строки, числа, Math и основы дат». 45 минут.
+css: |
+  h1 { border-bottom-color: #0ea5e9; }
+  h2 { color: #0369a1; background: #f0f9ff; border-left-color: #0ea5e9; }
+  h3 { color: #075985; }
+  .step-number { background: #0ea5e9; }
+  .toc a { color: #0369a1; }
+  .plain-out { margin: 0; font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem; line-height: 1.55; color: #334155; overflow-x: auto; }
+---
+
+<Goals>
+- выбирать между четырьмя способами округления осознанно;
+- округлять до десятков, сотен и любого шага;
+- получать случайное целое в заданном диапазоне — правильной формулой;
+- объяснить, почему `Math.round` в этой формуле портит края;
+- находить наибольшее и наименьшее в списке.
+</Goals>
+
+<Toc />
+
+## 1. `Math` — набор инструментов {#what}
+
+`Math` устроен не так, как `String` и `Number`.
+Это не тип значения: чисел вида «математика» не бывает. Это просто **коробка
+с функциями и константами**, которая лежит в языке готовой.
+
+```js
+Math.PI;          // 3.141592653589793
+Math.round(4.6);  // 5
+Math.max(3, 7);   // 7
+```
+
+Отсюда два следствия. Первое: `Math` не создают — `new Math()`
+бессмысленно. Второе: все его умения вызываются через точку от самого слова
+`Math`, а не от числа:
+
+```js
+(4.6).toFixed(0);   // "5"  — это метод ЧИСЛА, возвращает строку
+Math.round(4.6);    // 5    — это функция MATH, возвращает число
+```
+
+Разница важнее, чем кажется. Вчерашний `toFixed` нужен для **показа**
+и отдаёт строку. Сегодняшние функции нужны для **вычислений** и отдают числа.
+Путать их — одна из самых частых ошибок в отчётах.
+
+## 2. Четыре способа округлить {#rounding}
+
+Способов ровно четыре, и разница между ними — в том, куда идти, когда число дробное.
+
+```js
+Math.round(4.6);   // 5   к ближайшему
+Math.round(4.4);   // 4
+Math.round(4.5);   // 5   ровно половина — вверх
+```
+
+Три остальных не смотрят, какая половина ближе, — у каждого своё направление:
+
+```js
+Math.floor(4.9);   // 4   всегда вниз
+Math.ceil(4.1);    // 5   всегда вверх
+Math.trunc(4.9);   // 4   просто отбросить дробную часть
+```
+
+Разница между `floor` и `ceil` видна на задаче, которая
+встречается постоянно: сколько нужно коробок, если в каждую влезает десять предметов.
+
+```js
+const items = 47;
+const perBox = 10;
+
+Math.floor(items / perBox);   // 4   столько коробок наполнится целиком
+Math.ceil(items / perBox);    // 5   столько коробок понадобится
+```
+
+Оба ответа правильные — на разные вопросы. Именно поэтому «округлить» без уточнения
+направления недостаточно.
+
+<Scheme src="scheme-rounding.svg">Четыре направления округления. Для положительных чисел вариантов по сути три</Scheme>
+
+Когда что брать, решается вопросом «а что будет неправильно, если ошибёмся»:
+
+| Задача | Метод | Почему |
+| --- | --- | --- |
+| показать средний балл | `round` | нужно ближайшее |
+| сколько целых коробок войдёт | `floor` | неполная не считается |
+| сколько коробок понадобится | `ceil` | под остаток нужна ещё одна |
+| отбросить копейки | `trunc` | без округления, просто срезать |
+
+## 3. Отрицательные числа {#negative}
+
+Здесь прячется подвох, на который попадаются все. Проверьте:
+
+```js
+Math.floor(-4.1);   // -5   «вниз» — это в сторону минус бесконечности
+Math.trunc(-4.1);   // -4   «отбросить» — это в сторону нуля
+
+Math.ceil(-4.9);    // -4   «вверх» — в сторону плюс бесконечности
+Math.round(-4.5);   // -4   ровно половина всегда идёт ВВЕРХ
+```
+
+Две строки стоит запомнить отдельно. **`floor` и `trunc`
+на минусах расходятся**: первый уводит дальше от нуля, второй просто стирает
+дробную часть. На положительных числах они одинаковы, поэтому ошибку не видно, пока
+в данные не попадёт минус.
+
+И **`Math.round(-4.5)` даёт −4, а не −5**. Правило «половина
+вверх» действует буквально: вверх по числовой прямой, а не «дальше от нуля».
+Симметрии здесь нет.
+
+<Mistake>
+Если в программе есть отрицательные значения — разницу температур, долг, смещение —
+выберите метод сознательно и напишите проверку на минусе. Ошибка в одну единицу
+на границе находится потом очень долго.
+</Mistake>
+
+## 4. Округление до десятков и шага {#steps}
+
+Все четыре метода умеют округлять только до целых. Но приём с делением и умножением
+даёт любой шаг:
+
+```js
+const price = 1234.567;
+
+Math.round(price);              // 1235   до целых
+Math.round(price / 10) * 10;    // 1230   до десятков
+Math.round(price / 100) * 100;  // 1200   до сотен
+Math.floor(price / 5) * 5;      // 1230   вниз до кратного пяти
+```
+
+Читается изнутри наружу: **поделили на шаг, округлили, умножили обратно**.
+Если шаг 10, то после деления «десятки» встают на место единиц, округление работает
+как обычно, а умножение возвращает всё на место.
+
+Тем же приёмом округляют и в другую сторону — до сотых долей:
+
+```js
+Math.round(4.3333 * 100) / 100;   // 4.33 — число, а не строка
+```
+
+Разница с `toFixed(2)` принципиальная: `toFixed` даёт строку
+`"4.33"` для показа, а эта запись — **число** 4.33, с которым
+можно считать дальше.
+
+### Деньги: отбросить или округлить
+
+С деньгами оба действия нужны, и путать их нельзя:
+
+```js
+const total = 1234.567;
+
+Math.trunc(total);                 // 1234     отбросили копейки совсем
+Math.round(total * 100) / 100;     // 1234.57  оставили копейки, округлив
+```
+
+Первое — это «сколько целых манатов», второе — «сумма с точностью до копейки».
+Вчерашнее правило остаётся в силе: **хранить и считать лучше прямо в копейках**,
+целыми числами, а делить на сто один раз при выводе.
+
+```js
+const kopecks = Math.round(total * 100);   // 123457 — целое, точное
+kopecks / 100;                             // 1234.57 — только для показа
+```
+
+## 5. Модуль и знак {#abs-sign}
+
+```js
+Math.abs(-5);    // 5    расстояние от нуля
+Math.abs(5);     // 5
+
+Math.sign(-5);   // -1   отрицательное
+Math.sign(0);    // 0    ноль
+Math.sign(5);    // 1    положительное
+```
+
+`Math.abs` мы уже применяли вчера — для сравнения дробных чисел
+с `Number.EPSILON`. Это его типичная работа: **«насколько отличаются»
+без оглядки на то, что больше**.
+
+```js
+const plan = 4.5;
+const fact = 4.2;
+
+Math.abs(plan - fact) < 0.5;   // true — отклонение меньше половины балла
+```
+
+`Math.sign` нужен реже, но незаменим, когда важно только направление:
+растёт показатель или падает, вверх или вниз двигать элемент.
+
+```js
+const wasAvg = 4.2;
+const nowAvg = 3.9;
+
+Math.sign(nowAvg - wasAvg);          // -1 — упал
+Math.abs(nowAvg - wasAvg).toFixed(1); // "0.3" — на сколько
+```
+
+Вместе они отвечают на два разных вопроса об одной и той же разнице: **куда**
+и **насколько**. В отчётах это часто две соседние колонки — стрелка
+и число.
+
+## 6. Степени и корни {#pow-sqrt}
+
+```js
+Math.pow(2, 10);   // 1024
+2 ** 10;           // 1024 — то же самое, оператор из дня 6
+
+Math.sqrt(144);    // 12    квадратный корень
+Math.sqrt(-1);     // NaN   корня из отрицательного нет
+Math.cbrt(27);     // 3     кубический корень
+Math.hypot(3, 4);  // 5     длина гипотенузы
+```
+
+У оператора `**` есть две тонкости, о которых стоит знать. Он считается
+**справа налево**, и он не дружит с минусом перед числом:
+
+```js
+2 ** 3 ** 2;   // 512 — это 2 в степени 9, а не 8 в квадрате
+(-2) ** 2;     // 4   скобки обязательны
+```
+
+```js
+// -2 ** 2;   → SyntaxError: Unary operator used immediately before exponentiation expression.
+//                         Parenthesis must be used to disambiguate operator precedence
+-(2 ** 2);    // -4 — «минус от двух в квадрате»; (-2) ** 2 — это 4
+```
+
+Язык здесь не угадывает, а честно требует скобок: `-2 ** 2` можно прочитать
+и как «минус два в квадрате», и как «минус от двух в квадрате», и это разные числа.
+
+`Math.pow` и оператор `**` делают одно и то же; в новом коде
+пишут оператор, а `pow` остаётся в старом. `Math.hypot` —
+это `sqrt(a² + b²)` одной записью: расстояние между двумя точками.
+Координаты точек на странице появятся на дне 27, в событиях щелчка.
+
+## 7. Наибольшее и наименьшее {#max-min}
+
+```js
+Math.max(3, 7, 5);   // 7
+Math.min(3, 7, 5);   // 3
+```
+
+Обе функции принимают сколько угодно аргументов — как наши функции с остаточным
+параметром из дня 14. И обе ведут себя неожиданно в двух случаях:
+
+```js
+Math.max();            // -Infinity   ни одного аргумента
+Math.min();            // Infinity
+Math.max(3, NaN, 5);   // NaN         один NaN портит всё
+```
+
+Логика у первых двух такая: `Math.max` начинает с самого маленького
+возможного значения и поднимает его каждым аргументом. Если аргументов нет, поднимать
+нечего — остаётся `-Infinity`. Странно выглядит, но в цикле это как раз
+удобное начальное значение.
+
+Главный вопрос: **как найти максимум в массиве**, ведь `Math.max`
+хочет аргументы по отдельности. Сегодня мы делаем это циклом:
+
+```js
+const maxOf = (numbers) => {
+  let best = numbers[0];
+  for (const n of numbers) {
+    best = Math.max(best, n);
+  }
+  return best;
+};
+
+maxOf([3, 5, 4]);   // 5
+```
+
+Тот же цикл легко приспособить под «максимум среди подходящих» — достаточно
+добавить условие:
+
+```js
+const bestValid = (marks) => {
+  let best = -Infinity;
+  for (const m of marks) {
+    if (isValidMark(m)) {
+      best = Math.max(best, m);
+    }
+  }
+  return best;
+};
+```
+
+Проверка `isValidMark` здесь — наша старая знакомая из «Табеля».
+А начальное значение — `-Infinity`, а не первый элемент: первый может
+и не подойти под условие. Это как раз тот случай, ради которого `Math.max`
+начинает счёт именно с минус бесконечности.
+
+Обратная сторона такого начала: если ни одна оценка не подошла, функция вернёт
+`-Infinity`, а не понятное сообщение. Проверять результат придётся
+на стороне вызывающего.
+
+Есть и короткая запись — через три точки, которые «разворачивают» массив
+в отдельные аргументы. Мы разберём её на дне 22, а пока просто узнавайте:
+
+```js
+Math.max(...[3, 5, 4]);   // 5 — день 22, spread
+```
+
+## 8. Как устроен `random` {#random}
+
+Одна функция, и у неё нет аргументов. Она возвращает случайное дробное число
+**от нуля включительно до единицы не включая**:
+
+```js
+Math.random();   // 0.5316784922... каждый раз новое
+Math.random();   // 0.0271633481...
+```
+
+<Scheme src="scheme-random.svg">Путь от дробного числа к броску кубика. Каждая клетка одинаковой ширины — отсюда равные шансы</Scheme>
+
+Важна именно правая граница. Единица **никогда не выпадает**, и это
+не случайность, а условие: благодаря ему после умножения и округления вниз получается
+ровно столько исходов, сколько задумано.
+
+## 9. Целое в диапазоне {#randomint}
+
+Формула, которую стоит записать и запомнить:
+
+```js
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+randomInt(1, 6);     // бросок кубика
+randomInt(1, 100);   // число для игры
+randomInt(0, 1);     // орёл или решка
+```
+
+Разберём её по частям, чтобы не заучивать вслепую.
+
+| Часть | Что делает | Пример для 1…6 |
+| --- | --- | --- |
+| `max - min + 1` | сколько всего исходов | 6 − 1 + 1 = 6 |
+| `Math.random() * 6` | растягивает отрезок | 0 … 5.999… |
+| `Math.floor(...)` | делит на равные клетки | 0, 1, 2, 3, 4, 5 |
+| `+ min` | сдвигает к началу диапазона | 1, 2, 3, 4, 5, 6 |
+
+Единица в `max - min + 1` — самая частая забытая деталь. Без неё
+максимальное значение просто никогда не выпадет, и заметить это можно только
+по статистике за тысячу бросков.
+
+### Случайный элемент списка
+
+Самое частое применение формулы — выбрать наугад из готового списка. Индексы идут
+от нуля до `length - 1`, значит, и диапазон такой же:
+
+```js
+const names = ["Аман", "Мерет", "Гүлнар", "Сапар"];
+
+const lucky = names[randomInt(0, names.length - 1)];
+```
+
+Раз нижняя граница всегда ноль, формулу можно сократить: `+ min`
+и `- min` обнуляются, а `max + 1` превращается в саму длину.
+
+```js
+const lucky = names[Math.floor(Math.random() * names.length)];
+```
+
+Эту запись вы увидите в чужом коде чаще, чем полную формулу, — стоит узнавать её
+с первого взгляда. Обе версии дают одинаково частые исходы; проверено счётчиком
+на сорока тысячах попыток.
+
+## 10. Почему не `round` {#round-trap}
+
+Напрашивается более простая запись — `Math.round(Math.random() * 6)`.
+Она даёт числа от 0 до 6 и выглядит безобидно. Но шансы у них разные.
+
+Проверим честно: шестьдесят тысяч бросков и подсчёт каждого исхода.
+
+```js
+const counts = {};
+
+for (let i = 0; i < 60000; i++) {
+  const n = Math.round(Math.random() * 6);
+  counts[n] = (counts[n] || 0) + 1;
+}
+
+console.log(counts);
+```
+
+Один из запусков в Chrome — у вас числа будут другими, но картина та же:
+
+<ResultBox>
+```plain-out
+{0: 4944, 1: 9976, 2: 9898, 3: 10142, 4: 10130, 5: 9871, 6: 5039}
+```
+</ResultBox>
+
+<Scheme src="scheme-round-trap.svg">Высота столбика — как часто выпадает исход. У `round` крайние клетки вдвое уже остальных</Scheme>
+
+Причина видна на схеме из раздела 8. `round` относит к нулю только отрезок
+от 0 до 0.5, а к единице — от 0.5 до 1.5, то есть вдвое более широкий. Края получают
+по половине клетки, середина — по целой.
+
+### Как проверять любую случайную формулу
+
+Приём из этого раздела стоит запомнить отдельно от самой ошибки. У случайных чисел
+нет «правильного ответа», который можно сверить, — поэтому их проверяют
+**статистикой**:
+
+```js
+function checkRandom(makeNumber, times = 60000) {
+  const counts = {};
+  for (let i = 0; i < times; i++) {
+    const n = makeNumber();
+    counts[n] = (counts[n] || 0) + 1;
+  }
+  return counts;
+}
+
+checkRandom(() => randomInt(1, 6));
+```
+
+Функция принимает другую функцию — приём из дня 12. Дальше смотрят на три вещи:
+сколько всего разных исходов, нет ли значений за пределами диапазона и примерно ли
+одинаковы столбики. Любая из трёх проверок ловит свою ошибку.
+
+<Important>
+Это ошибка, которая **не ломает программу и не видна на глаз**.
+Игра будет работать, кубик будет бросаться, и только через тысячу партий кто-то
+заметит, что шестёрка выпадает вдвое реже. Ищется такое только счётчиком —
+ровно так, как мы сделали выше.
+</Important>
+
+## 11. Игра «угадай число» {#game}
+
+Соберём маленькую игру. Заметьте: загаданное число и ответ игрока — **параметры
+функции**, а не что-то, взятое изнутри. Так проверку можно прогнать без единого
+клика, как мы договаривались на дне 15.
+
+```js
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function checkGuess(guess, secret) {
+  if (!Number.isInteger(guess)) {
+    return "это не целое число";
+  }
+  if (guess < secret) {
+    return "больше";
+  }
+  if (guess > secret) {
+    return "меньше";
+  }
+  return "угадал!";
+}
+
+const secret = randomInt(1, 100);
+
+checkGuess(50, 7);    // "меньше"
+checkGuess(3, 7);     // "больше"
+checkGuess(7, 7);     // "угадал!"
+checkGuess(4.5, 7);   // "это не целое число"
+```
+
+Четыре вызова проверяют все четыре ветки — привычка из дня 15. Настоящий ввод
+от игрока появится на дне 28 вместе с формами, а до тех пор функция полностью готова
+и проверена.
+
+### Сколько шагов нужно, чтобы угадать
+
+Если каждый раз называть середину оставшегося отрезка, любое число от 1 до 100
+угадывается **не больше чем за семь ходов**. Каждый ход уменьшает отрезок
+вдвое: 100 → 50 → 25 → 13 → 7 → 4 → 2 → 1.
+
+Это тот же расчёт, что стоит за `Math.log2` из таблицы раздела 13:
+сколько раз число надо поделить пополам, чтобы дойти до единицы.
+
+## 12. Константы {#constants}
+
+У `Math` восемь готовых чисел. Пишутся без скобок — это значения,
+а не функции:
+
+| Константа | Значение | Что это |
+| --- | --- | --- |
+| `Math.PI` | 3.14159… | отношение длины окружности к диаметру |
+| `Math.E` | 2.71828… | основание натурального логарифма |
+| `Math.SQRT2` | 1.41421… | корень из двух |
+| `Math.SQRT1_2` | 0.70710… | корень из одной второй |
+| `Math.LN2` | 0.69314… | натуральный логарифм двух |
+| `Math.LN10` | 2.30258… | натуральный логарифм десяти |
+| `Math.LOG2E` | 1.44269… | логарифм E по основанию 2 |
+| `Math.LOG10E` | 0.43429… | десятичный логарифм E |
+
+Из них в обычных задачах встречается одна — `Math.PI`:
+
+```js
+const radius = 5;
+
+const area = Math.PI * radius ** 2;        // 78.539816...
+const length = 2 * Math.PI * radius;       // 31.415926...
+
+area.toFixed(2);   // "78.54"
+```
+
+Обе формулы стоит завести функциями — тогда радиус не придётся писать дважды,
+а округление окажется в одном месте:
+
+```js
+const round2 = (x) => Math.round(x * 100) / 100;
+
+const circleArea = (r) => round2(Math.PI * r ** 2);
+const circleLength = (r) => round2(2 * Math.PI * r);
+
+circleArea(5);     // 78.54
+circleLength(5);   // 31.42
+```
+
+Обратите внимание: `round2` возвращает число, а не строку. Поэтому
+результат можно складывать, сравнивать и класть в следующую формулу — в отличие
+от `toFixed`.
+
+## 13. Тригонометрия и логарифмы {#trig}
+
+Большая часть `Math` — это школьная математика, которая в вебе нужна
+редко, но лежит наготове. Разбирать каждую функцию смысла нет; важно **знать,
+что они есть, и уметь найти**.
+
+| Группа | Функции | Когда вспомнить |
+| --- | --- | --- |
+| тригонометрия | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` | движение по кругу, углы, анимация |
+| гиперболические | `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | физика и машинное обучение |
+| логарифмы | `log`, `log2`, `log10`, `log1p`, `exp`, `expm1` | шкалы, рост, «сколько раз поделить пополам» |
+| корни и длины | `cbrt`, `hypot` | геометрия, расстояния |
+
+Две вещи стоит знать про углы. Первое: тригонометрия работает
+**в радианах**, а не в градусах. Второе: перевод делается через
+`Math.PI` и помещается в одну строку:
+
+```js
+const degrees = 90;
+const radians = degrees * Math.PI / 180;
+
+Math.sin(radians);   // 1
+```
+
+Перевод в обе стороны удобно завести двумя маленькими функциями и больше
+об этом не думать:
+
+```js
+const toRadians = (degrees) => degrees * Math.PI / 180;
+const toDegrees = (radians) => radians * 180 / Math.PI;
+
+Math.sin(toRadians(90));   // 1
+toDegrees(Math.PI / 2);    // 90
+```
+
+И сразу проверка вчерашнего материала: `Math.sin(toRadians(30))` даёт
+не ровно 0.5, а 0.49999999999999994. Это та же двоичная погрешность, о которой шла
+речь на дне 17, — и тот же вывод: сравнивать такие числа через `===` нельзя.
+
+Из логарифмов чаще других встречается `Math.log2` — тот самый ответ
+на вопрос «сколько раз можно поделить пополам». Именно он даёт семь ходов
+в игре из раздела 11.
+
+## 14. Редкие методы {#rare}
+
+Пять функций, которые вы, скорее всего, никогда не напишете сами, но можете
+встретить в чужом коде.
+
+| Метод | Что делает |
+| --- | --- |
+| `Math.fround` | округляет до точности 32-битного числа |
+| `Math.f16round` | то же для 16-битного |
+| `Math.clz32` | считает нули в начале двоичной записи |
+| `Math.imul` | умножение 32-битных целых |
+| `Math.sumPrecise` | сумма списка без накопления погрешности |
+
+Последнюю стоит отметить особо. `Math.sumPrecise` решает ровно ту
+задачу, о которую мы споткнулись вчера — сложение дробей с погрешностью. Но он
+настолько новый, что есть ещё не везде: в Node 22, например, его нет вовсе.
+**Прежде чем брать такой метод, проверьте, есть ли он в вашей среде**:
+
+```js
+typeof Math.sumPrecise;   // "function" — есть; "undefined" — нет
+```
+
+Такая проверка занимает секунду и работает для любого метода языка. Привычка
+пригодится не раз: новые возможности появляются в браузерах не одновременно,
+и программа, написанная на самом свежем, у кого-то просто не запустится.
+
+## 15. «Табель»: лучшая и худшая оценка {#tabel}
+
+Добавим в отчёт две колонки — минимум и максимум — и долю годных оценок
+в процентах.
+
+```js
+const MIN_MARK = 2;
+const MAX_MARK = 5;
+const NAME_WIDTH = 12;
+
+const toMark = (raw) => Number(String(raw).trim());
+const isValidMark = (m) => Number.isInteger(m) && m >= MIN_MARK && m <= MAX_MARK;
+
+const sum = (numbers) => {
+  let total = 0;
+  for (const n of numbers) {
+    total += n;
+  }
+  return total;
+};
+
+const average = (numbers) =>
+  numbers.length === 0 ? 0 : sum(numbers) / numbers.length;
+
+// новое: максимум и минимум списка
+const maxOf = (numbers) => {
+  let best = numbers[0];
+  for (const n of numbers) {
+    best = Math.max(best, n);
+  }
+  return best;
+};
+
+const minOf = (numbers) => {
+  let worst = numbers[0];
+  for (const n of numbers) {
+    worst = Math.min(worst, n);
+  }
+  return worst;
+};
+
+function verdict(avg, excellent = 4.5, good = 3.5, pass = 2.5) {
+  if (avg >= excellent) return "отличник";
+  if (avg >= good) return "хорошист";
+  if (avg >= pass) return "троечник";
+  return "надо подтянуть";
+}
+
+function makeHeader() {
+  return "Имя".padEnd(NAME_WIDTH) + "Средн".padStart(6) + "Мин".padStart(5)
+    + "Макс".padStart(5) + "%".padStart(7) + "  Вердикт";
+}
+
+function makeRow(name = "без имени", ...raw) {
+  const marks = [];
+  for (const r of raw) {
+    marks.push(toMark(r));
+  }
+  const valid = marks.filter(isValidMark);
+
+  if (valid.length === 0) {
+    return name.padEnd(NAME_WIDTH) + "нет годных оценок";
+  }
+
+  const avg = average(valid);
+  const percent = Math.round(valid.length / marks.length * 100);
+
+  return name.padEnd(NAME_WIDTH)
+    + avg.toFixed(2).padStart(6)
+    + String(minOf(valid)).padStart(5)
+    + String(maxOf(valid)).padStart(5)
+    + (percent + "%").padStart(7)
+    + "  " + verdict(avg);
+}
+
+const line = "-".repeat(56);
+
+console.log(makeHeader());
+console.log(line);
+console.log(makeRow("Аман", 5, "4", " 9 ", 3, 5, 0, "4", 5));
+console.log(makeRow("Мерет", "3", 3, 4));
+console.log(makeRow("Гүлнар", 9, 0, "пять"));
+console.log(makeRow("Сапар", 5, 5, "4", 5));
+console.log(makeRow("Огулджан", "4.5", 4, 5));
+console.log(line);
+```
+
+<ResultBox>
+```plain-out
+Имя          Средн  Мин Макс      %  Вердикт
+--------------------------------------------------------
+Аман          4.33    3    5    75%  хорошист
+Мерет         3.33    3    4   100%  троечник
+Гүлнар      нет годных оценок
+Сапар         4.75    4    5   100%  отличник
+Огулджан      4.50    4    5    67%  отличник
+--------------------------------------------------------
+```
+</ResultBox>
+
+**Проценты округлены до целых.** У Амана шесть годных оценок из восьми —
+это ровно 75. У Огулджан две из трёх, то есть 66.666…, и `Math.round`
+даёт 67. Здесь важно, что округление стоит **после** всего деления,
+а не внутри: это правило из вчерашнего дня.
+
+**`maxOf` и `minOf` написаны циклом**, а не через
+`Math.max(...valid)` — короткая запись с тремя точками ждёт дня 22. Зато
+внутри цикла `Math.max` работает в своём естественном виде: сравнивает два
+числа и возвращает большее.
+
+**Ни один из двух помощников не проверяет пустой список.** Это не забывчивость:
+выше стоит ранняя ветка, которая до них просто не доходит, если годных оценок нет.
+Но если вы вынесете `maxOf` в другую программу, проверку придётся добавить —
+на пустом массиве он вернёт `undefined`.
+
+<TryIt>
+Три опыта.
+\
+\
+**Первый.** Замените в `maxOf` начальное значение
+`numbers[0]` на `-Infinity`. Почему программа продолжит
+работать и в чём такой вариант лучше, а в чём хуже?
+\
+\
+**Второй.** Посчитайте процент через `toFixed(0)` вместо
+`Math.round`. Вывод не изменится — объясните почему. Потом сложите проценты
+Амана и Мерета в обоих вариантах и сравните ответы.
+\
+\
+**Третий.** Добавьте колонку «разброс» — разницу между максимумом
+и минимумом. У кого она больше всех? И при каких оценках разброс был бы нулевым — что это значит?
+</TryIt>
+
+## 16. Частые ошибки и что завтра {#mistakes}
+
+| Ошибка | Почему | Как правильно |
+| --- | --- | --- |
+| `Math.round(Math.random() * 6)` | края выпадают вдвое реже | `Math.floor(random() * 6)` |
+| формула без `+ 1` | максимум никогда не выпадет | `(max - min + 1)` |
+| `Math.floor` на отрицательных как «отбросить» | `floor(-4.1)` это −5 | `Math.trunc` |
+| `Math.max(marks)` с массивом | массив — один аргумент, получится `NaN` | цикл или spread с дня 22 |
+| `Math.max()` в пустом списке | вернёт `-Infinity` | проверить длину заранее |
+| `Math.sin(90)` как «синус 90°» | аргумент в радианах | `Math.sin(90 * Math.PI / 180)` |
+| `Math.round(x).toFixed(2)` | сначала потеряли дробь, потом дописали нули | округлять один раз, в конце |
+
+### Что будет завтра
+
+Модуль «Строки, числа, Math и основы дат» на этом закрывается: строки, числа, `Math`
+разобраны. С девятнадцатого дня начинается модуль про массивы — и начнётся он
+с приятного: `slice`, `indexOf`, `includes`,
+`at` и `concat` там работают ровно так же, как в строках,
+включая отрицательные индексы и −1 при неудаче.
+
+А заодно станет понятно, почему `Math.max` не принимает массив и что
+за три точки исправляют это положение.
+
+<Ref>
+| Страница | Что там | Как разбираем |
+| --- | --- | --- |
+| [Math](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math) | обзор: функции и константы | <Full /> |
+| [round](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/round) | к ближайшему; половина вверх | <Full /> |
+| [floor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/floor) | вниз, к минус бесконечности | <Full /> |
+| [ceil](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/ceil) | вверх, к плюс бесконечности | <Full /> |
+| [trunc](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/trunc) | отбросить дробную часть | <Full /> |
+| [abs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/abs) | модуль: расстояние от нуля | <Full /> |
+| [sign](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sign) | −1, 0 или 1 | <Full /> |
+| [pow](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/pow) | степень; то же, что `**` | <Full /> |
+| [sqrt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sqrt) | квадратный корень | <Full /> |
+| [max](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/max) | наибольший из аргументов | <Full /> |
+| [min](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/min) | наименьший из аргументов | <Full /> |
+| [random](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random) | дробное от 0 до 1, единица не входит | <Full /> |
+| [PI](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/PI) | 3.14159… | <Full /> |
+| [E](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/E) | 2.71828… | <Brief /> |
+| [SQRT2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/SQRT2) | корень из двух | <Brief /> |
+| [SQRT1_2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/SQRT1_2) | корень из одной второй | <Brief /> |
+| [LN2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LN2) | натуральный логарифм двух | <Brief /> |
+| [LN10](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LN10) | натуральный логарифм десяти | <Brief /> |
+| [LOG2E](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LOG2E) | логарифм E по основанию 2 | <Brief /> |
+| [LOG10E](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/LOG10E) | десятичный логарифм E | <Brief /> |
+| [cbrt](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/cbrt) | кубический корень | <Brief /> |
+| [hypot](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/hypot) | длина гипотенузы | <Brief /> |
+| [sin](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sin) | синус, аргумент в радианах | <Brief /> |
+| [cos](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/cos) | косинус | <Brief /> |
+| [tan](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/tan) | тангенс | <Brief /> |
+| [asin](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/asin) | арксинус | <Brief /> |
+| [acos](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/acos) | арккосинус | <Brief /> |
+| [atan](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/atan) | арктангенс | <Brief /> |
+| [atan2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/atan2) | угол по двум катетам | <Brief /> |
+| [sinh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sinh) | гиперболический синус | <Brief /> |
+| [cosh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/cosh) | гиперболический косинус | <Brief /> |
+| [tanh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/tanh) | гиперболический тангенс | <Brief /> |
+| [asinh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/asinh) | обратный гиперболический синус | <Brief /> |
+| [acosh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/acosh) | обратный гиперболический косинус | <Brief /> |
+| [atanh](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/atanh) | обратный гиперболический тангенс | <Brief /> |
+| [log](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log) | натуральный логарифм | <Brief /> |
+| [log2](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log2) | логарифм по основанию 2 | <Brief /> |
+| [log10](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log10) | десятичный логарифм | <Brief /> |
+| [log1p](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/log1p) | логарифм от 1 + x, точнее у малых x | <Brief /> |
+| [exp](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/exp) | E в степени x | <Brief /> |
+| [expm1](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/expm1) | то же минус единица, точнее у малых x | <Brief /> |
+| [fround](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/fround) | округление до 32-битной точности | <Brief /> |
+| [f16round](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/f16round) | то же для 16 бит | <Brief /> |
+| [clz32](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/clz32) | нули в начале двоичной записи | <Brief /> |
+| [imul](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/imul) | умножение 32-битных целых | <Brief /> |
+| [sumPrecise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sumPrecise) | точная сумма списка; очень новый, есть не везде | <Brief /> |
+
+Сорок шесть страниц: тринадцать подробно, тридцать три для узнавания. Тригонометрия
+и логарифмы даны одной таблицей — их разбирают тогда, когда задача до них доходит.
+</Ref>
+
+<Cheatsheet>
+```js
+// ЧЕТЫРЕ ОКРУГЛЕНИЯ
+Math.round(4.5);   // 5   к ближайшему, половина ВВЕРХ
+Math.floor(4.9);   // 4   всегда вниз
+Math.ceil(4.1);    // 5   всегда вверх
+Math.trunc(4.9);   // 4   отбросить дробную часть
+
+// НА МИНУСАХ ОНИ РАСХОДЯТСЯ
+Math.floor(-4.1);  // -5  вниз = дальше от нуля
+Math.trunc(-4.1);  // -4  отбросить = к нулю
+Math.round(-4.5);  // -4  половина всё равно ВВЕРХ
+
+// ЛЮБОЙ ШАГ: поделить → округлить → умножить
+const price = 1234.567;
+Math.round(price / 10) * 10;     // 1230     до десятков
+Math.round(price * 100) / 100;   // 1234.57  до сотых, ЧИСЛОМ (toFixed даёт строку)
+
+// МОДУЛЬ, ЗНАК, СТЕПЕНИ
+Math.abs(-5);       // 5
+Math.sign(-5);      // -1
+Math.sqrt(144);     // 12
+2 ** 10;            // 1024 — то же, что Math.pow(2, 10)
+Math.hypot(3, 4);   // 5
+
+// МАКСИМУМ И МИНИМУМ
+Math.max(3, 7, 5);     // 7
+Math.max();            // -Infinity !
+Math.max(3, NaN, 5);   // NaN !
+const marks = [3, 5, 4];
+Math.max(marks);       // NaN — массив это ОДИН аргумент
+let best = marks[0];
+for (const n of marks) { best = Math.max(best, n); }   // так сегодня
+best;                  // 5
+
+// СЛУЧАЙНЫЕ
+Math.random();   // 0 ≤ x < 1, единица НИКОГДА
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+Math.round(Math.random() * 6);   // ОШИБКА: 0 и 6 вдвое реже
+
+// КОНСТАНТЫ — без скобок
+Math.PI;   // 3.141592653589793; ещё Math.E, Math.SQRT2, Math.LN2
+
+// УГЛЫ В РАДИАНАХ
+Math.sin(90 * Math.PI / 180);   // 1 — синус 90 градусов
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Чем `Math.floor` отличается от `Math.trunc`?
+   <Answer>На положительных числах — ничем. На отрицательных `floor` идёт
+   вниз по прямой (`-4.1` → `-5`), а `trunc`
+   просто отбрасывает дробную часть (`-4.1` → `-4`).</Answer>
+2. Почему в формуле случайного целого стоит `+ 1`?
+   <Answer>`max - min + 1` — это количество исходов. Без единицы диапазон
+   окажется на один короче, и максимальное значение не выпадет никогда.</Answer>
+3. Что не так с `Math.round(Math.random() * 6)`?
+   <Answer>Исходов получается семь (0…6), и крайние выпадают вдвое реже остальных:
+   `round` относит к нулю только половину клетки. Программа
+   при этом работает, и ошибку видно только по счётчику за тысячи бросков.</Answer>
+4. Что вернёт `Math.max(marks)`, если `marks` — массив?
+   <Answer>`NaN`. Массив попадает в функцию одним аргументом, превратить
+   его в число нельзя. Нужен цикл или запись со spread из дня 22.</Answer>
+5. Чем `Math.round(x * 100) / 100` лучше, чем
+   `x.toFixed(2)`?
+   <Answer>Первое даёт число, с которым можно считать дальше; второе — строку
+   для показа. Если результат идёт в следующие вычисления, нужен первый
+   вариант.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math" />

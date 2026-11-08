@@ -47,9 +47,10 @@ const LABELS = {
 const TEXT_BOXES = {
   analogy: 'Analogy', 'try-it': 'TryIt', why: 'Why', 'fun-fact': 'FunFact', 'real-world': 'RealWorld', mistake: 'Mistake',
   important: 'Important', 'pro-tip': 'ProTip', highlight: 'Highlight', hint: 'Hint', 'write-box': 'WriteBox',
-  definition: 'Definition', 'key-point': 'KeyPoint', remember: 'Remember', 'note-box': 'NoteBox',
+  definition: 'Definition', 'key-point': 'KeyPoint', remember: 'Remember', 'note-box': 'NoteBox', 'result-box': 'ResultBox',
+  summary: 'Summary',
 };
-const BLOCK_BOXES = { goals: 'Goals', cheatsheet: 'Cheatsheet', selfcheck: 'Selfcheck', criteria: 'Criteria', example: 'Example', homework: 'Homework' };
+const BLOCK_BOXES = { goals: 'Goals', cheatsheet: 'Cheatsheet', selfcheck: 'Selfcheck', criteria: 'Criteria', example: 'Example', homework: 'Homework', compare: 'Compare' };
 const BLOCK = new Set(['p', 'div', 'ul', 'ol', 'pre', 'table', 'h1', 'h2', 'h3', 'h4', 'figure', 'details']);
 const PUNCT = /[\p{P}\p{S}]/u;
 const SPACE = /\s/u;
@@ -82,7 +83,8 @@ function convert(file) {
       .replace(/\\/g, '\\\\')
       .replace(/([{}<`[\]*])/g, '\\$1')
       .replace(/&(?=[a-zA-Z0-9#]+;)/g, '&amp;')
-      .replace(/(^|[^\p{L}\p{N}])_|_(?=[^\p{L}\p{N}]|$)/gu, (m) => m.replace('_', '\\_'))
+      // each underscore not inside a word ("два __proto__": all four — escaping every other one left _proto_ italic)
+      .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, '\\_')
       .replace(/~~/g, '\\~\\~')
       .replace(/(https?|ftp):\/\//g, '$1\\://')
       .replace(/\bwww\./g, 'www\\.')
@@ -106,7 +108,8 @@ function convert(file) {
     let out = '';
     for (const n of nodes) {
       if (n.nodeName === '#text') { out += escapeText(n.value, ctx); continue; }
-      if (n.nodeName === '#comment') fail(n, 'a comment');
+      // a comment (e.g. "ahead-ok: day 17, course 2", read by check-ahead) stays a comment: {/* … */} draws nothing
+      if (n.nodeName === '#comment') { if (n.data.includes('*/')) fail(n, 'a comment with */'); out += `{/* ${n.data.trim()} */}`; continue; }
       if (!isEl(n)) continue;
       const tag = n.tagName;
       const inner = () => inline(kids(n), ctx);
@@ -122,7 +125,12 @@ function convert(file) {
         out += okOpen && okClose && text ? mark + text + mark : `<${tag}>${text}</${tag}>`;
         continue;
       }
-      if (tag === 'code') { onlyAttrs(n, []); out += codeSpan(textOf(n), ctx); continue; }
+      if (tag === 'code') {
+        onlyAttrs(n, []);
+        // inline code with markup inside (<code><span lang="ru">арр</span>.js</code>): JSX, so the span stays
+        out += elems(n).length ? `<code>${inline(kids(n), ctx)}</code>` : codeSpan(textOf(n), ctx);
+        continue;
+      }
       if (tag === 'a') {
         onlyAttrs(n, ['href']);
         const href = attr(n, 'href');
@@ -140,11 +148,12 @@ function convert(file) {
         continue;
       }
       if (tag === 'span' || tag === 'sup' || tag === 'sub') {
-        if ((n.attrs ?? []).some((a) => a.name === 'style')) fail(n, `<${tag} style>`);
-        const props = (n.attrs ?? []).map((a) => `${a.name === 'class' ? 'className' : a.name}="${a.value}"`).join(' ');
-        out += `<${tag}${props ? ' ' + props : ''}>${inner()}</${tag}>`;
+        out += `<${tag}${jsxAttrs(n, ['class', 'style', 'lang'])}>${inner()}</${tag}>`;
         continue;
       }
+      // pictures of a program's result (days 27 and 29 of Essentials): buttons and checkboxes that do nothing
+      if (tag === 'button') { out += `<button${jsxAttrs(n, ['type', 'disabled'])}>${inner()}</button>`; continue; }
+      if (tag === 'input') { out += `<input${jsxAttrs(n, ['type', 'checked', 'disabled'])} />`; continue; }
       fail(n, `inline <${tag}> not handled`);
     }
     return out;
@@ -156,8 +165,8 @@ function convert(file) {
     const lines = text.split('\n').map((l) => l.replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''));
     while (lines.length && !lines[0]) lines.shift();
     while (lines.length && !lines[lines.length - 1]) lines.pop();
-    if (lines.some((l) => !l)) throw new Error(`${rel}: an empty line inside a paragraph: ${JSON.stringify(text.slice(0, 120))}`);
-    return lines.map((l) => l
+    // an empty line inside a paragraph is only whitespace in HTML, but would end the paragraph in Markdown
+    return lines.filter(Boolean).map((l) => l
       .replace(/^([#>+=|])/, '\\$1')
       .replace(/^(-)(?=\s|$)/, '\\$1')
       .replace(/^(\d+)([.)])(?=\s|$)/, '$1\\$2')
@@ -177,6 +186,30 @@ function convert(file) {
     return out.join('\n\n');
   }
 
+  // JSX attributes of an element Markdown cannot write (a style, a colspan): class -> className, colspan ->
+  // colSpan, style="a-b: c;" -> style={{aB: "c"}} (React writes it back as the same declarations)
+  const jsxAttrs = (n, allowed) => {
+    onlyAttrs(n, allowed);
+    return (n.attrs ?? []).map((a) => {
+      if (a.name === 'style') {
+        const decls = a.value.split(';').map((d) => d.trim()).filter(Boolean).map((d) => {
+          const m = /^([a-z-]+)\s*:\s*(.+)$/.exec(d);
+          if (!m || /["\\]/.test(m[2])) fail(n, `style "${a.value}"`);
+          return `${m[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase())}: "${m[2]}"`;
+        });
+        return ` style={{${decls.join(', ')}}}`;
+      }
+      // boolean attributes: disabled as is; checked as React's defaultChecked (it renders the same checked="",
+      // without React's warning about a checked box with no onChange)
+      if (a.name === 'disabled' || a.name === 'checked') {
+        if (a.value !== '') fail(n, `${a.name}="${a.value}"`);
+        return a.name === 'checked' ? ' defaultChecked' : ' disabled';
+      }
+      const name = { class: 'className', colspan: 'colSpan', rowspan: 'rowSpan' }[a.name] ?? a.name;
+      return ` ${name}="${a.value.replace(/"/g, '&quot;')}"`;
+    }).join('');
+  };
+
   // ---------- blocks ----------
   const indent = (s, by) => s.split('\n').map((l) => (l ? by + l : l)).join('\n');
   const jsx = (name, inner, props = '') => `<${name}${props}>\n${inner}\n</${name}>`;
@@ -187,6 +220,7 @@ function convert(file) {
     if (!lang) fail(n, `<pre class="${c}">`);
     onlyAttrs(n, ['class', 'data-file', 'data-page']);
     if (elems(n).length) fail(n, '<pre> with elements inside');
+    if (kids(n).some((k) => k.nodeName === '#comment')) fail(n, '<pre> with a comment inside');
     const meta = ['data-file', 'data-page'].filter((a) => attr(n, a) !== undefined).map((a) => `${a.slice(5)}="${attr(n, a)}"`).join(' ');
     const text = textOf(n);
     const runs = text.match(/`{3,}/g) ?? [];
@@ -203,7 +237,15 @@ function convert(file) {
   }
 
   function list(n) {
-    onlyAttrs(n, []);
+    if ((n.attrs ?? []).length) {
+      // a list with a style: JSX, one <li> per line (text only inside)
+      const items = elems(n).map((li) => {
+        onlyAttrs(li, []);
+        if (elems(li).some((e) => BLOCK.has(e.tagName))) fail(li, 'a block inside an item of a styled list');
+        return `<li>${paragraphText(inline(kids(li))).replace(/\n/g, ' ')}</li>`;
+      });
+      return `<${n.tagName}${jsxAttrs(n, ['style', 'type'])}>\n${items.join('\n')}\n</${n.tagName}>`;
+    }
     const ordered = n.tagName === 'ol';
     if (kids(n).some((k) => k.nodeName === '#text' && k.value.trim())) fail(n, 'text right in a list');
     return elems(n).map((li, i) => {
@@ -227,18 +269,20 @@ function convert(file) {
   }
 
   function table(n) {
-    onlyAttrs(n, []);
     const parts = elems(n);
     const thead = parts.find((p) => p.tagName === 'thead'), tbody = parts.find((p) => p.tagName === 'tbody');
     if (!thead || !tbody || parts.length !== 2) fail(n, 'a table without exactly thead + tbody');
-    const rows = (sec) => elems(sec).map((tr) => {
-      onlyAttrs(tr, []);
-      return elems(tr).map((c) => {
-        onlyAttrs(c, []);
-        if (elems(c).some((e) => BLOCK.has(e.tagName))) fail(c, 'a block inside a table cell');
-        return inline(kids(c), { table: true }).replace(/\s*\n\s*/g, ' ').trim();
-      });
-    });
+    const cellsOf = (sec) => elems(sec).flatMap((tr) => elems(tr));
+    const plain = !(n.attrs ?? []).length && [thead, tbody].every((sec) => elems(sec).every((tr) => !(tr.attrs ?? []).length) && cellsOf(sec).every((c) => !(c.attrs ?? []).length));
+    for (const c of [...cellsOf(thead), ...cellsOf(tbody)]) if (elems(c).some((e) => BLOCK.has(e.tagName))) fail(c, 'a block inside a table cell');
+    if (!plain) {
+      // a table with a style on a row, a colspan or a class: JSX, a line per row
+      const row = (tr) => `<tr${jsxAttrs(tr, ['style'])}>${elems(tr).map((c) => `<${c.tagName}${jsxAttrs(c, ['colspan', 'rowspan', 'style'])}>${inline(kids(c)).replace(/\s*\n\s*/g, ' ').trim()}</${c.tagName}>`).join('')}</tr>`;
+      const sec = (el) => `<${el.tagName}>\n${elems(el).map(row).join('\n')}\n</${el.tagName}>`;
+      onlyAttrs(thead, []); onlyAttrs(tbody, []);
+      return `<table${jsxAttrs(n, ['class'])}>\n${sec(thead)}\n${sec(tbody)}\n</table>`;
+    }
+    const rows = (sec) => elems(sec).map((tr) => elems(tr).map((c) => inline(kids(c), { table: true }).replace(/\s*\n\s*/g, ' ').trim()));
     const headRows = rows(thead), bodyRows = rows(tbody);
     if (headRows.length !== 1) fail(n, 'not one header row');
     if (bodyRows.some((r) => r.length !== headRows[0].length)) fail(n, 'rows of different width');
@@ -266,8 +310,9 @@ function convert(file) {
   function toc(n, h2s) {
     const [titleEl, ol] = elems(n);
     if (flat(textOf(titleEl)) !== L.toc || ol?.tagName !== 'ol' || elems(n).length !== 2) fail(n, 'an unusual table of contents');
-    const items = elems(ol).map((li) => { const a = elems(li)[0]; return [attr(a, 'href'), flat(textOf(a))]; });
-    const auto = h2s.map((h) => [`#${attr(h, 'id')}`, flat(textOf(h)).replace(/^\d+\.\s*/, '')]);
+    // <Toc /> draws plain text: an item with markup (day 22: "Где <code>?.</code> не поможет") needs the list written out
+    const items = elems(ol).map((li) => { const a = elems(li)[0]; return [attr(a, 'href'), flat(textOf(a)), elems(a).length]; });
+    const auto = h2s.map((h) => [`#${attr(h, 'id')}`, flat(textOf(h)).replace(/^\d+\.\s*/, ''), 0]);
     return JSON.stringify(items) === JSON.stringify(auto) ? '<Toc />' : jsx('Toc', list(ol));
   }
 
@@ -304,7 +349,9 @@ function convert(file) {
     const tag = n.tagName, c = cls(n), k = c.join(' ');
     if (tag === 'p') {
       if (k === 'subtitle') { onlyAttrs(n, ['class']); return `<Subtitle>${oneLine(n)}</Subtitle>`; }
-      if ((n.attrs ?? []).length) fail(n, `<p ${n.attrs.map((a) => a.name).join(' ')}>`);
+      // a paragraph with a style: JSX, its text starting on the tag's line (so that MDX reads it as text, not as a
+      // <p> inside the <p>)
+      if ((n.attrs ?? []).length) return `<p${jsxAttrs(n, ['style'])}>${paragraphText(inline(kids(n)))}</p>`;
       return paragraphText(inline(kids(n)));
     }
     if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
@@ -329,9 +376,16 @@ function convert(file) {
         return jsx('Ref', rest.map(block).join('\n\n'));
       }
       if (k === 'step') {
+        // the number is a <div> on some pages and a <span> on others
         const [num, inner] = elems(n);
-        if (cls(num).join(' ') !== 'step-number' || num.tagName !== 'div' || elems(n).length !== 2 || cls(inner).length) fail(n, 'an unusual step');
-        return jsx('Step', flow(kids(inner)), ` n="${flat(textOf(num))}"`);
+        if (cls(num).join(' ') !== 'step-number' || !['div', 'span'].includes(num.tagName) || elems(n).length !== 2 || inner.tagName !== 'div' || cls(inner).length || elems(num).length) fail(n, 'an unusual step');
+        return jsx('Step', flow(kids(inner)), ` n="${flat(textOf(num))}"${num.tagName === 'span' ? ' numberTag="span"' : ''}`);
+      }
+      if (k === 'wrong' || k === 'right') {
+        const [label] = elems(n);
+        if (cls(label).join(' ') !== 'label' || elems(label).length) fail(n, `an unusual ${k} box`);
+        const rest = kids(n).slice(kids(n).indexOf(label) + 1);
+        return jsx(k === 'wrong' ? 'Wrong' : 'Right', flow(rest), ` label="${flat(textOf(label)).replace(/"/g, '&quot;')}"`);
       }
       if (k === 'timeline') {
         return jsx('Timeline', elems(n).map((item) => {
@@ -360,7 +414,9 @@ function convert(file) {
   if (styleEl) front.css = textOf(styleEl).split('\n').map((l) => l.trim()).filter(Boolean).join('\n') + '\n';
   if (kids(container).some((k) => k.nodeName === '#text' && k.value.trim())) fail(container, 'text right in the container');
   const h2List = children.filter((e) => e.tagName === 'h2' && attr(e, 'id'));
-  const mdx = `---\n${YAML.stringify(front, { lineWidth: 0 })}---\n\n${children.slice(start).map(block).join('\n\n')}\n`;
+  // the container's children after the day head, comments between blocks included
+  const rest = start ? kids(container).slice(kids(container).indexOf(children[0]) + 1) : kids(container);
+  const mdx = `---\n${YAML.stringify(front, { lineWidth: 0 })}---\n\n${flow(rest)}\n`;
   return { rel, mdx, schemes, lines: source.split('\n').length };
 }
 

@@ -1,0 +1,950 @@
+---
+title: "Day 29 — Mini project: a to-do list"
+day: Day 29 • lesson 1
+heading: "Mini project: a to-do list"
+lead: A project day after the module “DOM and events”. 45 minutes.
+css: |
+  h1 { border-bottom-color: #eab308; }
+  h2 { color: #a16207; background: #fefce8; border-left-color: #eab308; }
+  h3 { color: #854d0e; }
+  .step-number { background: #eab308; }
+  .toc a { color: #a16207; }
+---
+
+<Goals>
+- build a finished application out of what you know;
+- start with the data, not with the markup;
+- build the page from the data with one function, `render`;
+- find the data object for a page element through `id`;
+- recognize four typical mistakes of such an application by their symptoms.
+</Goals>
+
+<Toc />
+
+## 1. A project instead of a new topic {#why}
+
+There will be no new methods today. The five days of the module gave everything needed to build a real
+small application — and today we will build it: a **to-do list**. Add
+a task, mark it as done, delete it, show only the ones you need.
+
+A to-do list is a classic study application, and not by chance. It has everything
+big programs are made of: data, showing it, a person’s input, input validation and responding
+to actions. Understand how a to-do list works — and you will understand how email,
+a shop and a chat work.
+
+| What we will need | From where |
+| --- | --- |
+| an array of objects, `filter`, `find`, `every` | days 19–21 |
+| `querySelector`, `closest`, `matches` | day 24 |
+| `textContent`, `classList`, `dataset`, `hidden` | day 25 |
+| `createElement`, `append` | day 26 |
+| listeners, delegation | day 27 |
+| a form, `submit`, `checked`, `change` | day 28 |
+
+The lecture goes the way work on any project should go: first the assignment, then
+the data, then the markup, then the code — one feature at a time. At the end — the whole
+program and the mistakes you are almost sure to meet in the tasks.
+
+## 2. What the list must be able to do {#spec}
+
+Before writing code, people write down what the program must do. Briefly, and so that
+every point can be checked:
+
+| No. | Feature | How to check |
+| --- | --- | --- |
+| 1 | show the list of tasks | on load three tasks are visible |
+| 2 | add a task through a form | typed, pressed Enter — the task is at the end of the list |
+| 3 | not let in an empty or too long task | a message below the form, the cursor in the field |
+| 4 | mark as done and remove the mark | a checkbox, the text is crossed out |
+| 5 | delete a task | a “✕” button at every task |
+| 6 | show all, active or done tasks | three filter buttons |
+| 7 | a counter “Left: N of M” | changes after every action |
+| 8 | delete all done tasks at once | the button is visible only when there is something to delete |
+| 9 | Esc clears the input field | typed, pressed Esc — the field is empty |
+
+It is just as important to write down what the program does **not** do. There is no saving:
+reload the page — the list is back to the initial three tasks. We will learn to save on day 31.
+There is no editing of a task’s text either — that is a starred task.
+
+## 3. The data first {#data}
+
+The main decision of the project is made before the markup: **how to store the data**.
+A task is a text and a “done” mark. So it is an object, and all the tasks are an array of objects:
+
+```js
+let tasks = [
+  { id: 1, text: "Review day 26", done: true },
+  { id: 2, text: "Do the tasks of day 28", done: false },
+  { id: 3, text: "Read about events on MDN", done: false },
+];
+let nextId = 4;
+let filter = "all";
+```
+
+Why does every task need an `id` if it has a text? On day 27 the “Report card” deleted a student
+by name, and that is why on day 28 it did not let in two identical ones. Tasks, though, can repeat:
+“Buy bread” can be written down twice. An `id` is a number that a task gets once
+and never loses. The `nextId` counter keeps the next free number.
+
+The third variable, `filter`, is data too, although not about tasks: what to show
+right now. `"all"`, `"active"` or `"done"`. Everything that
+affects the look of the page is kept in variables, not “on the page”.
+
+All three are declared with `let`: they will be changed. When deleting, `tasks`
+is replaced with a whole new array (section 11), and with `const` that would break —
+the walkthrough in section 14 is about this.
+
+Checking the step. For now put only these three variables into `app.js`, open
+the page and ask the console. The page is still empty, but the data already lives:
+
+```js
+tasks.length;                          // 3
+tasks[0].done;                         // true
+tasks.filter((t) => !t.done).length;   // 2 — that many tasks are left
+```
+
+This is how we will check every step: wrote a piece — asked the console — moved on.
+A mistake caught at once is easy to find: it is in the last few lines.
+
+## 4. The markup {#markup}
+
+The markup is an empty frame: there is not a single task in it. The tasks will appear from the data, by code.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>To-do list</title>
+  <style>
+    .done span { text-decoration: line-through; color: gray; }
+    .filters .active { font-weight: bold; }
+    .error { color: #b91c1c; }
+  </style>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>To-do list</h1>
+  <form id="new-task">
+    <input name="text" placeholder="What needs to be done?">
+    <button>Add</button>
+  </form>
+  <p id="error" class="error"></p>
+  <p class="filters">
+    <button data-filter="all">All</button>
+    <button data-filter="active">Active</button>
+    <button data-filter="done">Done</button>
+  </p>
+  <ul id="tasks"></ul>
+  <p>
+    <span id="counter"></span>
+    <button id="clear-done">Clear done</button>
+  </p>
+</body>
+</html>
+```
+
+Everything is familiar. The “Add” button inside the form submits it (day 28). The filter buttons
+stand outside the form, so they submit nothing, and which filter each one has is kept in
+`data-filter` (day 25). The look is set by classes: a done task is crossed out
+through the `done` class, the selected filter is highlighted with the `active` class.
+There will not be a single color in the code.
+
+At the start of `app.js` the elements are found once and put into variables —
+further on the code refers to them by name:
+
+```js
+const form = document.querySelector("#new-task");
+const error = document.querySelector("#error");
+const list = document.querySelector("#tasks");
+const counter = document.querySelector("#counter");
+const clearDone = document.querySelector("#clear-done");
+const filters = document.querySelector(".filters");
+```
+
+Checking the step: the elements were found, and the list is empty — nobody has created tasks on the page yet.
+
+```js
+filters.children.length;   // 3 — three filter buttons
+list.children.length;      // 0
+```
+
+If an error came instead of a number, `TypeError: Cannot read properties of null`,
+then `querySelector` found nothing and returned `null`. Compare
+the selector with the markup: `#tasks` is an `id`, `.filters` is a class.
+
+## 5. The main scheme {#idea}
+
+Here is the idea the whole program rests on — and any program with an interface:
+
+<Scheme src="scheme-idea.svg">A person acts → a listener changes the data → render builds the page from the data</Scheme>
+
+The page is a **picture of the data**, and nothing more. A listener never touches
+the list on the page directly: it changes the `tasks` array and calls `render()`,
+and that function builds the list anew. The rule of the “Report card” — “compute in the data, format at the end” —
+has become the rule of the whole program here.
+
+Why this way, and not “added a task — added an item to the page”? Because one action
+changes several places at once: the list, the counter, the “Clear done” button. If every
+listener fixes these places itself, sooner or later one of them forgets something, and the page
+drifts apart from the data. When one function builds the page, they have no room to drift apart.
+
+## 6. One task — one item {#item}
+
+First — a function that makes one list item out of one object. This is
+`makeItem` from day 26, only now there is a checkbox, a text and a button inside:
+
+<Scheme src="scheme-item.svg">Every field of the object turns into its own part of the item</Scheme>
+
+```js
+function makeItem(task) {
+  const li = document.createElement("li");
+  const box = document.createElement("input");
+  const text = document.createElement("span");
+  const del = document.createElement("button");
+
+  box.type = "checkbox";
+  box.checked = task.done;
+  text.textContent = task.text;       // data — only as text (day 25)
+  del.textContent = "✕";
+  del.classList.add("delete");
+
+  li.append(box, " ", text, " ", del);   // the " " strings are spaces between the parts
+  li.dataset.id = task.id;               // the item remembers the number of its task
+  li.classList.toggle("done", task.done);
+  return li;
+}
+```
+
+Three lines here are worth noting separately. `box.type = "checkbox"` makes
+the field a checkbox — the `type` property from day 28 works for writing too.
+`li.dataset.id = task.id` is the thread from the item to the data: by it the listeners will find
+the task (section 9). And `toggle` with the second argument sets or removes the class
+`done` in one line, depending on what is in the data.
+
+The function inserts nothing into the page — it only creates the item and returns it. That makes it easy
+to check in the console:
+
+```js
+makeItem({ id: 7, text: "Test", done: false }).outerHTML;
+// '<li data-id="7"><input type="checkbox"> <span>Test</span> <button class="delete">✕</button></li>'
+```
+
+A task that is not done has no `class` attribute at all: `toggle` with
+`false` added nothing. And here is a real task from the data, a done one:
+
+```js
+const item = makeItem(tasks[0]);
+item.className;                        // "done"
+item.dataset.id;                       // "1" — the number 1 became a string
+item.querySelector("input").checked;   // true
+```
+
+Remember the quotes around `"1"`: everything written into `dataset` lies
+in the markup as a string. Three sections later this will become important.
+
+## 7. `render`: the page from the data {#render}
+
+```js
+function isVisible(task) {
+  if (filter === "active") return !task.done;
+  if (filter === "done") return task.done;
+  return true;
+}
+
+function render() {
+  list.textContent = "";                                   // 1. remove the old
+  list.append(...tasks.filter(isVisible).map(makeItem));   // 2. build the visible ones
+
+  const left = tasks.filter((t) => !t.done).length;       // 3. the counter
+  counter.textContent = `Left: ${left} of ${tasks.length}`;
+  clearDone.hidden = tasks.every((t) => !t.done);          // 4. the button — if there is something to delete
+
+  filters.querySelectorAll("button").forEach((b) => {      // 5. highlight the current filter
+    b.classList.toggle("active", b.dataset.filter === filter);
+  });
+}
+
+render();   // the first showing on load
+```
+
+<ResultBox>
+<ul style={{margin: "0 0 8px 20px"}}>
+<li><input type="checkbox" defaultChecked disabled /> <span style={{textDecoration: "line-through", color: "gray"}}>Review day 26</span> <button type="button" disabled>✕</button></li>
+<li><input type="checkbox" disabled /> <span>Do the tasks of day 28</span> <button type="button" disabled>✕</button></li>
+<li><input type="checkbox" disabled /> <span>Read about events on MDN</span> <button type="button" disabled>✕</button></li>
+</ul>
+
+Left: 2 of 3 &nbsp; <button type="button" disabled>Clear done</button>
+</ResultBox>
+
+`render` is the heart of the program, and it is made entirely of familiar pieces.
+“To redraw means to clear and insert anew” — that is `renderList` from day 26.
+`filter` picks the tasks by the current filter, `map` makes an item from each one,
+the three dots spread the array into `append`. The counter and the button are computed over
+**all** the tasks, not the visible ones: “Left: 2 of 3” does not depend on the filter.
+
+`every` from day 20 answers the question “is it true that not a single task is done”.
+If yes, we hide the “Clear done” button with `hidden` (day 25). For an empty
+array `every` answers `true`, so for an empty list the button is hidden too.
+
+Checking the step — and the main experiment of the day. First let us make sure that what is shown matches the data:
+
+```js
+list.children.length;   // 3
+counter.textContent;    // "Left: 2 of 3"
+clearDone.hidden;       // false — one task is done, the button is visible
+```
+
+Now let us change the data by hand, right in the console, and call `render`.
+There is not a single listener yet, but the page can already show everything:
+
+```js
+tasks[1].done = true;
+render();
+counter.textContent;          // "Left: 1 of 3"
+list.children[1].className;   // "done" — the second item is crossed out
+```
+
+Reload the page to get the initial data back, and switch the filter the same way:
+
+```js
+filter = "active";
+render();
+list.children.length;                     // 2
+list.querySelector("span").textContent;   // "Do the tasks of day 28"
+```
+
+This is what “the page is a picture of the data” means. The listeners we will write next
+will do exactly this: change the data and call `render()`. What is left is to teach
+them to understand what the person pressed.
+
+## 8. Adding a task {#add}
+
+```js
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = form.elements.text.value.trim();
+
+  if (text === "") {
+    error.textContent = "Write what needs to be done";
+    form.elements.text.focus();
+    return;
+  }
+  if (text.length > 60) {
+    error.textContent = "Too long: no more than 60 characters";
+    form.elements.text.focus();
+    return;
+  }
+
+  tasks.push({ id: nextId, text, done: false });   // 1. change the data
+  nextId++;
+  error.textContent = "";
+  form.reset();
+  render();                                        // 2. redraw
+});
+```
+
+This is the `submit` listener from day 28 almost without changes: `preventDefault`,
+`trim`, checks one at a time, a message and focus. What is new is the two lines
+in the middle: the task is added **to the data**, and the number counter moves on.
+The task will get onto the page by itself — through `render()`.
+
+The notation `{ id: nextId, text, done: false }` uses the short form from
+day 21: `text` instead of `text: text`. After adding, the console shows
+that it is the data that changed:
+
+```js
+// added “Buy a notebook” through the form:
+tasks.length;             // 4
+tasks.at(-1);             // {id: 4, text: 'Buy a notebook', done: false}
+nextId;                   // 5
+```
+
+## 9. From an element to the data {#find}
+
+A checkbox or a “✕” was clicked — the listener gets an **element**. But what has
+to change is **an object in the array**. The bridge between them is the `data-id` that
+`makeItem` wrote into every item:
+
+<Scheme src="scheme-find.svg">Four steps from a click to an object in the array</Scheme>
+
+```js
+function taskOf(element) {
+  const id = Number(element.closest("li").dataset.id);
+  return tasks.find((t) => t.id === id);
+}
+```
+
+Four steps in two lines. `closest("li")` climbs from the checkbox or the button
+to the item — day 24 and day 27. `dataset.id` is the number as a string: everything read
+from the page is strings (day 25). `Number` turns the string into a number, and
+`find` from day 20 finds the task with this number in the array.
+
+```js
+const li = document.querySelector('li[data-id="2"]');
+
+li.dataset.id;          // "2" — a string
+taskOf(li).text;        // "Do the tasks of day 28"
+```
+
+Two listeners need the function — marking and deleting, so it is moved out separately.
+It returns **the same object** that lies in the array, not a copy: changing its
+property means changing the data.
+
+Why there is no way without `Number` is visible in the console:
+
+```js
+"2" === 2;                            // false — strict comparison, day 7
+tasks.find((t) => t.id === "2");      // undefined — there is no such task
+tasks.find((t) => t.id === 2).text;   // "Do the tasks of day 28"
+```
+
+## 10. Marking as done {#toggle}
+
+```js
+list.addEventListener("change", (event) => {
+  if (!event.target.matches('input[type="checkbox"]')) return;
+  taskOf(event.target).done = event.target.checked;
+  render();
+});
+```
+
+There is one listener for the whole list — delegation from day 27. The `change` event
+bubbles, so a click on any checkbox reaches `ul`. The first line
+checks with `matches` (day 24) that it was exactly a checkbox that changed: an item
+may get other fields too, for example the edit field from a starred task.
+
+The checkbox has already been checked by itself, the browser did it. Our job is to carry its state
+over into the data: `done` becomes equal to `checked`. Then `render()`
+rebuilds the list: the item gets the `done` class and is crossed out, the counter
+goes down. Redrawing is needed even when the visible checkbox is already right: under
+the “Active” filter a checked task must disappear from the list.
+
+Checking the step: click the checkbox of “Do the tasks of day 28” and ask the console.
+
+```js
+tasks.find((t) => t.id === 2).done;   // true — the mark reached the data
+counter.textContent;                  // "Left: 1 of 3"
+```
+
+## 11. Deleting {#delete}
+
+```js
+list.addEventListener("click", (event) => {
+  if (!event.target.closest(".delete")) return;
+  const task = taskOf(event.target);
+  tasks = tasks.filter((t) => t !== task);
+  render();
+});
+```
+
+To delete a task from the data means to keep all the others. That is `filter`:
+a new array without one element. That is why `tasks` is declared with
+`let` — the variable is assigned a new array.
+
+The comparison `t !== task` compares objects — “is it the same box”, day 21.
+It works because `taskOf` returned that very object from the array. One could
+compare the numbers too: `t.id !== task.id`.
+
+Checking the step: “✕” at “Review day 26”.
+
+```js
+tasks.map((t) => t.id);   // [2, 3]
+list.children.length;     // 2
+```
+
+And why not `splice`, as in the “Report card” on day 27? That works too: find the position
+with `findIndex` and cut it out. Let us check in the console on the initial page:
+
+```js
+const i = tasks.findIndex((t) => t.id === 2);
+tasks.splice(i, 1);        // cuts out of the same array
+render();
+tasks.map((t) => t.id);    // [1, 3]
+list.children.length;      // 2
+```
+
+It works, and even `const` would do here: `splice` changes the same
+array instead of assigning a new one to the variable. Still, we took `filter`: it is shorter,
+and it has no position to get wrong — and getting it wrong is very easy, as
+section 13 will show.
+
+## 12. Filters, clearing, Esc {#filters}
+
+The three remaining features take a few lines each. A filter changes only the variable
+`filter`, and what to show is decided by `isVisible` inside
+`render`:
+
+```js
+filters.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  filter = button.dataset.filter;   // "all", "active" or "done" — from data-filter
+  render();
+});
+```
+
+The button does what we did by hand in section 7. Let us check the third filter the same
+way, on the initial page:
+
+```js
+filter = "done";
+render();
+list.children.length;                      // 1
+list.querySelector("span").textContent;    // "Review day 26"
+filters.querySelector(".active").textContent;   // "Done" — the right button is highlighted
+```
+
+“Clear done” is the same array `filter` as for deleting one task,
+only the condition is different:
+
+```js
+clearDone.addEventListener("click", () => {
+  tasks = tasks.filter((t) => !t.done);
+  render();
+});
+```
+
+And <Kbd>Esc</Kbd> in the input field is a `keydown` listener from day 27
+on the field itself: the field has the focus, so the keys come to it.
+
+```js
+form.elements.text.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    form.reset();
+    error.textContent = "";
+  }
+});
+```
+
+Note how little code each new feature needs. A listener changes
+the data in one line and calls `render` — all the rest of the work is already done.
+This is the main benefit of the scheme from section 5: new features are cheap to add.
+
+Five listeners out of six are built the same way, and they share a skeleton. The sixth, on
+<Kbd>Esc</Kbd>, does not touch the data: it only clears the field, and
+it does not need `render`.
+
+```js
+// the skeleton of a listener of this program — a template, not code to run
+element.addEventListener("event", (event) => {
+  // 1. understand what happened: matches, closest, taskOf, input validation
+  // 2. change the data: tasks, filter or nextId
+  render();   // 3. redraw — as the last line
+});
+```
+
+## 13. Walkthrough: the wrong task was deleted {#bug-index}
+
+A common first version of deleting remembers in the item not the `id` but the position number —
+the second argument of `map`:
+
+```js
+// do NOT do this
+function makeItem(task, i) {
+  // … the same, plus:
+  li.dataset.index = i;
+}
+
+list.addEventListener("click", (event) => {
+  if (!event.target.closest(".delete")) return;
+  const index = Number(event.target.closest("li").dataset.index);
+  tasks.splice(index, 1);
+  render();
+});
+```
+
+As long as the filter is “All”, everything works, and the mistake is easy to miss. Let us add “Buy a notebook”,
+switch on “Active” and press “✕” at “Read about events on MDN”:
+
+```js
+// on the screen under the “Active” filter:
+// 0 Do the tasks of day 28 · 1 Read about events on MDN · 2 Buy a notebook
+// clicked “✕” at the second one — index 1
+tasks.map((t) => t.text);
+// ["Review day 26", "Read about events on MDN", "Buy a notebook"]
+// “Do the tasks of day 28” was deleted, while the clicked task stayed!
+```
+
+**Step 1. What was deleted?** Not the clicked task but its neighbor. So the number
+pointed to the wrong place.
+
+**Step 2. Where does the number come from?** `map` numbered the items
+of the **visible** list, while `splice` deletes by a number of
+the **whole** array. In the visible list “Read…” is number 1, and in the array
+number 1 is “Do the tasks of day 28”: the hidden done task shifted the numbering.
+The console shows this directly — even on the correct program, under the “Active” filter:
+
+```js
+filter = "active";
+render();
+tasks.filter(isVisible)[1].text;   // "Read about events on MDN" — the second on the screen
+tasks[1].text;                     // "Do the tasks of day 28" — the second in the array
+```
+
+**Step 3. We fix it.** A position changes because of filtering, deleting, sorting.
+An `id` — never. That is why the link “item — task” is built only through the permanent
+number, as in section 9.
+
+## 14. Walkthrough: three silent mistakes {#bugs}
+
+Three more mistakes turn up in the tasks for almost everyone. Each has its own symptom.
+
+### The checkbox does not mark the task
+
+```js
+// Number was forgotten in taskOf:
+function taskOf(element) {
+  return tasks.find((t) => t.id === element.closest("li").dataset.id);
+}
+
+// a click on the checkbox:
+// TypeError: Cannot set properties of undefined (setting 'done')
+```
+
+`dataset.id` is the string `"2"`, while the data has the number `2`.
+Strict comparison from day 7 does not consider them equal, `find` finds nothing
+and returns `undefined` — and that is what we try to write `done` into.
+The trick is that the checkbox on the page did get checked: the browser did its part, while
+the data stayed the same.
+
+### The task was added, but it is not visible
+
+`render()` was forgotten at the end of the listener. There is no error, the form was cleared, but the list
+is the same. Let us repeat this in the console: add a task to the data and not call `render`.
+
+```js
+tasks.push({ id: nextId, text: "Buy a notebook", done: false });
+nextId++;
+tasks.length;            // 4 — four tasks in the data
+list.children.length;    // 3 — three on the page
+render();
+list.children.length;    // 4
+```
+
+The first question for any oddity of such an application: **what is in the data?**
+If the data is right and the page is not, `render` was not called.
+
+### Deleting fails with an error about a constant
+
+```js
+const tasks = [ /* … */ ];
+
+// a click on “✕”:
+// TypeError: Assignment to constant variable.
+```
+
+That very mistake from day 4: `tasks = tasks.filter(…)` assigns the variable
+a new array, and with `const` this is not allowed. There are two solutions: declare it with
+`let`, as we did, or delete from within the same array — `splice`
+by `findIndex`.
+
+| Symptom | Cause | Where to look |
+| --- | --- | --- |
+| the neighboring task was deleted | a position number instead of `id` | what is written into `dataset` |
+| `Cannot set properties of undefined` | a string against a number in `find` | `Number` in `taskOf` |
+| the data changed, the page did not | no `render()` | the end of the listener |
+| `Assignment to constant variable.` | `const` for a changing array | the declaration of `tasks` |
+
+## 15. The whole program {#whole}
+
+Let us gather `app.js` in one place. The order of the parts is the same in which we
+wrote them: data, elements, showing, actions, the first showing.
+
+```js
+// 1. The data is the main thing in the program. The page only shows it.
+let tasks = [
+  { id: 1, text: "Review day 26", done: true },
+  { id: 2, text: "Do the tasks of day 28", done: false },
+  { id: 3, text: "Read about events on MDN", done: false },
+];
+let nextId = 4;
+let filter = "all";
+
+// 2. The elements of the page — we find them once
+const form = document.querySelector("#new-task");
+const error = document.querySelector("#error");
+const list = document.querySelector("#tasks");
+const counter = document.querySelector("#counter");
+const clearDone = document.querySelector("#clear-done");
+const filters = document.querySelector(".filters");
+
+// 3. Showing: from the data — into elements
+function makeItem(task) {
+  const li = document.createElement("li");
+  const box = document.createElement("input");
+  const text = document.createElement("span");
+  const del = document.createElement("button");
+
+  box.type = "checkbox";
+  box.checked = task.done;
+  text.textContent = task.text;
+  del.textContent = "✕";
+  del.classList.add("delete");
+
+  li.append(box, " ", text, " ", del);
+  li.dataset.id = task.id;
+  li.classList.toggle("done", task.done);
+  return li;
+}
+
+function isVisible(task) {
+  if (filter === "active") return !task.done;
+  if (filter === "done") return task.done;
+  return true;
+}
+
+function render() {
+  list.textContent = "";
+  list.append(...tasks.filter(isVisible).map(makeItem));
+
+  const left = tasks.filter((t) => !t.done).length;
+  counter.textContent = `Left: ${left} of ${tasks.length}`;
+  clearDone.hidden = tasks.every((t) => !t.done);
+
+  filters.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.filter === filter);
+  });
+}
+
+// 4. Actions: they change the data and call render()
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = form.elements.text.value.trim();
+
+  if (text === "") {
+    error.textContent = "Write what needs to be done";
+    form.elements.text.focus();
+    return;
+  }
+  if (text.length > 60) {
+    error.textContent = "Too long: no more than 60 characters";
+    form.elements.text.focus();
+    return;
+  }
+
+  tasks.push({ id: nextId, text, done: false });
+  nextId++;
+  error.textContent = "";
+  form.reset();
+  render();
+});
+
+function taskOf(element) {
+  const id = Number(element.closest("li").dataset.id);
+  return tasks.find((t) => t.id === id);
+}
+
+list.addEventListener("change", (event) => {
+  if (!event.target.matches('input[type="checkbox"]')) return;
+  taskOf(event.target).done = event.target.checked;
+  render();
+});
+
+list.addEventListener("click", (event) => {
+  if (!event.target.closest(".delete")) return;
+  const task = taskOf(event.target);
+  tasks = tasks.filter((t) => t !== task);
+  render();
+});
+
+filters.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  filter = button.dataset.filter;
+  render();
+});
+
+clearDone.addEventListener("click", () => {
+  tasks = tasks.filter((t) => !t.done);
+  render();
+});
+
+form.elements.text.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    form.reset();
+    error.textContent = "";
+  }
+});
+
+// 5. The first showing
+render();
+```
+
+Let us check all nine points of the assignment from section 2 with one scenario. Every branch
+of the program fired in it at least once:
+
+<ResultBox>
+| What we did | What is on the page |
+| --- | --- |
+| opened the page | three tasks, the first one crossed out; “Left: 2 of 3” |
+| “Add” with an empty field | “Write what needs to be done”, the cursor in the field |
+| a long task, Enter | “Too long: no more than 60 characters” |
+| typed some text, Esc | the field and the message are cleared |
+| “&nbsp;&nbsp;Buy a notebook&nbsp;&nbsp;”, Enter | the fourth task without spaces; “Left: 3 of 4” |
+| the checkbox of “Do the tasks of day 28” | crossed out; “Left: 2 of 4” |
+| “Active” | two tasks: “Read…” and “Buy a notebook” |
+| “Done”, “✕” at “Review day 26” | one task; “Left: 2 of 3” |
+| “All”, “Clear done” | two active tasks; “Left: 2 of 2”; the button is gone |
+</ResultBox>
+
+### Edge cases
+
+The scenario above is ordinary work. Now let us check the edges, like a tester: every row
+from a clean page.
+
+| What we did | What is on the page | Why |
+| --- | --- | --- |
+| five spaces, Enter | “Write what needs to be done” | `trim` left an empty string |
+| exactly 60 characters / 61 characters | added / “Too long…” | the condition `> 60`: sixty is allowed |
+| the task `<b>bold</b>` | written just like that, with the angle brackets | `textContent` does not parse markup (day 25) |
+| a task under the “Done” filter | did not appear in the list, “Left: 3 of 4” | the new task is active, the filter hides it |
+| deleted all three tasks | “Left: 0 of 0”, no “Clear done” button | `every` of an empty array is `true` |
+| an input error, then started typing | the error message stays | only submitting and <Kbd>Esc</Kbd> remove it |
+
+In the first three rows the program behaves correctly. The last one and the fourth are not mistakes,
+but a person will be surprised: “I added it, so where is it?”, “but I am fixing it!”. Such places are polished
+in the tasks.
+
+### What it has in common with the “Report card”
+
+Put the “Report card” and the to-do list side by side — it is one and the same program with different data.
+
+|  | The “Report card” | The to-do list |
+| --- | --- | --- |
+| data | an array of reports, `reports` | an array of tasks, `tasks` |
+| one object → one element | `makeRow` | `makeItem` |
+| the link of an element with the data | `data-name` | `data-id` |
+| input | a form with validation | a form with validation |
+| actions | delegation on `tbody` | delegation on `ul` |
+| the total | “Top students: 2 of 5” | “Left: 2 of 3” |
+
+There is one difference, and it is important: the to-do list rebuilds the page entirely with one function,
+while the “Report card” adds and deletes rows in place. For small lists both ways
+fit. Rebuilding everything is simpler and more reliable, and in place is faster when there are thousands of elements.
+
+<TryIt>
+Two experiments.
+\
+\
+**The first.** Mark all the tasks as done — what will the “Clear done” button
+become, and what will the “Active” filter show? Clear the done tasks — what happened to the button?
+\
+\
+**The second.** Add two identical tasks “Buy bread” and delete one of them.
+Was the second one deleted too? Why does this work with `id`, while the “Report card” with names had to
+be protected with a check for a repeat?
+</TryIt>
+
+## 16. What comes next {#next}
+
+The to-do list has an obvious drawback: reload the page — everything is gone, the
+three initial tasks are back. The data lives in variables, and variables disappear together with the page.
+We will fix this on day 31: `localStorage` will save the array as a JSON string (day 23),
+and on load we will read it. Thanks to the scheme from section 5 the change will be tiny:
+save the data at the end of `render`, read it at the start of the program.
+
+```js
+localStorage.setItem("tasks", JSON.stringify(tasks));   // day 31: the last line of render
+tasks = JSON.parse(localStorage.getItem("tasks"));      // day 31: the start of the program
+```
+
+Two lines — but with two catches, which we will cover on day 31. On the very first
+run nothing is saved yet, and `null` will come instead of an array. And the counter
+`nextId` will have to be restored too — otherwise a new task will get a number
+that is already taken.
+
+Tomorrow, on day 30, — **timers and promises**: how to do something not now
+but in a second, and how to wait for what does not come at once. This is preparation for day 31,
+when the data starts coming from the network.
+
+### How to extend the project yourself
+
+| Idea | What you will need |
+| --- | --- |
+| editing the text with a double click | `dblclick`, a field instead of the text, `replaceWith` (day 26) |
+| “Check all” | `forEach` over the data and one `render` |
+| searching the tasks | `input` and one more condition in `isVisible` (day 28) |
+| important tasks | an `important` field in the object and a class in `makeItem` |
+
+Every idea fits into the same scheme: a new field in the data, a new line in
+`makeItem` or `isVisible`, a new listener that changes the data
+and calls `render`. All four are in today’s tasks.
+
+<Ref>
+<p style={{margin: "0 0 8px"}}>There are no new pages — the project uses the ones covered before:</p>
+
+| Page | Where in the project | Day |
+| --- | --- | --- |
+| [Array.filter](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/filter) | visible tasks, deleting, clearing | 20 |
+| [Array.find](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/find) | a task by its number in `taskOf` | 20 |
+| [Array.every](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/every) | hiding “Clear done” | 20 |
+| [closest](https://developer.mozilla.org/en-US/docs/Web/API/Element/closest) | from the button and the checkbox to the item | 24 |
+| [matches](https://developer.mozilla.org/en-US/docs/Web/API/Element/matches) | whether the checkbox changed | 24 |
+| [dataset](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/dataset) | `data-id`, `data-filter` | 25 |
+| [classList.toggle](https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/toggle) | the `done` and `active` classes | 25 |
+| [createElement](https://developer.mozilla.org/en-US/docs/Web/API/Document/createElement) | the item, the checkbox, the text, the button | 26 |
+| [append](https://developer.mozilla.org/en-US/docs/Web/API/Element/append) | assembling the item and the list | 26 |
+| [addEventListener](https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener) | all the actions | 27 |
+| [submit](https://developer.mozilla.org/en-US/docs/Web/API/HTMLFormElement/submit_event) | adding a task | 28 |
+| [change](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/change_event) | marking with a checkbox | 28 |
+</Ref>
+
+<Cheatsheet>
+```js
+// THE SCHEME OF ANY APPLICATION WITH AN INTERFACE
+// data (let tasks, let filter) → render() → the page
+// a listener: change the data → render()
+
+// ONE OBJECT → ONE ELEMENT
+function makeItem(task) {
+  const li = document.createElement("li");
+  // … the parts, textContent for the data
+  li.dataset.id = task.id;               // the thread to the data
+  return li;                             // we do not insert — only create
+}
+
+// REDRAW
+function render() {
+  list.textContent = "";
+  list.append(...tasks.filter(isVisible).map(makeItem));
+  // + counters, buttons, filters — all from the data
+}
+
+// FROM AN ELEMENT TO THE DATA
+const id = Number(element.closest("li").dataset.id);   // Number is a must!
+const task = tasks.find((t) => t.id === id);
+
+// DELETE FROM THE DATA
+tasks = tasks.filter((t) => t.id !== id);             // let, not const
+
+// IF SOMETHING IS WRONG — THE DATA FIRST
+console.log(tasks);   // is it right? — then render() was forgotten
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why do the listeners change the data and call `render`, instead of fixing the page themselves?
+   <Answer>One action changes several places of the page: the list, the counter, the buttons. If
+   one function builds them from the data, the page cannot drift apart from the data.
+   And new features are simpler to add.</Answer>
+2. Why does a task need an `id` if it has a text and a position in the array?
+   <Answer>A text can repeat, and a position changes because of filtering, deleting, sorting.
+   A task gets its `id` once and does not lose it — by it an item reliably
+   finds its task.</Answer>
+3. Why is `Number` needed in `taskOf`?
+   <Answer>`dataset.id` is a string, while in the data `id` is a number.
+   `"2" === 2` is false, and `find` would return `undefined`.</Answer>
+4. Why is `tasks` declared with `let`?
+   <Answer>When deleting, the variable is assigned a new array from `filter`.
+   With `const` this is the error `Assignment to constant variable.`</Answer>
+5. Is the “Left” counter computed over all the tasks or over the visible ones? Why?
+   <Answer>Over all of them: how much is left to do does not depend on which filter is selected.
+   The visible ones are needed only for the list.</Answer>
+6. A task was added to `tasks`, but it is not on the page. What should be checked first?
+   <Answer>The call to `render()` at the end of the listener: the data is right, so
+   the page was not rebuilt.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model" />

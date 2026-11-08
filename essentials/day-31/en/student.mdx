@@ -1,0 +1,109 @@
+---
+title: Day 31 — notes
+css: |
+  h1 { border-bottom-color: #6366f1; }
+  h2 { color: #4338ca; background: #eef2ff; border-left-color: #6366f1; }
+---
+
+# Day 31. fetch, async/await and localStorage
+
+<Subtitle>A summary of the lecture: a request to a server, asynchronous functions, browser storage, encoding an address.</Subtitle>
+
+## A request and a response
+
+```js
+async function loadGroup() {
+  const response = await fetch("group.json");   // the response came: the status and the headers
+  if (!response.ok) {                            // 404, 500 — not an error for fetch!
+    throw new Error(`Server replied ${response.status}`);
+  }
+  return response.json();                        // the body: json() or text(), once
+}
+```
+
+<Remember>
+The page is opened through Live Server: from `file:///` requests are forbidden.
+`fetch` is rejected only without a response — `TypeError: Failed to fetch`.
+A 404 response comes “successfully”, with `ok === false`, so `ok` is checked
+before reading the body: otherwise the error page goes into `json()` and gives
+`Unexpected token '<'`.
+</Remember>
+
+| Trouble | Where it is visible |
+| --- | --- |
+| the server does not answer | `fetch` is rejected: `Failed to fetch` |
+| no such file, a server error | `ok === false`, `status` 404 or 500 |
+| the response is not JSON | `json()` is rejected: `SyntaxError` |
+
+All three are handy to bring into one `catch`: a bad status is turned into an error by hand,
+with `throw`. What went out and what came back is visible on the Network tab.
+
+## `async` and `await`
+
+```js
+loadButton.addEventListener("click", async () => {
+  try {
+    const group = await loadGroup();   // the value — only after await
+    // … show it
+  } catch (err) {
+    message.textContent = `Could not load: ${err.message}`;
+  } finally {
+    loadButton.hidden = false;         // cleanup in any outcome
+  }
+});
+```
+
+<KeyPoint>
+An asynchronous function always returns a promise. `await` stops only
+its own function, the page lives on. `await` works only inside
+`async`; in the Chrome console — outside a function too, but that is a convenience of the console.
+A forgotten `await` gives a promise instead of data: `r.json is not a function`,
+`undefined` instead of a length.
+</KeyPoint>
+
+## Browser storage
+
+```js
+const saved = localStorage.getItem("todo:tasks");             // null if there is no key
+const tasks = saved === null ? [] : JSON.parse(saved);
+localStorage.setItem("todo:tasks", JSON.stringify(tasks));   // only strings!
+localStorage.removeItem("todo:tasks");                        // your own — with your own key
+```
+
+|  | `localStorage` | `sessionStorage` |
+| --- | --- | --- |
+| the page was reloaded | in place | in place |
+| a new tab | in place | empty |
+| the tab was closed | in place | gone |
+
+Without `JSON.stringify` an object is saved as `"[object Object]"`, and
+`getItem` returns a number as a string: `"5" + 1` gives `"51"`. All
+the Live Server projects live on one address and share one storage, so keys have
+a project prefix, and `clear()` is only for experiments.
+
+## Text in an address
+
+Any text from a person that goes into an address is passed through
+`encodeURIComponent`: otherwise `&`, `?` and `#` in it
+will break the address. `decodeURIComponent` goes back; a wrong code gives
+`URIError: URI malformed`. `encodeURI` is for a whole address, the characters
+`&` and `?` it leaves as they are.
+
+## The to-do list and the “Report card” remember
+
+The to-do list saves the tasks in the last line of `render`, and on start it reads them
+and restores the counter: `Math.max(0, ...tasks.map((t) => t.id)) + 1` — otherwise
+the numbers will repeat. The “Report card” takes the data from `students.json` on the first start,
+then from storage, and it saves in `updateSummary`. Broken data in
+storage is cured with `removeItem` of your own key.
+
+<Homework>
+1. Build the group page from the lecture and go through all three troubles of section 6.
+2. Teach the to-do list to remember the tasks and check the three rows of the table of section 14.
+3. Move the “Report card” to `students.json` and saving, add a student,
+   reload the page and find the data on the Application tab.
+4. For day 32: think about what data the catalog needs — what will be in the JSON file,
+   and what is worth keeping in `localStorage`.
+</Homework>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch" />

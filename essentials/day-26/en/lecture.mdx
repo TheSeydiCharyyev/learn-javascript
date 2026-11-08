@@ -1,0 +1,871 @@
+---
+title: Day 26 — Creating and removing elements
+day: Day 26 • lesson 1
+heading: Creating and removing elements
+lead: Module “DOM and events”, the third day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #8b5cf6; }
+  h2 { color: #6d28d9; background: #f5f3ff; border-left-color: #8b5cf6; }
+  h3 { color: #5b21b6; }
+  .step-number { background: #8b5cf6; }
+  .toc a { color: #6d28d9; }
+---
+
+<Goals>
+- create elements and text nodes with code;
+- insert them into the right place: at the start, at the end, before and after;
+- move, copy, replace and remove elements;
+- recognize the old `Node` methods in other people’s code;
+- build a piece of the tree in the right order and build a list from an array;
+- teach the “Report card” to create as many rows as there are students.
+</Goals>
+
+<Toc />
+
+## 1. When the markup is not enough {#why}
+
+For two days we worked with what is already in the markup: we found and changed it. But this
+approach has a ceiling, and the “Report card” hit it. The table has as many rows as were
+prepared by hand, and a sixth student crashed the program:
+
+```js
+rows[5].children;   // TypeError: Cannot read properties of undefined (reading 'children')
+```
+
+Real data does not know how much of it there will be: five students today, thirty tomorrow.
+So the elements have to be **created** with code — exactly as many as the data that came —
+and the unneeded ones **removed**. The DOM has two sets of methods for this:
+
+|  | The new set (on `Element`) | The old set (on `Node`) |
+| --- | --- | --- |
+| insert at the end | `append` | `appendChild` |
+| insert at the start | `prepend` | `insertBefore(new, first)` |
+| insert next to it | `before`, `after` | `insertBefore` |
+| remove | `remove` | `removeChild` |
+| replace | `replaceWith` | `replaceChild` |
+
+The new set is shorter and can do more: it takes strings and several arguments at once.
+That is the one we will write with. The old one has to be recognized — it lives in other people’s code, textbooks and on MDN,
+including the guide this lesson is built on. The page for experiments is
+yesterday’s, from day 25. The examples of one section continue each other, and before each
+new section reload the page (<Kbd>F5</Kbd>).
+
+You will be creating elements until the end of the course: the items of the to-do list on day 29, the catalog
+cards with data from the server on day 32, the rows of the final project. The picture is the same everywhere:
+there is some amount of data, and the markup for it appears through code.
+
+## 2. `createElement`: a new element {#create}
+
+`document.createElement(tagName)` creates a new empty element.
+The main thing to understand right away: **it is not on the page yet**.
+
+```js
+const li = document.createElement("li");
+
+li;                               // <li></li>
+li.isConnected;                   // false — not connected to the page
+li.parentElement;                 // null — no parent
+document.body.contains(li);       // false
+```
+
+The element lives in memory, like any object, until we insert it into the tree. This
+is convenient: it can be filled calmly before inserting — given text, classes, data. Everything
+we did yesterday with found elements works with created ones too:
+
+```js
+li.textContent = "Ilýas";
+li.classList.add("student");
+li.dataset.id = "6";
+
+const list = document.querySelector("#list");
+list.append(li);                  // now it is on the page
+
+li.isConnected;                   // true
+list.children.length;             // 6
+li.outerHTML;                     // '<li class="student" data-id="6">Ilýas</li>'
+```
+
+The tag name can be written in any letters: in an HTML document it is converted to lowercase,
+and `createElement("LI")` gives the same `<li></li>`.
+A name with a space is rejected by the browser, and an unknown one is accepted silently:
+
+```js
+document.createElement("my item");
+// InvalidCharacterError: Failed to execute 'createElement' on 'Document':
+// The tag name provided ('my item') is not a valid name.
+
+document.createElement("student");   // <student></student> — HTMLUnknownElement, no error
+```
+
+The last line is a quiet trap. A typo in a tag name (`"lii"`,
+`"tabel"`) gives a strange element that the browser shows as plain text
+without styling. If a created element looks “wrong”, check the tag name first.
+
+### Walkthrough: created, but the page is empty
+
+```js
+const nazik = document.createElement("li");
+nazik.textContent = "Nazik";
+nazik.classList.add("student");
+
+document.body.contains(nazik);   // false — she is not on the page
+nazik.isConnected;               // false
+```
+
+**Step 1. There are no errors.** Every line worked, and in the console the element
+looks right. So it seems that everything is done.
+
+**Step 2. We ask the element.** `isConnected` answers
+`false`: the element exists but is not attached to anything.
+
+**Step 3. We fix it.** A third action is missing: `list.append(nazik)`.
+The order is always the same — **create, fill, insert**. The last step
+is forgotten most often: the first two already give a picture in the console.
+
+## 3. Text: nodes and strings {#text-node}
+
+A text node from day 24 can also be created separately — with the method
+`createTextNode`. Like `textContent`, it never parses
+markup:
+
+```js
+const p = document.querySelector("footer p");
+const text = document.createTextNode("<b>Mary</b>");
+
+text.nodeName;          // "#text"
+p.textContent = "";
+p.append(text);
+p.children.length;      // 0 — no <b>; the page literally shows <b>Mary</b>
+```
+
+In old code `createTextNode` comes up all the time — in the MDN guide
+every table cell is filled with it. We rarely need it, because `append`
+can take strings and turns them into text nodes by itself:
+
+```js
+p.textContent = "Mary";
+p.append(", ", "Turkmenistan", "!");
+
+p.textContent;          // "Mary, Turkmenistan!"
+p.childNodes.length;    // 4 — four text nodes in a row
+```
+
+On the screen it is one line, but in the tree it is four nodes. MDN notes the same thing:
+“hello” and “world” look like one word, but in the document model there are two of them.
+
+<Mistake>
+Everything that is not a node, `append` turns into text — without errors. A number becomes
+digits, and `null` and `undefined` become words:
+`p.append(2026, null, undefined)` appends `"2026nullundefined"`.
+If the word “undefined” suddenly appears on the page, look for the variable that
+got into `append` empty.
+</Mistake>
+
+| Way | What it does | When |
+| --- | --- | --- |
+| `el.textContent = s` | replaces all the contents with text | to set the text as a whole |
+| `el.append(s)` | adds text at the end | to add to what is there |
+| `createTextNode(s)` | a separate node that can be inserted anywhere | old code and old methods |
+
+## 4. `append` and `prepend` {#append}
+
+`append` inserts inside the element **at the end**,
+`prepend` — **at the start**. Both take any number of
+arguments: nodes and strings mixed.
+
+```js
+const list = document.querySelector("#list");
+const first = document.createElement("li");
+first.textContent = "Ilýas";
+
+list.prepend(first);
+list.firstElementChild.textContent;   // "Ilýas"
+list.children[1].textContent;         // "Aman" — the others moved down
+```
+
+Several elements are inserted with one call — in the order they were passed:
+
+```js
+const a = document.createElement("li");
+const b = document.createElement("li");
+a.textContent = "Ilýas";
+b.textContent = "Bahar";
+
+list.append(a, b);
+list.lastElementChild.textContent;    // "Bahar" — passed last, it stands last
+```
+
+Nodes and strings can be mixed — MDN shows this with the example “text, then a paragraph”.
+It is handy for building captions from a constant part and data:
+
+```js
+const mark = document.createElement("b");
+mark.textContent = "5";
+
+const item = document.createElement("li");
+item.append("Aman — mark ", mark);     // the string becomes text, b stands after it
+item.childNodes.length;                // 2
+```
+
+Both methods **return nothing**. Hence a mistake that every second person
+makes:
+
+```js
+const added = list.append(first);
+added;   // undefined — append gives nothing back
+```
+
+The right way is to keep the created element in your own variable and insert it with a separate
+line. That is how it was in section 2: `li` was created, filled, inserted, and after
+inserting `li` still points to it.
+
+## 5. `before` and `after` {#before-after}
+
+These two methods insert not inside the element but **next to** it —
+as a sibling before it or after it. Together with `prepend` and `append`
+they give the same four places as `insertAdjacentHTML` from day 25,
+only nodes are inserted, not markup:
+
+<Scheme src="scheme-before-after.svg">prepend and append go inside the element, before and after go next to it</Scheme>
+
+```js
+const title = document.querySelector("#title");
+const note = document.createElement("p");
+note.textContent = "Tutor: Sapar";
+
+title.after(note);    // the paragraph stood right after the heading, inside header
+title.before("Mary, 2026");   // a string works too — it becomes a text node
+```
+
+The names are easy to mix up, so let us remember them by the scheme: `pre`- and `ap`-
+are “to the children”, at the start and at the end; `before` and `after` are
+“to the siblings”, before and after.
+
+The sibling methods have a condition: the element must have a parent. A new
+element that is not inserted yet has nowhere to put a sibling, and the method silently does nothing:
+
+```js
+const lonely = document.createElement("p");
+lonely.after("text");    // neither an error nor a result: lonely has no parent
+```
+
+## 6. Inserting moves, it does not copy {#move}
+
+What happens if you insert an element that already stands on the page? It does not
+split in two — it **moves**. A node cannot be in two places of the tree
+at once, so inserting first takes it from its old place:
+
+```js
+const list = document.querySelector("#list");
+
+list.prepend(list.lastElementChild);   // Oguljan moved to the start
+[...list.children].map((li) => li.textContent);
+// ["Oguljan", "Aman", "Meret", "Gülnar", "Sapar"] — still five
+```
+
+<Scheme src="scheme-move.svg">A node cannot stand in two places: inserting takes it from the old one</Scheme>
+
+The same happens when moving to another parent:
+
+```js
+const first = list.firstElementChild;           // now this is Oguljan
+document.querySelector("footer").append(first);
+
+list.children.length;          // 4 — she is no longer in the list
+first.parentElement.nodeName;  // "FOOTER"
+```
+
+This is not a bug but an important tool: reordering elements is simply inserting
+them in a new order (section 14). And if you need exactly a copy, it is made explicitly.
+
+## 7. `cloneNode`: a copy {#clone}
+
+`cloneNode` returns a copy of a node. Without an argument only the element itself
+with its attributes is copied; with the argument `true` — together with everything inside:
+
+```js
+const aman = document.querySelector("li");
+
+aman.cloneNode();       // <li class="student" data-id="1"></li> — empty, without text
+aman.cloneNode(true);   // <li class="student" data-id="1">Aman</li> — with the contents
+```
+
+On an element with children the difference is even clearer:
+
+```js
+const header = document.querySelector("header");
+
+header.cloneNode().querySelectorAll("*").length;       // 0 — an empty wrapper
+header.cloneNode(true).querySelectorAll("*").length;   // 4 — h1, nav and both links
+```
+
+A copy, like a new element, is **not on the page** until it is inserted.
+And it is independent: change the copy, and the original will not notice. This is handy when the markup
+has a ready sample and you need a few more like it:
+
+```js
+const copy = aman.cloneNode(true);
+copy.textContent = "Aman (copy)";
+copy.dataset.id = "11";
+list.append(copy);
+
+aman.textContent;   // "Aman" — the original is untouched
+```
+
+<Mistake>
+MDN warns: a copy takes the `id` with it too. If you copied the heading
+`#title` and inserted it, the page has two elements with one `id`,
+and `getElementById` will find only the first. The copy’s `id` is changed
+right away, before inserting.
+</Mistake>
+
+## 8. `remove`: delete {#remove}
+
+`remove()` takes an element off the page. The object itself does not disappear:
+as long as there is a variable pointing to it, it can be read and even inserted back.
+
+```js
+const meret = document.querySelector(".absent");
+
+meret.remove();
+meret.isConnected;                          // false — she is not on the page
+document.querySelectorAll("li").length;    // 4
+meret.textContent;                          // "Meret" — but the object is intact
+
+list.firstElementChild.after(meret);        // put back in place — after Aman
+```
+
+An element that is not on the page can be removed without an error: `remove`
+simply does nothing.
+
+### Walkthrough: why not all of them were removed
+
+The task: clear the list by removing each item. It seems to be done with a loop
+over the children:
+
+```js
+const list = document.querySelector("#list");
+
+for (const li of list.children) {
+  li.remove();
+}
+list.children.length;   // 2 — Meret and Sapar are left!
+```
+
+**Step 1. We recall what `children` is.** It is the live
+`HTMLCollection` from day 24: it changes together with the page.
+
+**Step 2. We play through the loop.** The first step takes element number 0 —
+Aman — and removes it. The collection immediately shrinks: Meret becomes number zero, Gülnar —
+number one. The second step takes element number 1 — that is already Gülnar. Meret is skipped.
+So the loop steps over every second one.
+
+**Step 3. We fix it.** You have to go through something that does not change during
+removal. The `querySelectorAll` snapshot from day 24 fits — it “remembers how it
+was”. Or a loop “while there is a first one, remove the first one”:
+
+```js
+document.querySelectorAll("#list li").forEach((li) => li.remove());
+
+while (list.firstElementChild) {
+  list.firstElementChild.remove();
+}
+```
+
+And if you need to remove all the contents at all, the line from day 25 is enough:
+`list.textContent = ""`. It removes both the elements and the whitespace text nodes
+between them — the loop over `firstElementChild` leaves those.
+
+| Task | How |
+| --- | --- |
+| remove one element | `el.remove()` |
+| remove all the contents | `el.textContent = ""` |
+| remove the chosen ones | `querySelectorAll(…).forEach((x) => x.remove())` |
+| remove to put back later | `remove()`, and keep the object in a variable |
+
+## 9. `replaceWith`: replace {#replace}
+
+`replaceWith` puts something else in place of the element — nodes or strings.
+The old element leaves the page, but, as after `remove`, it stays
+in the variable:
+
+```js
+const meret = document.querySelector(".absent");
+const bahar = document.createElement("li");
+bahar.textContent = "Bahar";
+
+meret.replaceWith(bahar);
+meret.isConnected;   // false
+// the list now has: Aman, Bahar, Gülnar, Sapar, Oguljan
+```
+
+Like `append`, the method takes several nodes and strings. One element
+can be replaced with two:
+
+```js
+const sapar = document.querySelector(".absent");   // Meret is already replaced, now this is Sapar
+const ilyas = document.createElement("li");
+const nazik = document.createElement("li");
+ilyas.textContent = "Ilýas";
+nazik.textContent = "Nazik";
+
+sapar.replaceWith(ilyas, nazik);
+// the list: Aman, Bahar, Gülnar, Ilýas, Nazik, Oguljan
+```
+
+And a string instead of an element becomes a text node:
+`el.replaceWith("just text")`.
+
+Where it comes in handy: in the starred task of day 29 the text of a to-do item is temporarily replaced
+with an input field so that it can be edited.
+
+## 10. The old `Node` methods {#node}
+
+The new set appeared in browsers later. Before it everything was done through the
+`Node` interface from day 25 — common to all nodes, from the document to text. These methods
+still work, and other people’s code is full of them.
+
+```js
+const list = document.querySelector("#list");
+const li = document.createElement("li");
+li.textContent = "Ilýas";
+
+list.appendChild(li);                            // at the end, returns li
+list.insertBefore(li, list.firstElementChild);   // before the first — that is, at the start
+list.insertBefore(li, null);                     // null instead of a sibling — at the end
+list.removeChild(li);                            // remove, returns li
+list.replaceChild(li, list.firstElementChild);   // the NEW one first, then the OLD one
+```
+
+There are four differences from the new methods. The methods are called **on the parent**,
+not on the element itself. They take **exactly one** node. They do
+**not take** strings. And they **return** a node — so they can
+be nested in expressions.
+
+```js
+list.appendChild("Ilýas");
+// TypeError: Failed to execute 'appendChild' on 'Node': parameter 1 is not of type 'Node'.
+```
+
+`replaceChild` has an unusual order: the new node first, the old one second.
+MDN itself calls it “unusual” and recommends `replaceWith`.
+
+Inserting into the middle of a list shows the difference between the approaches most clearly. The old
+set asks the parent “insert before this child”, the new one asks the sibling “stand before yourself”:
+
+```js
+const ilyas = document.createElement("li");
+ilyas.textContent = "Ilýas";
+list.insertBefore(ilyas, list.children[2]);   // old: on the parent
+
+const bahar = document.createElement("li");
+bahar.textContent = "Bahar";
+list.children[2].before(bahar);               // new: on the sibling
+```
+
+<Mistake>
+The fact that `appendChild` returns the inserted node, not the parent, gives birth to
+a mistake that MDN lists separately. The chain
+`body.appendChild(p1).appendChild(p2)` inserts `p2`
+not next to `p1` but **inside** it:
+you get `<p><p></p></p>`.
+</Mistake>
+
+## 11. Building a piece of the tree {#build}
+
+A single `<li>` with text is a simple case. Usually you need to build
+an element with children: an item with a bold name and marks, a table row of six cells,
+a card. The MDN guide gives a rule: **create from the top down, attach
+from the bottom up**.
+
+```js
+function makeItem(student) {
+  const li = document.createElement("li");        // 1. create: the outer one first,
+  const name = document.createElement("b");       //    then the inner ones
+  const marks = document.createElement("span");
+
+  name.textContent = student.name;                // 2. fill with data — as text
+  marks.textContent = " " + student.marks.join(", ");
+
+  li.append(name, marks);                         // 3. attach the children to the parent
+  li.classList.add("student");
+  return li;                                      // 4. give it back ready, but not inserted yet
+}
+
+list.append(makeItem({ name: "Ilýas", marks: [5, 4, 5] }));
+// <li class="student"><b>Ilýas</b><span> 5, 4, 5</span></li>
+```
+
+<Scheme src="scheme-build.svg">While the piece is being built, it is not on the page. When it is ready, it is inserted with one line</Scheme>
+
+Why exactly this way? While the piece is being built, it is not on the page, and the browser does not need
+to redraw anything. The ready piece is inserted in one operation. And a function like
+`makeItem` knows nothing about where its result will end up: it can
+be called for one student or for a hundred.
+
+### The main MDN example: a table from code
+
+The MDN guide builds a whole table this way. Two nested loops from day 10:
+the outer one creates the rows, the inner one the cells.
+
+```js
+const table = document.createElement("table");
+const body = document.createElement("tbody");
+
+for (let i = 0; i < 2; i++) {
+  const row = document.createElement("tr");
+  for (let j = 0; j < 3; j++) {
+    const cell = document.createElement("td");
+    cell.textContent = `row ${i}, column ${j}`;
+    row.append(cell);                            // the cell — into the row
+  }
+  body.append(row);                              // the row — into the body
+}
+table.append(body);                              // the body — into the table
+document.querySelector("main").append(table);    // the table — onto the page, once
+
+table.querySelectorAll("td").length;             // 6
+```
+
+In the original `appendChild` stands instead of `append`, and the cell text
+is created through `createTextNode` — this is the old set from section 10. The order is
+the same: each level is attached to its parent, and only the ready table gets
+onto the page.
+
+## 12. Insertion errors {#errors}
+
+The tree will not let you turn it into a non-tree. You cannot insert an element into its
+own descendant: that would make a circle, and a tree has no circles.
+
+```js
+list.append(document.querySelector("main"));
+// HierarchyRequestError: Failed to execute 'append' on 'Element':
+// The new child element contains the parent.
+```
+
+`main` is an ancestor of the list. Inserting it into the list means putting a box
+inside its own contents. Three more errors you will meet:
+
+| Call | What Chrome says |
+| --- | --- |
+| `list.appendChild("text")` | `TypeError: … parameter 1 is not of type 'Node'.` |
+| `list.removeChild(title)` — not a child | `NotFoundError: … The node to be removed is not a child of this node.` |
+| `list.insertBefore(li, title)` — the sibling is not from this list | `NotFoundError: … The node before which the new node is to be inserted is not a child of this node.` |
+| `textNode.append("x")` | `TypeError: … append is not a function` — text has no children |
+
+The most common one is `NotFoundError` from `removeChild`:
+the method requires being called on the **real** parent.
+
+```js
+list.removeChild(document.querySelector("#title"));
+// NotFoundError: Failed to execute 'removeChild' on 'Node':
+// The node to be removed is not a child of this node.
+```
+
+The heading lies in `header`, not in the list. `title.remove()`
+does not give such an error — it knows its parent itself. One more argument for the new set.
+
+## 13. A list from an array {#render}
+
+The most common task of the module: there is an array of data — draw it on the page.
+Let us gather everything from today into one function:
+
+```js
+function toItem(name) {
+  const li = document.createElement("li");
+  li.textContent = name;                 // data — only as text
+  return li;
+}
+
+function renderList(list, names) {
+  list.textContent = "";                 // 1. remove the old (day 25)
+  list.append(...names.map(toItem));     // 2. one element per value — and onto the page at once
+}
+
+renderList(document.querySelector("#list"), ["Aman", "Meret", "Gülnar"]);
+// <li>Aman</li><li>Meret</li><li>Gülnar</li>
+```
+
+`map` from day 20 turns the array of names into an array of elements, three dots
+from day 22 spread it into separate arguments, and `append` inserts
+everything in one call. The function can be called any number of times, and with an empty array
+it simply clears the list.
+
+### Walkthrough: the list doubled
+
+```js
+const names = ["Aman", "Meret", "Gülnar"];
+
+renderList(list, names);             // three items
+list.append(...names.map(toItem));   // “updated” without clearing
+list.children.length;                // 6 — the old items did not go anywhere
+```
+
+**Step 1. We count.** There are twice as many items as names — so
+the old ones stayed, and the new ones stood after them.
+
+**Step 2. We recall what `append` does.** It only adds.
+It cannot and should not remove the old.
+
+**Step 3. The rule.** To redraw is to **clear and insert
+again**. That is why `renderList` starts with clearing. This pattern
+will come in handy until the end of the course: the to-do list on day 29 is redrawn after each
+change, the catalog on day 32 — after the data loads from the server.
+
+The same task is often solved through `innerHTML` and a template string from day 16:
+
+```js
+// instead of the body of renderList
+list.innerHTML = names.map((n) => `<li>${n}</li>`).join("");
+```
+
+It is short, but with data it is dangerous: the name `"<b>Aman</b>"` becomes
+markup, and an evil string needs only an `onerror` handler (day 25).
+Let us compare:
+
+|  | `createElement` + `textContent` | `innerHTML` with a string |
+| --- | --- | --- |
+| user data | safe | dangerous |
+| references to elements | there right away, in variables | have to be found again with `querySelector` |
+| code length | longer | shorter |
+| when to use | data, especially other people’s | fixed markup written by us |
+
+## 14. Reordering and sorting {#reorder}
+
+Section 6 promised: reordering is inserting in a new order. Let us sort the list
+by the number from `data-id`, from the largest to the smallest:
+
+```js
+const list = document.querySelector("#list");
+
+const sorted = [...list.children].sort(
+  (a, b) => Number(b.dataset.id) - Number(a.dataset.id),
+);
+list.append(...sorted);
+
+[...list.children].map((li) => li.textContent);
+// ["Oguljan", "Sapar", "Gülnar", "Meret", "Aman"]
+```
+
+Three steps. The children were turned into an array — a live collection has no `sort`
+(day 24). The array was sorted with a comparison function from day 20, turning the
+`data-id` strings into numbers (day 25). And the elements were inserted back in the new order.
+There are still five items: `append` does not copy but moves each one to
+a new place. Not a single element was created or removed — only rearranged.
+
+The same technique reverses the list — and brings ours back to the original order:
+
+```js
+list.append(...[...list.children].reverse());
+// ["Aman", "Meret", "Gülnar", "Sapar", "Oguljan"]
+```
+
+## 15. The “Report card” without prepared rows {#tabel}
+
+Now the “Report card” can give up the empty rows in the markup. The table body is empty —
+the code will create the rows:
+
+```html
+<table id="tabel">
+  <thead>
+    <tr><th>Name</th><th>Avg</th><th>Min</th><th>Max</th><th>%</th><th>Verdict</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+```
+
+```js
+// unchanged: MIN_MARK … makeReport (day 23), makeCells (day 24),
+// VERDICT_CLASS and rowClass (day 25)
+
+// new: a table row is created by code — like makeItem from section 11
+function makeRow(report) {
+  const row = document.createElement("tr");
+  row.classList.add(rowClass(report));
+  row.dataset.name = report.name;
+  makeCells(report).forEach((text) => {
+    const cell = document.createElement("td");
+    cell.textContent = text;
+    row.append(cell);
+  });
+  return row;
+}
+
+const tbody = document.querySelector("#tabel tbody");
+const reports = students.map(makeReport);
+tbody.append(...reports.map(makeRow));
+
+const excellent = reports.filter((r) => r.ok && r.verdict === "top student").length;
+document.querySelector("#summary").textContent = `Top students: ${excellent} of ${reports.length}`;
+document.title = `Report card: ${reports.length} students`;
+```
+
+<ResultBox>
+<table>
+<thead>
+<tr><th>Name</th><th>Avg</th><th>Min</th><th>Max</th><th>%</th><th>Verdict</th></tr>
+</thead>
+<tbody>
+<tr style={{background: "#e0f2fe"}}><td>Aman</td><td>4.33</td><td>3</td><td>5</td><td>75%</td><td>good student</td></tr>
+<tr style={{background: "#fef9c3"}}><td>Meret</td><td>3.33</td><td>3</td><td>4</td><td>100%</td><td>average student</td></tr>
+<tr style={{color: "gray", fontStyle: "italic"}}><td>Gülnar</td><td>—</td><td>—</td><td>—</td><td>—</td><td>no valid marks</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Sapar</td><td>4.75</td><td>4</td><td>5</td><td>100%</td><td>top student</td></tr>
+<tr style={{background: "#dcfce7"}}><td>Oguljan</td><td>4.50</td><td>4</td><td>5</td><td>67%</td><td>top student</td></tr>
+</tbody>
+</table>
+
+Top students: 2 of 5
+</ResultBox>
+
+On the screen it is the same as yesterday. But now the table grows together with the data. Let us add
+a sixth student — right in the console, without touching the markup:
+
+```js
+tbody.append(makeRow(makeReport({ name: "Ilýas", marks: [5, 5, "4"] })));
+tbody.children.length;   // 6
+// a new green row: Ilýas, 4.67, 4, 5, 100%, top student
+```
+
+Look at how the program came together over the three days of the module. Yesterday’s
+`rowClass` and `dataset.name` moved into `makeRow`
+without a single edit. `makeCells` from day 24 still gives six texts,
+and it does not care whether they are written into prepared cells or created ones. The calculation from day 23
+noticed nothing. Each day one part changed, and never all of them at once.
+
+| Day | What changed in the “Report card” |
+| --- | --- |
+| 23 | the data came as a JSON string; the report became an object, display separated from calculation |
+| 24 | the output moved into a table on the page — into prepared rows |
+| 25 | `textContent` instead of `write`, row colors with classes, the name in `dataset` |
+| 26 | the rows are created by code, exactly as many as there are students |
+
+And all this time the numbers are the same as on day 23.
+
+<TryIt>
+Two experiments.
+\
+\
+**The first.** Call `tbody.append(...reports.map(makeRow))`
+a second time. What happened to the table, and why? How can you fix it with one line
+from section 13?
+\
+\
+**The second.** Sort the table rows by average mark, like the list
+in section 14. A hint: the average mark is in the first cell after the name, and the row
+without marks can be sent to the end.
+</TryIt>
+
+`makeRow` is a ready base for tomorrow. The row will get a seventh cell
+with a “Delete” button, created by the same `createElement`, and on a click the row
+will run `row.remove()`.
+
+## 16. Common mistakes and what comes tomorrow {#mistakes}
+
+| Mistake | What you will see | How to do it right |
+| --- | --- | --- |
+| created but not inserted | nothing on the page | `append` into the parent |
+| `const x = list.append(li)` | `x` is `undefined` | keep `li` in your own variable |
+| inserted an element into a second place | it disappeared from the first | `cloneNode(true)` if you need a copy |
+| a copy with an `id` | two identical `id`s | change the copy’s `id` |
+| `for...of` over `children` with `remove` | every second one was removed | `querySelectorAll` or a loop over `firstElementChild` |
+| a repeated render without clearing | everything doubled | `textContent = ""` before inserting |
+| `appendChild("text")` | `TypeError` | `append` or `createTextNode` |
+| `replaceChild(old, new)` | an error or the wrong result | the new one first; simpler — `replaceWith` |
+| data through `innerHTML` in a template | other people’s tags became markup | `createElement` + `textContent` |
+| `before` on an element that is not inserted | nothing, silently | insert the element itself first |
+| a typo in the tag name | an element without styling | check the string in `createElement` |
+
+### What comes tomorrow
+
+For three days the page changed by itself — through code that ran on load.
+Tomorrow it will start **responding** to a person: **events**, clicks,
+key presses. A row will get a “Delete” button, and `remove` will work
+on a click. And `closest("tr")` from day 24 and `dataset.name` from day 25
+will tell whose row is being deleted.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [Building the DOM tree](https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Building_and_updating_the_DOM_tree) | create from the top down, attach from the bottom up | <Full /> |
+| [createElement](https://developer.mozilla.org/en-US/docs/Web/API/Document/createElement) | a new element, not on the page yet | <Full /> |
+| [createTextNode](https://developer.mozilla.org/en-US/docs/Web/API/Document/createTextNode) | a text node; does not parse markup | <Full /> |
+| [append](https://developer.mozilla.org/en-US/docs/Web/API/Element/append) | at the end; nodes and strings, several at once | <Full /> |
+| [prepend](https://developer.mozilla.org/en-US/docs/Web/API/Element/prepend) | at the start | <Full /> |
+| [remove](https://developer.mozilla.org/en-US/docs/Web/API/Element/remove) | take off the page | <Full /> |
+| [replaceWith](https://developer.mozilla.org/en-US/docs/Web/API/Element/replaceWith) | put something else in the element’s place | <Full /> |
+| [Node](https://developer.mozilla.org/en-US/docs/Web/API/Node) | what all nodes share, and the old set of methods | <Full /> |
+| [appendChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/appendChild) | at the end, one node, returns it | <Full /> |
+| [insertBefore](https://developer.mozilla.org/en-US/docs/Web/API/Node/insertBefore) | before a sibling; with `null` — at the end | <Full /> |
+| [removeChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/removeChild) | remove a child, returns it | <Full /> |
+| [replaceChild](https://developer.mozilla.org/en-US/docs/Web/API/Node/replaceChild) | replace a child: the new one, then the old one | <Full /> |
+| [cloneNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/cloneNode) | a copy; `true` — with the contents | <Full /> |
+| [before](https://developer.mozilla.org/en-US/docs/Web/API/Element/before) | as a sibling before the element | <Brief /> |
+| [after](https://developer.mozilla.org/en-US/docs/Web/API/Element/after) | as a sibling after the element | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// CREATE — it is not on the page yet
+const li = document.createElement("li");
+li.textContent = "Ilýas";                  // fill before inserting
+li.isConnected;                            // false
+const text = document.createTextNode("text");    // a text node
+
+// INSERT — the new set, strings and several arguments
+const list = document.querySelector("#list");
+list.append(li, "!");                      // inside, at the end
+list.prepend(text);                        // inside, at the start
+const title = document.querySelector("#title");
+const note = document.createElement("p");
+title.after(note);                         // next to it, after
+title.before("Mary");                      // next to it, before
+list.append(...[...list.children].reverse());   // an array — at once
+
+// MOVE, COPY, REMOVE, REPLACE
+list.prepend(list.lastElementChild);       // inserting an existing one = moving
+const copy = title.cloneNode(true);        // a copy with the contents
+copy.id = "title-2";                       // change the copy’s id!
+li.remove();                               // the object stays in the variable
+note.replaceWith(copy);                    // the copy stood in place of the paragraph
+
+// THE OLD NODE SET — on the parent, one node, returns the node
+list.appendChild(li);                      // <li>Ilýas</li>
+list.insertBefore(li, null);               // null instead of a sibling — at the end
+list.removeChild(li);                      // <li>Ilýas</li>
+list.replaceChild(li, list.firstElementChild);   // the new one first, then the old one
+
+// BUILD: create from the top down, attach from the bottom up, insert once
+// CLEAR EVERYTHING
+list.textContent = "";
+// REMOVE THE CHOSEN ONES
+document.querySelectorAll(".note").forEach((el) => el.remove());
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Why is the element not visible on the page after `createElement`?
+   <Answer>It was created in memory and is not attached to anything: `isConnected` is
+   `false`. It appears on the page after being inserted into an element
+   that is itself on the page — for example, with `append`.</Answer>
+2. What happens if you insert with `append` an element that is already on the page?
+   <Answer>It moves: a node cannot stand in two places, so inserting takes
+   it from its old place. If you need a copy — `cloneNode(true)`.</Answer>
+3. Why does a `for...of` loop over `list.children` with `remove`
+   not remove all the items?
+   <Answer>`children` is a live collection: after each removal it shrinks,
+   and the next item takes the removed one’s number. The loop steps over it. You have to go through
+   the `querySelectorAll` snapshot or remove the first one while it exists.</Answer>
+4. How does `append` differ from `appendChild`?
+   <Answer>`append` takes several arguments and strings and returns nothing.
+   `appendChild` takes exactly one node and returns it.</Answer>
+5. Why is `createElement` + `textContent` better for user data
+   than `innerHTML` with a template string?
+   <Answer>`textContent` never parses markup, so someone else’s string
+   stays text. In a template string for `innerHTML` it becomes
+   markup, or even code.</Answer>
+6. In what order do you build an element with children?
+   <Answer>Create from the top down, fill, attach the children to the parent from the bottom up
+   and insert the ready piece onto the page with one call.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model/Building_and_updating_the_DOM_tree" />

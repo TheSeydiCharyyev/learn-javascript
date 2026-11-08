@@ -1,0 +1,865 @@
+---
+title: Day 30 — Timers and promises
+day: Day 30 • lesson 1
+heading: Timers and promises
+lead: Module “Timers, promises and fetch”, the first day. 45 minutes.
+css: |
+  h1 { border-bottom-color: #6366f1; }
+  h2 { color: #4338ca; background: #eef2ff; border-left-color: #6366f1; }
+  h3 { color: #3730a3; }
+  .step-number { background: #6366f1; }
+  .toc a { color: #4338ca; }
+---
+
+<Goals>
+- run code after a while — `setTimeout` — and repeat it — `setInterval`;
+- cancel timers and not lose their numbers;
+- understand why code with a timer does not wait;
+- get the result of a promise with `then`, `catch` and `finally`;
+- create your own promise with `new Promise`;
+- load the “Report card” with a “Loading…” label.
+</Goals>
+
+<Toc />
+
+## 1. Not now, but later {#why}
+
+Until now the program ran at once, from top to bottom, and everything it needed was at hand.
+The listeners of day 27 were the first to say “do this later — when there is a click”. But a click is not
+the only “later”. Sometimes you need to wait for some time or for a result that will come
+not at once.
+
+| Problem | Solved by | Day |
+| --- | --- | --- |
+| hide a message after 3 seconds | `setTimeout` | 30 |
+| update a clock every second | `setInterval` | 30 |
+| wait for a result that will come later | a promise: `then`, `catch` | 30 |
+| get data from a server | `fetch` — it returns a promise | 31 |
+
+The main rule of the day: JavaScript **does not stop** to wait.
+It writes down what to do later and goes on at once. If the page froze on every
+wait, it would respond neither to clicks nor to keys.
+
+Two words you will meet on every MDN page today and tomorrow. Code that
+runs at once, line by line, is called **synchronous**. Code that
+will run later, when something happens, is **asynchronous**. The listeners of
+day 27, timers and promises — all of this is asynchronous code.
+
+## 2. The study page {#page}
+
+Today’s experiments are on the stopwatch page. The buttons will start working in section 6, the note field —
+in section 5, and the clock and the paragraph for messages are useful from the very beginning.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stopwatch</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>Stopwatch</h1>
+  <p id="clock">0.0</p>
+  <button id="start">Start</button>
+  <button id="stop">Stop</button>
+  <button id="reset">Reset</button>
+  <p><input id="note" placeholder="Note"></p>
+  <p id="message"></p>
+</body>
+</html>
+```
+
+```js
+const clock = document.querySelector("#clock");
+const message = document.querySelector("#message");
+
+// three ready-made functions for experiments with promises — how they work is in section 13
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const later = (value, ms) => new Promise((resolve) => setTimeout(resolve, ms, value));
+const failLater = (text, ms) => new Promise((resolve, reject) => {
+  setTimeout(() => reject(new Error(text)), ms);
+});
+```
+
+You do not need to read the last three lines yet — they are a “black box” for sections 9–12.
+This is how most promises in real life work: someone else’s function returns them, and our job is
+to get the result correctly. How to make your own, we will cover at the end.
+
+## 3. `setTimeout`: do it after a while {#timeout}
+
+`setTimeout` gets a function and a delay in milliseconds and calls the function
+once, when the time is up. A second has 1000 milliseconds.
+
+```js
+setTimeout(() => {
+  message.textContent = "Two seconds have passed";
+}, 2000);
+```
+
+Everything after the delay `setTimeout` will pass to the function as arguments.
+This way you can give a timer a ready-made function with a parameter without wrapping it in an arrow:
+
+```js
+function greet(name) {
+  message.textContent = `Hello, ${name}!`;
+}
+
+setTimeout(greet, 1000, "Aman");   // a second later: “Hello, Aman!”
+```
+
+`setTimeout` returns the number of the timer — an ordinary number. It does not return
+the result of the function, and it cannot: the function has not run yet.
+
+```js
+const id = setTimeout(greet, 1000, "Meret");
+typeof id;   // "number" — the number of the timer; the timer can be canceled by it
+```
+
+### Parentheses after the name
+
+```js
+setTimeout(greet("Sapar"), 3000);
+// “Hello, Sapar!” appeared at once, and three seconds later — nothing
+```
+
+With parentheses `greet("Sapar")` ran right away, like any call, and returned
+`undefined`. That is what `setTimeout` got instead of a function. There is no error —
+there is simply nothing to call three seconds later. A timer is given **the function itself**:
+`greet` without parentheses or an arrow `() => greet("Sapar")`.
+
+## 4. Code does not wait {#order}
+
+What will this code print, and in what order?
+
+```js
+console.log("1: before");
+setTimeout(() => console.log("3: timer"), 1000);
+console.log("2: after");
+// 1: before
+// 2: after
+// 3: timer — a second later
+```
+
+<Scheme src="scheme-order.svg">setTimeout does not wait: it puts the function off for later, and the code goes on</Scheme>
+
+`setTimeout` does not pause the program. It puts the function off “for later”
+and returns at once, so “2: after” is printed before the timer. The example from MDN makes
+this even clearer — three timers started one after another:
+
+```js
+setTimeout(() => console.log("first"), 3000);
+setTimeout(() => console.log("second"), 2000);
+setTimeout(() => console.log("third"), 1000);
+// third
+// second
+// first
+```
+
+The order of firing is decided by time, not by the order of the lines. And even a delay of 0 does not mean
+“now”: the timer’s function will wait until all the current code has finished.
+
+The reason is that the page has one thread of execution: while your code is running, the browser
+runs nothing else. A timer that has fired gets in a queue and waits for the thread to become
+free. How this queue works is covered in detail in course 2; today the rule
+“a timer’s function always runs after the current code” is enough.
+
+```js
+setTimeout(() => console.log("timer with delay 0"), 0);
+console.log("ordinary code");
+// ordinary code
+// timer with delay 0
+```
+
+## 5. `clearTimeout`: we changed our mind {#clear}
+
+The number from `setTimeout` is needed to cancel the timer before it fires:
+
+```js
+const reminder = setTimeout(() => {
+  message.textContent = "Time for a break!";
+}, 5000);
+
+clearTimeout(reminder);   // in 5 seconds nothing will happen
+```
+
+Canceling a timer that has already fired, or someone else’s number, does nothing and gives no error.
+`clearTimeout(undefined)` does nothing either. This will come in handy right now.
+
+### A message for three seconds
+
+A common task: show “Saved” and remove it three seconds later. The first version:
+
+```js
+function flash(text) {
+  message.textContent = text;
+  setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+}
+```
+
+Let us call it twice, two seconds apart: `flash("Saved")`, and then
+`flash("Deleted")`. “Deleted” will disappear after just one second, not three.
+
+**Step 1. Who erased the message?** A timer. But the timer of the second call should
+fire only at the fifth second, and the message was erased at the third.
+
+**Step 2. How many timers are there?** Two. The first call left a timer too, and it
+knows nothing about the second message: at the third second it honestly erased what was
+in the paragraph — by then “Deleted”.
+
+**Step 3. We fix it.** A new message cancels the old timer. For this the number
+of the timer is kept in a variable **outside** the function — so that the next call
+sees it:
+
+```js
+let flashTimer;
+
+function flash(text) {
+  clearTimeout(flashTimer);         // the previous timer is not needed any more
+  message.textContent = text;
+  flashTimer = setTimeout(() => {
+    message.textContent = "";
+  }, 3000);
+}
+```
+
+On the first call `flashTimer` is still `undefined`, and
+`clearTimeout` silently does nothing. Now “Deleted” stays for the full three
+seconds: until the fifth.
+
+### Wait until the typing is done
+
+The same technique — “a new event cancels the old timer” — gives autosave. There is no point in saving
+on every letter; we will save when the person has stopped typing for at least a second:
+
+```js
+const note = document.querySelector("#note");
+let saveTimer;
+
+note.addEventListener("input", () => {
+  clearTimeout(saveTimer);                  // still typing — put it off
+  saveTimer = setTimeout(() => {
+    flash(`Saved: ${note.value}`);
+  }, 1000);
+});
+// typed “Buy bread” without pauses: a second later — one message “Saved: Buy bread”
+```
+
+Every letter is an `input` event from day 28, and each one cancels the timer of the previous
+letter. Only the timer of the last one fires. Make a pause in the middle of a word — there will be
+two messages. A search that waits until you finish typing the query works the same way: on day 32
+it will be needed in the catalog, so as not to ask the server on every letter.
+
+## 6. `setInterval`: a stopwatch {#interval}
+
+`setInterval` is like `setTimeout`, but it calls the function
+**again and again** at equal intervals until it is stopped with
+`clearInterval`. That is enough for a stopwatch:
+
+```js
+let tenths = 0;        // tenths of a second that have passed
+let timerId = null;    // the interval number; null — the stopwatch is stopped
+
+function tick() {
+  tenths++;
+  clock.textContent = (tenths / 10).toFixed(1);
+}
+
+document.querySelector("#start").addEventListener("click", () => {
+  timerId = setInterval(tick, 100);
+});
+
+document.querySelector("#stop").addEventListener("click", () => {
+  clearInterval(timerId);
+});
+
+document.querySelector("#reset").addEventListener("click", () => {
+  tenths = 0;
+  clock.textContent = "0.0";
+});
+```
+
+Every 100 milliseconds `tick` adds a tenth and shows the time:
+`toFixed(1)` from day 17 keeps one digit after the dot. Pressed “Start”, waited
+three seconds — the clock shows 3.0. “Stop” stops the counting, “Reset” sets it to zero.
+
+Let us check in the console what “Stop” did with the variable:
+
+```js
+// pressed “Start”, a second later “Stop”:
+clock.textContent;   // "1.0"
+timerId !== null;    // true — counting stopped, but the number stayed in the variable
+```
+
+`clearInterval` stops the interval but does not touch the variable: it still
+holds the old number. Remember this — it will come in handy in the next section.
+
+The stopwatch counts the timer’s ticks, not real time, — and this is a simplification. As we will see
+in section 8, a timer can be late. Accurate clocks check against `Date.now()` from
+day 17; this is one of the tasks.
+
+## 7. Walkthrough: “Start” was pressed twice {#twice}
+
+Start the stopwatch and press “Start” once more. A second later the clock shows 2.0: time
+runs twice as fast. Press “Stop” — the clock did not stop, but went on at the usual
+speed.
+
+**Step 1. Why twice as fast?** Every click on “Start” started its own
+interval. Now two intervals call `tick`, and in a second it fires
+20 times instead of 10.
+
+**Step 2. Why did “Stop” not help?** `timerId` holds only
+the last number: the second click wrote its number over the first one. “Stop” stopped
+the second interval, while the number of the first is lost forever — there is nothing left to stop it with.
+
+**Step 3. We fix it.** Do not start a second interval while the first is running, and after
+stopping mark that the stopwatch is stopped:
+
+```js
+document.querySelector("#start").addEventListener("click", () => {
+  if (timerId !== null) return;     // already running — we do not start a second one
+  timerId = setInterval(tick, 100);
+});
+
+document.querySelector("#stop").addEventListener("click", () => {
+  clearInterval(timerId);
+  timerId = null;                   // stopped — “Start” works again
+});
+```
+
+The rule for all timers: **the number of a timer is data, just like everything else**.
+A lost number is a timer that nobody controls any more.
+
+## 8. A delay means “not earlier than” {#delay}
+
+The delay in `setTimeout` means “not earlier than”, not “exactly in”. The timer’s
+function waits until the browser is free. Let us keep it busy for a second:
+
+```js
+const start = Date.now();
+setTimeout(() => console.log(`elapsed ${Date.now() - start} ms`), 100);
+while (Date.now() - start < 1000) {}   // the browser is busy for a whole second
+// elapsed 1000 ms — although we asked for 100
+```
+
+While the loop is spinning, the page responds to nothing: neither timers nor clicks
+run. Long computations freeze the whole page — that is why JavaScript
+never waits “standing still”: waiting through a timer does not get in the way of everything else.
+
+| Case | What happens | Why |
+| --- | --- | --- |
+| a delay of 0 | after all the current code | the timer waits until the code has finished |
+| `setTimeout(f, 0)` called from a timer, and so on many times | after five nested ones — at least 4 ms | the HTML standard requires it |
+| a delay of `"1 second"` | fires at once | the string became `NaN`, and `NaN` means 0 |
+| a delay over 2147483647 ms | `2 ** 32 - 5000` fires at once | the number is kept in 32 bits and overflows |
+| `clearTimeout` for `setInterval` | stops it too | they share the numbers, but it is better not to mix them up |
+
+If the work inside an interval can take longer than the interval itself, MDN advises
+a chain of `setTimeout`: each next call is scheduled only after
+the previous one has finished.
+
+```js
+function tickLater() {
+  tick();
+  timerId = setTimeout(tickLater, 100);   // the next one — when this one has finished
+}
+```
+
+## 9. A promise is a promise of a result {#promise}
+
+A timer answers the question “when”. But often something else is needed: getting a **result**
+that does not exist yet — data from a server, an answer to a request. For this the language has
+the **promise**: an object that *promises*
+a result later.
+
+<Scheme src="scheme-promise.svg">A promise starts by waiting and finishes once: with a value or with an error</Scheme>
+
+A promise has three states. At first it is **waiting** (*pending*). Then —
+once and for good — it is either **fulfilled** with a value (*fulfilled*),
+or **rejected** with an error (*rejected*). A fulfilled or
+rejected promise is called settled (*settled*). The Chrome console shows
+the state right in the output:
+
+```js
+const p = wait(1000);
+p;   // Promise {<pending>}
+// a second later:
+p;   // Promise {<fulfilled>: undefined}
+```
+
+`wait` promises only “the time has passed”, so the value is `undefined`.
+`later` promises a value, and `failLater` an error:
+
+```js
+later("Aman", 500);           // half a second later: Promise {<fulfilled>: 'Aman'}
+failLater("No network", 500); // half a second later: Promise {<rejected>: Error: No network}
+// Uncaught (in promise) Error: No network
+```
+
+The last line is red: nobody handled the error of the rejected promise. What to catch
+it with is section 11.
+
+## 10. `then`: get the result {#then}
+
+The value cannot be taken out of a promise directly: it does not exist yet. Instead the promise is given
+a function — “when it is ready, call it with the result”. That is `then`:
+
+```js
+later("5 4 9", 1000).then((text) => {
+  console.log(`received: ${text}`);
+});
+// a second later: received: 5 4 9
+```
+
+The main feature of `then`: it returns a **new promise** —
+with the value that the function returned. That is why `then` can be put
+in a chain, and each step gets the result of the previous one:
+
+```js
+later("5 4 9", 1000)
+  .then((text) => [...text].filter((ch) => ch !== " "))   // ["5", "4", "9"]
+  .then((marks) => marks.map(Number))                     // [5, 4, 9]
+  .then((marks) => console.log(Math.max(...marks)));      // a second later: 9
+```
+
+This is `parseMarks` from the “Report card” of day 28, only split into steps. Each step is
+a short function: it got a value and returned a new one. That `then` returned a new
+promise is easy to check:
+
+```js
+const first = later(2, 100);
+const second = first.then((x) => x * 10);
+first === second;   // false — these are different promises
+// in 100 ms: second — Promise {<fulfilled>: 20}
+```
+
+And if a step itself returns a promise, the chain **waits** for it and passes
+on its value. This way one wait follows another:
+
+```js
+later("Aman", 1000)
+  .then((name) => later(`${name}: 4.33`, 1000))   // one more second of waiting
+  .then((line) => console.log(line));             // in 2 seconds: Aman: 4.33
+```
+
+All the cases at once — from the MDN page on `then`:
+
+| The step’s function… | The next `then` gets |
+| --- | --- |
+| returned a value | this value |
+| returned nothing | `undefined` — at once (section 14) |
+| returned a promise | its value, when it is fulfilled |
+| threw an error | nothing: the error goes to `catch` (section 11) |
+
+### A ladder instead of a chain
+
+Why all this, if there are timers? Try to make three steps a second apart with timers
+alone. Each next one will have to be nested in the previous one:
+
+```js
+setTimeout(() => {
+  console.log("step 1");
+  setTimeout(() => {
+    console.log("step 2");
+    setTimeout(() => console.log("step 3"), 1000);
+  }, 1000);
+}, 1000);
+```
+
+The code drifts to the right like a ladder, and the more steps, the worse: MDN calls this
+“callback hell”. With promises the steps stand one under another:
+
+```js
+wait(1000)
+  .then(() => { console.log("step 1"); return wait(1000); })
+  .then(() => { console.log("step 2"); return wait(1000); })
+  .then(() => console.log("step 3"));
+// step 1, step 2, step 3 — a second apart, just like the ladder
+```
+
+## 11. `catch`: catch the error {#catch}
+
+If a promise is rejected, the functions in `then` are not called. The error goes down the chain
+to the first `catch`:
+
+```js
+failLater("The server did not respond", 1000)
+  .then(() => console.log("this will not run"))
+  .catch((err) => console.log(`Error: ${err.message}`));
+// a second later: Error: The server did not respond
+```
+
+<Scheme src="scheme-catch.svg">On an error the chain jumps to the nearest catch; finally runs in both cases</Scheme>
+
+It is not only the one who created a promise who can reject it. If a function inside
+`then` throws an error — with `throw` from day 11 or by itself, like
+`JSON.parse` on a broken string, — the new promise is rejected, and the error also
+goes to `catch`:
+
+```js
+later('[5, 4', 500)
+  .then((text) => JSON.parse(text))        // the string is cut off — JSON.parse throws
+  .then((marks) => console.log(marks))     // skipped
+  .catch((err) => console.log(err.name));  // half a second later: SyntaxError
+```
+
+One `catch` at the end catches an error of any step above — like one
+`try...catch` around several lines. And after `catch` the chain
+can go on: what `catch` returned is what the next
+`then` gets.
+
+```js
+failLater("No network", 500)
+  .catch(() => [])                              // instead of an error — an empty list
+  .then((list) => console.log(list.length));    // half a second later: 0
+```
+
+By the way, `catch(f)` is a short form of `then(undefined, f)`:
+`then` also has a second parameter, a function for the error. But a chain with
+`catch` at the end reads more simply, and MDN advises exactly that.
+
+## 12. `finally`: in any outcome {#finally}
+
+Sometimes something has to be done however it ended: remove “Loading…”, turn the
+button on again. Writing this both in `then` and in `catch` is repetition. For this
+there is `finally`:
+
+```js
+message.textContent = "Loading…";
+later("Done", 1000)
+  .then((text) => console.log(text))
+  .catch((err) => console.log(err.message))
+  .finally(() => {
+    message.textContent = "";               // both after success and after an error
+  });
+```
+
+The function in `finally` gets no arguments: it does not care how it ended.
+And it passes the value on without changing it:
+
+```js
+Promise.resolve(2).finally(() => 77);   // Promise {<fulfilled>: 2}
+```
+
+There is one exception: if an error happens in `finally`, the chain is
+rejected with it after all, and the next `catch` gets that one. That is why
+`finally` holds only simple cleanup — hide, show, turn on.
+
+## 13. Your own promise: `new Promise` {#new}
+
+It is time to open the “black box” from section 2. A promise is created with the constructor
+`new Promise`, which is given an **executor** function. The executor
+gets two functions: `resolve` — fulfill the promise with a value, and
+`reject` — reject it with an error.
+
+```js
+const coin = new Promise((resolve, reject) => {
+  setTimeout(() => resolve("heads"), 1000);
+});
+
+coin.then((side) => console.log(side));   // a second later: heads
+```
+
+Three rules of the executor, each checked in the console.
+
+**The executor starts at once**, at the moment of `new`. It is not the executor that waits
+but the functions in `then`:
+
+```js
+console.log("before");
+new Promise((resolve) => {
+  console.log("executor");
+  resolve("done");
+}).then((value) => console.log(value));
+console.log("after");
+// before
+// executor
+// after
+// done
+```
+
+**Only the first call counts.** A promise is settled once, the other
+`resolve` and `reject` calls silently vanish:
+
+```js
+new Promise((resolve, reject) => {
+  resolve("first");
+  resolve("second");
+  reject(new Error("too late"));
+});
+// Promise {<fulfilled>: 'first'}
+```
+
+**An error in the executor rejects the promise** — but only if it is thrown
+at once. An error thrown later, inside a timer, the promise will no longer see: it will become
+an ordinary unhandled error, and the promise will stay pending forever. That is why
+from a timer you call `reject` instead of using `throw`.
+
+```js
+new Promise(() => {
+  setTimeout(() => {
+    throw new Error("From a timer");        // catch will not catch this
+  }, 100);
+}).catch((err) => console.log("caught"));
+// Uncaught Error: From a timer — and “caught” is never printed
+```
+
+Now it is clear how the helpers from the page work. Each one is the good old
+`setTimeout` wrapped in a promise. MDN calls this the main reason
+to write `new Promise`: **wrap the old “through a function” way in a promise**.
+
+```js
+// a line from app.js (section 2) — do not type it in the console: wait is already declared
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// setTimeout will call resolve in ms milliseconds — the promise will be fulfilled
+```
+
+### A ready promise: `Promise.resolve` and `Promise.reject`
+
+When the value already exists and a promise is needed, it is written briefly: `Promise.resolve(42)`
+is fulfilled at once, `Promise.reject(new Error("…"))` is rejected at once.
+But even for a ready promise the function in `then` is not called at once, but after
+the current code. MDN calls this a guarantee: `then` never fires
+in the middle of your code.
+
+```js
+Promise.resolve("afterwards").then((value) => console.log(value));
+console.log("now");
+// now
+// afterwards
+```
+
+## 14. Walkthrough: `return` was forgotten {#return}
+
+The chain from section 10, but the step is written with curly braces:
+
+```js
+later("Aman", 500)
+  .then((name) => {
+    later(`${name}: 4.33`, 500);            // return was forgotten
+  })
+  .then((line) => console.log(line));
+// half a second later: undefined
+```
+
+**Step 1. What is wrong?** Two symptoms: `undefined` instead of “Aman: 4.33”,
+and it is printed after half a second, not after a second.
+
+**Step 2. Why?** With braces an arrow returns only what comes after
+`return` (day 13). Without it the step returned `undefined`, the new promise
+was fulfilled with it at once, and the next `then` did not wait. The second
+`later` promise is created, but it is not connected to the chain — MDN calls such a promise “floating”.
+
+**Step 3. We fix it.** `return later(…)` or an arrow without braces, as
+in section 10. MDN’s rule: **if a promise appeared in a step, return it**.
+
+The second common mistake is a chain without `catch`. While all is well, it is not visible.
+But as soon as a promise is rejected, a red
+`Uncaught (in promise)` appears in the console, and the program silently does not do what it should. Every
+chain ends with `catch`.
+
+## 15. The “Report card” is loading {#tabel}
+
+On day 23 the data of the “Report card” came as a JSON string “as if from a file or a server”. But data
+does not come from a server instantly. Let us be honest: the string will come in a second, and meanwhile — the label
+“Loading…”. A paragraph is added to the page, between the table and the total:
+
+```html
+<p id="loading">Loading…</p>
+```
+
+```js
+// unchanged: the calculation, makeCells, the classes, makeRow, addDeleteButton, updateSummary,
+// the tbody and Esc listeners (days 23–27), the form (day 28)
+// removed: const students = JSON.parse(saved) (day 23)
+// and const reports = …, tbody.append(…), updateSummary() (day 27)
+
+// new: the data comes in a second — the way it will come from a server
+function loadSaved() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 1000, saved);
+  });
+}
+
+const reports = [];   // empty until the data has come
+const loading = document.querySelector("#loading");
+
+loadSaved()
+  .then((text) => JSON.parse(text))
+  .then((students) => {
+    const loaded = students.map(makeReport);
+    reports.push(...loaded);
+    tbody.append(...loaded.map(makeRow).map(addDeleteButton));
+    updateSummary();
+  })
+  .catch((err) => {
+    document.querySelector("#summary").textContent = `Could not load: ${err.message}`;
+  })
+  .finally(() => {
+    loading.hidden = true;
+  });
+```
+
+Every step of the chain is familiar work: parse the string, compute the reports, build
+the rows, sum up the total. The only new thing is **when** it is done. And
+`reports` stayed `const`: the array is filled with
+`push`, and deleting and the form from days 27–28 work with it as before.
+
+<ResultBox>
+| When | What is on the page |
+| --- | --- |
+| right after opening | an empty table, “Loading…”, the tab “Report card” |
+| a second later | five rows in color, “Top students: 2 of 5”, “Loading…” is gone, the tab “Report card — students: 5” |
+| a second later, if `loadSaved` gives `saved.slice(0, 40)` | the table is empty, “Could not load: Unterminated string in JSON at position 40 (line 2 column 39)”, “Loading…” is gone |
+</ResultBox>
+
+The third row checks the `catch` branch: the string is cut off in the middle of a word, as when
+the connection breaks, and `JSON.parse` throws a `SyntaxError`. The error was caught by
+`catch`, and `finally` removed “Loading…” in both cases. On day 31
+the real browser storage will take the place of `loadSaved` — and the chain will stay
+the same.
+
+### Walkthrough: a student was added during loading
+
+A new mistake has appeared that could not happen before. While “Loading…” is showing, the form
+already works. Let us add “Aman” with the marks “5 5” during this second:
+
+<ResultBox>
+| What we did | What is on the page |
+| --- | --- |
+| “Aman”, “5 5” during loading | the row “Aman 5.00”, the repeat check did not fire: `reports` is still empty |
+| the data came | six rows, two “Amans”, “Top students: 3 of 6” |
+| “Delete” at the second “Aman”, OK | the second row disappeared, while the first “Aman” was deleted from the data: the page shows three top students, the total says “Top students: 2 of 5” |
+</ResultBox>
+
+**Step 1. What broke?** The page and the data drifted apart: deleting looks for
+a student by name, and there are two names “Aman” — exactly what the repeat check
+of day 28 protected against.
+
+**Step 2. Why did the check let it through?** It compared with
+`reports`, and that was empty: the data was still on its way. The check is right for data that is ready,
+but the form allowed acting before the data came.
+
+**Step 3. We fix it.** While there is no data, the form is not needed. We hide it until loading
+and show it in `finally`:
+
+```js
+form.hidden = true;                 // new: too early to add before loading
+
+loadSaved()
+  // … then and catch unchanged
+  .finally(() => {
+    loading.hidden = true;
+    form.hidden = false;            // new
+  });
+```
+
+This is a general rule for everything that comes “later”: **while there is no result, the program
+must not pretend that there is one**. A “Loading…” label, a hidden form,
+a disabled button — all of these are ways to honestly say “please wait”.
+
+## 16. Common mistakes and what comes next {#mistakes}
+
+### A timer and a promise side by side
+
+|  | A timer | A promise |
+| --- | --- | --- |
+| answers the question | when | what came out |
+| returns | a number | a promise object |
+| how many times | `setTimeout` — once, `setInterval` — until it is stopped | is settled once |
+| canceling | `clearTimeout`, `clearInterval` | impossible: a promise has no cancel |
+| an error inside | unhandled, nobody to catch it | goes to `catch` |
+
+They are not rivals but partners: a timer is the simplest way to get a promise that
+will be fulfilled “later”, and the `wait` function is an example of that.
+
+### Common mistakes
+
+| Mistake | What you will see | How to do it right |
+| --- | --- | --- |
+| `setTimeout(f(), 1000)` | it fired at once, then — nothing | `setTimeout(f, 1000)` |
+| the interval number is lost | “Stop” does not stop | do not start a second one; `timerId = null` |
+| `setTimeout(…).then(…)` | `setTimeout(...).then is not a function` | a timer is not a promise; wrap it in `new Promise` |
+| `Promise(…)` without `new` | `Promise constructor cannot be invoked without 'new'` | `new Promise(…)` |
+| `new Promise()` without an executor | `Promise resolver undefined is not a function` | pass a function `(resolve, reject) => …` |
+| a promise treated as a value: `later("Aman", 100).toUpperCase()` | `later(...).toUpperCase is not a function` | the value — only inside `then` |
+| no `return` in a step | `undefined`, the step did not wait | return the promise |
+| no `catch` | `Uncaught (in promise) Error: …` | `catch` at the end of the chain |
+| `throw` inside a timer in the executor | `Uncaught Error`, the promise waits forever | `reject(new Error(…))` |
+
+### What comes tomorrow
+
+On day 31 `fetch` appears — a request to a server. It returns a promise, and all
+of today — `then`, `catch`, `finally` — works with it
+unchanged. There will also be `async` and `await`: another way of writing the same
+promises, which reads like ordinary code from top to bottom. And `localStorage` —
+the place where the “Report card” and the to-do list will finally keep their data between page loads.
+
+<Ref>
+| Page | What is there | How we cover it |
+| --- | --- | --- |
+| [setTimeout](https://developer.mozilla.org/en-US/docs/Web/API/Window/setTimeout) | call a function once after a while | <Full /> |
+| [clearTimeout](https://developer.mozilla.org/en-US/docs/Web/API/Window/clearTimeout) | cancel a timer by its number | <Full /> |
+| [setInterval](https://developer.mozilla.org/en-US/docs/Web/API/Window/setInterval) | call a function again and again | <Full /> |
+| [clearInterval](https://developer.mozilla.org/en-US/docs/Web/API/Window/clearInterval) | stop an interval | <Full /> |
+| [Using promises](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises) | a guide: chains, errors, a wrapper around a timer | <Full /> |
+| [Promise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise) | the states of a promise, the methods | <Full /> |
+| [Promise()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/Promise) | the constructor, the executor, resolve and reject | <Full /> |
+| [then](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/then) | the result; returns a new promise | <Full /> |
+| [catch](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/catch) | an error of any step above | <Full /> |
+| [finally](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/finally) | in any outcome; does not change the value | <Full /> |
+| [Promise.resolve](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/resolve) | a promise fulfilled at once | <Brief /> |
+| [Promise.reject](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/reject) | a promise rejected at once | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// TIMERS
+const id = setTimeout(f, 1000, arg);   // once after 1 s; f — without parentheses!
+clearTimeout(id);                      // cancel
+const timerId = setInterval(f, 100);   // every 100 ms
+clearInterval(timerId);                // stop; do not lose the number
+// the delay means “not earlier than”; the code after setTimeout runs at once
+
+// A PROMISE: pending → fulfilled (a value) or rejected (an error), once
+later(5, 1000)
+  .then((x) => x * 2)                  // return a value or a promise
+  .then((x) => console.log(x))
+  .catch((err) => console.log(err.message))   // an error of any step above
+  .finally(() => hideLoading());       // in any outcome
+
+// YOUR OWN PROMISE — wrap the old “through a function” way
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+new Promise((resolve, reject) => {
+  // the executor starts at once; the first call counts
+  // from a timer — reject(new Error("…")), not throw
+});
+Promise.resolve(42);   Promise.reject(new Error("…"));
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. In what order will the lines be printed: `console.log("A")`,
+   `setTimeout(() => console.log("B"), 0)`, `console.log("C")`?
+   <Answer>A, C, B. The timer’s function waits until the current code has finished, even with a delay of 0.</Answer>
+2. Why does `setTimeout(greet("Sapar"), 3000)` show the greeting at once?
+   <Answer>The parentheses call the function right away, and the timer gets its result —
+   `undefined`. A timer is given the function itself, without parentheses.</Answer>
+3. The stopwatch sped up after “Start” was pressed a second time. What happened and how can it be prevented?
+   <Answer>Two intervals started, and the number of the first was overwritten by the second. Before starting,
+   check `timerId !== null`; after stopping, write
+   `timerId = null`.</Answer>
+4. What does `then` return, and why does that make chains possible?
+   <Answer>A new promise with the value that the step’s function returned. The next
+   `then` is attached to it and gets this value.</Answer>
+5. `JSON.parse` threw an error in the middle of a chain. What happens to the remaining `then` steps?
+   <Answer>They are skipped, the error goes to the nearest `catch`. Without
+   `catch` the console shows `Uncaught (in promise)`.</Answer>
+6. Why do you call `reject` from a timer inside the executor, and not `throw`?
+   <Answer>By then the executor has already finished: the promise will not see an error from the timer,
+   it will become unhandled, and the promise will stay pending forever.</Answer>
+</Selfcheck>
+
+<Sources mdn="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises" />

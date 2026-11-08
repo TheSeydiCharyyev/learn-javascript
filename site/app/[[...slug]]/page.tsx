@@ -2,7 +2,9 @@
 // file's <body> — on a day page the navigation bar (drawn by <LessonNav>) and the content, on the home page the
 // header, menu and main part — the content with its inner HTML exactly as written.
 // A day page starts with its own CSS (its kind's CSS, book.css, the colours of the day — after common.css in the
-// cascade, as the file had it); the CSS leaves with the page when the reader goes to another one.
+// cascade, as the file had it); the CSS leaves with the page when the reader goes to another one. Its title is
+// metadata, so it changes with the page too.
+import type { Metadata } from "next";
 import LessonNav from "@/lib/LessonNav";
 import { fromSlug, pagePaths, readPage, render, toSlug } from "@/lib/source";
 
@@ -10,6 +12,11 @@ export const dynamicParams = false;
 
 export function generateStaticParams() {
   return pagePaths().map((rel) => ({ slug: toSlug(rel) }));
+}
+
+export async function generateMetadata({ params }: PageProps<"/[[...slug]]">): Promise<Metadata> {
+  const page = readPage(fromSlug((await params).slug));
+  return page.title === null ? {} : { title: page.title };
 }
 
 export default async function Page({ params }: PageProps<"/[[...slug]]">) {

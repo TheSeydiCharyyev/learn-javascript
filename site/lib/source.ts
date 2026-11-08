@@ -35,6 +35,8 @@ export type SourcePage = {
   kind: PageKind | null; // a day page: lecture, notes (student) or tasks
   // A day page's own CSS, in cascade order: css/<kind>.css, css/book.css, then its <style> (the colours of the day).
   pageCss: string[];
+  // A day page's <title> as text: given to Next.js as metadata (see page.tsx); null on the home page.
+  title: string | null;
 };
 
 // lecture.css, student.css and tasks.css set the same selectors differently (body, h1, h2, .container, pre…), so a
@@ -173,6 +175,16 @@ export function readPage(rel: string): SourcePage {
     }
   }
 
+  // A day page's title goes to Next.js as metadata, so that it changes with the page when the reader moves by a <Link>
+  // (a <title> in the layout would keep the first page's: lib/title.tsx takes what the document shows — 06.11.2026).
+  let title: string | null = null;
+  if (kind) {
+    const titles = head.childNodes.filter(isElement).filter((n) => n.tagName === "title");
+    if (titles.length !== 1 || titles[0].attrs.length) throw new Error(`${rel}: a day page needs one <title> without attributes`);
+    title = textOf(titles[0]);
+    kept = kept.filter((p) => p.tag !== "title");
+  }
+
   // At the top level of <body> only elements and whitespace are carried; anything else would be lost silently.
   for (const n of body.childNodes) {
     if (isElement(n)) continue;
@@ -216,6 +228,7 @@ export function readPage(rel: string): SourcePage {
     nav,
     kind: kind ?? null,
     pageCss,
+    title,
   };
   cache.set(rel, page);
   return page;
@@ -236,8 +249,9 @@ function props(p: Piece): Record<string, unknown> {
 
 const VOID = new Set(["link", "meta", "br", "hr", "img", "input"]);
 
-// An element as written: same tag, same attributes, the original inner HTML. The <title> goes through Title:
-// lang.js rewrites it for English and React would write the file's text back when it hydrates.
+// An element as written: same tag, same attributes, the original inner HTML. The <title> (only the home page has one
+// here) goes through Title: lang.js rewrites it for English and React would write the file's text back when it
+// hydrates.
 export function render(p: Piece, key: number): ReactElement {
   if (p.tag === "title") return createElement(Title, { key, html: p.html, attrs: props(p) as Record<string, string> });
   const own = { ...props(p), key };

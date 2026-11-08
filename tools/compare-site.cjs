@@ -12,7 +12,10 @@
 //   - full-page screenshots, byte for byte; on a mismatch the pair is shot again (at most twice);
 //   - <body> after the page's scripts ran (highlight.js, lang.js): every top-level element's outerHTML; Next's own
 //     nodes are dropped (a hidden <div> of comments, its data scripts, the route announcer); the onclick attribute
-//     of the RU/EN button is not compared (React attaches that click as a listener) — the click test checks it;
+//     of the RU/EN button is not compared (React attaches that click as a listener) — the click tests check it; in
+//     the navigation bar the new site links to routes ("student", not "student.html" — 07.11.2026), so there its
+//     page links are compared with ".html" added, and the attributes of the bar's links in any order (<Link> writes
+//     class before href);
 //   - title, <html lang>, highlighted tokens, page height (the list of stylesheets is not compared: the site bundles
 //     the course CSS, scoped to the kind of page, into one file — 06.11.2026);
 //   - JS errors and failed requests on both pages (/favicon.ico is skipped: Chrome asks every http site for it);
@@ -24,8 +27,13 @@
 // blur over the open menu gives ±1 per channel, and the old page differs from itself there too) — printed as
 // "noise", not a failure. A one-step colour change of a text is caught as a failure (mutant, 05.11.2026).
 // Once per page: every link of the page (a[href], link[href], script[src]) leads to an existing file in the old
-// site exactly when it does in the new one. At 1280x900 the RU/EN button of a day page is clicked: same address,
-// same language saved in localStorage.
+// site exactly when it does in the new one (a route "student" of the new site stands for the file "student.html").
+// At 1280x900, on a day page, every link of the navigation bar whose page exists is clicked (lecture / notes /
+// tasks, RU/EN; and the first of them once more from the bottom of the page — the bar is sticky): the old page loads
+// the next file, the new one must move by Next's router without reloading the document; the page reached is
+// compared like any page state, and also: the address (the old one without ".html"), the language saved in
+// localStorage, the scroll position, the page's <style>s against the same page opened directly; after the first
+// click the browser's Back must bring the page before it back, still without a reload.
 // The home page: with the language chosen beforehand (none, en, tk, tr) and after each of: the EN button, the menu
 // button on a phone, closing the menu on the overlay (an inline onclick at the top level of <body>).
 // Google Fonts (the home page imports Inter) are served from a local copy in tools/.cache/fonts/: over a slow network
@@ -89,11 +97,20 @@ const stale = files.filter((f) => !fs.existsSync(path.join(OUT, f)) || fs.statSy
 if (stale.length) { console.log(`site/out is older than ${stale.length} page(s), e.g. ${stale[0]}: run \`pnpm build\` in site/ first`); process.exit(1); }
 
 // ---------- helpers ----------
+// The file for an address, as site/scripts/serve.mjs (and most hosts) find it: the file itself, index.html of a
+// folder, or "<address>.html" — a route of the site ("…/day-01/student") is a folder of Next's data files as well.
+function resolveOut(urlPath) {
+  const file = path.join(OUT, urlPath);
+  if (fs.existsSync(file) && fs.statSync(file).isFile()) return file;
+  if (fs.existsSync(path.join(file, 'index.html'))) return path.join(file, 'index.html');
+  if (fs.existsSync(file + '.html')) return file + '.html';
+  return null;
+}
+
 function serve() {
   const server = http.createServer((req, res) => {
-    let file = path.join(OUT, decodeURIComponent(new URL(req.url, 'http://x').pathname));
-    if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
-    if (!fs.existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
+    const file = resolveOut(decodeURIComponent(new URL(req.url, 'http://x').pathname));
+    if (!file) { res.writeHead(404); res.end('not found'); return; }
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
     fs.createReadStream(file).pipe(res);
   });
@@ -155,12 +172,21 @@ const NEXT_NODE = `(n) => n.tagName === 'NEXT-ROUTE-ANNOUNCER'
 const TOP_ELEMENTS = `(isNext) => [...document.body.children].filter((c) => !isNext(c) && c.tagName !== 'STYLE')`;
 
 // The RU/EN button of a day page: the HTML pages write its click as onclick="…", React attaches it as an event
-// listener (06.11.2026, <LessonNav>) — so that attribute is not compared; what the click does is (the click test).
+// listener (06.11.2026, <LessonNav>) — so that attribute is not compared; what the click does is (the click tests).
+// The bar's page links: the new site's go to routes — ".html" is added to them (only there: a link still ending in
+// ".html" becomes "….html.html" and differs); <Link> writes class before href — the links' attributes are sorted.
 const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
   const isNext = eval(nextNode);
+  const isNew = location.protocol === 'http:';
   const top = eval(topElements)(isNext).map((n) => {
     const c = n.cloneNode(true);
     c.querySelectorAll('a.lang-btn[onclick]').forEach((a) => a.removeAttribute('onclick'));
+    if (c.matches('div.lesson-nav')) c.querySelectorAll('a').forEach((a) => {
+      if (isNew && a.matches('.nav-link, .lang-btn')) a.setAttribute('href', a.getAttribute('href') + '.html');
+      const at = [...a.attributes].map((x) => [x.name, x.value]).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+      at.forEach(([k]) => a.removeAttribute(k));
+      at.forEach(([k, v]) => a.setAttribute(k, v));
+    });
     return c.outerHTML;
   });
   const text = [...document.body.childNodes].filter((n) => n.nodeType === 3 && n.data.trim()).map((n) => n.data);
@@ -244,6 +270,54 @@ const HOME_STEPS = [
   }],
 ];
 
+// The CSS a page carries: the texts of its <style> elements (a day page of the site has its kind's CSS, book.css and
+// the colours of the day in <body>).
+const pageCss = (page) => page.evaluate(() => [...document.querySelectorAll('style')].map((s) => s.textContent));
+
+// A click on the navigation bar of a day page. The old page loads the next file; the new one should move by Next's
+// router, the document staying the same (a mark on window survives). Returns what the checks after it need.
+const navClick = (locate, fromBottom) => async (p) => {
+  const isNew = p.url().startsWith('http:');
+  const before = p.url();
+  const origin = isNew ? { snap: await snapshot(p), css: await pageCss(p) } : null;
+  if (fromBottom) { await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)); await p.waitForTimeout(200); }
+  await p.evaluate(() => { window.__mark = 1; });
+  const box = await locate(p).boundingBox(); // the click goes to the middle of the link
+  if (isNew) await Promise.all([p.waitForURL((u) => u.href !== before), locate(p).click()]);
+  else await Promise.all([p.waitForNavigation({ waitUntil: 'load' }), locate(p).click()]);
+  // Chrome works out :hover in a new document only when the mouse moves; in the same document (a move by the router)
+  // the element under the cursor is hovered at once (the RU/EN button stays under it). The reader's first mouse move
+  // makes the two the same: move it by 1px on both sides.
+  await p.mouse.move(box.x + box.width / 2 + 1, box.y + box.height / 2);
+  await p.evaluate(() => { window.__removed = []; }); // the previous page's elements leave <body> by design
+  await p.evaluate(() => Promise.all([...document.images].map((i) => i.complete || new Promise((ok) => { i.onload = i.onerror = ok; }))));
+  await settle(p);
+  return {
+    before, origin, url: p.url(),
+    kept: await p.evaluate(() => window.__mark === 1),
+    saved: await p.evaluate((k) => localStorage.getItem(k), LANG_KEY),
+    scrollY: await p.evaluate(() => scrollY),
+    css: isNew ? await pageCss(p) : null,
+  };
+};
+
+// The clicks of a day page's bar: [name, action] for each link whose page exists (a dead link — day 21 of Advanced —
+// is reported by the link check), the first of them again from the bottom of the page, and RU/EN where it is.
+function navSteps(file) {
+  const m = /^(.+\/day-\d+\/)(en\/)?(lecture|student|tasks)\.html$/.exec(file);
+  if (!m) return [];
+  const [, dayDir, en, kind] = m;
+  const others = ['lecture', 'student', 'tasks'].filter((k) => k !== kind); // the bar's a.nav-link, in order
+  const link = (i) => (p) => p.locator('.lesson-nav a.nav-link').nth(i);
+  const live = others.map((k, i) => [k, i]).filter(([k]) => fs.existsSync(path.join(ROOT, dayDir + (en ?? '') + k + '.html')));
+  const steps = live.map(([k, i]) => [`click ${k}`, navClick(link(i), false)]);
+  if (live.length) steps.push([`from the bottom, click ${live[0][0]}`, navClick(link(live[0][1]), true)]);
+  if (fs.existsSync(path.join(ROOT, en ? `${dayDir}${kind}.html` : `${dayDir}en/${kind}.html`))) {
+    steps.push(['click RU/EN', navClick((p) => p.locator('.lesson-nav a.lang-btn'), false)]);
+  }
+  return steps;
+}
+
 // ---------- run ----------
 (async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
@@ -267,8 +341,12 @@ const HOME_STEPS = [
         .map((e) => e.getAttribute('href') ?? e.getAttribute('src'))
         .filter((h) => !/^(#|[a-z]+:|\/\/|\/_next\/)/i.test(h)));
       for (const ref of new Set(refs)) {
-        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), ref.replace(/[?#].*$/, '')));
-        const inOld = fs.existsSync(path.join(ROOT, target)), inNew = fs.existsSync(path.join(OUT, target));
+        const bare = ref.replace(/[?#].*$/, '');
+        const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), bare));
+        // a link to a route ("student", "../lecture") stands for the old site's file "student.html" — a path with no
+        // extension that is not a file of the repository (LICENSE is one)
+        const isRoute = !bare.endsWith('/') && !/\.[a-z0-9]+$/i.test(target) && !fs.existsSync(path.join(ROOT, target));
+        const inOld = fs.existsSync(path.join(ROOT, isRoute ? target + '.html' : target)), inNew = resolveOut(target) !== null;
         if (inOld !== inNew) say(`link ${file} -> ${ref}: ${inOld ? 'exists' : 'missing'} in the repository, ${inNew ? 'exists' : 'missing'} in site/out`);
         else if (!inOld) { dead++; console.log(`dead link (in both, not a difference) ${file} -> ${ref}`); }
       }
@@ -291,8 +369,18 @@ const HOME_STEPS = [
       const errors = [];
       page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
       page.on('console', (m) => { if (m.type() === 'error' && !FAVICON.test(m.location()?.url ?? '')) errors.push(`console: ${m.text()} ${m.location()?.url ?? ''}`); });
-      page.on('response', (r) => { if (r.status() >= 400 && !FAVICON.test(r.url())) errors.push(`${r.status()} ${r.url()}`); });
-      page.on('requestfailed', (r) => errors.push(`failed ${r.url()} ${r.failure()?.errorText}`));
+      // Before prefetching a page the router asks for it with HEAD; Chrome reports every such fetch as net::ERR_ABORTED
+      // right after its response, whatever the server sends (with or without Content-Length, 07.11.2026), and the
+      // prefetch goes on. Such a HEAD — answered 2xx, then "aborted" — is not an error; any other failure is.
+      const answered = new WeakSet();
+      page.on('response', (r) => {
+        if (r.status() < 300) answered.add(r.request());
+        if (r.status() >= 400 && !FAVICON.test(r.url())) errors.push(`${r.status()} ${r.url()}`);
+      });
+      page.on('requestfailed', (r) => {
+        if (r.method() === 'HEAD' && r.failure()?.errorText === 'net::ERR_ABORTED' && answered.has(r)) return;
+        errors.push(`failed ${r.method()} ${r.url()} ${r.failure()?.errorText}`);
+      });
       const open = async (which, file) => {
         if (which === 'old') await page.goto(OLD_BASE + file, { waitUntil: 'load' });
         else await page.goto(BASE + file, { waitUntil: 'networkidle' });
@@ -302,18 +390,21 @@ const HOME_STEPS = [
       for (const spec of specs.filter((s) => (s.split('@')[1] ?? '') === lang)) {
         const file = spec.split('@')[0];
         const tag = `${w}x${h} ${spec}`;
-        const compareState = async (step, fullPage) => {
+        // steps: [name, action] done in order up to `step`; afterNew(oldResult, newResult, where): more checks of the
+        // step's results once the state is compared
+        const compareState = async (step, fullPage, steps = HOME_STEPS, afterNew = null) => {
           const shot = async () => page.screenshot({ fullPage });
           const run = async (which) => {
             await open(which, file);
-            if (step) for (const [name, act] of HOME_STEPS) { const r = await act(page); await page.waitForTimeout(500); await settle(page); if (name === step) return r; }
+            if (step) for (const [name, act] of steps) { const r = await act(page); await page.waitForTimeout(500); await settle(page); if (name === step) return r; }
           };
           errors.length = 0;
-          if ((await run('old')) === 'skip') return;
+          const oldResult = await run('old');
+          if (oldResult === 'skip') return;
           checks++;
           const oldSnap = await snapshot(page); let oldShot = await shot(); const oldErrors = [...errors]; errors.length = 0;
           const oldInputs = STYLES ? await renderInputs(page, OLD_BASE) : null;
-          await run('new');
+          const newResult = await run('new');
           const newSnap = await snapshot(page); let newShot = await shot(); const newErrors = [...errors];
           const newInputs = STYLES ? await renderInputs(page, BASE) : null;
           const where = step ? `${tag} [after: ${step}]` : tag;
@@ -328,6 +419,7 @@ const HOME_STEPS = [
           if (newSnap.removed.length) say(`${where}: nodes removed from <body> on the new page: ${newSnap.removed.join(', ')}`);
           if (oldErrors.length) say(`${where}: errors on the old page: ${oldErrors.join('; ')}`);
           if (newErrors.length) say(`${where}: errors on the new page: ${newErrors.join('; ')}`);
+          if (afterNew) await afterNew(oldResult, newResult, where);
           let same = Buffer.compare(oldShot, newShot) === 0, n = 0;
           while (!same && n < 2) {
             n++; retakes++;
@@ -357,20 +449,42 @@ const HOME_STEPS = [
         await compareState(null, true);
         if (file === 'index.html') for (const [step] of HOME_STEPS) await compareState(step, false);
 
-        // the RU/EN button of a day page: same address, same language saved
+        // the navigation bar of a day page, clicked (see the top of the file)
         if (w === 1280 && file !== 'index.html') {
-          const click = async (which) => {
-            await open(which, file);
-            if (!(await page.$('.lang-btn'))) return null;
-            await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.click('.lang-btn')]);
-            const at = page.url().startsWith('file:') ? page.url().slice(OLD_BASE.length) : page.url().slice(BASE.length);
-            return `${decodeURIComponent(at)} saved=${await page.evaluate((k) => localStorage.getItem(k), LANG_KEY)}`;
-          };
-          const a = await click('old');
-          if (a !== null) {
-            const b = await click('new');
-            checks++;
-            if (a !== b) say(`${tag} [click RU/EN]: ${a} | ${b}`);
+          const rel = (u) => decodeURIComponent(u.startsWith('file:') ? u.slice(OLD_BASE.length) : u.slice(BASE.length));
+          for (const [i, s] of navSteps(file).entries()) {
+            const withBack = i === 0;
+            await compareState(s[0], !s[0].startsWith('from the bottom'), [s], async (a, b, where) => {
+              errors.length = 0;
+              if (!b.kept) say(`${where}: the document was reloaded — not a move by the router`);
+              if (rel(b.url) + '.html' !== rel(a.url)) say(`${where}: address ${rel(a.url)} | ${rel(b.url)} (expected the old one without .html)`);
+              if (a.saved !== b.saved) say(`${where}: language saved ${a.saved} | ${b.saved}`);
+              if (a.scrollY !== b.scrollY) say(`${where}: scrolled to ${a.scrollY} | ${b.scrollY}`);
+              if (withBack) {
+                checks++;
+                await page.goBack();
+                let back = null;
+                for (let t = 0; t < 50; t++) { // the router brings the page back from its cache
+                  back = await snapshot(page);
+                  if (back.body === b.origin.snap.body && back.title === b.origin.snap.title) break;
+                  await page.waitForTimeout(100);
+                }
+                await settle(page);
+                back = await snapshot(page);
+                for (const k of ['title', 'lang', 'body', 'tokens', 'height']) {
+                  if (JSON.stringify(back[k]) !== JSON.stringify(b.origin.snap[k])) say(`${where} [back]: ${k}: ${String(JSON.stringify(b.origin.snap[k])).slice(0, 100)} | ${String(JSON.stringify(back[k])).slice(0, 100)}`);
+                }
+                if (page.url() !== b.before) say(`${where} [back]: address ${rel(b.before)} | ${rel(page.url())}`);
+                if (!(await page.evaluate(() => window.__mark === 1))) say(`${where} [back]: the document was reloaded`);
+                if (JSON.stringify(await pageCss(page)) !== JSON.stringify(b.origin.css)) say(`${where} [back]: the page's <style>s differ from the ones before the click`);
+              }
+              // the page's CSS after the move: exactly the one it has when opened directly (none of the previous left)
+              await page.goto(b.url, { waitUntil: 'networkidle' });
+              await settle(page);
+              const direct = await pageCss(page);
+              if (JSON.stringify(direct) !== JSON.stringify(b.css)) say(`${where}: the page's <style>s after the click (${b.css.length}) differ from the page opened directly (${direct.length})`);
+              if (errors.length) say(`${where}: errors after the click (back, direct): ${errors.join('; ')}`);
+            });
           }
         }
         done++;

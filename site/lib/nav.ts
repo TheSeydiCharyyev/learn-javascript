@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { LANG_KEY } from "./lang-key";
 
-export type NavItem = { file: "lecture.html" | "student.html" | "tasks.html"; label: string; active: boolean };
+// exists: whether the page is written (day 21 of Advanced has only its lecture yet) — the bar links it either way.
+export type NavItem = { file: "lecture.html" | "student.html" | "tasks.html"; label: string; active: boolean; exists: boolean };
 export type NavModel = {
   home: { href: string; label: string };
   title: string;
@@ -43,6 +44,7 @@ export function navModel(rel: string, repo: string): NavModel | null {
     file: `${k}.html`,
     label: `${EMOJI[k]} ${k === "lecture" ? lectureWord : w[k]}`,
     active: k === kind,
+    exists: fs.existsSync(path.join(repo, course, dayDir, en ?? "", `${k}.html`)),
   }));
   const other = en ? `${course}/${dayDir}/${kind}.html` : `${course}/${dayDir}/en/${kind}.html`;
   const switchTo = fs.existsSync(path.join(repo, other))

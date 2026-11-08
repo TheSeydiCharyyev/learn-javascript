@@ -1,6 +1,7 @@
-// Serves the built site (site/out) at http://localhost:4173 — the whole site as a host would serve it, with the
-// pages' own links (student.html, en/lecture.html, ../../index.html) working. `next dev` serves the pages only
-// without ".html", so following links there leads to 404; use `pnpm preview` to read the site.
+// Serves the built site (site/out) at http://localhost:4173 — the whole site as a host would serve it: a route
+// ("…/day-01/student", where the day bar's links lead) gives its "….html" file, and the old addresses with ".html"
+// work too. `next dev` knows only the routes: there the day bar works, but the links written with ".html" (the home
+// page's, "← Курс") lead to 404 — use `pnpm preview` to read the site.
 //   pnpm preview              build, then serve
 //   node scripts/serve.mjs    serve what is already built; PORT=5000 for another port
 import fs from "node:fs";

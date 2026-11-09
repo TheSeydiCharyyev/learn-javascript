@@ -2,7 +2,12 @@
 // the header with the language buttons, the menu (the days of every course), the hero with the course cards, and the
 // module cards of every course; the lists twice, in Russian and in English. Its CSS is css/home.css (lib/source.ts
 // puts it before the page); the language and the menu are kept by lib/HomeState.tsx.
+// The links to the days are <Link>s to their routes (step 3.2, 09.11.2026): a day opens without a reload. They are
+// not prefetched: the page has hundreds of them, and every one in view would be fetched as the page opens — the day
+// comes when its link is clicked.
 import { Fragment, type ReactNode } from "react";
+import Link from "next/link";
+import { route } from "./route";
 import { homeLists, HOME_TITLE, type HomeDay, type HomeList } from "./home-lists";
 import { HOME_LANG_SCRIPT } from "./home-lang";
 import { ForLang, ForList, HomeState, LangOpt, MenuButton, Overlay, Sidebar } from "./HomeState";
@@ -24,7 +29,7 @@ const menu = (l: HomeList) =>
           <div className="sidebar-group-title">{`${g.icon} ${g.name}`}</div>
           {g.days.map((d) =>
             d.at ? (
-              <a key={d.day} href={`${d.at}/lecture.html`} className="sidebar-link"><span className="sidebar-num">{d.day}</span>{dayTitle(d, " ")}</a>
+              <Link key={d.day} href={route(`${d.at}/lecture.html`)} className="sidebar-link" prefetch={false}><span className="sidebar-num">{d.day}</span>{dayTitle(d, " ")}</Link>
             ) : (
               <span key={d.day} className="sidebar-link sidebar-soon"><span className="sidebar-num">{d.day}</span>{dayTitle(d, " ")}</span>
             ),
@@ -72,7 +77,7 @@ const modules = (l: HomeList) =>
                 {d.at ? (
                   <div className="card-links">
                     {(["lecture", "student", "tasks"] as const).map((p) => (
-                      <a key={p} href={`${d.at}/${p}.html`} className={`card-link ${p}`}>{`${PAGE_ICONS[p]} ${l.words[p]}`}</a>
+                      <Link key={p} href={route(`${d.at}/${p}.html`)} className={`card-link ${p}`} prefetch={false}>{`${PAGE_ICONS[p]} ${l.words[p]}`}</Link>
                     ))}
                   </div>
                 ) : (

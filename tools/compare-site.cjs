@@ -34,9 +34,11 @@
 // Once per page: every link of the page (a[href], link[href], script[src]) leads to an existing file in the old
 // site exactly when it does in the new one (a route "student" of the new site stands for the file "student.html").
 // At 1280x900, on a day page, every link of the navigation bar whose page exists is clicked (lecture / notes /
-// tasks, RU/EN; and the first of them once more from the bottom of the page — the bar is sticky): the old page loads
+// tasks, RU/EN; and the first of them once more from the bottom of the page — the bar is sticky; "← Course" to the
+// home page since step 3.2, 09.11.2026), and on the home page three of its links to the days: the old page loads
 // the next file, the new one must move by Next's router without reloading the document; the page reached is
-// compared like any page state, and also: the address (the old one without ".html"), the language saved in
+// compared like any page state, and also: the address (the old one as a route: without ".html", the home page's
+// "index.html" as its folder), the language saved in
 // localStorage, the scroll position, the page's <style>s against the same page opened directly; after the first
 // click the browser's Back must bring the page before it back, still without a reload.
 // The home page: with the language chosen beforehand (none, en, tk, tr) and after each of: the EN, TM, TR and RU
@@ -214,6 +216,10 @@ const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
     // class="" is no class: lang.js leaves it after taking the last class off, React writes no attribute
     at = at.filter(([k, v]) => !(k === 'class' && v === ''));
     if (isNew && el.matches('div.lesson-nav a.nav-link, div.lesson-nav a.lang-btn')) at = at.map(([k, v]) => [k, k === 'href' ? v + '.html' : v]);
+    // since step 3.2 (09.11.2026) "← Course" goes to the home page's route ("../../") and the home page's links to the
+    // days' routes
+    if (isNew && el.matches('div.lesson-nav a.nav-home')) at = at.map(([k, v]) => [k, k === 'href' ? v + 'index.html' : v]);
+    if (isNew && isHome && el.matches('a.sidebar-link, a.card-link')) at = at.map(([k, v]) => [k, k === 'href' ? v + '.html' : v]);
     at = at.map(([k, v]) => [k, k === 'style' ? el.style.cssText : v]).sort((x, y) => (x[0] < y[0] ? -1 : 1));
     return at.map(([k, v]) => ` ${k}="${quote(v)}"`).join('');
   };
@@ -359,7 +365,16 @@ const navClick = (locate, fromBottom) => async (p) => {
 
 // The clicks of a day page's bar: [name, action] for each link whose page exists (a dead link — day 21 of Advanced —
 // is reported by the link check), the first of them again from the bottom of the page, and RU/EN where it is.
+// The home page's links to the days (step 3.2, 09.11.2026): the lecture button of the first card, the tasks button of
+// the last ready day, an item of the menu — in the list shown (Russian or English, by the language saved).
+const HOME_LINK_STEPS = [
+  ['click a card: lecture', navClick((p) => p.locator('a.card-link.lecture:visible').first(), false)],
+  ['click a card: tasks of the last ready day', navClick((p) => p.locator('a.card-link.tasks:visible').last(), false)],
+  ['click a menu item', navClick((p) => p.locator('a.sidebar-link:visible').nth(5), false)],
+];
+
 function navSteps(file) {
+  if (file === 'index.html') return HOME_LINK_STEPS;
   const m = /^(.+\/day-\d+\/)(en\/)?(lecture|student|tasks)\.html$/.exec(file);
   if (!m) return [];
   const [, dayDir, en, kind] = m;
@@ -371,6 +386,8 @@ function navSteps(file) {
   if (fs.existsSync(path.join(ROOT, en ? `${dayDir}${kind}.html` : `${dayDir}en/${kind}.html`))) {
     steps.push(['click RU/EN', navClick((p) => p.locator('.lesson-nav a.lang-btn'), false)]);
   }
+  // "← Course": to the home page, a <Link> too since step 3.2 (09.11.2026)
+  steps.push(['click home', navClick((p) => p.locator('.lesson-nav a.nav-home'), false)]);
   return steps;
 }
 
@@ -513,15 +530,17 @@ function navSteps(file) {
         await compareState(null, true);
         if (file === 'index.html') for (const [step] of HOME_STEPS) await compareState(step, false);
 
-        // the navigation bar of a day page, clicked (see the top of the file)
-        if (w === 1280 && file !== 'index.html') {
+        // links clicked: the navigation bar of a day page, the links of the home page to the days (see the top of the file)
+        if (w === 1280) {
           const rel = (u) => decodeURIComponent(u.startsWith('file:') ? u.slice(OLD_BASE.length) : u.slice(BASE.length));
+          // the new address is the old one as a route: without ".html", the home page's "index.html" as its folder
+          const routeOf = (r) => r.replace(/(^|\/)index\.html$/, '$1').replace(/\.html$/, '');
           for (const [i, s] of navSteps(file).entries()) {
             const withBack = i === 0;
             await compareState(s[0], !s[0].startsWith('from the bottom'), [s], async (a, b, where) => {
               errors.length = 0;
               if (!b.kept) say(`${where}: the document was reloaded — not a move by the router`);
-              if (rel(b.url) + '.html' !== rel(a.url)) say(`${where}: address ${rel(a.url)} | ${rel(b.url)} (expected the old one without .html)`);
+              if (routeOf(rel(a.url)) !== rel(b.url)) say(`${where}: address ${rel(a.url)} | ${rel(b.url)} (expected the old one as a route)`);
               if (a.saved !== b.saved) say(`${where}: language saved ${a.saved} | ${b.saved}`);
               if (a.scrollY !== b.scrollY) say(`${where}: scrolled to ${a.scrollY} | ${b.scrollY}`);
               if (withBack) {

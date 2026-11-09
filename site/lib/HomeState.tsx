@@ -9,7 +9,7 @@
 // lib/home-lang.ts), as lang.js did when the page was parsed — so that a reader who chose EN does not see the page in
 // Russian first. React then takes the language from localStorage too; the elements it changes say
 // suppressHydrationWarning (the server drew them in Russian).
-import { createContext, useContext, useEffect, useState, type ElementType, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useState, type ElementType, type ReactNode } from "react";
 import { LANG_KEY } from "./lang-key";
 import { HOME_LANGS } from "./home-lang";
 
@@ -25,14 +25,23 @@ export function HomeState({ titles, children }: { titles: { ru: string; en: stri
   const [lang, setLang] = useState("ru");
   const [menu, setMenu] = useState(false);
   const shown = shownOf(lang);
-  useEffect(() => {
+  // Layout effects, before the page is painted: coming by a <Link> from a day page (no script runs then), the page
+  // shows in the saved language at once.
+  useLayoutEffect(() => {
     // as lang.js: the saved language, Russian if none — and it is saved back
     const saved = localStorage.getItem(LANG_KEY) || "ru";
     setLang(saved);
     localStorage.setItem(LANG_KEY, saved);
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.lang = shown;
+    // Leaving for a day page, <html lang> goes back to "ru", what React rendered for the home page: a Russian day
+    // page renders "ru" too, so React would not touch it and "tk" or "en" would stay (step 3.2, 09.11.2026). This runs
+    // before React sets the next page's lang (a removed child's layout effects are cleaned up before its parent
+    // <html> is updated).
+    return () => {
+      document.documentElement.lang = "ru";
+    };
   }, [shown]);
   const choose = (next: string) => {
     setLang(next);

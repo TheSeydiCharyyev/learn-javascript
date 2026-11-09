@@ -2,5 +2,6 @@
 // "../lecture"). Next.js moves between pages without a reload only by route addresses; a route ending in ".html"
 // would be exported as a folder "student.html/" next to a file "student.html.html" (tried 06.11.2026). The files
 // "….html" are still written, so the old addresses open the same pages.
+// The home page's route is its folder: "../../index.html" -> "../../" (there is no route "index" — 09.11.2026).
 // (A module of its own: LangButton runs in the browser, nav.ts reads the file system.)
-export const route = (href: string) => href.replace(/\.html$/, "");
+export const route = (href: string) => href.replace(/(^|\/)index\.html$/, "$1").replace(/\.html$/, "");

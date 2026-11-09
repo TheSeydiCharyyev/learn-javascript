@@ -1,6 +1,7 @@
 // Reads the course pages from the repository at build time. A day page is written in MDX (lecture.mdx next to
 // lecture.html — stage 2 of the move, 08.11.2026; see lib/mdx.ts) or still in HTML; the MDX file wins when both
-// are there. For an HTML page (index.html and the days not moved yet) the site takes the <head> resources and the
+// are there. The home page is drawn by lib/Home.tsx from the plans (stage 3, 09.11.2026); index.html is not read.
+// For an HTML page (a day not moved yet: the lecture of day 21 of Advanced) the site takes the <head> resources and the
 // top-level elements of <body> as written — the inner HTML of each is cut from the file by parser offsets, not
 // re-serialized, so inline handlers, inline scripts and entities inside them reach the browser byte for byte.
 //
@@ -11,7 +12,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { createElement, type ReactElement } from "react";
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
-import Title from "./title";
 import { highlightCode } from "./highlight";
 import { navInnerHtml, navModel, type NavModel } from "./nav";
 import { splitFrontmatter, type Frontmatter } from "./mdx";
@@ -35,9 +35,10 @@ export type SourcePage = {
   handlers: Handler[];
   nav: NavModel | null;
   kind: PageKind | null; // a day page: lecture, notes (student) or tasks
-  // A day page's own CSS, in cascade order: css/<kind>.css, css/book.css, then its <style> (the colours of the day).
+  // A day page's own CSS, in cascade order: css/<kind>.css, css/book.css, then its <style> (the colours of the day);
+  // the home page's: css/home.css.
   pageCss: string[];
-  // A day page's <title> as text: given to Next.js as metadata (see page.tsx); null on the home page.
+  // A day page's <title> as text: given to Next.js as metadata (see page.tsx); null on the home page (lib/home-lists.ts).
   title: string | null;
   // A page written in MDX: its frontmatter and the MDX after it (head, body and handlers are empty then).
   mdx: { front: Frontmatter; body: string; firstLine: number; dir: string; up: string } | null;
@@ -166,6 +167,13 @@ function highlightBlocks(rel: string, source: string, body: Element): string {
 export function readPage(rel: string): SourcePage {
   const hit = cache.get(rel);
   if (hit) return hit;
+  // The home page is drawn by <Home> from the plans (lib/Home.tsx — stage 3, 09.11.2026), not read from index.html:
+  // here only its CSS, css/home.css, after common.css as the file had it (its title: page.tsx).
+  if (rel === "index.html") {
+    const page: SourcePage = { lang: "ru", head: [], body: [], handlers: [], nav: null, kind: null, pageCss: [readCourseCss("home.css")], title: null, mdx: null };
+    cache.set(rel, page);
+    return page;
+  }
   const mdxRel = rel.replace(/\.html$/, ".mdx");
   if (mdxRel !== rel && fs.existsSync(path.join(REPO, mdxRel))) {
     const page = readMdxPage(rel, mdxRel);
@@ -211,7 +219,7 @@ export function readPage(rel: string): SourcePage {
   }
 
   // A day page's title goes to Next.js as metadata, so that it changes with the page when the reader moves by a <Link>
-  // (a <title> in the layout would keep the first page's: lib/title.tsx takes what the document shows — 06.11.2026).
+  // (a <title> in the layout would keep the first page's — 06.11.2026).
   let title: string | null = null;
   if (kind) {
     const titles = head.childNodes.filter(isElement).filter((n) => n.tagName === "title");
@@ -285,11 +293,11 @@ function props(p: Piece): Record<string, unknown> {
 
 const VOID = new Set(["link", "meta", "br", "hr", "img", "input"]);
 
-// An element as written: same tag, same attributes, the original inner HTML. The <title> (only the home page has one
-// here) goes through Title: lang.js rewrites it for English and React would write the file's text back when it
-// hydrates.
+// An element as written: same tag, same attributes, the original inner HTML. (A <title> never comes here: a day
+// page's is metadata; the home page's, which lang.js used to rewrite, is drawn by lib/HomeState.tsx since stage 3 —
+// lib/title.tsx went with it, 09.11.2026.)
 export function render(p: Piece, key: number): ReactElement {
-  if (p.tag === "title") return createElement(Title, { key, html: p.html, attrs: props(p) as Record<string, string> });
+  if (p.tag === "title") throw new Error("a <title> in the pieces of a page: a day page's title is metadata");
   const own = { ...props(p), key };
   if (VOID.has(p.tag) || (p.tag === "script" && !p.html)) return createElement(p.tag, own);
   return createElement(p.tag, { ...own, dangerouslySetInnerHTML: { __html: p.html } });

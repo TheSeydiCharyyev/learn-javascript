@@ -34,8 +34,8 @@ const LECTURE_NAME: Record<string, { ru: string; en: string }> = {
   "essentials/day-15": { ru: "Теория", en: "Theory" },
 };
 
-// A page exists when its HTML or its MDX file does (rel is the .html path).
-const pageExists = (repo: string, rel: string) =>
+// A page exists when its HTML or its MDX file does (rel is the .html path). Also used by the home page (lib/home-lists.ts).
+export const pageExists = (repo: string, rel: string) =>
   fs.existsSync(path.join(repo, rel)) || fs.existsSync(path.join(repo, rel.replace(/\.html$/, ".mdx")));
 
 export function navModel(rel: string, repo: string): NavModel | null {

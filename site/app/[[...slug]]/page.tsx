@@ -1,13 +1,14 @@
-// Routes: one static page per page of the course (see lib/source.ts). A day page is its navigation bar (drawn by
-// <LessonNav>) and its content: from an MDX file, the course's components inside <div class="container"> (the head of
-// a lecture from its frontmatter); from an HTML file, the top-level elements of its <body> with their inner HTML
-// exactly as written (on the home page: the header, menu and main part).
+// Routes: one static page per page of the course (see lib/source.ts). The home page is drawn by <Home> from the plans
+// (lib/Home.tsx). A day page is its navigation bar (drawn by <LessonNav>) and its content: from an MDX file, the
+// course's components inside <div class="container"> (the head of a lecture from its frontmatter); from an HTML file,
+// the top-level elements of its <body> with their inner HTML exactly as written.
 // A day page starts with its own CSS (its kind's CSS, book.css, the colours of the day — after common.css in the
 // cascade, as the file had it); the CSS leaves with the page when the reader goes to another one. Its title is
 // metadata, so it changes with the page too.
 import type { Metadata } from "next";
 import LessonNav from "@/lib/LessonNav";
 import { courseComponents, DayHead } from "@/lib/course";
+import Home from "@/lib/Home";
 import { mdxContent } from "@/lib/mdx";
 import { fromSlug, pagePaths, readPage, render, toSlug } from "@/lib/source";
 
@@ -18,7 +19,9 @@ export function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: PageProps<"/[[...slug]]">): Promise<Metadata> {
-  const page = readPage(fromSlug((await params).slug));
+  const rel = fromSlug((await params).slug);
+  if (rel === "index.html") return {}; // the home page's title is drawn by lib/HomeState.tsx (it follows the language)
+  const page = readPage(rel);
   return page.title === null ? {} : { title: page.title };
 }
 
@@ -26,7 +29,9 @@ export default async function Page({ params }: PageProps<"/[[...slug]]">) {
   const rel = fromSlug((await params).slug);
   const page = readPage(rel);
   let content;
-  if (page.mdx) {
+  if (rel === "index.html") {
+    content = <Home />;
+  } else if (page.mdx) {
     const { front, body, firstLine, dir, up } = page.mdx;
     const Content = await mdxContent(rel, body, firstLine);
     content = (

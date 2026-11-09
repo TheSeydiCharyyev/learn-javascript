@@ -8,85 +8,22 @@ import path from 'node:path';
 import { MODULES } from './plan-modules.mjs';
 import { PLAN } from './plan-days.mjs';
 import { DAY_TITLES_EN, MODULE_NAMES_EN } from './plan-en.mjs';
+import { COURSES, LOOK, TEXT } from './home-data.mjs';
 
 const ROOT = path.join(import.meta.dirname, '..');
 const INDEX = path.join(ROOT, 'index.html');
-
-// the courses on the home page, in order; a course needs a day plan in plan-days.mjs and English titles in plan-en.mjs
-const COURSES = [
-  {
-    no: 1, dir: 'essentials', name: 'Essentials',
-    about: {
-      ru: 'Основы языка для тех, кто программирует впервые, и работа со страницей: DOM, события, таймеры, fetch, хранилище.',
-      en: 'The basics of the language for first-time programmers, and working with the page: DOM, events, timers, fetch, storage.',
-    },
-  },
-  {
-    no: 2, dir: 'intermediate', name: 'Intermediate',
-    about: {
-      ru: 'Как устроен язык: замыкания и this, прототипы и классы, итераторы, коллекции, регулярные выражения, Temporal и Intl, асинхронность, модули.',
-      en: 'How the language works: closures and this, prototypes and classes, iterators, collections, regular expressions, Temporal and Intl, async code, modules.',
-    },
-  },
-  {
-    no: 3, dir: 'advanced', name: 'Advanced',
-    about: {
-      ru: 'Язык по спецификации: как читать ECMA-262, типы и абстрактные операции, контексты выполнения, Proxy и Reflect, двоичные данные и память, Intl целиком, наследие языка.',
-      en: 'The language by its specification: reading ECMA-262, types and abstract operations, execution contexts, Proxy and Reflect, binary data and memory, all of Intl, legacy features.',
-    },
-  },
-];
-
-// colour and icon per module, in the order of MODULES
-const LOOK = {
-  E1: ['#3b82f6, #06b6d4', '&#x1F4DC;'],
-  E2: ['#8b5cf6, #d946ef', '&#x1F524;'],
-  E3: ['#f59e0b, #ef4444', '&#x1F500;'],
-  E4: ['#10b981, #059669', '&#x2699;&#xFE0F;'],
-  E5: ['#0ea5e9, #6366f1', '&#x1F522;'],
-  E6: ['#ec4899, #f43f5e', '&#x1F4E6;'],
-  E7: ['#22c55e, #84cc16', '&#x1F5B1;&#xFE0F;'],
-  E8: ['#6366f1, #8b5cf6', '&#x23F1;&#xFE0F;'],
-  I1: ['#0ea5e9, #2563eb', '&#x1F512;'],
-  I2: ['#a855f7, #6366f1', '&#x1F9E9;'],
-  I3: ['#f97316, #ef4444', '&#x1F3DB;&#xFE0F;'],
-  I4: ['#14b8a6, #0d9488', '&#x1F501;'],
-  I5: ['#84cc16, #16a34a', '&#x1F5C2;&#xFE0F;'],
-  I6: ['#f43f5e, #db2777', '&#x1F50D;'],
-  I7: ['#06b6d4, #3b82f6', '&#x1F4C5;'],
-  I8: ['#f59e0b, #dc2626', '&#x26A1;'],
-  I9: ['#64748b, #334155', '&#x1F9F1;'],
-  A1: ['#6366f1, #4338ca', '&#x1F4D6;'],
-  A2: ['#8b5cf6, #7c3aed', '&#x1F9EE;'],
-  A3: ['#0ea5e9, #0369a1', '&#x1F3C3;'],
-  A4: ['#ec4899, #be185d', '&#x1FA9E;'],
-  A5: ['#10b981, #047857', '&#x1F4BE;'],
-  A6: ['#f97316, #c2410c', '&#x267B;&#xFE0F;'],
-  A7: ['#0891b2, #4f46e5', '&#x1F310;'],
-  A8: ['#78716c, #44403c', '&#x1F3FA;'],
-  PROJECTS: ['#eab308, #f97316', '&#x1F3C6;'],
-};
-
-const TEXT = {
-  ru: {
-    projects: 'Проекты и защита', lecture: 'Лекция', student: 'Конспект', tasks: 'Задания', soon: 'материал готовится',
-    days: 'Дни', day: 'День', courseNo: 'Курс', course: (c) => `курс ${c.name}`,
-    status: (n, all) => (n === all ? `${all} занятий &bull; готов` : n ? `${all} занятий &bull; готово ${n} из ${all}` : `${all} занятий &bull; материал готовится`),
-  },
-  en: {
-    projects: MODULE_NAMES_EN.PROJECTS, lecture: 'Lecture', student: 'Notes', tasks: 'Tasks', soon: 'coming soon',
-    days: 'Days', day: 'Day', courseNo: 'Course', course: (c) => `${c.name} course`,
-    status: (n, all) => (n === all ? `${all} lessons &bull; ready` : n ? `${all} lessons &bull; ${n} of ${all} ready` : `${all} lessons &bull; coming soon`),
-  },
-};
 
 const moduleName = {
   ru: Object.fromEntries(MODULES.map(([id, , , name]) => [id, name])),
   en: MODULE_NAMES_EN,
 };
 const folderOf = (c, day) => `${c.dir}/day-${String(day).padStart(2, '0')}`;
-const ready = (c, day) => fs.existsSync(path.join(ROOT, folderOf(c, day)));
-const hasEn = (c, day) => fs.existsSync(path.join(ROOT, folderOf(c, day), 'en', 'lecture.html'));
+// a page is written in HTML or MDX; a day is ready when its three pages are (09.11.2026 — before, when its folder
+// was: day 21 of Advanced, paused with only its lecture, would have shown up; the site's home page, site/lib/home-lists.ts,
+// has the same rule)
+const written = (rel) => ['.html', '.mdx'].some((ext) => fs.existsSync(path.join(ROOT, rel + ext)));
+const ready = (c, day) => ['lecture', 'student', 'tasks'].every((p) => written(`${folderOf(c, day)}/${p}`));
+const hasEn = (c, day) => written(`${folderOf(c, day)}/en/lecture`);
 
 // the English list falls back to the Russian pages of a day that is not translated yet
 const pagesOf = (c, day, lang) => (lang === 'en' && hasEn(c, day) ? `${folderOf(c, day)}/en` : folderOf(c, day));

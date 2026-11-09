@@ -39,8 +39,10 @@
 // compared like any page state, and also: the address (the old one without ".html"), the language saved in
 // localStorage, the scroll position, the page's <style>s against the same page opened directly; after the first
 // click the browser's Back must bring the page before it back, still without a reload.
-// The home page: with the language chosen beforehand (none, en, tk, tr) and after each of: the EN button, the menu
-// button on a phone, closing the menu on the overlay (an inline onclick at the top level of <body>).
+// The home page: with the language chosen beforehand (none, en, tk, tr) and after each of: the EN, TM, TR and RU
+// buttons, the menu button on a phone, closing the menu on the overlay. Since 09.11.2026 the new home page is React
+// (site/lib/Home.tsx): its clicks are listeners, so the old page's onclick attributes and its inline <script> at the
+// top level are not compared there — the steps check what they do; class="" counts as no class anywhere.
 // Google Fonts (the home page imports Inter) are served from a local copy in tools/.cache/fonts/: over a slow network
 // the font subsets arrive at different moments and even the old page differs from itself by 1/64 px of text width.
 // Screenshots of differences go to tools/.cache/compare-site/. Playwright from the goose folder, the installed Chrome.
@@ -184,7 +186,10 @@ const NEXT_NODE = `(n) => n.tagName === 'NEXT-ROUTE-ANNOUNCER'
 // The page's top-level elements. A day page of the site starts with its own CSS as <style> elements in <body> (its
 // kind's CSS, book.css, the colours of the day — 06.11.2026); a top-level <style> is not compared as markup: what
 // it does shows in the pixels and, with --styles, in the computed styles.
-const TOP_ELEMENTS = `(isNext) => [...document.body.children].filter((c) => !isNext(c) && c.tagName !== 'STYLE')`;
+// On the home page an inline <script> at the top level is not compared either: the old page defines its menu functions
+// there, the new one puts the saved language on the page before React starts (09.11.2026) — what they do, the steps
+// check.
+const TOP_ELEMENTS = `(isNext, isHome) => [...document.body.children].filter((c) => !isNext(c) && c.tagName !== 'STYLE' && !(isHome && c.tagName === 'SCRIPT' && !c.src))`;
 
 // The RU/EN button of a day page: the HTML pages write its click as onclick="…", React attaches it as an event
 // listener (06.11.2026, <LessonNav>) — so that attribute is not compared; what the click does is (the click tests).
@@ -195,6 +200,7 @@ const TOP_ELEMENTS = `(isNext) => [...document.body.children].filter((c) => !isN
 const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
   const isNext = eval(nextNode);
   const isNew = location.protocol === 'http:';
+  const isHome = /\/(index\.html)?$/.test(location.pathname);
   const isBlock = (n) => !!n && n.nodeType === 1 && !/^inline/.test(getComputedStyle(n).display);
   // spaces around a <br> are not drawn either (the end of a line, the start of the next): trimmed as next to a block
   const breaks = (n) => isBlock(n) || (!!n && n.nodeType === 1 && n.tagName === 'BR');
@@ -203,6 +209,10 @@ const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
   const attrs = (el) => {
     let at = [...el.attributes].map((a) => [a.name, a.value]);
     if (el.matches('a.lang-btn')) at = at.filter(([k]) => k !== 'onclick');
+    // the home page's clicks (language buttons, menu, overlay) are React's listeners on the new page (09.11.2026)
+    if (isHome) at = at.filter(([k]) => k !== 'onclick');
+    // class="" is no class: lang.js leaves it after taking the last class off, React writes no attribute
+    at = at.filter(([k, v]) => !(k === 'class' && v === ''));
     if (isNew && el.matches('div.lesson-nav a.nav-link, div.lesson-nav a.lang-btn')) at = at.map(([k, v]) => [k, k === 'href' ? v + '.html' : v]);
     at = at.map(([k, v]) => [k, k === 'style' ? el.style.cssText : v]).sort((x, y) => (x[0] < y[0] ? -1 : 1));
     return at.map(([k, v]) => ` ${k}="${quote(v)}"`).join('');
@@ -229,7 +239,7 @@ const snapshot = (page) => page.evaluate(([nextNode, topElements]) => {
     });
     return open + inner + close;
   };
-  const top = eval(topElements)(isNext).map(markup);
+  const top = eval(topElements)(isNext, isHome).map(markup);
   const text = [...document.body.childNodes].filter((n) => n.nodeType === 3 && n.data.trim()).map((n) => n.data);
   return {
     title: document.title,
@@ -297,8 +307,13 @@ async function pixelDiff(page, a, b) {
 }
 
 // Steps on the home page: [name, action]; the menu steps only where the menu button is shown.
+// The language buttons in turn (EN, TM, TR, back to RU — since 09.11.2026, when React took the clicks over), then the
+// menu.
 const HOME_STEPS = [
   ['click EN', (p) => p.click('.lang-opt[data-set-lang="en"]')],
+  ['click TM', (p) => p.click('.lang-opt[data-set-lang="tk"]')],
+  ['click TR', (p) => p.click('.lang-opt[data-set-lang="tr"]')],
+  ['click RU', (p) => p.click('.lang-opt[data-set-lang="ru"]')],
   ['open menu', async (p) => { if (await p.isVisible('.sidebar-toggle')) await p.click('.sidebar-toggle'); else return 'skip'; }],
   // the overlay is the whole screen under the 280px menu: click the middle of the strip to the right of the menu
   ['close on overlay', async (p) => {

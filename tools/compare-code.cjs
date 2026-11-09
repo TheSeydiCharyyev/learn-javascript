@@ -1,9 +1,17 @@
 // Compare code blocks of a RU and an EN page line by line: the number of blocks, the number of lines,
 // and the column where a trailing // comment (or a → arrow in a comment) starts.
 //   node tools/compare-code.cjs essentials/day-07/lecture.html essentials/day-07/en/lecture.html
-const fs = require('node:fs');
-const decode = (s) => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').replace(/&#8592;/g, '←').replace(/&amp;/g, '&');
-const blocks = (f) => [...fs.readFileSync(f, 'utf8').matchAll(/<pre class="(?:code js|plain-out)">([\s\S]*?)<\/pre>/g)].map((m) => decode(m[1]).split('\n'));
+// The pages are read as the site builds them (site/out, `pnpm build` in site/ first — stage 4 of the move to
+// Next.js, 09.11.2026): the blocks are its <pre class="code js"> and <pre class="plain-out">, their text as the
+// browser has it (the highlighting's spans gone, every entity decoded).
+const path = require('node:path');
+const site = require('./lib/site.cjs');
+
+const relOf = (f) => path.relative(site.ROOT, path.resolve(f)).replace(/\\/g, '/');
+const blocks = (f) => {
+  const p = site.page(relOf(f));
+  return p.all('pre').filter((n) => ['code js', 'plain-out'].includes(p.attr(n, 'class'))).map((n) => p.text(n).replace(/ /g, ' ').split('\n'));
+};
 // column of a comment start outside strings: the first // that is not inside quotes or backticks
 function commentCol(line) {
   let q = null;

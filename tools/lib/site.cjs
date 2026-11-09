@@ -5,7 +5,9 @@
 //   site.builtFile('essentials/day-01/lecture.html')        the built file; throws if it is missing or older than its
 //                                                           sources (run `pnpm build` in site/)
 //   const p = site.page('essentials/day-01/lecture.html')   the page's <body> as a tree (parse5), without Next's nodes:
-//   p.all('pre.code.js'), p.first('div.sources a'), p.text(node), p.attr(node, 'href'), p.lang
+//   p.all('pre.code.js'), p.first('div.sources a'), p.text(node), p.attr(node, 'href'), p.lang, p.title,
+//   p.inner(node) / p.outer(node) (the node as HTML again)
+//   site.dayPages('essentials/day-01/en')                   the written pages of a day folder (MDX or HTML)
 //   const { base, close } = await site.serve()              a local server of site/out for a browser (the built pages
 //                                                           load their CSS and scripts from /_next/…, so file:// will
 //                                                           not do): page(base + 'essentials/day-01/lecture.html')
@@ -114,8 +116,23 @@ function page(rel) {
     walk(from);
     return out;
   };
-  return { rel, html, body, lang: attr(root, 'lang'), all, first: (selector, from) => all(selector, from)[0] ?? null, text, attr, classes };
+  const head = root.childNodes.find((n) => n.tagName === 'head');
+  const title = head.childNodes.find((n) => n.tagName === 'title');
+  return {
+    rel, html, body, head, lang: attr(root, 'lang'), title: title ? text(title) : null,
+    all, first: (selector, from) => all(selector, from)[0] ?? null, text, attr, classes,
+    // a node as HTML again (parse5's serializer: attributes in double quotes, & < > " escaped where HTML needs it)
+    inner: (n) => parser().serialize(n), outer: (n) => parser().serializeOuter(n),
+  };
 }
+
+// ---------- the pages of a day ----------
+
+const PAGE_NAMES = ['lecture', 'student', 'tasks'];
+// a page is written when its MDX file is, or its HTML file (a day not moved yet)
+const written = (rel) => fs.existsSync(path.join(ROOT, rel.replace(/\.html$/, '.mdx'))) || fs.existsSync(path.join(ROOT, rel));
+// the written pages of a day folder ("essentials/day-01" or "essentials/day-01/en"), as page paths
+const dayPages = (dir) => PAGE_NAMES.map((n) => `${dir}/${n}.html`).filter(written);
 
 // ---------- a local server of site/out ----------
 
@@ -146,4 +163,4 @@ function serve() {
   });
 }
 
-module.exports = { ROOT, OUT, builtFile, page, serve };
+module.exports = { ROOT, OUT, builtFile, page, serve, written, dayPages };

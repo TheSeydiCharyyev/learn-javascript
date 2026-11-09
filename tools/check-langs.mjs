@@ -6,16 +6,38 @@
 //
 //   node tools/check-langs.mjs            all written days
 //   node tools/check-langs.mjs 1          only day 1 (of every course)
+// The pages are read as the site builds them (site/out, `pnpm build` in site/ first — stage 4 of the move to
+// Next.js, 09.11.2026): the RU/EN button links to the other page's route ("en/lecture", "../lecture"); the language is
+// the page's <html lang>; Cyrillic is looked for in the text and the attributes of <body> and in the title, outside
+// the elements marked lang="ru" (the place is told by its text — a built page has no lines to count).
 import fs from 'node:fs';
 import path from 'node:path';
+import site from './lib/site.cjs';
 
 const ROOT = path.join(import.meta.dirname, '..');
 const COURSE_DIR = ['essentials', 'intermediate', 'advanced', 'web-apis'];
 const PAGES = ['lecture', 'student', 'tasks'];
 const CYRILLIC = /[А-Яа-яЁё]/;
-const MARKED_RU = /<(\w+)\b[^>]*\blang="ru"[^>]*>.*?<\/\1>/g;
 
-const langLink = (html, href) => new RegExp(`<a href="${href.replace(/[./]/g, '\\$&')}" class="lang-btn"`).test(html);
+const langLink = (p, href) => p.all('a.lang-btn').some((a) => p.attr(a, 'href') === href);
+
+// texts and attribute values with Cyrillic, outside the elements marked lang="ru"
+function cyrillic(p) {
+  const found = [];
+  const walk = (n) => {
+    for (const c of n.childNodes ?? []) {
+      if (c.nodeName === '#text') { if (CYRILLIC.test(c.value)) found.push(c.value.trim()); continue; }
+      // CSS is not the page's text: a built page carries the course CSS in <style> (lecture.css, book.css — Russian
+      // labels and comments); a Russian label that shows on an English page is check-pages's (CSS ::before)
+      if (!c.tagName || c.tagName === 'style' || c.tagName === 'script' || p.attr(c, 'lang') === 'ru') continue;
+      for (const a of c.attrs) if (CYRILLIC.test(a.value)) found.push(`<${c.tagName} ${a.name}="${a.value}">`);
+      walk(c.content ?? c);
+    }
+  };
+  walk(p.body);
+  if (p.title && CYRILLIC.test(p.title)) found.push(`<title>${p.title}</title>`);
+  return found;
+}
 
 const only = process.argv.slice(2).map(Number);
 const lines = [];
@@ -30,22 +52,19 @@ for (const dir of COURSE_DIR) {
     const problems = [];
     const hasEn = fs.existsSync(path.join(courseDir, day, 'en'));
     for (const page of PAGES) {
-      const ruFile = path.join(courseDir, day, `${page}.html`);
-      const enFile = path.join(courseDir, day, 'en', `${page}.html`);
-      if (!fs.existsSync(ruFile)) continue;
-      const ru = fs.readFileSync(ruFile, 'utf8');
+      const ruRel = `${dir}/${day}/${page}.html`, enRel = `${dir}/${day}/en/${page}.html`;
+      if (!site.written(ruRel)) continue;
+      const ru = site.page(ruRel);
       if (!hasEn) {
-        if (/href="en\//.test(ru)) problems.push(`${page}.html links to en/, but the day has no translation`);
+        if (ru.all('a[href]').some((a) => ru.attr(a, 'href').startsWith('en/'))) problems.push(`${page}.html links to en/, but the day has no translation`);
         continue;
       }
-      if (!fs.existsSync(enFile)) { problems.push(`en/${page}.html is missing`); continue; }
-      const en = fs.readFileSync(enFile, 'utf8');
-      if (!langLink(ru, `en/${page}.html`)) problems.push(`${page}.html has no EN link to en/${page}.html`);
-      if (!langLink(en, `../${page}.html`)) problems.push(`en/${page}.html has no RU link to ../${page}.html`);
-      if (!/<html lang="en">/.test(en)) problems.push(`en/${page}.html is not marked <html lang="en">`);
-      en.split('\n').forEach((line, i) => {
-        if (CYRILLIC.test(line.replace(MARKED_RU, ''))) problems.push(`en/${page}.html:${i + 1} Cyrillic: ${line.trim().slice(0, 80)}`);
-      });
+      if (!site.written(enRel)) { problems.push(`en/${page}.html is missing`); continue; }
+      const en = site.page(enRel);
+      if (!langLink(ru, `en/${page}`)) problems.push(`${page}.html has no EN link to en/${page}`);
+      if (!langLink(en, `../${page}`)) problems.push(`en/${page}.html has no RU link to ../${page}`);
+      if (en.lang !== 'en') problems.push(`en/${page}.html is not marked <html lang="en">`);
+      for (const t of cyrillic(en)) problems.push(`en/${page}.html Cyrillic: ${t.slice(0, 80)}`);
     }
     if (problems.length) bad++;
     lines.push(`${problems.length ? 'FAIL' : 'PASS'}  ${dir}/${day}: ${hasEn ? 'ru + en' : 'ru only'}`);

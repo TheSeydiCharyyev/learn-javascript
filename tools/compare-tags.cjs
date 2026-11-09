@@ -1,27 +1,42 @@
 // Compare the tag skeleton of a Russian page and its English twin: the sequence of opening tags
 // with their class (and href for links, id for headings), ignoring text. Prints the differences.
 //   node tools/compare-tags.cjs essentials/day-07/lecture.html essentials/day-07/en/lecture.html
-const fs = require('node:fs');
+// The pages are read as the site builds them (site/out, `pnpm build` in site/ first — stage 4 of the move to
+// Next.js, 09.11.2026): the elements of <body> in order (the <head> is Next.js's, the same for both). The links
+// between the two pages are routes there ("en/lecture", "../lecture"), still written LANG.
+const path = require('node:path');
+const site = require('./lib/site.cjs');
+
+const relOf = (f) => path.relative(site.ROOT, path.resolve(f)).replace(/\\/g, '/');
 
 function skeleton(file) {
-  const html = fs.readFileSync(file, 'utf8');
+  const p = site.page(relOf(file));
   const out = [];
-  for (const m of html.matchAll(/<([a-zA-Z][\w-]*)([^>]*)>/g)) {
-    const tag = m[1].toLowerCase();
-    const attrs = m[2];
-    const cls = (attrs.match(/\bclass="([^"]*)"/) || [])[1];
-    const id = (attrs.match(/\bid="([^"]*)"/) || [])[1];
-    let href = (attrs.match(/\bhref="([^"]*)"/) || [])[1];
-    if (href) href = href.replace(/^\.\.\/\.\.\/\.\.\//, '../../').replace(/^\.\.\/(lecture|student|tasks)\.html$/, 'LANG').replace(/^en\/(lecture|student|tasks)\.html$/, 'LANG');
-    const parts = [tag];
-    if (cls) parts.push('.' + cls);
-    if (id) parts.push('#' + id);
-    if (href && tag === 'a') parts.push('@' + href);
-    if (tag === 'svg') parts.push('vb=' + (attrs.match(/viewBox="([^"]*)"/) || [])[1]);
-    if (['rect', 'circle', 'path', 'line'].includes(tag)) parts.push(attrs.replace(/\s+/g, ' ').replace(/ \/$/, '').trim());
-    if (tag === 'text') parts.push((attrs.match(/\bx="[^"]*" y="[^"]*"/) || [''])[0] + ' ' + (attrs.match(/font-size="[^"]*"/) || [''])[0]);
-    out.push(parts.join(' '));
-  }
+  const walk = (n) => {
+    for (const c of n.childNodes ?? []) {
+      if (!c.tagName) continue;
+      const tag = c.tagName.toLowerCase();
+      const at = (name) => p.attr(c, name);
+      // the attributes as written, for the shapes of a scheme
+      const attrs = c.attrs.map((a) => `${a.name}="${a.value}"`).join(' ');
+      const cls = at('class'), id = at('id');
+      let href = at('href');
+      if (href) href = href.replace(/^\.\.\/\.\.\/\.\.\//, '../../').replace(/^\.\.\/(lecture|student|tasks)(\.html)?$/, 'LANG').replace(/^en\/(lecture|student|tasks)(\.html)?$/, 'LANG');
+      const parts = [tag];
+      if (cls) parts.push('.' + cls);
+      if (id) parts.push('#' + id);
+      if (href && tag === 'a') parts.push('@' + href);
+      if (tag === 'svg') parts.push('vb=' + at('viewBox'));
+      if (['rect', 'circle', 'path', 'line'].includes(tag)) parts.push(attrs);
+      if (tag === 'text') parts.push(`${at('x') !== undefined && at('y') !== undefined ? `x="${at('x')}" y="${at('y')}"` : ''} ${at('font-size') !== undefined ? `font-size="${at('font-size')}"` : ''}`);
+      out.push(parts.join(' '));
+      // inside a code block the built page has the highlighting's spans — the code, not the page's structure (the HTML
+      // files had none there)
+      if (tag === 'pre' && p.classes(c).includes('code')) continue;
+      walk(c.content ?? c);
+    }
+  };
+  walk(p.body);
   return out;
 }
 

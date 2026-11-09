@@ -3,9 +3,12 @@
 //
 //   node tools/check-lesson-links.mjs            all days that have a folder
 //   node tools/check-lesson-links.mjs 1 19       only these days of course 1
+// The pages are read as the site builds them (site/out, `pnpm build` in site/ first — stage 4 of the move to
+// Next.js, 09.11.2026): the <body> of each, without Next.js's own scripts (they repeat the page's text).
 import fs from 'node:fs';
 import path from 'node:path';
 import { readCsv } from './lib/csv.mjs';
+import site from './lib/site.cjs';
 
 const ROOT = path.join(import.meta.dirname, '..');
 const COV = path.join(ROOT, 'docs', 'coverage');
@@ -36,7 +39,7 @@ for (const [key, rows] of [...want].sort((a, b) => Number(a[0].split('/')[1]) - 
     const dir = path.join(dayDir, sub);
     if (!fs.existsSync(dir)) continue;
     checked++;
-    const html = fs.readdirSync(dir).filter((f) => f.endsWith('.html')).map((f) => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
+    const html = site.dayPages(path.relative(ROOT, dir).replace(/\\/g, '/')).map((rel) => { const p = site.page(rel); return p.inner(p.body); }).join('\n');
     const linked = new Set([...html.matchAll(/https:\/\/developer\.mozilla\.org\/en-US\/docs\/([^"'\s)]+)/g)].map((m) => decodeURI(m[1]).replace(/#.*$/, '').toLowerCase()));
     const missing = rows.filter((r) => !linked.has(r.path.toLowerCase()));
     const planned = new Set(rows.map((r) => r.path.toLowerCase()));

@@ -4,8 +4,11 @@
 //
 //   node tools/check-license.mjs            all written days
 //   node tools/check-license.mjs 3          only day 3 (of every course)
+// The pages are read as the site builds them (site/out, `pnpm build` in site/ first — stage 4 of the move to
+// Next.js, 09.11.2026): the footer is the <div class="sources"> of the built page, as HTML again.
 import fs from 'node:fs';
 import path from 'node:path';
+import site from './lib/site.cjs';
 
 const ROOT = path.join(import.meta.dirname, '..');
 const COURSE_DIR = ['essentials', 'intermediate', 'advanced', 'web-apis'];
@@ -33,12 +36,10 @@ for (const dir of COURSE_DIR) {
     for (const sub of LANG_DIRS) {
       const dayDir = path.join(courseDir, day, sub);
       if (!fs.existsSync(dayDir)) continue;
-      const pages = fs.readdirSync(dayDir).filter((f) => f.endsWith('.html')).sort();
-      for (const page of pages) {
-        const rel = `${dir}/${day}/${sub}${page}`;
+      for (const rel of site.dayPages(`${dir}/${day}${sub ? `/${sub.slice(0, -1)}` : ''}`)) {
         checked++;
-        const html = fs.readFileSync(path.join(dayDir, page), 'utf8');
-        const blocks = html.match(/<div class="sources">[\s\S]*?<\/div>/g) || [];
+        const p = site.page(rel);
+        const blocks = p.all('div.sources').map((n) => p.outer(n));
         if (blocks.length !== 1) {
           bad++;
           lines.push(`FAIL  ${rel}: блоков .sources ${blocks.length}, нужен ровно 1`);

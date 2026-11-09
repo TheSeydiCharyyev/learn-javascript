@@ -33,6 +33,12 @@ check('page: descendant selector', p.all('div.lesson-nav a.nav-link').length ===
 check('page: attribute selector', p.all('a[href]').length > 0 && p.all('pre[data-highlighted="1"]').length === p.all('pre.code').length, `${p.all('pre[data-highlighted="1"]').length} | ${p.all('pre.code').length}`);
 check('page: a selector it does not know', throws(() => p.all('div > p'), /selector not supported/));
 check('page: the licence footer', /CC BY-SA/.test(p.text(p.first('div.sources'))));
+check('page: a node as HTML again', /^<div class="sources">[\s\S]*<a href="https:\/\/creativecommons\.org\/licenses\/by-sa\/4\.0\/">/.test(p.outer(p.first('div.sources'))));
+check('page: the title', site.page('essentials/day-01/en/lecture.html').title?.startsWith('Day 1'), String(site.page('essentials/day-01/en/lecture.html').title));
+
+// the written pages of a day folder: MDX or HTML (day 21 of Advanced has only its lecture, in HTML)
+check('dayPages: a day in MDX', site.dayPages('essentials/day-01/en').join(' ') === 'essentials/day-01/en/lecture.html essentials/day-01/en/student.html essentials/day-01/en/tasks.html');
+check('dayPages: a day with one page in HTML', site.dayPages('advanced/day-21').join(' ') === 'advanced/day-21/lecture.html');
 
 // the freshness check: a source newer than the build
 const src = path.join(ROOT, 'essentials/day-01/lecture.mdx');

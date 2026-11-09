@@ -30,6 +30,15 @@ const only = (day, course = 'essentials') => {
 };
 const course2 = (day) => only(day, 'intermediate');
 const course3 = (day) => only(day, 'advanced');
+// a day of course 1 with the given files (name -> text), e.g. { 'lecture.mdx': '…' } — pages written in MDX
+const files = (day, pages) => {
+  for (const c of ['essentials', 'intermediate', 'advanced']) fs.rmSync(path.join(root, c), { recursive: true, force: true });
+  const dir = path.join(root, 'essentials', `day-${String(day).padStart(2, '0')}`);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, text] of Object.entries(pages)) fs.writeFileSync(path.join(dir, name), text);
+  return run(day);
+};
+const fence = (code, info = 'js', indent = '') => `${indent}\`\`\`${info}\n${code.split('\n').map((l) => indent + l).join('\n')}\n${indent}\`\`\``;
 
 try {
   // 1. a construct from a later day is found, and the day fails
@@ -177,6 +186,22 @@ try {
   // 28. every row of course 3 says on which day of course 3 it is taught
   const noDay3 = src.split('\n').filter((l) => /^\s*\{ id: .*where: 'курс 3'/.test(l) && !/day3: \d+/.test(l));
   check('таблица: у каждой строки курса 3 есть day3', noDay3.length === 0, noDay3.join(' | '));
+
+  // 29. pages in MDX (stage 4 of the move to Next.js, 09.11.2026): a ```js block is checked, the file and line point
+  // into the MDX file
+  r = files(9, { 'lecture.mdx': `# День 9\n\nТекст.\n\n${fence('const a = 1;\nconst city = user?.city;')}\n` });
+  check('MDX: ?. в блоке ```js на дне 9 поймана', r.out.includes('необязательная цепочка') && r.code === 1, r.out.split('\n')[0]);
+  check('MDX: место — файл .mdx и строка кода в нём', r.out.includes('essentials/day-09/lecture.mdx:7 '), r.out.split('\n')[1]);
+  r = files(9, { 'lecture.mdx': `{/* ahead-ok: день 22 */}\n\n${fence('const city = user?.city;\nconst zip = user?.zip;')}\n` });
+  check('MDX: {/* ahead-ok */} перед блоком снимает весь блок', r.code === 0, r.out.split('\n')[0]);
+  r = files(9, { 'lecture.mdx': `${fence('<script>const city = user?.city;</script>', 'html')}\n` });
+  check('MDX: блок ```html не проверяется', r.code === 0, r.out.split('\n')[0]);
+  r = files(9, { 'lecture.mdx': `${fence('const city = user?.city;', 'js file="main.js"')}\n` });
+  check('MDX: блок с именем файла (```js file="…") проверяется', r.code === 1, r.out.split('\n')[0]);
+  r = files(9, { 'tasks.mdx': `1. Задание:\n\n${fence('const city = user?.city;', 'js', '   ')}\n` });
+  check('MDX: блок с отступом внутри пункта списка проверяется', r.code === 1 && r.out.includes('tasks.mdx:4'), r.out.split('\n')[1]);
+  r = files(9, { 'lecture.mdx': `${fence('const a = 1;')}\n`, 'lecture.html': page(js('const city = user?.city;')) });
+  check('MDX и HTML рядом: читается MDX', r.code === 0, r.out.split('\n')[0]);
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

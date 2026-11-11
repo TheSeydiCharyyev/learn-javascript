@@ -15,6 +15,7 @@
 // the three experiments of «Карточки») and reference solutions of tasks 1–9.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -133,7 +134,7 @@ const fileName = (code) => {
     const ctx = await b.newContext(MAIN);
     for (const name of PAGES) {
       const src = await ctx.newPage();
-      await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+      await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
       all[name] = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => {
         const next = pre.nextElementSibling;
         const heads = [...document.querySelectorAll('h2')];
@@ -201,7 +202,7 @@ const fileName = (code) => {
     check(ok, `${text}: ${JSON.stringify(out)}${opts?.after ? ` | ${JSON.stringify(res.extraOut)}` : ''}`);
     return res;
   };
-  const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
+  const lecture = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
 
   // what the prose says the MDN pages say
   const G = 'guide/modules';

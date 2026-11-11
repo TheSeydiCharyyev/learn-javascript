@@ -24,6 +24,7 @@
 //   node tools/runs/advanced/day-19.cjs --quiet    only the checks
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -156,7 +157,7 @@ const stepPaths = (html, needle) => {
   {
     const ctx = await b.newContext(MAIN);
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, 'lecture.html').replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, 'lecture.html')));
     Object.assign(all, await src.evaluate(() => ({
       blocks: [...document.querySelectorAll('pre.code')].map((pre) => {
         const next = pre.nextElementSibling;
@@ -173,13 +174,13 @@ const stepPaths = (html, needle) => {
       tryIt: document.querySelector('.try-it code').textContent,
       text: document.querySelector('.container').innerText,
     })));
-    await src.goto('file:///' + path.join(DAY, 'student.html').replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
     all.notes = await src.evaluate(() => ({
       blocks: [...document.querySelectorAll('pre.code')].map((pre) => pre.textContent),
       writes: [...[...document.querySelectorAll('table')][0].querySelectorAll('tbody tr')].map((tr) => [...tr.cells].map((c) => c.innerText.trim())),
       text: document.querySelector('.container').innerText,
     }));
-    await src.goto('file:///' + path.join(DAY, 'tasks.html').replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
     all.tasks = await src.evaluate(() => ({
       blocks: [...document.querySelectorAll('pre.code')].map((pre) => pre.textContent),
       tasks: [...document.querySelectorAll('.task')].map((t) => t.innerText.replace(/\s+/g, ' ')),
@@ -711,7 +712,7 @@ console.log(n(() => ["a", "b", "c", "d", "e"], (o) => { o.splice(1, 1); }).join(
       await page3.close();
     }
     // the text of the tasks: ECMA-262, MDN, the footer
-    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
     const ts = fs.readFileSync(SPEC, 'utf8');
     const tAnchors = [...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]);
     const toSorted = plainMd(execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/reference/global_objects/array/tosorted/index.md'], { encoding: 'utf8' }));
@@ -788,7 +789,7 @@ console.log(n(() => ["a", "b", "c", "d", "e"], (o) => { o.splice(1, 1); }).join(
   }
 
   // the days the lecture points to, read as text without tags
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   const page = (p) => flat(read(p));
   check(page('advanced/day-16/lecture.html').includes('Проверка записи — это две ловушки: set и defineProperty') && page('advanced/day-16/lecture.html').includes('5. Receiver, приватные поля и слоты')
     && page('advanced/day-16/lecture.html').includes('incompatible receiver #<Map>') && read('advanced/day-16/lecture.html').includes('typeof value !== typeof t[key]) throw new TypeError')

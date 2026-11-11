@@ -13,6 +13,7 @@
 // every link whose text starts with a number names the section of that number.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -173,7 +174,7 @@ const stepPaths = (html, needle) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -416,7 +417,7 @@ console.log(values.length, diff, run(() => c.fill(1)), run(() => c.length), run(
     && same(at('sec-istypedarrayoutofbounds', 'Let byteOffsetEnd be bufferByteLength'), ['6.a']) && ['sec-toint8', 'sec-touint16', 'sec-touint8clamp'].map(num).join() === '7.1.10,7.1.9,7.1.12',
   `student homework 1, 4: ToInt8 7.1.10, ToUint16 7.1.9, ToUint8Clamp 7.1.12; IsTypedArrayOutOfBounds step 9 (a length-tracking view ends at the buffer, 6.a), TypedArrayLength step 9 — floor((byteLength − byteOffset) / elementSize) [${['sec-toint8', 'sec-touint16'].map(num).join()}]`);
   {
-    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');   // read is declared below (TDZ)
+    const notes = builtSite.htmlOfFile(path.join(DAY, 'student.html'));   // read is declared below (TDZ)
     const nAnchors = [...new Set([...notes.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
     const nFooter = notes.slice(notes.indexOf('<div class="sources">'));
     check(nAnchors.every((a) => spec.includes(`id="${a}"`)) && ['TypedArray', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 3,
@@ -442,7 +443,7 @@ console.log(values.length, diff, run(() => c.fill(1)), run(() => c.length), run(
     check(f('sec-stringtonumber') !== '' && /NonDecimalIntegerLiteral/.test(f('sec-tonumber-applied-to-the-string-type')) && num('sec-%typedarray%.prototype.fill') === '23.2.3.9',
       'tasks: ToNumber of a string takes "0x1F" (StrNumericLiteral has NonDecimalIntegerLiteral); fill is 23.2.3.9');
     const setPage = plain(mdn('reference/global_objects/typedarray/set'));
-    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
     const tAnchors = [...new Set([...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
     const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
     const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
@@ -453,7 +454,7 @@ console.log(values.length, diff, run(() => c.fill(1)), run(() => c.length), run(
   }
 
   // the days the lecture points to, read as text without tags
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   const page = (p) => flat(read(p));
   check(page('advanced/day-04/lecture.html').includes('память ArrayBuffer (день 20)') && page('advanced/day-05/lecture.html').includes('ею пользуются двоичные данные (день 20)')
     && hasAll(page('advanced/day-06/lecture.html'), ['Int8Array, Uint8Array — день 20', 'Int16Array, Uint16Array — день 20', 'BigInt64Array — день 20'])

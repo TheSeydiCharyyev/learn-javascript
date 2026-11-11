@@ -29,6 +29,7 @@
 // table holds all 14 rows of ECMA-262 and all 6 pages of MDN of the day's plan as links and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -242,7 +243,7 @@ const callersOf = (spec, op) => {
   for (const name of PAGES) {
     const ctx = await b.newContext();
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => {
       const next = pre.nextElementSibling;
       const heads = [...document.querySelectorAll('h2')];
@@ -606,7 +607,7 @@ console.log(test());`), ['локальная | глобальная | локал
   'student homework 4: MDN import defer — only a namespace import, as evaluation starts on a property access; a property read is synchronous, so modules with top-level await run eagerly');
 
   // the days and the modules of «Карточки» it points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(hasAll(read('intermediate/day-03/lecture.html'), ['Две половины глобальной области', 'разбираем в курсе 3', 'Cannot delete property'])
     && hasAll(read('intermediate/day-30/lecture.html'), ['Модуль и обычный скрипт', 'CreateImportBinding', 'не напечатает'])
     && read('intermediate/day-31/lecture.html').includes('import.meta') && read('intermediate/day-31/lecture.html').includes('with { type: "json" }'),

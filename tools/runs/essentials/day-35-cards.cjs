@@ -4,12 +4,13 @@
 //   node tools/runs/essentials/day-35-cards.cjs <day-33 lecture> <day-34 lecture> <day-35 lecture> <day-35 student> <day-35 tasks>
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const LiveServer = require('live-server');
 const dec = (s) => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, '\u00a0').replace(/&amp;/g, '&');
-const blocks = (f, kind) => [...fs.readFileSync(f, 'utf8').matchAll(new RegExp(`<pre class="${kind}">([\\s\\S]*?)<\\/pre>`, 'g'))].map((m) => dec(m[1]));
+const blocks = (f, kind) => [...builtSite.htmlOfFile(f).matchAll(new RegExp(`<pre class="${kind}">([\\s\\S]*?)<\\/pre>`, 'g'))].map((m) => dec(m[1]));
 const must = (s, from, to) => { if (!s.includes(from)) throw new Error('not found: ' + from.slice(0, 80)); return s.replace(from, to); };
 const line = (code, n) => code.split('\n')[n - 1];
 const noComment = (l) => l.replace(/\s*\/\/.*$/, '');
@@ -17,7 +18,7 @@ const fnText = (src, head) => { const s = src.indexOf(head); if (s < 0) throw ne
 const [p33, p34, pl, ps, pt] = process.argv.slice(2);
 const A = blocks(p33, 'code js'), B = blocks(p34, 'code js');
 const J = blocks(pl, 'code js'), H = blocks(pl, 'code html'), SJ = blocks(ps, 'code js'), TJ = blocks(pt, 'code js');
-const lectureHtml = fs.readFileSync(pl, 'utf8');
+const lectureHtml = builtSite.htmlOfFile(pl);
 
 // day 33/34: the starting point
 const FRAME33 = blocks(p33, 'code html')[0];

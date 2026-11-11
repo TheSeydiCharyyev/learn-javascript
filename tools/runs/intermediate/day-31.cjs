@@ -16,6 +16,7 @@
 // experiments of «Карточки») and reference solutions of tasks 1–9.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -126,7 +127,7 @@ const fileName = (blk) => {
     const ctx = await b.newContext(MAIN);
     for (const name of PAGES) {
       const src = await ctx.newPage();
-      await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+      await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
       all[name] = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => {
         const next = pre.nextElementSibling;
         const heads = [...document.querySelectorAll('h2')];
@@ -248,7 +249,7 @@ const fileName = (blk) => {
   // Chrome 155 answered type text with TypeError "text" is not a valid module type. (26.10.2026); Chrome 156 takes it
   await extra({ 'note.txt': 'текст', 'style.css': 'body { color: red; }', ...main('try {\n  const note = await import("./note.txt", { with: { type: "text" } });\n  console.log(typeof note.default, note.default);\n} catch (e) {\n  console.log(e.name, e.message);\n}\nconst css = await import("./style.css", { with: { type: "css" } });\nconsole.log(Object.prototype.toString.call(css.default));') }, ['string текст', '[object CSSStyleSheet]'], 'lecture 6: type text is in Chrome 156 (not in 155), css is');
   {
-    const html = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
+    const html = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
     check(html.includes('Chrome 155 его не принимал — <code>"text" is not a valid module type.</code>') && html.includes('Chrome 156 принимает: <code>default</code> такого модуля — содержимое файла строкой'), 'lecture 6: the text tells both Chrome 155 and 156 about type text');
   }
   // lecture 7: undefined deletes, a hole in an array; this is the holder; no source once the value is changed

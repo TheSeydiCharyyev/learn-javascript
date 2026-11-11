@@ -12,6 +12,7 @@
 // allowed and the error table, the three experiments of «Карточки», the notes and reference solutions of tasks 1–9.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -112,7 +113,7 @@ const EXPECT = {
   const all = {};
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     all[name] = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -156,7 +157,7 @@ const EXPECT = {
     const out = await runOnPage(withHelpers(code), opts);
     check(same(out, want), `${text}: ${JSON.stringify(out)}`);
   };
-  const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
+  const lecture = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
 
   // what the prose says the MDN pages say
   check(has('operators/await', 'execution doesn\'t return to the current function until all other already-scheduled microtasks are processed') && has('operators/await', 'intertwined') && has('operators/await', 'make sure to use `await` only when necessary') && has('operators/await', 'another [microtask]'), 'lecture 2, 4, 5: microtasks, intertwined, await only when necessary');

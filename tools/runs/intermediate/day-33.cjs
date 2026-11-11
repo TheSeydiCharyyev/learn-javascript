@@ -23,6 +23,7 @@
 //   node tools/runs/intermediate/day-33.cjs --quiet    only the checks
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -169,7 +170,7 @@ const body = (code) => code.split(LF).slice(1).join(LF);
     const ctx = await b.newContext(MAIN);
     for (const name of PAGES) {
       const src = await ctx.newPage();
-      await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+      await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
       all[name] = await src.evaluate(() => ({
         blocks: [...document.querySelectorAll('pre.code')].map((pre) => {
           const next = pre.nextElementSibling;
@@ -194,7 +195,7 @@ const body = (code) => code.split(LF).slice(1).join(LF);
   {
     const ctx = await b.newContext(MAIN);
     const p31 = await ctx.newPage();
-    await p31.goto('file:///' + path.join(ROOT, 'intermediate/day-31/lecture.html').replace(/\\/g, '/'));
+    await p31.goto(builtSite.urlOfFile(path.join(ROOT, 'intermediate/day-31/lecture.html')));
     const st = await p31.evaluate(() => [...document.querySelectorAll('pre.code')].map((x) => x.textContent).filter((c) => c.startsWith('// storage.js')));
     await ctx.close();
     check(st.length === 1, 'storage.js: one block of day 31');
@@ -370,7 +371,7 @@ const body = (code) => code.split(LF).slice(1).join(LF);
   {
     const ctx = await b.newContext(MAIN);
     const e36 = await ctx.newPage();
-    await e36.goto('file:///' + path.join(ROOT, 'essentials/day-36/lecture.html').replace(/\\/g, '/'));
+    await e36.goto(builtSite.urlOfFile(path.join(ROOT, 'essentials/day-36/lecture.html')));
     const rows36 = await e36.evaluate(() => {
       const h = [...document.querySelectorAll('h2')].find((x) => x.textContent.includes('Чего в «Карточках» нет'));
       let t = h.nextElementSibling;
@@ -382,14 +383,14 @@ const body = (code) => code.split(LF).slice(1).join(LF);
     for (const [, , where] of ours ?? []) {
       const m = where.match(/^день (\d+), (.+)$/);
       const page = await ctx.newPage();
-      await page.goto('file:///' + path.join(ROOT, `intermediate/day-${m[1].padStart(2, '0')}/lecture.html`).replace(/\\/g, '/'));
+      await page.goto(builtSite.urlOfFile(path.join(ROOT, `intermediate/day-${m[1].padStart(2, '0')}/lecture.html`)));
       const h2 = await page.evaluate(() => [...document.querySelectorAll('h2')].map((x) => x.textContent).filter((x) => x.includes('Карточки')));
       await page.close();
       const want = m[2].replace(/^«(.*)»$/, '$1');
       check(h2.some((x) => x.includes(want)), `section 1: day ${m[1]} has «Карточки» with «${want}»`);
     }
     const e33 = await ctx.newPage();
-    await e33.goto('file:///' + path.join(ROOT, 'essentials/day-33/lecture.html').replace(/\\/g, '/'));
+    await e33.goto(builtSite.urlOfFile(path.join(ROOT, 'essentials/day-33/lecture.html')));
     const e33code = await e33.evaluate(() => [...document.querySelectorAll('pre.code')].map((x) => x.textContent).join('\n'));
     check(e33code.includes('[34, 35].map(') && e33code.includes('function checkData()') && lec.includes('[34, 35].map(…)'), 'section 13: [34, 35].map of day 33 Essentials, checkData of section 7');
     await ctx.close();

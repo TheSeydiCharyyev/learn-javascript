@@ -19,6 +19,7 @@
 // (22 of ECMA-262, 29 of MDN) as links with their marks and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -179,7 +180,7 @@ const stepPath = (html, needle) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -453,7 +454,7 @@ console.log(Reflect.get(p, "x"), myGet(p, "x"), Reflect.get(setOnly, "v"), myGet
     && ['sec-instanceofoperator', 'sec-function.prototype-%symbol.hasinstance%'].map(num).join() === '13.10.2,20.2.3.6',
   'task 9: Symbol(description) — undefined stays undefined, else ToString; Symbol.for — ToString of the key, the registry; the numbers 20.4.1.1, 20.4.2.2, 20.4.5.1, 13.10.2, 20.2.3.6');
   {
-    const tasks = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasks = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
     const gone = [...tasks.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]).filter((a) => !spec.includes(`id="${a}"`));
     check(gone.length === 0 && !/(?<![.\w$])with\s*\(/.test(tasks.replace(/<[^>]+>/g, '')), `tasks: every tc39.es anchor exists, no with in the code ${gone.join(', ')}`);
   }
@@ -479,19 +480,19 @@ console.log(Reflect.get(p, "x"), myGet(p, "x"), Reflect.get(setOnly, "v"), myGet
     const section = construct.slice(construct.indexOf('### Reflect.construct() vs. Object.create()'), construct.indexOf('## Specifications'));
     check(section.includes('while the end result is the same') && section.includes('the `new.target` operator will point to `undefined`') && !/\bclass\s+\w/.test(section),
       'student homework 4: MDN «Reflect.construct() vs. Object.create()» — the end result is the same, new.target undefined; its examples are functions, no class');
-    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');
+    const notes = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
     const footer = notes.slice(notes.indexOf('<div class="sources">'));
     check(['(Reflect,', 'Reflect.construct()', 'Reflect.get()', 'Symbol.toPrimitive', 'Symbol.toStringTag', 'Symbol.species', 'Symbol.hasInstance'].every((s) => footer.includes(s))
       && ['reflect', 'reflect/construct', 'reflect/get', 'symbol/toprimitive', 'symbol/tostringtag', 'symbol/species', 'symbol/hasinstance'].every((p) => pages.includes(p)),
     'student: the MDN pages of the footer are pages of the plan, in the cache');
-    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
     const tasksFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
     check(['(Reflect,', 'Reflect.get()', 'Reflect.construct()', 'Symbol.toPrimitive', 'Symbol.toStringTag', 'Symbol.species', 'Symbol.hasInstance'].every((s) => tasksFooter.includes(s)),
       'tasks: the MDN pages of the footer are pages of the plan, in the cache');
   }
 
   // the days the lecture points to, read as text without tags (a phrase may hold <code>)
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   const page = (p) => flat(read(p));
   check(page('advanced/day-01/lecture.html').includes('4.4.33 Symbol object')
     && hasAll(page('advanced/day-05/lecture.html'), ['ToPrimitive', 'IsLooselyEqual', 'Symbol.toPrimitive'])

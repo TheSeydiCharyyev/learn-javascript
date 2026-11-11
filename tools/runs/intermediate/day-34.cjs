@@ -19,6 +19,7 @@
 //   node tools/runs/intermediate/day-34.cjs --quiet    only the checks
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '../../..');
@@ -266,7 +267,7 @@ const isEnd = (line, indent) => line === `${indent}}` || line === `${indent}});`
   const blocksOf = async (file) => {
     const ctx = await b.newContext(MAIN);
     const src = await ctx.newPage();
-    await src.goto('file:///' + file.replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(file));
     const r = await src.evaluate(() => ({
       blocks: [...document.querySelectorAll('pre.code')].map((pre) => {
         const next = pre.nextElementSibling;

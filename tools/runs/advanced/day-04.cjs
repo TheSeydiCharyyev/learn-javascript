@@ -14,6 +14,7 @@
 // tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -159,7 +160,7 @@ const clause = (spec, id) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -326,11 +327,11 @@ console.log(typeof Object(1), Object(1) instanceof Number, Object(1) + 1);`, 'ta
   check(/Let thisValue be refEnv\. ?WithBaseObject/.test(flat(clause(spec, 'sec-evaluatecall'))), 'student homework 2: EvaluateCall asks WithBaseObject of the Environment Record');
 
   // the button handler of day 34 is an arrow, and know is called on the deck
-  const day34 = fs.readFileSync(path.join(ROOT, 'intermediate/day-34/lecture.html'), 'utf8');
+  const day34 = builtSite.htmlOfFile(path.join(ROOT, 'intermediate/day-34/lecture.html'));
   check(day34.includes('knowButton.addEventListener("click", () =&gt; {'), 'lecture 15: the handler of the «Знаю» button in day 34 is an arrow');
 
   // every row of the day's plan is a link, every anchor of the lecture exists
-  const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
+  const lecture = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
   const anchors = new Set([...lecture.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]));
   const rows = fs.readFileSync(path.join(ROOT, 'docs/coverage/ecma262.csv'), 'utf8').split('\n').map(csvLine)
     .filter((c) => c[6] === '3' && c[7] === '4').map((c) => c[0]);

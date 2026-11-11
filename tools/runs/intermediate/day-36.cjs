@@ -9,6 +9,7 @@
 //   node tools/runs/intermediate/day-36.cjs --quiet    only the checks
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -334,7 +335,7 @@ const strip = (l) => l.replace(/\s+\/\/ .*$/, '').trim();
     if (!fs.existsSync(file)) return null;
     const ctx = await b.newContext(MAIN);
     const src = await ctx.newPage();
-    await src.goto('file:///' + file.replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(file));
     const r = await src.evaluate(() => ({
       blocks: [...document.querySelectorAll('pre.code')].map((pre) => {
         const next = pre.nextElementSibling;
@@ -482,7 +483,7 @@ const strip = (l) => l.replace(/\s+\/\/ .*$/, '').trim();
   // six setTimeout
   {
     check(chronoMs !== null && chronoMs >= 7000 && chronoMs < 7500 && lec.includes('доли секунды'), `section 1: the rehearsal took ${chronoMs} ms`);
-    const e36 = fs.readFileSync(path.join(ROOT, 'essentials/day-36/lecture.html'), 'utf8');
+    const e36 = builtSite.htmlOfFile(path.join(ROOT, 'essentials/day-36/lecture.html'));
     const parts = (e36.match(/\{ part: "/g) || []).length;
     check(parts === 5 && e36.includes('schedule(defense).forEach((s) =&gt; {') && e36.includes('setTimeout(() =&gt; console.log("7 мин: время вышло")') && lec.includes('шесть <code>setTimeout</code>'.replace(/<\/?code>/g, '')), `section 1: the chronometer of Essentials — five parts and one more timer (${parts})`);
   }
@@ -514,7 +515,7 @@ const strip = (l) => l.replace(/\s+\/\/ .*$/, '').trim();
       check(v.card === 'book' && v.counter === 'На сегодня: 3 из 3' && page.out.length === 0, `section 5: storage ${s} — book ${JSON.stringify(v)}`);
       await page.close();
     }
-    const e36 = fs.readFileSync(path.join(ROOT, 'essentials/day-36/lecture.html'), 'utf8');
+    const e36 = builtSite.htmlOfFile(path.join(ROOT, 'essentials/day-36/lecture.html'));
     check(e36.includes('const saved = localStorage.getItem(KEY);') && e36.includes('localStorage.setItem(KEY, saved);   // вернуть как было') && lec.includes('сохранял ключ и возвращал его на место'), 'section 5: testInput of Essentials saved the key and put it back');
   }
   // section 7: questions

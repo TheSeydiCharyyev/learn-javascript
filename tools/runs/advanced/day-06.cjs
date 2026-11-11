@@ -15,6 +15,7 @@
 // of the day's plan is a link and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -173,7 +174,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -381,7 +382,7 @@ console.log(Math.trunc(-9 / 4), -9 >> 2, String(-9n % 2n), String(bigOp("&", -9n
   'lecture 14: MDN void — precedence, the IIFE, the arrow error, javascript: URLs, the non-leaking arrow');
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(read('essentials/day-06/lecture.html').includes('<tr><td>побитовые</td><td><code>&amp; | ^ &lt;&lt; &gt;&gt;</code></td><td>курс 3</td></tr>'), 'lecture 1: the table of Essentials day 6 says «побитовые — курс 3»');
   const oneTwo = ['essentials', 'intermediate'].flatMap((c) => fs.readdirSync(path.join(ROOT, c)).filter((d) => /^day-\d+$/.test(d))
     .flatMap((d) => [d, `${d}/en`].filter((s) => fs.existsSync(path.join(ROOT, c, s))).flatMap((s) => fs.readdirSync(path.join(ROOT, c, s)).filter((x) => x.endsWith('.html')).map((x) => `${c}/${s}/${x}`))));

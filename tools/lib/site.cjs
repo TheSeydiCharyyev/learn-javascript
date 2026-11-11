@@ -148,19 +148,97 @@ function resolveOut(urlPath) {
   return null;
 }
 
+const handler = (req, res) => {
+  const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  // Chrome asks every http site for /favicon.ico; the course has none — an empty answer instead of a 404 in the console
+  if (urlPath === '/favicon.ico') { res.writeHead(204); res.end(); return; }
+  const file = resolveOut(urlPath);
+  if (!file) { res.writeHead(404); res.end('not found'); return; }
+  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
+};
+
 function serve() {
   builtFile('index.html');
   return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      const file = resolveOut(decodeURIComponent(new URL(req.url, 'http://x').pathname));
-      if (!file) { res.writeHead(404); res.end('not found'); return; }
-      res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
-      fs.createReadStream(file).pipe(res);
-    });
+    const server = http.createServer(handler);
     // close: open keep-alive connections (a browser's) are dropped, or the server would wait for them
     const close = () => new Promise((ok) => { server.close(ok); server.closeAllConnections(); });
     server.listen(0, '127.0.0.1', () => resolve({ base: `http://127.0.0.1:${server.address().port}/`, close }));
   });
 }
 
-module.exports = { ROOT, OUT, builtFile, page, serve, written, dayPages };
+// ---------- the built site at an address known at once (the day runs) ----------
+// A day run builds its addresses when it starts (ROOT + 'day-05/lecture.html'), before anything is awaited: base()
+// gives the address of a local server of site/out at once — on a port of its own (from the process id), listening by
+// the time the browser asks; the server alone does not keep the process alive. The first call checks that every
+// page of the site is built and fresh.
+const COURSE_DIRS = ['essentials', 'intermediate', 'advanced', 'web-apis'];
+function allPages() {
+  const out = ['index.html'];
+  for (const c of COURSE_DIRS) {
+    if (!fs.existsSync(path.join(ROOT, c))) continue;
+    for (const d of fs.readdirSync(path.join(ROOT, c)).filter((n) => /^day-\d+$/.test(n)).sort()) {
+      out.push(...dayPages(`${c}/${d}`));
+      if (fs.existsSync(path.join(ROOT, c, d, 'en'))) out.push(...dayPages(`${c}/${d}/en`));
+    }
+  }
+  return out;
+}
+let baseUrl = null;
+function base() {
+  if (baseUrl) return baseUrl;
+  for (const rel of allPages()) builtFile(rel);
+  const port = 20000 + (process.pid % 20000);
+  const server = http.createServer(handler);
+  server.on('error', (e) => { console.error(`tools/lib/site.cjs: the local server on port ${port}: ${e.message}`); process.exit(1); });
+  server.listen(port, '127.0.0.1');
+  server.unref();
+  baseUrl = `http://127.0.0.1:${port}/`;
+  return baseUrl;
+}
+// a file of the repository (an absolute path, as the runs build them) -> its path from the root, "/" separated
+const relOfFile = (abs) => path.relative(ROOT, path.resolve(abs)).replace(/\\/g, '/');
+// the address of a page (or of a folder of pages, ending in "/") of the built site, by the path of its old HTML file
+function urlOfFile(abs) {
+  const rel = relOfFile(abs);
+  const folder = /[\\/]$/.test(abs) || (fs.existsSync(abs) && fs.statSync(abs).isDirectory());
+  if (!folder) builtFile(rel);
+  return base() + rel + (folder && rel && !rel.endsWith('/') ? '/' : '');
+}
+// The <body> of a built page as HTML written the way the course's HTML files were (Next.js's nodes left out), by the
+// path of its old HTML file — the day runs read a page as text and their checks follow the files' habits (step 4.4,
+// 11.11.2026): a table row on one line, rows on lines of their own (a check like `<td>.*?<\/td><td><span class="mark
+// mark-full">` must not run on into the next row); a code block as its text, without the highlighting's spans and
+// data-highlighted; text with &amp; &lt; &gt; &nbsp; and attributes in double quotes, as parse5 writes them.
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+const escText = (s) => s.replace(/&/g, '&amp;').replace(/ /g, '&nbsp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escAttr = (s) => s.replace(/&/g, '&amp;').replace(/ /g, '&nbsp;').replace(/"/g, '&quot;');
+const ROWS = new Set(['table', 'thead', 'tbody', 'tfoot']);
+function sourceLike(n, parent) {
+  if (n.nodeName === '#text') {
+    if (!n.value.trim() && parent?.tagName === 'tr') return '';
+    return parent?.tagName === 'style' || parent?.tagName === 'script' ? n.value : escText(n.value);
+  }
+  // the rows of a table (and its parts) each on a line of its own — whether the built page has whitespace between them
+  // or not (a table written in JSX has none: MDX drops it, 11.11.2026)
+  if (isElement(n) && ROWS.has(n.tagName)) {
+    const attrs = n.attrs.map((a) => ` ${a.name}="${escAttr(a.value)}"`).join('');
+    const rows = (n.childNodes ?? []).filter((c) => !(c.nodeName === '#text' && !c.value.trim())).map((c) => '\n' + sourceLike(c, n)).join('');
+    return `<${n.tagName}${attrs}>${rows}\n</${n.tagName}>`;
+  }
+  if (n.nodeName === '#comment') return `<!--${n.data}-->`;
+  if (!isElement(n)) return '';
+  const code = n.tagName === 'pre' && classes(n).includes('code');
+  const attrs = n.attrs.filter((a) => !(code && a.name === 'data-highlighted')).map((a) => ` ${a.name}="${escAttr(a.value)}"`).join('');
+  if (VOID_TAGS.has(n.tagName)) return `<${n.tagName}${attrs}>`;
+  const inner = code ? escText(text(n)) : ((n.content ?? n).childNodes ?? []).map((c) => sourceLike(c, n)).join('');
+  return `<${n.tagName}${attrs}>${inner}</${n.tagName}>`;
+}
+// (the page's <title> first, as the files had it in their <head>: a run may look for it)
+const htmlOfFile = (abs) => {
+  const p = page(relOfFile(abs));
+  return (p.title === null ? '' : `<title>${escText(p.title)}</title>\n`) + p.body.childNodes.map((c) => sourceLike(c, null)).join('');
+};
+
+module.exports = { ROOT, OUT, builtFile, page, serve, written, dayPages, allPages, base, urlOfFile, htmlOfFile };

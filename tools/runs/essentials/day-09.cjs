@@ -5,7 +5,8 @@
 //   node tools/runs/essentials/day-09.cjs
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
-const ROOT = 'file:///' + require('node:path').join(__dirname, '../../../essentials/day-09/').replace(/\\/g, '/');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
+const ROOT = builtSite.urlOfFile(require('node:path').join(__dirname, '../../../essentials/day-09/'));
 // swap the bodies of the first two verdict branches: if (A) { X } else if (B) { Y } -> if (B) { Y } else if (A) { X }
 const swap = (code) => code.replace(
   /if \(average >= ([\d.]+)\) \{\n(\s+verdict = [^\n]+)\n\} else if \(average >= ([\d.]+)\) \{\n(\s+verdict = [^\n]+)\n\}/,

@@ -13,6 +13,7 @@
 // holds all 33 rows of the day's plan as links and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -206,7 +207,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -409,7 +410,7 @@ console.log(clicks, names(button).join());`, 'tasks-criteria-2.html');
     'student homework 4: MDN Function: name has the section about compressors that change names');
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(read('advanced/day-01/lecture.html').includes('5.2.2') && read('advanced/day-02/lecture.html').includes('new Function'), 'lecture 1, 2: day 1 met 5.2.2, day 2 had parse with new Function');
   check(read('essentials/day-04/lecture.html').includes("Identifier 'sum' has already been declared") && read('essentials/day-04/lecture.html').includes('мёртв')
     && /подъём|поднима/.test(read('essentials/day-12/lecture.html')) && read('essentials/day-10/lecture.html').includes('<strong>метку</strong>'),

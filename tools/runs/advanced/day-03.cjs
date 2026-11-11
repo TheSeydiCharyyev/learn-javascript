@@ -13,6 +13,7 @@
 // row of the day's plan is a link and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -168,7 +169,7 @@ const terminals = (spec, name) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -391,7 +392,7 @@ console.log(String(numericValue("9007199254740993")), String(numericValue("90071
   check(/Within classes, class fields and generator methods can be a pitfall as well/.test(lexical) && lexical.includes(';(() => {'), 'MDN: class fields before a generator; ;( at the start of a line');
 
   // every row of the day's plan is a link, every anchor of the lecture exists
-  const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
+  const lecture = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
   const anchors = new Set([...lecture.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]));
   const rows = fs.readFileSync(path.join(ROOT, 'docs/coverage/ecma262.csv'), 'utf8').split('\n').map(csvLine)
     .filter((c) => c[6] === '3' && c[7] === '3').map((c) => c[0]);

@@ -13,6 +13,7 @@
 //   node tools/runs/intermediate/day-32.cjs --quiet    only the checks
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -110,7 +111,7 @@ const fileName = (blk) => {
     const ctx = await b.newContext(MAIN);
     for (const name of PAGES) {
       const src = await ctx.newPage();
-      await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+      await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
       all[name] = await src.evaluate(() => ({
         blocks: [...document.querySelectorAll('pre.code')].map((pre) => {
           const next = pre.nextElementSibling;

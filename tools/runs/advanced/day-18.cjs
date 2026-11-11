@@ -20,6 +20,7 @@
 // tc39.es anchor exists, and every link whose text starts with a number names the section of that number.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -226,7 +227,7 @@ const stepPath = (html, needle) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -496,7 +497,7 @@ console.log(samples.length, diff.length, run(() => decodeURIComponent("%F4%90%80
     check(hasAll(f('sec-tonumber-applied-to-the-string-type'), ['StrWhiteSpaceChar ::: WhiteSpace LineTerminator', 'StrUnsignedDecimalLiteral ::: Infinity']) && num('sec-tonumber-applied-to-the-string-type') === '7.1.4.1'
       && f('sec-trimstring').includes('The definition of white space is the union of WhiteSpace and LineTerminator'),
     'task 9: 7.1.4.1 — StrDecimalLiteral, Infinity among its forms; white space of TrimString is WhiteSpace and LineTerminator (U+2028 too)');
-    const tasks = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasks = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
     const gone = [...tasks.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]).filter((a) => !spec.includes(`id="${a}"`));
     const tfooter = tasks.slice(tasks.indexOf('<div class="sources">'));
     check(gone.length === 0 && ['encodeURIComponent()', 'globalThis', 'ECMA-262 2026'].every((s) => tfooter.includes(s)), `tasks: every tc39.es anchor exists, the footer names the MDN pages and ECMA-262 ${gone.join(', ')}`);
@@ -515,14 +516,14 @@ console.log(samples.length, diff.length, run(() => decodeURIComponent("%F4%90%80
     'lecture 9, 16: MDN globalThis — «Historically…», window/self/frames, Workers self, Node global, «HTML and the WindowProxy» (a proxy around the global object); encodeURIComponent — + for x-www-form-urlencoded');
     check(e.includes('### Encoding for RFC3986') && e.includes("The more recent RFC3986 reserves !, ', (, ), and *"),
       'student homework 4: MDN encodeURIComponent «Encoding for RFC3986» — RFC3986 reserves ! \' ( ) *');
-    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');
+    const notes = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
     const nfooter = notes.slice(notes.indexOf('<div class="sources">'));
     check(['globalThis', 'encodeURIComponent()', 'ECMA-262 2026'].every((s) => nfooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 2,
       'student: the footer names the MDN pages the notes use (globalThis in «запомни», encodeURIComponent in homework 4) and ECMA-262 2026');
   }
 
   // the days the lecture points to, read as text without tags
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   const page = (p) => flat(read(p));
   check(hasAll(page('advanced/day-01/lecture.html'), ['4.4.11 standard object', '4.4.12 built-in object', '4.4.19 Boolean object', '4.4.26 Infinity', '4.4.27 NaN', '4.4.35 built-in function', '4.4.36 built-in constructor'])
     && hasAll(page('advanced/day-02/lecture.html'), ['FEFF', '00A0']) && page('advanced/day-05/lecture.html').includes('ToNumber') && page('advanced/day-06/lecture.html').includes('ToInt32')

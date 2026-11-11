@@ -16,6 +16,7 @@
 // day's plan as links and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -188,7 +189,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -405,7 +406,7 @@ console.log([{ b: 1, 1: 2, a: 3 }, arr, withProto].every((o) => [...enumerate(o)
   'student homework 1, 3, 4: 14.7.4.3 and 14.7.5.9 are where the notes say; MDN try...catch has The finally block and Returning from a finally block');
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(read('advanced/day-04/lecture.html').includes('Completion Record') && read('advanced/day-04/lecture.html').includes('return и finally') && read('advanced/day-03/lecture.html').includes('12.10.1')
     && read('advanced/day-05/lecture.html').includes('ToObject') && read('advanced/day-05/lecture.html').includes('IsStrictlyEqual') && read('advanced/day-07/lecture.html').includes('IteratorClose')
     && read('advanced/day-08/lecture.html').includes('BlockDeclarationInstantiation') && read('advanced/day-09/lecture.html').includes('debugger'),

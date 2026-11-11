@@ -18,6 +18,7 @@
 // the reference table holds all 34 rows of the day's plan as links and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -201,7 +202,7 @@ const callersOf = (spec, op) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -546,7 +547,7 @@ console.log(card.word, Object.isFrozen(card));`, ['galam true'], 'lecture 17: fr
   }
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(hasAll(read('advanced/day-04/lecture.html'), ['Таблица 4 — одиннадцать обязательных методов любого объекта', '6.1.7.3', 'PutValue'])
     && hasAll(read('advanced/day-07/lecture.html'), ['DefineField', 'CreateDataProperty', 'EnumerableOwnProperties', 'CopyDataProperties', 'InitializeInstanceElements'])
     && read('advanced/day-08/lecture.html').includes('Duplicate parameter name not allowed in this context')

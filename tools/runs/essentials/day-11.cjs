@@ -9,9 +9,10 @@
 //   node tools/runs/essentials/day-11.cjs
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const fs = require('node:fs');
 const path = require('node:path');
-const ROOT = 'file:///' + path.join(__dirname, '../../../essentials/').replace(/\\/g, '/');
+const ROOT = builtSite.urlOfFile(path.join(__dirname, '../../../essentials/'));
 const REPO = path.join(__dirname, '../../..');
 const RULE = { 'ru/': /try\.\.\.catch — не замена\s+проверкам/, 'en/': /try\.\.\.catch is not a replacement\s+for checks/ };
 const DESTRUCTURING = { 'ru/': /деструктуризац/i, 'en/': /destructuring/i };

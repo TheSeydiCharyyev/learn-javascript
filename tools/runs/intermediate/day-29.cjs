@@ -14,6 +14,7 @@
 // ticker, the prototype chain, the error table, the three experiments of «Карточки», the notes and reference solutions
 // of tasks 1–9. Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -134,7 +135,7 @@ const WAIT = {
   const all = {};
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     all[name] = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -184,7 +185,7 @@ const WAIT = {
     check(opts?.late ? lateOk(out, want) : same(out, want), `${text}: ${JSON.stringify(out)}`);
     return out;
   };
-  const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
+  const lecture = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
 
   // what the prose says the MDN pages say
   check(has('statements/async_function_star_', 'combines the features of [async functions]') && has('statements/async_function_star_', 'You can use both the [`await`]') && has('statements/async_function_star_', 'Async generator functions do not have arrow function counterparts') && has('statements/async_function_star_', 'there cannot be a line terminator between `async` and `function`') && has('statements/async_function_star_', 'they are [hoisted]'), 'lecture 2, 3: await and yield together, no arrow, no line break after async, hoisted');

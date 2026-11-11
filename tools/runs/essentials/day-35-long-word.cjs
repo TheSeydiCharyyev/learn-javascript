@@ -5,10 +5,11 @@
 //   node tools/runs/essentials/day-35-long-word.cjs <day-33 lecture> <word> <word> ...
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const fs = require('node:fs');
 const dec = (s) => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 const [p33, ...words] = process.argv.slice(2);
-let html = dec(fs.readFileSync(p33, 'utf8').match(/<pre class="code html">([\s\S]*?)<\/pre>/)[1]);
+let html = dec(builtSite.htmlOfFile(p33).match(/<pre class="code html">([\s\S]*?)<\/pre>/)[1]);
 html = html.replace('<meta charset="UTF-8">', '<meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">')
   .replace('</style>', '  button { font-size: 18px; padding: 10px 16px; margin: 0 8px 8px 0; }\n  </style>').replace('<script src="app.js" defer></script>', '');
 (async () => {

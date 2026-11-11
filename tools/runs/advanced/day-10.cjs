@@ -16,6 +16,7 @@
 // reference table holds all 64 rows of the day's plan as links and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -205,7 +206,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -447,7 +448,7 @@ console.log(o.k, conversions);`, 'tasks-criteria-2.html');
     && f('sec-runtime-semantics-propertydestructuringassignmentevaluation').includes('Let name be ? Evaluation of PropertyName. Perform ? KeyedDestructuringAssignmentEvaluation of AssignmentElement with arguments value and name')
     && inOrder(f('sec-runtime-semantics-restdestructuringassignmentevaluation'), ['Let lRef be ? Evaluation of DestructuringAssignmentTarget', 'Perform ? CopyDataProperties (restObj, value, excludedNames)', 'Return ? PutValue (lRef, restObj)'])
     && f('sec-runtime-semantics-destructuringassignmentevaluation').includes('Let excludedNames be ? PropertyDestructuringAssignmentEvaluation of AssignmentPropertyList with argument value. Return ? RestDestructuringAssignmentEvaluation of AssignmentRestProperty with arguments value and excludedNames')
-    && fs.readFileSync(path.join(ROOT, 'advanced/day-07/lecture.html'), 'utf8').includes('CopyDataProperties'),
+    && builtSite.htmlOfFile(path.join(ROOT, 'advanced/day-07/lecture.html')).includes('CopyDataProperties'),
   'tasks 2, 9: delete of a var name ends in [[Delete]] of the global object too; the key, then the keyed step; the rest gets excludedNames and copies with CopyDataProperties (day 7)');
   check(hasAll(mdn('optional_chaining'), ['### Short-circuiting', '### Invalid optional chaining'])
     && /^id="sec-runtime-semantics-iteratordestructuringassignmentevaluation"[^>]*> 13\.15\.5\.5 /.test(f('sec-runtime-semantics-iteratordestructuringassignmentevaluation'))
@@ -455,7 +456,7 @@ console.log(o.k, conversions);`, 'tasks-criteria-2.html');
   'student homework 3, 4: 13.15.5.5 takes the target before the iterator step; MDN Optional chaining has the sections Short-circuiting and Invalid optional chaining');
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(read('advanced/day-04/lecture.html').includes('(card.show)()') && read('advanced/day-04/lecture.html').includes('запятая')
     && read('advanced/day-05/lecture.html').includes('LeftFirst') && read('advanced/day-05/lecture.html').includes('new Date(0) + 1')
     && read('advanced/day-06/lecture.html').includes('Оператор void') && read('advanced/day-07/lecture.html').includes('OrdinarySetWithOwnDescriptor')

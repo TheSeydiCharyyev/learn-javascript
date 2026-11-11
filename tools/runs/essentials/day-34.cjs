@@ -6,6 +6,7 @@
 //   node tools/runs/essentials/day-34.cjs
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const fs = require('node:fs');
 const path = require('node:path');
 const DIR = path.join(__dirname, '../../../essentials/day-34/');
@@ -18,7 +19,7 @@ const NUM = { 'ru/': { Три: 3, Четыре: 4, пять: 5 }, 'en/': { Three
     const lang = sub || 'ru/';
     console.log(`\n=== ${lang}`);
     const p = await b.newPage();
-    await p.goto('file:///' + path.join(DIR, sub, 'lecture.html').replace(/\\/g, '/'));
+    await p.goto(builtSite.urlOfFile(path.join(DIR, sub, 'lecture.html')));
     const r = await p.evaluate(() => {
       const table = document.querySelector('#start ~ table');
       const rows = [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.cells].map((c) => c.textContent.trim()));
@@ -31,7 +32,7 @@ const NUM = { 'ru/': { Три: 3, Четыре: 4, пять: 5 }, 'en/': { Three
     console.log(`     table: ready ${ready}, half ${half}, tasks ${tasks}; sentence: ${r.sentence.slice(0, 120)}…`);
     check(words[0] === ready && (half === 0 || /наполовину|half done/.test(r.sentence)), `ready rows ${ready}${half ? ` and ${half} half done` : ''} as in the sentence`);
     check(words[1] === tasks, `${tasks} plan tasks left as in the sentence`);
-    const src = fs.readFileSync(path.join(DIR, sub, 'lecture.html'), 'utf8');
+    const src = builtSite.htmlOfFile(path.join(DIR, sub, 'lecture.html'));
     const spaced = src.split('\n').filter((l) => /<p> \S/.test(l));
     check(spaced.length === 0, `no "<p> " in the source${spaced.length ? ': ' + spaced[0].trim().slice(0, 60) : ''}`);
     await p.close();

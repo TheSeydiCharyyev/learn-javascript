@@ -18,6 +18,7 @@
 // 9 rows of the day's plan as links and every tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -190,7 +191,7 @@ const callersOf = (spec, op) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -525,7 +526,7 @@ console.log(diff.join(" "), String(Number("Infinity")) === "Infinity", String(Nu
   }
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   const day14 = read('advanced/day-14/lecture.html');
   check(read('advanced/day-01/lecture.html').includes('4.4.10 exotic object') && read('advanced/day-04/lecture.html').includes('PutValue')
     && hasAll(read('advanced/day-05/lecture.html'), ['CanonicalNumericIndexString', 'ToPrimitive']) && read('advanced/day-06/lecture.html').includes('ToUint32')

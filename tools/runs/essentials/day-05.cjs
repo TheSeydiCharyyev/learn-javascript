@@ -6,6 +6,7 @@
 //   node tools/runs/essentials/day-05.cjs
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -26,7 +27,7 @@ for (const day of ['day-03', 'day-05']) for (const sub of ['', 'en/']) for (cons
   let bad = 0, places = 0;
   console.log(`coverage map: Symbol — course ${WANT.Symbol}, BigInt — course ${WANT.BigInt}`);
   for (const file of PAGES) {
-    await p.goto('file:///' + path.join(ROOT, file).replace(/\\/g, '/'));
+    await p.goto(builtSite.urlOfFile(path.join(ROOT, file)));
     const found = await p.evaluate(() => [...document.querySelectorAll('p, tr, li')]
       .filter((el) => !el.querySelector('p, tr, li'))
       .map((el) => el.textContent.replace(/\s+/g, ' ').trim())

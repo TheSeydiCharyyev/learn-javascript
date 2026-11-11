@@ -4,12 +4,13 @@
 //   node tools/runs/essentials/day-34-cards.cjs <day-33 lecture> <day-34 lecture> <day-34 student> <day-34 tasks>
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const LiveServer = require('live-server');
 const dec = (s) => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, '\u00a0').replace(/&amp;/g, '&');
-const blocks = (f, kind) => [...fs.readFileSync(f, 'utf8').matchAll(new RegExp(`<pre class="code ${kind}">([\\s\\S]*?)<\\/pre>`, 'g'))].map((m) => dec(m[1]));
+const blocks = (f, kind) => [...builtSite.htmlOfFile(f).matchAll(new RegExp(`<pre class="code ${kind}">([\\s\\S]*?)<\\/pre>`, 'g'))].map((m) => dec(m[1]));
 const must = (s, from, to) => { if (!s.includes(from)) throw new Error('not found: ' + from.slice(0, 70)); return s.replace(from, to); };
 const [p33, pl, ps, pt] = process.argv.slice(2);
 const A = blocks(p33, 'js');   // day 33 lecture

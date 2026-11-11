@@ -1,8 +1,9 @@
 // Which parts of the day 34 program (built from day 33 blocks and the day 34 sections) are not word for word in section 14.
 //   node tools/runs/essentials/day-34-whole.cjs <day-33 lecture> <day-34 lecture>
 const fs = require('node:fs');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const dec = (s) => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
-const blocks = (f) => [...fs.readFileSync(f, 'utf8').matchAll(/<pre class="code js">([\s\S]*?)<\/pre>/g)].map((m) => dec(m[1]));
+const blocks = (f) => [...builtSite.htmlOfFile(f).matchAll(/<pre class="code js">([\s\S]*?)<\/pre>/g)].map((m) => dec(m[1]));
 const [p33, pl] = process.argv.slice(2);
 const A = blocks(p33), J = blocks(pl);
 const W = J[29];

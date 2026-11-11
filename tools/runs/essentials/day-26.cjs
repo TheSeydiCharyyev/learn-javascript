@@ -3,7 +3,8 @@
 //   node tools/runs/essentials/day-26.cjs
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
-const ROOT = 'file:///' + require('node:path').join(__dirname, '../../../essentials/day-26/').replace(/\\/g, '/');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
+const ROOT = builtSite.urlOfFile(require('node:path').join(__dirname, '../../../essentials/day-26/'));
 (async () => {
   const b = await chromium.launch({ headless: true, channel: 'chrome' });
   const p = await b.newPage({ viewport: { width: 1200, height: 900 } });

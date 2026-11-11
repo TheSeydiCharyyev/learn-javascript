@@ -6,7 +6,8 @@
 //   node tools/runs/essentials/day-20.cjs
 // Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
-const ROOT = 'file:///' + require('node:path').join(__dirname, '../../../').replace(/\\/g, '/');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
+const ROOT = builtSite.urlOfFile(require('node:path').join(__dirname, '../../../'));
 const QUOTED = { ru: /[Мм]одул[ьяеию]{0,2}\s+«([^»]+)»/g, en: /[Mm]odule\s+“([^”]+)”|“([^”]+)”\s+module/g };
 (async () => {
   const b = await chromium.launch({ headless: true, channel: 'chrome' });
@@ -16,7 +17,8 @@ const QUOTED = { ru: /[Мм]одул[ьяеию]{0,2}\s+«([^»]+)»/g, en: /[Mm
   let bad = 0, checked = 0;
   for (const lang of ['ru', 'en']) {
     await p.goto(ROOT + 'index.html');
-    await p.evaluate((l) => setLang(l), lang);
+    // the home page's language button (its global setLang of js/lang.js went with the HTML home page — stage 3)
+    await p.click(`.lang-opt[data-set-lang="${lang}"]`);
     await p.waitForTimeout(100);
     const modules = await p.evaluate(() => [...document.querySelectorAll('.module')].filter((m) => m.offsetParent !== null).map((m) => ({
       title: m.querySelector('.module-title').innerText.trim(),

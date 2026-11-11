@@ -13,6 +13,7 @@
 // exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -188,7 +189,7 @@ const inOrder = (text, words) => words.every((w, i) => text.includes(w) && (i ==
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -352,13 +353,13 @@ console.log(typeof (new Date(0) + 1), attempt(() => Object(Symbol("x")) + ""), "
   const mdn = execFileSync('git', ['-C', MDN_GIT, 'show', 'HEAD:files/en-us/web/javascript/guide/equality_comparisons_and_sameness/index.md'], { encoding: 'utf8' });
   check(/SameValueZero/.test(mdn) && /Object\.is\(\)/.test(mdn), 'MDN: Equality comparisons and sameness speaks of SameValueZero and Object.is()');
   check(mdn.includes('## Comparing equality methods') && /\| `==` +\| `===` +\| `Object\.is` \| `SameValueZero` \|/.test(mdn), 'student homework 4: MDN has the table Comparing equality methods with four columns');
-  const day33 = fs.readFileSync(path.join(ROOT, 'intermediate/day-33/lecture.html'), 'utf8');
+  const day33 = builtSite.htmlOfFile(path.join(ROOT, 'intermediate/day-33/lecture.html'));
   check(day33.includes('{"$map":[[1,'), 'lecture 15: save of day 33 writes progress as a list of pairs {"$map":[[1, …]]}');
-  const day33decks = fs.readFileSync(path.join(ROOT, 'intermediate/day-33/lecture.html'), 'utf8');
+  const day33decks = builtSite.htmlOfFile(path.join(ROOT, 'intermediate/day-33/lecture.html'));
   check(day33decks.includes('{ "id": "school", "name": "школа" }') && day33decks.includes('{ "id": 1, "word": "book"'), 'lecture 15: deck ids are strings, card ids are numbers');
 
   // every row of the day's plan is a link, every anchor of the lecture exists
-  const lecture = fs.readFileSync(path.join(DAY, 'lecture.html'), 'utf8');
+  const lecture = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
   const anchors = new Set([...lecture.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]));
   const rows = fs.readFileSync(path.join(ROOT, 'docs/coverage/ecma262.csv'), 'utf8').split('\n').map(csvLine)
     .filter((c) => c[6] === '3' && c[7] === '5').map((c) => c[0]);

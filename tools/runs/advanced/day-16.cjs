@@ -20,6 +20,7 @@
 // tc39.es anchor exists.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -193,7 +194,7 @@ const callersOf = (spec, op) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -484,7 +485,7 @@ console.log(JSON.stringify(Object.getOwnPropertyDescriptor(plain, "c")));`, ['{"
     check(num('sec-promise-resolve-functions') === '27.2.1.3' && f('sec-promise-resolve-functions').includes('CreateResolvingFunctions')
       && f('sec-promise-resolve-functions').includes('Let then be Completion (Get (resolution, "then")). If then is an abrupt completion, then Perform RejectPromise (promise, then. [[Value]])'),
     'task 7: CreateResolvingFunctions (27.2.1.3) — resolve asks then and rejects the promise if the question throws');
-    const tasks = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasks = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
     check([['getownproperty-p', '10.5.5'], ['defineownproperty-p-desc', '10.5.6'], ['get-p-receiver', '10.5.8'], ['ownpropertykeys', '10.5.11']].every(([id, n]) => num(`${PX}-${id}`) === n)
       && [...tasks.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].every((m) => spec.includes(`id="${m[1]}"`)),
     'tasks: the numbers 10.5.5, 10.5.6, 10.5.8, 10.5.11 are those of the 2026 text, every tc39.es anchor exists');
@@ -510,12 +511,12 @@ console.log(JSON.stringify(Object.getOwnPropertyDescriptor(plain, "c")));`, ['{"
     check(setMd.includes('### Return value') && setMd.includes('Many operations, including using property accessors in strict mode, throw a TypeError if the `[[Set]]` internal method returns `false`.')
       && !setMd.includes('Object.assign'),
     'student homework 4: MDN handler.set() «Return value» — many operations, strict assignment among them, throw on false; Object.assign is not named there');
-    const notes = fs.readFileSync(path.join(DAY, 'student.html'), 'utf8');
+    const notes = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
     const footer = notes.slice(notes.indexOf('<div class="sources">'));
     check(['(Proxy,', 'handler.get()', 'handler.set()', 'handler.ownKeys()', 'handler.construct()', 'Proxy.revocable()'].every((s) => footer.includes(s))
       && [G, `${G}/proxy/get`, `${G}/proxy/set`, `${G}/proxy/ownkeys`, `${G}/proxy/construct`, `${G}/revocable`].every((p) => pages.includes(p)),
     'student: the MDN pages of the footer are pages of the plan, in the cache');
-    const tasksHtml = fs.readFileSync(path.join(DAY, 'tasks.html'), 'utf8');
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
     const tasksFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
     check(['(Proxy,', 'handler.set()', 'handler.defineProperty()', 'handler.ownKeys()', 'handler.getOwnPropertyDescriptor()', 'handler.apply()', 'Proxy.revocable()'].every((s) => tasksFooter.includes(s))
       && [`${G}/proxy/defineproperty`, `${G}/proxy/getownpropertydescriptor`, `${G}/proxy/apply`].every((p) => pages.includes(p)),
@@ -523,7 +524,7 @@ console.log(JSON.stringify(Object.getOwnPropertyDescriptor(plain, "c")));`, ['{"
   }
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(hasAll(read('advanced/day-04/lecture.html'), ['Таблица 4', '6.1.7.3', 'Proxy перехватывает ровно эти вызовы', 'Map.prototype.get called on incompatible receiver'])
     && hasAll(read('advanced/day-05/lecture.html'), ['ToPrimitive', 'SameValueZero']) && hasAll(read('advanced/day-07/lecture.html'), ['OrdinaryHasInstance', 'Object.assign'])
     && read('advanced/day-09/lecture.html').includes('IsArray') && read('advanced/day-09/tasks.html').includes('отозванный прокси (день 16)')

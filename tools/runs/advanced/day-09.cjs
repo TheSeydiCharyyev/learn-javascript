@@ -18,6 +18,7 @@
 // once by hand through the CDP target of DevTools, see HANDOFF.md, day 9 of course 3.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
+const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
@@ -252,7 +253,7 @@ const topSteps = (spec, id) => {
 
   for (const name of PAGES) {
     const src = await ctx.newPage();
-    await src.goto('file:///' + path.join(DAY, `${name}.html`).replace(/\\/g, '/'));
+    await src.goto(builtSite.urlOfFile(path.join(DAY, `${name}.html`)));
     const blocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => {
       const next = pre.nextElementSibling;
       return {
@@ -564,7 +565,7 @@ setTimeout(() => console.log(log.join(" ")), 0);`, 'tasks-criteria-2.html');
   check(f('sec-promise-resolve-functions').includes('Let job be NewPromiseResolveThenableJob (promise, resolution, thenJobCallback). Perform HostEnqueuePromiseJob (job. [[Job]], job. [[Realm]])')
     && hasAll(f('sec-newpromiseresolvethenablejob'), ['Let getThenRealmResult be Completion (GetFunctionRealm (then. [[Callback]]))', 'Else, let thenRealm be the current Realm Record',
       'When then. [[Callback]] is a revoked Proxy and no code runs, thenRealm is used to create error objects'])
-    && fs.readFileSync(path.join(ROOT, 'intermediate/day-28/lecture.html'), 'utf8').includes('лишних задания в разделе 3: одно — вызвать <code>then</code> возвращённого промиса, второе — его реакция'),
+    && builtSite.htmlOfFile(path.join(ROOT, 'intermediate/day-28/lecture.html')).includes('лишних задания в разделе 3: одно — вызвать <code>then</code> возвращённого промиса, второе — его реакция'),
   'tasks 9: resolve with a thenable enqueues NewPromiseResolveThenableJob in the realm of then (the current one for a revoked proxy); course 2 day 28 — two extra jobs for a promise');
   check(hasAll(f('sec-getactivescriptormodule'), ['Let ec be the topmost execution context on the execution context stack whose ScriptOrModule component is not null'])
     && ['EvaluateImportCall', 'sec-meta-properties-runtime-semantics-evaluation'].every((c) => callers('GetActiveScriptOrModule').includes(c)),
@@ -591,7 +592,7 @@ setTimeout(() => console.log(log.join(" ")), 0);`, 'tasks-criteria-2.html');
     'student homework 4: MDN — the section Never blocking names two legacy exceptions, alert() and synchronous XHR');
 
   // the days the lecture points to
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(read('intermediate/day-28/lecture.html').includes('Устройство цикла событий целиком описывает страница MDN «Execution model»') && read('advanced/day-01/lecture.html').includes('Хозяин и реализация'),
     'lecture 1: course 2 day 28 left the page Execution model to course 3; the host is day 1');
   check(read('advanced/day-04/lecture.html').includes('реалма (день 9)') && read('advanced/day-07/lecture.html').includes('реалм функции — день 9'),

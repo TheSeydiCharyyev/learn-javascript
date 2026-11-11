@@ -280,7 +280,7 @@ const callersOf = (spec, op) => {
       if (where !== section) { await closeSection(); site = {}; section = where; }
       const want = EXPECT[`${name} #${i}`];
       if (QUOTES[first]) {
-        const quoted = fs.readFileSync(path.join(ROOT, QUOTES[first]), 'utf8');
+        const quoted = builtSite.htmlOfFile(path.join(ROOT, QUOTES[first]));
         const code = [...quoted.matchAll(/<pre class="code js"[^>]*>([\s\S]*?)<\/pre>/g)].map((m) => textOf(m[1])).join(LF);
         const lines = blk.code.split(LF).slice(1).map((l) => l.trim()).filter(Boolean);
         const missing = lines.filter((l) => !code.split(LF).some((c) => c.trim() === l));

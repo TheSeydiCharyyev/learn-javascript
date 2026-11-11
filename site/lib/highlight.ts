@@ -1,6 +1,6 @@
-// The course's syntax highlighter, run at build time: the same rules as js/highlight.js (which the HTML pages run in
-// the browser), so a highlighted block is the same markup, span for span. Kept in step with js/highlight.js until the
-// HTML pages are retired (stage 2 of the move to MDX); compare-site checks that both give the same DOM.
+// The course's syntax highlighter, run at build time: the same rules as js/highlight.js had (which the HTML pages ran
+// in the browser — both went at stage 4 of the move to Next.js, 11.11.2026), so a highlighted block is the same markup,
+// span for span. Tested by tools/test-highlight.mjs.
 const KEYWORDS = /^(await|async|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|finally|for|function|if|import|in|instanceof|let|new|of|return|static|super|switch|this|throw|try|typeof|var|void|while|with|yield)$/;
 const VALUES = /^(true|false|null|undefined|NaN|Infinity)$/;
 

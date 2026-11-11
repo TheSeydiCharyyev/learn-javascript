@@ -11,13 +11,16 @@ const results = [];
 const check = (name, ok, detail = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? '  — ' + detail : ''}`);
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ahead-'));
-const page = (body) => `<html><body><div class="container">${body}</div></body></html>`;
-const js = (code) => `<pre class="code js">${code}</pre>`;
+// A page is MDX (since 11.11.2026, when the HTML pages went — stage 4 of the move to Next.js): a block of code is
+// written as ```js, its code as is (the cases below keep the HTML entities they were written with: decoded here).
+const page = (body) => `# День\n\n${body}\n`;
+const decode = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const js = (code) => fence(decode(code));
 
 const write = (course, day, body) => {
   const dir = path.join(root, course, `day-${String(day).padStart(2, '0')}`);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'lecture.html'), page(body));
+  fs.writeFileSync(path.join(dir, 'lecture.mdx'), page(body));
 };
 const run = (day) => {
   const r = spawnSync('node', [path.join(TOOLS, 'check-ahead.mjs'), '--root', root, String(day)], { encoding: 'utf8' });
@@ -69,12 +72,12 @@ try {
   r = only(9)(js('const city = user?.city;   // день 15'));
   check('пометка на более ранний день не снимает', r.code === 1);
 
-  // 8. the HTML comment before the block excuses the whole block
-  r = only(9)(`<!-- ahead-ok: день 22 -->\n${js('const city = user?.city;\nconst zip = user?.zip;')}`);
+  // 8. the comment before the block excuses the whole block
+  r = only(9)(`{/* ahead-ok: день 22 */}\n\n${js('const city = user?.city;\nconst zip = user?.zip;')}`);
   check('пометка ahead-ok перед блоком снимает весь блок', r.code === 0, r.out.split('\n')[0]);
 
   // 9. HTML samples are not JavaScript
-  r = only(9)('<pre class="code html">&lt;!-- комментарий --&gt;\n&lt;script&gt;alert(1)&lt;/script&gt;</pre>');
+  r = only(9)(fence('<!-- комментарий -->\n<script>alert(1)</script>', 'html'));
   check('блок html не проверяется', r.code === 0, r.out.split('\n')[0]);
 
   // 10. days 1-3 tour the language and never fail
@@ -200,8 +203,8 @@ try {
   check('MDX: блок с именем файла (```js file="…") проверяется', r.code === 1, r.out.split('\n')[0]);
   r = files(9, { 'tasks.mdx': `1. Задание:\n\n${fence('const city = user?.city;', 'js', '   ')}\n` });
   check('MDX: блок с отступом внутри пункта списка проверяется', r.code === 1 && r.out.includes('tasks.mdx:4'), r.out.split('\n')[1]);
-  r = files(9, { 'lecture.mdx': `${fence('const a = 1;')}\n`, 'lecture.html': page(js('const city = user?.city;')) });
-  check('MDX и HTML рядом: читается MDX', r.code === 0, r.out.split('\n')[0]);
+  r = files(9, { 'lecture.html': '<pre class="code js">const city = user?.city;</pre>' });
+  check('HTML-файл не читается (страницы — MDX)', r.code === 0, r.out.split('\n')[0]);
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

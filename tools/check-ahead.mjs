@@ -6,16 +6,16 @@
 //   node tools/check-ahead.mjs --table    print the construct table and exit
 //   node tools/check-ahead.mjs --root DIR check another course tree (used by the test)
 //
-// Only JavaScript blocks are checked (```js in MDX, <pre class="code js"> in a day still in HTML): that is the code
-// the student copies and runs. Prose, inline code and HTML samples are not checked — there a construct is named, not
-// used. Since stage 4 of the move to Next.js (09.11.2026) a page is read from its MDX file (lib/code-blocks.mjs) —
-// including the blocks with a file name (```js file="main.js"), which the old reading of HTML skipped (33 of them),
-// and with the characters the HTML wrote as entities (&#215;, &#92;…) as they are.
+// Only JavaScript blocks (```js) are checked: that is the code the student copies and runs. Prose, inline code and
+// HTML samples are not checked — there a construct is named, not used. A page is read from its MDX file
+// (lib/code-blocks.mjs; since stage 4 of the move to Next.js, 09.11.2026) — including the blocks with a file name
+// (```js file="main.js"), which the old reading of HTML skipped (33 of them), and with the characters the HTML wrote
+// as entities (&#215;, &#92;…) as they are.
 //
 // A deliberate preview is excused in two ways:
 //   1. a comment on the same line that names the day or the course:  // день 22   // курс 2
 //      (on an English page: // day 22   // course 2)
-//   2. a comment right before the block:  {/* ahead-ok: причина */} in MDX, <!-- ahead-ok: причина --> in HTML
+//   2. a comment right before the block:  {/* ahead-ok: причина */}
 //
 // The table below is kept by hand. A row is:
 //   id     short name, unique
@@ -35,7 +35,7 @@
 // The excusing comment names a day of the same course.
 import fs from 'node:fs';
 import path from 'node:path';
-import { htmlJsBlocks, mdxJsBlocks } from './lib/code-blocks.mjs';
+import { mdxJsBlocks } from './lib/code-blocks.mjs';
 
 const argv = process.argv.slice(2);
 const rootAt = argv.indexOf('--root'); // another course tree instead of the repository — used by the test
@@ -274,13 +274,10 @@ for (const [course, dir] of Object.entries(COURSE_DIR)) {
     for (const sub of ['', 'en/']) {
       const at = path.join(base, folder, sub);
       if (!fs.existsSync(at)) continue;
-      // a page is its MDX file when there is one (stage 2 of the move to Next.js), its HTML file otherwise
-      const names = new Set(fs.readdirSync(at).filter((f) => /\.(html|mdx)$/.test(f)).map((f) => f.replace(/\.(html|mdx)$/, '')));
-      for (const name of [...names].sort()) {
-        const mdx = fs.existsSync(path.join(at, `${name}.mdx`));
-        const file = `${name}.${mdx ? 'mdx' : 'html'}`;
+      // a page is its MDX file (the HTML pages went at stage 4 of the move to Next.js, 11.11.2026)
+      for (const file of fs.readdirSync(at).filter((f) => f.endsWith('.mdx')).sort()) {
         const source = fs.readFileSync(path.join(at, file), 'utf8');
-        for (const h of scan(mdx ? mdxJsBlocks(source) : htmlJsBlocks(source), Number(course), day)) hits.push({ ...h, file: `${dir}/${folder}/${sub}${file}` });
+        for (const h of scan(mdxJsBlocks(source), Number(course), day)) hits.push({ ...h, file: `${dir}/${folder}/${sub}${file}` });
       }
     }
     problems += hits.length;

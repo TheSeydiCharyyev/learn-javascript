@@ -80,7 +80,7 @@ const COURSE_DIR = { 2: 'intermediate', 3: 'advanced', 4: 'web-apis' };
 
   // the course-2 day of Array/entries explains entries()
   const course2 = path.join(REPO, COURSE_DIR[ENTRIES.course], `day-${String(ENTRIES.day).padStart(2, '0')}`, 'lecture.html');
-  const explained = fs.existsSync(course2) && /entries\(\)/.test(fs.readFileSync(course2, 'utf8'));
+  const explained = fs.existsSync(course2.replace(/\.html$/, '.mdx')) && /entries\(\)/.test(builtSite.htmlOfFile(course2));
   if (!explained) bad++;
   console.log(`${explained ? 'OK  ' : 'BAD '} course ${ENTRIES.course}, day ${ENTRIES.day} explains entries(): ${explained}`);
 

@@ -190,7 +190,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split('\n')[0];
       if (QUOTES[first]) {
-        const quoted = fs.readFileSync(path.join(ROOT, QUOTES[first]), 'utf8');
+        const quoted = builtSite.htmlOfFile(path.join(ROOT, QUOTES[first]));
         // the quoted page marks some blocks with data-page, so the tag may carry attributes
         const code = [...quoted.matchAll(/<pre class="code js"[^>]*>([\s\S]*?)<\/pre>/g)].map((m) => textOf(m[1])).join('\n');
         const lines = blk.code.split('\n').slice(1).map((l) => l.trim()).filter(Boolean);
@@ -385,7 +385,7 @@ console.log(Math.trunc(-9 / 4), -9 >> 2, String(-9n % 2n), String(bigOp("&", -9n
   const read = (p) => (p.endsWith('.html') ? builtSite.htmlOfFile(path.join(ROOT, p)) : fs.readFileSync(path.join(ROOT, p), 'utf8'));
   check(read('essentials/day-06/lecture.html').includes('<tr><td>побитовые</td><td><code>&amp; | ^ &lt;&lt; &gt;&gt;</code></td><td>курс 3</td></tr>'), 'lecture 1: the table of Essentials day 6 says «побитовые — курс 3»');
   const oneTwo = ['essentials', 'intermediate'].flatMap((c) => fs.readdirSync(path.join(ROOT, c)).filter((d) => /^day-\d+$/.test(d))
-    .flatMap((d) => [d, `${d}/en`].filter((s) => fs.existsSync(path.join(ROOT, c, s))).flatMap((s) => fs.readdirSync(path.join(ROOT, c, s)).filter((x) => x.endsWith('.html')).map((x) => `${c}/${s}/${x}`))));
+    .flatMap((d) => [d, `${d}/en`].filter((s) => fs.existsSync(path.join(ROOT, c, s))).flatMap((s) => fs.readdirSync(path.join(ROOT, c, s)).filter((x) => x.endsWith('.mdx')).map((x) => `${c}/${s}/${x.replace(/\.mdx$/, '.html')}`))));
   const withVoid = oneTwo.filter((p) => /\bvoid\b/.test(read(p)));
   check(oneTwo.length > 200 && withVoid.length === 0, `lecture 1: void is in none of ${oneTwo.length} pages of courses 1–2${withVoid.length ? ` — ${withVoid.join(', ')}` : ''}`);
   check(read('essentials/day-06/lecture.html').includes('<strong>остаток</strong> от деления') && read('essentials/day-16/lecture.html').includes('(5).toString(2)')

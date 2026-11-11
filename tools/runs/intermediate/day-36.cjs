@@ -332,7 +332,7 @@ const strip = (l) => l.replace(/\s+\/\/ .*$/, '').trim();
   };
   const store = (p) => p.evaluate(() => localStorage.getItem('cards2:progress'));
   const blocksOf = async (file) => {
-    if (!fs.existsSync(file)) return null;
+    if (!fs.existsSync(file.replace(/\.html$/, '.mdx'))) return null;
     const ctx = await b.newContext(MAIN);
     const src = await ctx.newPage();
     await src.goto(builtSite.urlOfFile(file));

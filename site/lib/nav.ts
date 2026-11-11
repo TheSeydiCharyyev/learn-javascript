@@ -1,13 +1,11 @@
 // The navigation bar of a day page, as data. It follows from where the page lies: the course folder, the day, which
-// of lecture/student/tasks it is, Russian or en/, and whether the other language exists. While the HTML pages are the
-// source (until stage 2 of the move to MDX), the build checks that this model gives exactly the bar written in the
-// file (navInnerHtml), so <LessonNav> draws the same bar as the page did.
+// of lecture/student/tasks it is, Russian or en/, and whether the other language exists. (While the HTML pages were
+// the source, the build checked that this model gave exactly the bar written in each file; they went at stage 4 of
+// the move to Next.js, 11.11.2026, and the check with them.)
 import fs from "node:fs";
 import path from "node:path";
-import { LANG_KEY } from "./lang-key";
 
-// exists: whether the page is written, in HTML or MDX (day 21 of Advanced has only its lecture yet) — the bar links
-// it either way.
+// exists: whether the page is written (day 21 of Advanced has only its lecture yet) — the bar links it either way.
 export type NavItem = { file: "lecture.html" | "student.html" | "tasks.html"; label: string; active: boolean; exists: boolean };
 export type NavModel = {
   home: { href: string; label: string };
@@ -23,7 +21,7 @@ const COURSE_NAMES: Record<string, string> = {
   "web-apis": "Web APIs",
 };
 
-// Labels as the HTML pages write them (character references included); decodeRefs turns them into text.
+// Labels as the HTML pages wrote them (character references included); decodeRefs turns them into text.
 const WORDS = {
   ru: { home: "&#8592; Курс", day: "день", lecture: "Лекция", student: "Конспект", tasks: "Задания" },
   en: { home: "&#8592; Course", day: "day", lecture: "Lecture", student: "Notes", tasks: "Tasks" },
@@ -34,9 +32,9 @@ const LECTURE_NAME: Record<string, { ru: string; en: string }> = {
   "essentials/day-15": { ru: "Теория", en: "Theory" },
 };
 
-// A page exists when its HTML or its MDX file does (rel is the .html path). Also used by the home page (lib/home-lists.ts).
-export const pageExists = (repo: string, rel: string) =>
-  fs.existsSync(path.join(repo, rel)) || fs.existsSync(path.join(repo, rel.replace(/\.html$/, ".mdx")));
+// A page exists when its MDX file does (rel is the page's .html path — its address). Also used by the home page
+// (lib/home-lists.ts).
+export const pageExists = (repo: string, rel: string) => fs.existsSync(path.join(repo, rel.replace(/\.html$/, ".mdx")));
 
 export function navModel(rel: string, repo: string): NavModel | null {
   const m = /^([a-z-]+)\/(day-(\d+))\/(en\/)?(lecture|student|tasks)\.html$/.exec(rel);
@@ -63,22 +61,6 @@ export function navModel(rel: string, repo: string): NavModel | null {
     items,
     switchTo,
   };
-}
-
-// The inside of <div class="lesson-nav"> exactly as the HTML pages write it.
-export function navInnerHtml(n: NavModel): string {
-  const lines = [
-    `<a href="${n.home.href}" class="nav-home">${n.home.label}</a>`,
-    `<span class="nav-sep">|</span>`,
-    `<span class="nav-title">${n.title}</span>`,
-    `<span class="nav-sep">|</span>`,
-    ...n.items.map((i) => (i.active ? `<span class="nav-active">${i.label}</span>` : `<a href="${i.file}" class="nav-link">${i.label}</a>`)),
-  ];
-  if (n.switchTo) {
-    const s = n.switchTo;
-    lines.push(`<a href="${s.href}" class="lang-btn" hreflang="${s.lang}" lang="${s.lang}" onclick="try { localStorage.setItem('${LANG_KEY}', '${s.lang}'); } catch (e) {}">${s.label}</a>`);
-  }
-  return lines.map((l) => `\n    ${l}`).join("") + "\n";
 }
 
 // "&#8592; Курс" -> "← Курс": the numeric character references the labels use.

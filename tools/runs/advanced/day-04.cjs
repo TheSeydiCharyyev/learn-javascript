@@ -176,7 +176,7 @@ const clause = (spec, id) => {
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split('\n')[0];
       if (QUOTES[first]) {
-        const quoted = fs.readFileSync(path.join(ROOT, QUOTES[first]), 'utf8');
+        const quoted = builtSite.htmlOfFile(path.join(ROOT, QUOTES[first]));
         const code = [...quoted.matchAll(/<pre class="code js">([\s\S]*?)<\/pre>/g)].map((m) => textOf(m[1])).join('\n');
         const lines = blk.code.split('\n').slice(1).map((l) => l.trim()).filter(Boolean);
         const missing = lines.filter((l) => !code.split('\n').some((c) => c.trim() === l));

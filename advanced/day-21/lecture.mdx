@@ -1,0 +1,619 @@
+---
+title: День 21 — DataView, порядок байтов, Float16 и base64
+day: День 21 • урок 1
+heading: DataView, порядок байтов, Float16 и base64
+lead: Курс 3, Advanced. Модуль «Двоичные данные и модель памяти» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+---
+
+<Goals>
+- читать и писать числа любого размера с любого байта и выбирать порядок байтов явно;
+- проходить GetViewValue и SetViewValue по шагам и узнавать их ошибки;
+- предсказывать потерю точности у `Float32Array` и `Float16Array`;
+- разбирать заголовок файла и переводить байты в base64 и шестнадцатеричную строку и обратно.
+</Goals>
+
+<Toc />
+
+## 1. Зачем DataView {#why}
+
+День 20 оставил две трудности. Вид читает весь буфер одним типом, а заголовок файла — это смесь: байт, потом
+два, потом четыре. И вид читает байты в порядке машины, а формат файла задаёт порядок сам: PNG пишет числа
+старшим байтом вперёд, BMP — младшим. `DataView` снимает обе трудности. Страница MDN
+[DataView](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView)
+называет его низкоуровневым способом читать и писать числа разных типов «without having to care about the
+platform's endianness». Число берётся с любого байта: выравнивание, которое требовал
+`Uint16Array` (смещение кратно двум), здесь не нужно.
+
+В спецификации `DataView` — раздел [25.3](https://tc39.es/ecma262/2026/#sec-dataview-objects),
+рядом с `ArrayBuffer` дня 20. А base64 и hex — раздел
+[23.3](https://tc39.es/ecma262/2026/#sec-uint8array): это не отдельные функции, а методы одного вида,
+`Uint8Array`.
+
+## 2. Порядок байтов {#endian}
+
+Число 0x01020304 занимает четыре байта. Записать их можно старшим вперёд — 01 02 03 04 (*big-endian*) — или
+младшим вперёд — 04 03 02 01 (*little-endian*):
+
+<Scheme src="scheme-endian.svg">Одно число — два порядка байтов</Scheme>
+
+```js
+const n = 0x01020304;
+const buf = new ArrayBuffer(8);
+const dv = new DataView(buf);
+dv.setUint32(0, n);
+dv.setUint32(4, n, true);
+console.log(new Uint8Array(buf).join(" "), dv.getUint32(0), dv.getUint32(0, true).toString(16), dv.getUint32(4, true).toString(16));
+console.log(new Uint8Array(Uint16Array.of(1).buffer)[0] === 1, new Uint32Array(buf)[0].toString(16), new Uint32Array(buf)[1].toString(16));
+```
+
+<ResultBox>
+1 2 3 4 4 3 2 1 16909060 4030201 1020304\
+true 4030201 1020304
+</ResultBox>
+
+Без второго аргумента `DataView` пишет и читает **big-endian** — MDN прямо
+предупреждает: «DataView defaults to big-endian read and write, but most platforms use little-endian». Вид
+`Uint32Array` на том же буфере читает порядком машины, и у нас это little-endian: первые четыре байта
+он понял как 0x04030201. Откуда порядок вида? GetValueFromBuffer
+([25.1.3.16](https://tc39.es/ecma262/2026/#sec-getvaluefrombuffer), шаг 8): если порядок не передан,
+он берётся из поля \[\[LittleEndian\]\] записи агента (день 9), а стандарт оставляет выбор реализации. Сам переворот —
+шаг 2 RawBytesToNumeric ([25.1.3.14](https://tc39.es/ecma262/2026/#sec-rawbytestonumeric)): для
+big-endian байты переставляются, потом читаются как little-endian.
+
+Узнать порядок своей машины MDN предлагает так: записать `DataView` число 256 little-endian и
+прочитать его видом. Совпало — машина little-endian:
+
+```js
+const littleEndian = (() => {
+  const buffer = new ArrayBuffer(2);
+  new DataView(buffer).setInt16(0, 256, true);
+  return new Int16Array(buffer)[0] === 256;
+})();
+console.log(littleEndian);
+```
+
+<ResultBox>
+true
+</ResultBox>
+
+## 3. Конструктор DataView {#ctor}
+
+DataView(buffer, byteOffset, byteLength)
+([25.3.2.1](https://tc39.es/ecma262/2026/#sec-dataview-buffer-byteoffset-bytelength)): шаг 1 — без
+`new` нельзя; шаг 2 — первый аргумент обязан быть буфером, вид не годится; шаг 3 — смещение через
+ToIndex; шаг 6 — смещение не дальше конца; шаг 8 — без длины вид берёт остаток буфера, а у изменяемого буфера —
+следит за длиной; шаг 9.b — смещение плюс длина не дальше конца.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const buf = new ArrayBuffer(8);
+const dv = new DataView(buf, 2, 4);
+console.log(dv.byteOffset, dv.byteLength, dv.buffer === buf, dv[0], Object.prototype.toString.call(dv), ArrayBuffer.isView(dv));
+console.log(run(() => DataView(buf)), "|", run(() => new DataView(new Uint8Array(4))));
+console.log(run(() => new DataView(buf, 9)), "|", run(() => new DataView(buf, 4, 5)), "|", new DataView(buf, 8).byteLength);
+```
+
+<ResultBox>
+2 4 true undefined \[object DataView\] true\
+TypeError: Constructor DataView requires 'new' | TypeError: First argument to DataView constructor must be an ArrayBuffer\
+RangeError: Start offset 9 is outside the bounds of the buffer | RangeError: Invalid DataView length 5 | 0
+</ResultBox>
+
+У `DataView` нет индексов: `dv[0]` — `undefined`, это обычный объект со слотами
+(раздел [25.3.5](https://tc39.es/ecma262/2026/#sec-properties-of-dataview-instances)), а не
+экзотический, как вид дня 20. Зато `ArrayBuffer.isView` отвечает «да»: слот \[\[ViewedArrayBuffer\]\] у него
+есть. Смещение, равное длине буфера, законно — получается пустой `DataView`.
+
+## 4. getUint16 и setUint16 по шагам {#getset}
+
+Все методы чтения ведёт одна операция — GetViewValue
+([25.3.1.5](https://tc39.es/ecma262/2026/#sec-getviewvalue)), записи — SetViewValue
+([25.3.1.6](https://tc39.es/ecma262/2026/#sec-setviewvalue)). Чтение: шаг 3 — ToIndex смещения; шаг 4 —
+ToBoolean второго аргумента, поэтому `undefined` значит big-endian, а любая непустая строка — little;
+шаг 8 — вид за границей буфера — `TypeError`; шаг 11 — число не помещается до конца вида —
+`RangeError`; шаг 13 — GetValueFromBuffer *с переданным* порядком.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const dv = new DataView(new ArrayBuffer(4));
+dv.setUint16(1, 0xABCD);
+console.log(new Uint8Array(dv.buffer).join(" "), dv.getUint16(1), dv.getUint16(1, true), dv.getUint16(1, "yes"), dv.getUint16("1"), dv.getInt8(1), dv.getUint8(1));
+console.log(run(() => dv.getUint16(3)), "|", run(() => dv.getUint16(-1)));
+let calls = 0;
+console.log(run(() => dv.setUint16(3, { valueOf() { calls++; return 1; } })), calls);
+dv.setInt16(0, -2);
+console.log(dv.getUint16(0), dv.getInt16(0));
+```
+
+<ResultBox>
+0 171 205 0 43981 52651 52651 43981 -85 171\
+RangeError: Offset is outside the bounds of the DataView | RangeError: Offset is outside the bounds of the DataView\
+RangeError: Offset is outside the bounds of the DataView 1\
+65534 -2
+</ResultBox>
+
+Число 0xABCD легло с байта 1 — без выравнивания. Строка `"yes"` сработала как `true`, строка
+`"1"` — как смещение 1. Смещение −1 — `RangeError` уже на ToIndex, как у `ArrayBuffer`
+дня 20. И знакомое по дню 20: запись за концом вызвала `valueOf`, потому что SetViewValue превращает
+значение в число на шагах 4–5, а границы проверяет на шаге 13. Байты одни, а `getUint16` и
+`getInt16` читают их как 65534 и −2 — тип выбирает метод.
+
+Шаг 4 прячет ловушку: порядок проходит ToBoolean (день 5), а не сравнение с `true`:
+
+```js
+const dv = new DataView(new ArrayBuffer(2));
+dv.setUint16(0, 0x0102);
+console.log(dv.getUint16(0, false).toString(16), dv.getUint16(0, "false").toString(16), dv.getUint16(0, 0).toString(16), dv.getUint16(0, []).toString(16));
+```
+
+<ResultBox>
+102 201 102 201
+</ResultBox>
+
+Строка «false» непустая, значит истинна; пустой массив — объект, тоже истинен. Если порядок приходит из
+настроек или формы, его надо превратить в булево самому.
+
+## 5. Двадцать два метода {#methods}
+
+На каждый тип таблицы 70 у `DataView.prototype`
+([25.3.4](https://tc39.es/ecma262/2026/#sec-properties-of-the-dataview-prototype-object)) по паре
+`get…` и `set…`, кроме `Uint8Clamped`: насыщение нужно только виду.
+
+| Тип | Байт | Методы | Порядок |
+| --- | --- | --- | --- |
+| Int8, Uint8 | 1 | `getInt8`, `setUint8`… | не нужен — один байт |
+| Int16, Uint16 | 2 | `getInt16`, `setUint16`… | третий/второй аргумент |
+| Int32, Uint32 | 4 | `getInt32`, `setUint32`… | то же |
+| BigInt64, BigUint64 | 8 | `getBigInt64`, `setBigUint64`… | то же; значения — BigInt |
+| Float16, Float32, Float64 | 2, 4, 8 | `getFloat16`, `setFloat32`… | то же |
+
+У чтения два параметра (смещение, порядок), у записи — три (смещение, значение, порядок). Плюс геттеры
+`buffer`, `byteLength`, `byteOffset` и `constructor` —
+`Object.getOwnPropertyNames(DataView.prototype)` назовёт 26 имён.
+
+## 6. Float32 и Float64 изнутри {#float}
+
+```js
+const dv = new DataView(new ArrayBuffer(8));
+dv.setFloat32(0, 1);
+dv.setFloat32(4, 0.1);
+console.log(new Uint8Array(dv.buffer).join(" "), dv.getFloat32(0), dv.getFloat32(4), Math.fround(0.1), dv.getFloat32(0, true));
+dv.setFloat64(0, 1);
+console.log(new Uint8Array(dv.buffer).join(" "), dv.getFloat64(0), dv.getUint16(0).toString(16));
+```
+
+<ResultBox>
+63 128 0 0 61 204 204 205 1 0.10000000149011612 0.10000000149011612 4.600602988224807e-41\
+63 240 0 0 0 0 0 0 1 3ff0
+</ResultBox>
+
+Единица во float32 — 0x3F800000: знак, восемь бит порядка, 23 бита дроби. Это те байты 128 и 63, что задание 3
+дня 20 видело в обратном порядке. NumericToRawBytes
+([25.1.3.17](https://tc39.es/ecma262/2026/#sec-numerictorawbytes), шаг 2.a) округляет до 32 бит по
+правилу «половина — к чётному», и 0.1 возвращается с хвостом — тем же, что даёт `Math.fround`. Прочитать
+правильные байты не тем порядком — получить мусор: 4.6 × 10<sup>−41</sup>.
+
+```js
+const dv = new DataView(new ArrayBuffer(4));
+dv.setFloat32(0, NaN);
+const nanBytes = new Uint8Array(dv.buffer).join(" ");
+dv.setFloat32(0, -0);
+console.log(nanBytes, new Uint8Array(dv.buffer).join(" "), Object.is(dv.getFloat32(0), -0));
+```
+
+<ResultBox>
+127 192 0 0 128 0 0 0 true
+</ResultBox>
+
+У NaN много записей в битах, и шаг 2.a NumericToRawBytes разрешает реализации выбрать любую; Chrome пишет
+0x7FC00000. Ноль с минусом отличается от нуля только старшим битом знака — в байтах −0 и +0 разные, хотя
+`-0 === 0`.
+
+## 7. Float16Array и Math.f16round {#float16}
+
+Двенадцатый вид таблицы 70 — `Float16Array`: два байта на число. По MDN
+[TypedArray](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray),
+он «uses 10 bits for the mantissa and 5 bits for the exponent» — около трёх значащих цифр и максимум 65504. Такие
+числа хранят нейросети и видеокарты: половина памяти Float32 за меньшую точность.
+
+```js
+const f = Float16Array.of(0.1, 1, 2049, 65504, 65520, 1e-8, 3.14159, -0);
+console.log(f.join(" "), Float16Array.BYTES_PER_ELEMENT, Math.f16round(0.1), Math.f16round(2049), Math.f16round(2051));
+const dv = new DataView(new ArrayBuffer(2));
+dv.setFloat16(0, 1);
+console.log(new Uint8Array(dv.buffer).join(" "), dv.getFloat16(0), Object.getPrototypeOf(Float16Array) === Object.getPrototypeOf(Float32Array));
+```
+
+<ResultBox>
+0.0999755859375 1 2048 65504 Infinity 0 3.140625 0 2 0.0999755859375 2048 2052\
+60 0 1 true
+</ResultBox>
+
+После 2048 шаг между соседними числами — 2: 2049 стоит ровно посередине и уходит к чётной 2048, а 2051 — к
+2052\. 65520 стоит ровно посередине между 65504 и следующим шагом, 65536, и правило «к чётному» уводит её вверх, за
+предел, — в бесконечность (65519 ещё округляется к 65504). 1e−8 меньше самого
+маленького float16 и становится нулём. `Math.f16round`
+([21.3.2.18](https://tc39.es/ecma262/2026/#sec-math.f16round)) — то же округление без вида: шаг 4
+переводит в binary16, шаг 5 — обратно в Number. Родитель у `Float16Array` общий — %TypedArray% дня 20.
+
+| Формат | Байт | Бит дроби | Значащих цифр | Наибольшее | Округлить |
+| --- | --- | --- | --- | --- | --- |
+| float16 | 2 | 10 | около 3 | 65504 | `Math.f16round` |
+| float32 | 4 | 23 | около 7 | ≈ 3.4 × 10<sup>38</sup> | `Math.fround` |
+| float64 (Number) | 8 | 52 | около 16 | ≈ 1.8 × 10<sup>308</sup> | само число |
+
+## 8. BigInt через DataView {#bigint}
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const dv = new DataView(new ArrayBuffer(8));
+dv.setBigInt64(0, -1n);
+console.log(dv.getBigInt64(0), dv.getBigUint64(0), dv.getUint32(0), run(() => dv.setBigUint64(0, 1)), typeof dv.getBigInt64(0));
+```
+
+<ResultBox>
+-1n 18446744073709551615n 4294967295 TypeError: Cannot convert 1 to a BigInt bigint
+</ResultBox>
+
+Восемь байтов 0xFF: со знаком это −1n, без знака — 2<sup>64</sup> − 1, а первые четыре из них как
+`Uint32` — 2<sup>32</sup> − 1. SetViewValue на шаге 4 зовёт ToBigInt, и число 1 не проходит — как у
+`BigInt64Array` дня 20.
+
+## 9. Практика: размеры картинки PNG {#png}
+
+Файл PNG начинается с восьми байтов подписи, за ними — первый кусок данных, IHDR: длина (4 байта), имя (4),
+ширина (4), высота (4), глубина цвета (1)… Все числа — big-endian:
+
+<Scheme src="scheme-png.svg">Начало файла PNG: подпись и кусок IHDR</Scheme>
+
+```js
+const header = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x02, 0x80, 0, 0, 0x01, 0xE0, 8, 2, 0, 0, 0];
+const bytes = Uint8Array.from(header);
+const dv = new DataView(bytes.buffer);
+const signature = bytes.subarray(0, 8).toHex();
+const type = String.fromCharCode(...bytes.subarray(12, 16));
+console.log(signature, type, dv.getUint32(8), dv.getUint32(16), dv.getUint32(20), dv.getUint8(24));
+console.log(dv.getUint32(16, true), bytes.toBase64());
+```
+
+<ResultBox>
+89504e470d0a1a0a IHDR 13 640 480 8\
+2147614720 iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAIAAAA=
+</ResultBox>
+
+Подпись проверяется строкой hex (раздел 14), имя куска — кодами символов, а размеры — `getUint32` без
+второго аргумента, потому что PNG big-endian. Ошибка порядка не бросает исключения, она тихо даёт 2147614720 вместо
+640, и картинка «шириной два миллиарда» уходит дальше. Последняя строка — те же байты в base64: так картинки
+вставляют в адреса `data:`.
+
+## 10. Практика: BMP и обратный порядок {#bmp}
+
+BMP пишет числа little-endian: «BM», размер файла (4), четыре служебных байта, смещение пикселей (4), размер
+второго заголовка (4), ширина (4, со знаком), высота (4, со знаком)… Начало файла пришло строкой base64:
+
+```js
+const b64 = "Qk1GAAAAAAAAADYAAAAoAAAAAwAAAP7///8BABgAAAAAABAAAAA=";
+const bytes = Uint8Array.fromBase64(b64);
+const dv = new DataView(bytes.buffer);
+console.log(bytes.length, String.fromCharCode(bytes[0], bytes[1]), dv.getUint32(2, true), dv.getUint32(10, true), dv.getInt32(18, true), dv.getInt32(22, true), dv.getUint16(28, true), dv.getInt32(18));
+```
+
+<ResultBox>
+38 BM 70 54 3 -2 24 50331648
+</ResultBox>
+
+Картинка 3 × 2, 24 бита на точку, пиксели с байта 54. Высота −2 — не ошибка: в BMP отрицательная высота значит,
+что строки идут сверху вниз. Поэтому `getInt32`, а не `getUint32`. Без `true`
+ширина читается как 50331648.
+
+## 11. Практика: WAV — читаем подряд {#wav}
+
+Заголовок звукового файла WAV — 44 байта little-endian, поля идут подряд: «RIFF», размер, «WAVE», «fmt », размер
+куска, формат, каналы, частота, байт в секунду, выравнивание, бит на отсчёт, «data», размер звука. Считать каждое
+смещение вручную скучно и опасно. Удобнее курсор: функция помнит, где остановилась, и сдвигается сама:
+
+```js
+function reader(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let at = 0;
+  return {
+    text(n) { const s = String.fromCharCode(...bytes.subarray(at, at + n)); at += n; return s; },
+    u16() { const v = dv.getUint16(at, true); at += 2; return v; },
+    u32() { const v = dv.getUint32(at, true); at += 4; return v; },
+  };
+}
+const wav = "UklGRkRiBQBXQVZFZm10IBAAAAABAAIARKwAABCxAgAEABAAZGF0YSBiBQA=";
+const r = reader(Uint8Array.fromBase64(wav));
+const h = { riff: r.text(4), size: r.u32(), wave: r.text(4), fmt: r.text(4), fmtSize: r.u32(), format: r.u16(), channels: r.u16(), rate: r.u32(), byteRate: r.u32(), align: r.u16(), bits: r.u16(), data: r.text(4), dataSize: r.u32() };
+console.log(h.riff, h.wave, h.format, h.channels, h.rate, h.bits, h.dataSize / h.byteRate);
+const file = new Uint8Array(100);
+file.set(Uint8Array.fromBase64(wav), 10);
+const sub = file.subarray(10);
+console.log(new DataView(sub.buffer).getUint8(0), new DataView(sub.buffer, sub.byteOffset).getUint8(0), reader(sub).text(4));
+```
+
+<ResultBox>
+RIFF WAVE 1 2 44100 16 2\
+0 82 RIFF
+</ResultBox>
+
+Стерео, 44100 отсчётов в секунду, 16 бит, две секунды звука. Поля объекта вычисляются по порядку записи, поэтому
+курсор читает их ровно один раз. Главная строка — первая в `reader`: `DataView` строится над
+тем же отрезком, что и подмассив. Вторая строка вывода показывает, что будет иначе: заголовок лежит в большом файле
+с десятого байта, а `new DataView(sub.buffer)` начинает с нулевого — 0 вместо 82, кода буквы «R».
+
+## 12. base64: toBase64 и fromBase64 {#base64}
+
+base64 записывает каждые три байта четырьмя знаками из 64: 24 бита режутся на четыре куска по 6:
+
+<Scheme src="scheme-base64.svg">Три байта — четыре знака base64</Scheme>
+
+`toBase64(options)` ([23.3.2.3](https://tc39.es/ecma262/2026/#sec-uint8array.prototype.tobase64)):
+шаг 2 пускает только `Uint8Array`, шаги 4–6 выбирают алфавит — «base64» или «base64url», шаг 7 —
+`omitPadding`: не дописывать «=» до кратности четырём. `Uint8Array.fromBase64(string, options)`
+([23.3.1.1](https://tc39.es/ecma262/2026/#sec-uint8array.frombase64)): шаг 1 — строка и только строка;
+шаги 6–8 — `lastChunkHandling`: «loose» (по умолчанию) прощает неполный последний кусок без «=»,
+«strict» — нет, «stop-before-partial» его просто не читает. Пробелы и переводы строк пропускаются.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const u = Uint8Array.of(0xFB, 0xFF, 0x01);
+console.log(u.toBase64(), u.toBase64({ alphabet: "base64url" }), Uint8Array.of(1).toBase64(), Uint8Array.of(1).toBase64({ omitPadding: true }));
+console.log(Uint8Array.fromBase64("+/8B").join(), Uint8Array.fromBase64(" AQ I= ").join(), Uint8Array.fromBase64("AQ").join(), Uint8Array.fromBase64("AQIDBA", { lastChunkHandling: "stop-before-partial" }).join());
+console.log(run(() => Uint8Array.fromBase64("AQ", { lastChunkHandling: "strict" })));
+console.log(run(() => Uint8Array.fromBase64("-_8B")), "|", run(() => Uint8Array.fromBase64(123)));
+console.log(run(() => Uint8Array.prototype.toBase64.call(Uint8ClampedArray.of(1))));
+```
+
+<ResultBox>
+\+/8B -\_8B AQ== AQ\
+251,255,1 1,2 1 1,2,3\
+SyntaxError: The base64 input terminates with a single character, excluding padding (=).\
+SyntaxError: Found a character that cannot be part of a valid base64 string. | TypeError: input argument must be a string\
+TypeError: Method Uint8Array.prototype.toBase64 called on incompatible receiver undefined
+</ResultBox>
+
+Ошибки разбора — `SyntaxError`: знак не из алфавита («-» без «base64url»), неполный кусок в «strict».
+Текст V8 для «strict» неточен — «a single character», хотя знаков два; спецификация (FromBase64,
+[23.3.3.7](https://tc39.es/ecma262/2026/#sec-frombase64), шаг 10.b.i.2) говорит лишь «неполный кусок».
+Число вместо строки — `TypeError` без попытки привести. `Uint8ClampedArray` не пускает
+ValidateUint8Array ([23.3.3.1](https://tc39.es/ecma262/2026/#sec-validateuint8array), шаг 2), и здесь
+V8 снова неточен: получатель назван `undefined`, хотя это вид. В
+браузере есть старые `btoa` и `atob` (курс 4), но MDN советует новый метод:
+`fromBase64` «should be preferred over Window.atob() because it results in a byte array».
+
+Ещё одно различие режимов — лишние биты. В «AR==» два знака дают 12 бит, а байт занимает 8; оставшиеся четыре
+должны быть нулями:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(Uint8Array.fromBase64("AR==").join(), Uint8Array.fromBase64("AQ==", { lastChunkHandling: "strict" }).join());
+console.log(run(() => Uint8Array.fromBase64("AR==", { lastChunkHandling: "strict" })));
+```
+
+<ResultBox>
+1 1\
+SyntaxError: The base64 input terminates with non-zero padding bits.
+</ResultBox>
+
+«R» — 17, то есть 010001: последний бит единичный. «loose» его молча отбрасывает и даёт тот же байт 1, что и
+честная «AQ==»; «strict» на шаге 10.e.v включает throwOnExtraBits и бросает. Две разные строки base64 с одним и тем
+же содержимым — повод сравнивать байты, а не строки.
+
+## 13. Запись в готовый массив {#setfrom}
+
+`setFromBase64` и `setFromHex` (23.3.2.1–23.3.2.2) пишут в уже созданный
+`Uint8Array` — например, в `subarray` большого буфера — и отвечают объектом
+`{ read, written }`: сколько знаков прочитано и сколько байтов записано:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const into = new Uint8Array(4);
+console.log(JSON.stringify(into.setFromBase64("AQIDBAUG")), into.join());
+const into2 = new Uint8Array(8);
+console.log(run(() => into2.setFromBase64("AQID*AQ")), into2.join());
+const into3 = new Uint8Array(3);
+console.log(JSON.stringify(into3.setFromHex("0aFF10ee")), into3.join(), JSON.stringify(new Uint8Array(8).subarray(2).setFromHex("ab")));
+```
+
+<ResultBox>
+\{"read":4,"written":3\} 1,2,3,0\
+SyntaxError: Found a character that cannot be part of a valid base64 string. 1,2,3,0,0,0,0,0\
+\{"read":6,"written":3\} 10,255,16 \{"read":2,"written":1\}
+</ResultBox>
+
+В четыре байта влез один целый кусок base64 — три байта; второй кусок тоже три байта, и он не влезает целиком,
+поэтому чтение остановилось на четвёртом знаке. Вторая строка — неожиданность: ошибка, а байты всё же записаны.
+setFromBase64 ([23.3.2.1](https://tc39.es/ecma262/2026/#sec-uint8array.prototype.setfrombase64)) на
+шаге 19 пишет всё, что успел разобрать, и только на шаге 20 бросает.
+
+## 14. Шестнадцатеричная строка {#hex}
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+console.log(Uint8Array.of(0, 10, 255).toHex(), Uint8Array.fromHex("000aFF").join());
+console.log(run(() => Uint8Array.fromHex("abc")), "|", run(() => Uint8Array.fromHex("zz")));
+```
+
+<ResultBox>
+000aff 0,10,255\
+SyntaxError: Input string must contain hex characters in even length | SyntaxError: Input string must contain hex characters in even length
+</ResultBox>
+
+`toHex` ([23.3.2.4](https://tc39.es/ecma262/2026/#sec-uint8array.prototype.tohex)) пишет
+по две строчные цифры на байт: шаг 5.b дополняет нулём слева. `fromHex` принимает и заглавные. Обе
+ошибки по FromHex ([23.3.3.8](https://tc39.es/ecma262/2026/#sec-fromhex)) — разные шаги: нечётная длина —
+шаг 5, знак не из «0–9a–fA–F» — шаг 6.b. А текст V8 один на оба случая, и для «zz» он неточен: длина-то чётная.
+
+## 15. DataView без байтов {#bounds}
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const rab = new ArrayBuffer(4, { maxByteLength: 8 });
+const all = new DataView(rab);
+const part = new DataView(rab, 0, 4);
+rab.resize(8);
+console.log(all.byteLength, part.byteLength);
+rab.resize(2);
+console.log(all.byteLength, run(() => part.byteLength));
+console.log(run(() => part.getUint8(0)), all.getUint8(1));
+```
+
+<ResultBox>
+8 4\
+2 TypeError: Cannot perform get DataView.prototype.byteLength on a detached or out-of-bounds ArrayBuffer\
+TypeError: Cannot perform DataView.prototype.getUint8 on a detached or out-of-bounds ArrayBuffer 0
+</ResultBox>
+
+Как у видов: `DataView` без длины на изменяемом буфере следит за ним, с длиной — нет. Но есть
+разница. Вид за границей притворялся пустым — длина 0. `DataView` за границей бросает даже на
+`byteLength`: геттер (25.3.4.2) проверяет IsViewOutOfBounds и не возвращает 0. Отсоединённый буфер — то
+же `TypeError` и для конструктора (шаг 4).
+
+## 16. Вид или DataView {#choose}
+
+| Задача | Что взять | Почему |
+| --- | --- | --- |
+| много чисел одного типа: пиксели, отсчёты звука | вид | индексы и методы массива; порядок машины |
+| заголовок файла: смесь типов | `DataView` | каждое поле своим методом |
+| порядок задан форматом | `DataView` с явным порядком | вид всегда читает порядком машины |
+| число с нечётного байта | `DataView` | виду нужно выравнивание |
+| байты в текст и обратно | `Uint8Array`: `toBase64`, `toHex` | методы есть только у него |
+
+Часто они работают вместе: `DataView` читает заголовок и узнаёт, где лежат данные и какого они типа,
+а потом над этими данными строится вид — как в WAV, где за 44 байтами заголовка идут отсчёты
+`Int16`. Но вид годится для них, только если порядок файла совпадает с порядком машины.
+
+## 17. «Карточки 2.0»: колода в ссылке {#cards}
+
+На дне 18 настройками колоды делились через ссылку. Прогресс ученика — счётчики-байты дня 20 — тоже можно
+передать ссылкой: заголовок (версия формата — байт, число карточек — `Uint16` big-endian), потом
+счётчики, всё — в base64url без «=»:
+
+```js
+const counts = Uint8Array.of(3, 0, 255, 12);
+const packed = new Uint8Array(3 + counts.length);
+const head = new DataView(packed.buffer);
+head.setUint8(0, 1);
+head.setUint16(1, counts.length);
+packed.set(counts, 3);
+const link = packed.toBase64({ alphabet: "base64url", omitPadding: true });
+console.log(link, link.length);
+const back = Uint8Array.fromBase64(link, { alphabet: "base64url" });
+const view = new DataView(back.buffer);
+console.log(view.getUint8(0), view.getUint16(1), back.subarray(3).join());
+```
+
+<ResultBox>
+AQAEAwD_DA 10\
+1 4 3,0,255,12
+</ResultBox>
+
+Семь байтов — десять знаков, без «+», «/» и «=», которые в адресе пришлось бы кодировать
+`encodeURIComponent` дня 18. Версия формата в первом байте позволит потом поменять раскладку и
+не сломать старые ссылки.
+
+## 18. Что будет завтра {#next}
+
+День 22 — `SharedArrayBuffer` и `Atomics`: буфер, который видят сразу несколько
+потоков, и операции, которые не мешают друг другу.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [23.3 Uint8Array Objects](https://tc39.es/ecma262/2026/#sec-uint8array) | base64 и hex — методы одного вида; разделы 12–14 | <Full /> |
+| [23.3.1 Additional Properties of the Uint8Array Constructor](https://tc39.es/ecma262/2026/#sec-additional-properties-of-the-uint8array-constructor) | `fromBase64`, `fromHex` | <Brief /> |
+| [23.3.2 Additional Properties of the Uint8Array Prototype Object](https://tc39.es/ecma262/2026/#sec-additional-properties-of-the-uint8array-prototype-object) | `toBase64`, `toHex`, `setFrom…` | <Brief /> |
+| [23.3.3 Abstract Operations for Uint8Array Objects](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-uint8array-objects) | ValidateUint8Array, FromBase64, FromHex | <Brief /> |
+| [25.3 DataView Objects](https://tc39.es/ecma262/2026/#sec-dataview-objects) | числа любого типа с любого байта; разделы 1–8 | <Full /> |
+| [25.3.1 Abstract Operations For DataView Objects](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-dataview-objects) | GetViewValue и SetViewValue по шагам | <Brief /> |
+| [25.3.2 The DataView Constructor](https://tc39.es/ecma262/2026/#sec-dataview-constructor) | только буфер; смещение и длина; раздел 3 | <Brief /> |
+| [25.3.3 Properties of the DataView Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-dataview-constructor) | только `prototype` | <Brief /> |
+| [25.3.4 Properties of the DataView Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-dataview-prototype-object) | 22 метода, три геттера | <Brief /> |
+| [25.3.5 Properties of DataView Instances](https://tc39.es/ecma262/2026/#sec-properties-of-dataview-instances) | обычный объект со слотами, без индексов | <Brief /> |
+| [MDN: DataView](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView) | порядок байтов явно; big-endian по умолчанию | <Full /> |
+| [MDN: DataView.prototype.buffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/buffer) | буфер под видом | <Brief /> |
+| [MDN: DataView.prototype.byteLength](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/byteLength) | за границей буфера — `TypeError` | <Brief /> |
+| [MDN: DataView.prototype.byteOffset](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/byteOffset) | смещение в буфере | <Brief /> |
+| [MDN: DataView() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/DataView) | только буфер; раздел 3 | <Full /> |
+| [MDN: DataView.prototype.getBigInt64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getBigInt64) | BigInt со знаком | <Brief /> |
+| [MDN: DataView.prototype.getBigUint64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getBigUint64) | BigInt без знака | <Brief /> |
+| [MDN: DataView.prototype.getFloat16()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getFloat16) | два байта, ~3 цифры | <Brief /> |
+| [MDN: DataView.prototype.getFloat32()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getFloat32) | IEEE 754, 4 байта; раздел 6 | <Full /> |
+| [MDN: DataView.prototype.getFloat64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getFloat64) | как Number | <Brief /> |
+| [MDN: DataView.prototype.getInt16()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getInt16) | со знаком: −2 вместо 65534 | <Brief /> |
+| [MDN: DataView.prototype.getInt32()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getInt32) | со знаком; высота BMP | <Brief /> |
+| [MDN: DataView.prototype.getInt8()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getInt8) | один байт, порядок не нужен | <Brief /> |
+| [MDN: DataView.prototype.getUint16()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getUint16) | по шагам GetViewValue; раздел 4 | <Full /> |
+| [MDN: DataView.prototype.getUint32()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getUint32) | размеры PNG | <Brief /> |
+| [MDN: DataView.prototype.getUint8()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/getUint8) | один байт | <Brief /> |
+| [MDN: DataView.prototype.setBigInt64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setBigInt64) | только BigInt | <Brief /> |
+| [MDN: DataView.prototype.setBigUint64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setBigUint64) | только BigInt | <Brief /> |
+| [MDN: DataView.prototype.setFloat16()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setFloat16) | округление к чётному | <Brief /> |
+| [MDN: DataView.prototype.setFloat32()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setFloat32) | округление до 32 бит; раздел 6 | <Full /> |
+| [MDN: DataView.prototype.setFloat64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setFloat64) | восемь байтов без потерь | <Brief /> |
+| [MDN: DataView.prototype.setInt16()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setInt16) | как ToInt16 | <Brief /> |
+| [MDN: DataView.prototype.setInt32()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setInt32) | как ToInt32 | <Brief /> |
+| [MDN: DataView.prototype.setInt8()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setInt8) | один байт | <Brief /> |
+| [MDN: DataView.prototype.setUint16()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setUint16) | по шагам SetViewValue; раздел 4 | <Full /> |
+| [MDN: DataView.prototype.setUint32()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setUint32) | big-endian без второго аргумента | <Brief /> |
+| [MDN: DataView.prototype.setUint8()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView/setUint8) | один байт; заголовок «Карточек» | <Brief /> |
+| [MDN: Float16Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float16Array) | 2 байта, максимум 65504; раздел 7 | <Full /> |
+| [MDN: Float16Array() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float16Array/Float16Array) | пять форм, как у видов дня 20 | <Brief /> |
+| [MDN: Uint8Array.fromBase64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/fromBase64) | алфавит и `lastChunkHandling`; раздел 12 | <Full /> |
+| [MDN: Uint8Array.fromHex()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/fromHex) | чётная длина, только 0–9a–fA–F | <Brief /> |
+| [MDN: Uint8Array.prototype.setFromBase64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/setFromBase64) | `{ read, written }`; раздел 13 | <Brief /> |
+| [MDN: Uint8Array.prototype.setFromHex()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/setFromHex) | запись в готовый массив | <Brief /> |
+| [MDN: Uint8Array.prototype.toBase64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/toBase64) | `alphabet`, `omitPadding`; раздел 12 | <Full /> |
+| [MDN: Uint8Array.prototype.toHex()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/toHex) | строчные, по две цифры | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// DataView: любые типы с любого байта, порядок — явно
+// new DataView(buffer, byteOffset, byteLength)     // только буфер; без длины — до конца
+// dv.getUint16(i)          — big-endian (undefined → false)
+// dv.getUint16(i, true)    — little-endian, как у нашей машины
+// dv.setFloat32(i, x, true); dv.getBigInt64(i)    // BigInt — только BigInt
+// за концом вида — RangeError (valueOf всё равно вызван); вид за границей буфера — TypeError
+
+// Float16Array / Math.f16round: 2 байта, ~3 цифры, максимум 65504, половина — к чётному
+
+// base64: u8.toBase64({ alphabet: "base64url", omitPadding: true })
+// Uint8Array.fromBase64(s, { lastChunkHandling: "loose" | "strict" | "stop-before-partial" })
+// hex: u8.toHex() → строчные; Uint8Array.fromHex(s) — чётная длина
+// setFromBase64 / setFromHex → { read, written }; при ошибке успетое уже записано
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Какой порядок байтов у `dv.getUint32(0)` и у `new Uint32Array(buf)[0]`?
+   <Answer>`DataView` без второго аргумента — big-endian (ToBoolean от `undefined`).
+   Вид — порядок машины, поле \[\[LittleEndian\]\] агента; у нас это little-endian.</Answer>
+2. Почему `dv.getUint16(3)` на четырёх байтах — `RangeError`, а у отсоединённого
+   буфера — `TypeError`?
+   <Answer>Число не помещается до конца вида — шаг 11 GetViewValue. Вид без байтов — шаг 8, IsViewOutOfBounds.</Answer>
+3. Что окажется в `Float16Array` после записи 2049 и 65520?
+   <Answer>2048 — после 2048 шаг 2, и половина уходит к чётному; Infinity — больше максимума 65504 с
+   запасом.</Answer>
+4. Чем «loose» отличается от «strict» у `fromBase64`?
+   <Answer>«loose» прощает неполный последний кусок без «=» и лишние биты, «strict» бросает
+   `SyntaxError`.</Answer>
+5. Что записано в массив, если `setFromBase64` бросил `SyntaxError`?
+   <Answer>Всё, что успели разобрать до ошибки: шаг 19 пишет байты, шаг 20 только потом бросает.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView)
+(DataView и его методы, Float16Array, TypedArray, Uint8Array.fromBase64() и соседние методы, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

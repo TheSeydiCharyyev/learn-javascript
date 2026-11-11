@@ -1,14 +1,17 @@
 // The highlighter must only wrap tokens: strip the tags and you get the original code back.
 // node tools/test-highlight.mjs
+// The highlighter is the site's, run at build time: site/lib/highlight.ts, turned into JavaScript here by the TypeScript
+// of site/node_modules (until 11.11.2026 this tested js/highlight.js, which the HTML pages ran in the browser — gone
+// with them, stage 4 of the move to Next.js).
 import fs from 'node:fs';
 import path from 'node:path';
-import vm from 'node:vm';
+import { createRequire } from 'node:module';
 
-const file = path.join(import.meta.dirname, '..', 'js', 'highlight.js');
-const sandbox = { window: {}, document: { readyState: 'complete', querySelectorAll: () => [], addEventListener: () => {} } };
-vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox);
-const highlight = sandbox.window.highlightCode;
+const ROOT = path.join(import.meta.dirname, '..');
+const ts = createRequire(import.meta.url)(path.join(ROOT, 'site', 'node_modules', 'typescript'));
+const source = fs.readFileSync(path.join(ROOT, 'site', 'lib', 'highlight.ts'), 'utf8');
+const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
+const { highlightCode: highlight } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 
 const strip = (html) => html.replace(/<[^>]+>/g, '')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');

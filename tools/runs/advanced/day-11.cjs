@@ -205,7 +205,7 @@ const hasAll = (text, words) => words.every((w) => text.includes(w));
     for (const [i, blk] of blocks.entries()) {
       const first = blk.code.split('\n')[0];
       if (QUOTES[first]) {
-        const quoted = fs.readFileSync(path.join(ROOT, QUOTES[first]), 'utf8');
+        const quoted = builtSite.htmlOfFile(path.join(ROOT, QUOTES[first]));
         // the quoted page marks some blocks with data-page, so the tag may carry attributes
         const code = [...quoted.matchAll(/<pre class="code js"[^>]*>([\s\S]*?)<\/pre>/g)].map((m) => textOf(m[1])).join('\n');
         const lines = blk.code.split('\n').slice(1).map((l) => l.trim()).filter(Boolean);

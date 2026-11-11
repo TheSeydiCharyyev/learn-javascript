@@ -6,12 +6,15 @@
 //   NODE_PATH=... node tools/check-pages.cjs 3                 only day 3 of essentials
 //   NODE_PATH=... node tools/check-pages.cjs intermediate 3    only day 3 of course 2
 // The course folder is optional and defaults to essentials.
+// The pages are the built site (site/out, `pnpm build` in site/ first — stage 4 of the move to Next.js, 09.11.2026),
+// served by tools/lib/site.cjs: only the pages that are written (day 21 of Advanced has only its lecture).
 // Playwright comes from the goose folder; the browser is the installed Chrome.
 const { chromium } = require('playwright');
 const path = require('node:path');
 const fs = require('node:fs');
+const site = require('./lib/site.cjs');
 
-const ROOT = path.join(__dirname, '..');
+const ROOT = site.ROOT;
 const COURSES = ['essentials', 'intermediate', 'advanced', 'web-apis'];
 const args = process.argv.slice(2);
 const wrong = args.filter((a) => !COURSES.includes(a) && !/^\d+$/.test(a));
@@ -21,14 +24,17 @@ const only = args.filter((a) => /^\d+$/.test(a)).map(Number);
 const days = (fs.existsSync(path.join(ROOT, COURSE)) ? fs.readdirSync(path.join(ROOT, COURSE)) : [])
   .filter((d) => /^day-\d+$/.test(d))
   .filter((d) => !only.length || only.includes(Number(d.slice(4))));
+// a page as the course folder names it ("day-01/en/lecture.html"), from the written pages of each folder
 const PAGES = days.flatMap((d) => ['', 'en/']
   .filter((sub) => fs.existsSync(path.join(ROOT, COURSE, d, sub)))
-  .flatMap((sub) => ['lecture', 'student', 'tasks'].map((f) => `${d}/${sub}${f}.html`)));
+  .flatMap((sub) => site.dayPages(`${COURSE}/${d}${sub ? '/en' : ''}`).map((rel) => rel.slice(COURSE.length + 1))));
 const SIZES = [[360, 780], [414, 800], [768, 1024], [1280, 900], [640, 360]];
-const URL = 'file:///' + path.join(ROOT, COURSE).replace(/\\/g, '/') + '/';
 
 (async () => {
   if (!PAGES.length) { console.log(`no day folders found in ${COURSE}/`); process.exit(1); }
+  for (const p of PAGES) site.builtFile(`${COURSE}/${p}`); // built and fresh, or stop here
+  const { base, close } = await site.serve();
+  const URL = `${base}${COURSE}/`;
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const problems = [];
   for (const [w, h] of SIZES) {
@@ -75,6 +81,7 @@ const URL = 'file:///' + path.join(ROOT, COURSE).replace(/\\/g, '/') + '/';
     await ctx.close();
   }
   await browser.close();
+  await close();
   console.log(problems.length ? 'PROBLEMS:\n  ' + problems.join('\n  ') : `${PAGES.length} pages: no overflow, no JS errors, every code block highlighted`);
   process.exit(problems.length ? 1 : 0);
 })();

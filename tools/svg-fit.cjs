@@ -1,12 +1,18 @@
 // Every <text> of every figure.scheme svg: inside the viewBox, and inside the rect it sits in (if any).
 //   node tools/svg-fit.cjs <page.html>
-// Playwright (and live-server) come from NODE_PATH, see the header of tools/check-day.sh.
+// The page is the built site (site/out, `pnpm build` in site/ first — stage 4 of the move to Next.js, 09.11.2026),
+// served by tools/lib/site.cjs; the argument is still the page's path (essentials/day-07/lecture.html).
+// Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const path = require('node:path');
+const site = require('./lib/site.cjs');
 (async () => {
   const b = await chromium.launch({ headless: true, channel: 'chrome' });
   const p = await b.newPage({ viewport: { width: 1200, height: 900 } });
-  await p.goto('file:///' + path.resolve(process.argv[2]).replace(/\\/g, '/'));
+  const rel = path.relative(site.ROOT, path.resolve(process.argv[2])).replace(/\\/g, '/');
+  site.builtFile(rel); // built and fresh, or stop here
+  const { base, close } = await site.serve();
+  await p.goto(base + rel);
   await p.waitForTimeout(100);
   const out = await p.evaluate(() => {
     const res = [];
@@ -28,4 +34,5 @@ const path = require('node:path');
   });
   console.log(out.join('\n'));
   await b.close();
+  await close();
 })();

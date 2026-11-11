@@ -1,0 +1,251 @@
+---
+title: День 21 — задания
+---
+
+# День 21. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в папке `day-21` курса 3. Каждое предсказание — до запуска, каждое «почему» — с номером раздела и шага. `SharedArrayBuffer` и `Atomics` не трогаем — они на дне 22; `btoa`, `atob` и `TextEncoder` — курс 4.</Subtitle>
+
+## Разминка
+
+<Task title="1. Смещение и порядок" level="easy" time="7">
+<Goal>считать, какие байты буфера видит `DataView` со смещением.</Goal>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const dv = new DataView(new ArrayBuffer(6), 1);
+dv.setInt16(0, -2);
+dv.setUint32(1, 0xA1B2C3D4, true);
+console.log(new Uint8Array(dv.buffer).join(" "), dv.byteLength, dv.getInt16(0), dv.getUint16(3, true).toString(16));
+console.log(run(() => dv.getUint32(2)), run(() => dv.setUint8(5, 1)), run(() => dv.getFloat64(-1)), dv.getInt8(4));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждой записи названы байты буфера, в которые она легла, и объяснено, почему `getInt16(0)` —
+  уже не −2;
+- для трёх ошибок второй строки назван шаг GetViewValue или SetViewValue, который бросил.
+</Criteria>
+</Task>
+
+<Task title="2. Что считается true" level="easy" time="7">
+<Goal>предсказывать порядок по ToBoolean и округление float32.</Goal>
+
+```js
+const dv = new DataView(new ArrayBuffer(4));
+dv.setFloat32(0, -0.5);
+const orders = [undefined, null, 0, "", "0", NaN, {}, -1, 0n];
+console.log(new Uint8Array(dv.buffer).join(" "), orders.map((o) => dv.getUint16(0, o).toString(16)).join(" "));
+dv.setFloat32(0, 16777217);
+console.log(dv.getFloat32(0), Math.fround(16777217) === 16777216, dv.getUint8(3), dv.getUint8(0));
+```
+
+<Criteria>
+- предсказаны две строки;
+- для каждого из девяти значений `orders` назван ответ ToBoolean (день 5) и шаг GetViewValue, где он
+  нужен;
+- объяснено, почему −0.5 — это байты 191 0 0 0 и почему 16777217 не помещается во float32, а уходит
+  именно к 16777216.
+</Criteria>
+</Task>
+
+<Task title="3. base64 по шесть бит" level="easy" time="6">
+<Goal>кодировать и разбирать base64 руками.</Goal>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+console.log(Uint8Array.of(77, 97, 110).toBase64(), Uint8Array.of(77, 97).toBase64(), Uint8Array.of(77).toBase64({ omitPadding: true }), Uint8Array.of(255, 254).toBase64({ alphabet: "base64url" }));
+console.log(Uint8Array.fromBase64("TW E\n=").join(), Uint8Array.fromBase64("TWF=").join(), run(() => Uint8Array.fromBase64("TWF=", { lastChunkHandling: "strict" })), run(() => Uint8Array.fromBase64("T===")), run(() => Uint8Array.fromBase64("TWE", { lastChunkHandling: "strict" })));
+```
+
+<Criteria>
+- предсказаны две строки; «Man» разложено на четыре куска по 6 бит на бумаге;
+- объяснено, почему «TWF=» в «loose» дало те же байты, что «TWE=»;
+- для каждой из трёх ошибок назван шаг FromBase64 (23.3.3.7) или DecodeFinalBase64Chunk (23.3.3.5).
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. Размер картинки" level="medium" time="14">
+<Goal>читать заголовок файла из байтов или из base64.</Goal>
+
+Напишите `imageSize(input)`: `input` — байты (`Uint8Array`, возможно подмассив большого
+файла) или строка base64. По подписи узнайте формат и верните `{ type, width, height }`. PNG — подпись
+89 50 4E 47 0D 0A 1A 0A, ширина и высота — `Uint32` big-endian с байтов 16 и 20. GIF — «GIF8» в
+начале, `Uint16` little-endian с байтов 6 и 8. BMP — «BM», `Int32` little-endian с байтов
+18 и 22, высота по модулю. Другой формат или слишком короткий файл — `null`, без исключений.
+
+<Example>
+```js
+const png = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAIAAAA=";
+imageSize(png);                                                     // { type: "png", width: 640, height: 480 }
+imageSize("Qk1GAAAAAAAAADYAAAAoAAAAAwAAAP7///8BABgAAAAAABAAAAA=");   // { type: "bmp", width: 3, height: 2 }
+imageSize(Uint8Array.of(71, 73, 70, 56, 57, 97, 64, 1, 200, 0));    // { type: "gif", width: 320, height: 200 }
+imageSize("SGVsbG8=");                                              // null
+imageSize(Uint8Array.fromBase64(png).subarray(0, 20));              // null
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- тот же PNG с седьмого байта файла из 100 байтов (`file.subarray(7)`) даёт 640 × 480; объяснено, что
+  вернул бы `new DataView(bytes.buffer).getUint32(16)` и почему;
+- GIF строкой base64 «R0lGODlhQAHIAIAAAA==» даёт 320 × 200; короткий файл не бросает `RangeError`.
+</Criteria>
+</Task>
+
+<Task title="5. Переставить байты" level="medium" time="12">
+<Goal>переводить данные чужого порядка в порядок машины.</Goal>
+
+Напишите `swapBytes(view)`: переставляет на месте байты каждого элемента вида любого из двенадцати типов и
+возвращает тот же вид. Один `DataView` на байты самого вида; элементы читать и писать целыми того же
+размера.
+
+<Example>
+```js
+Array.from(swapBytes(Uint16Array.of(0x0102, 0xFF00)));   // [513, 255]
+Array.from(swapBytes(Int16Array.of(-2)));                 // [-257]
+Array.from(swapBytes(Uint8Array.of(1, 2)));               // [1, 2]
+String(swapBytes(BigInt64Array.of(1n))[0]);               // "72057594037927936"
+swapBytes(swapBytes(Float32Array.of(0.1)))[0];            // 0.10000000149011612
+const a = Uint16Array.of(1, 2, 3);
+swapBytes(a.subarray(1)).length;                          // 2
+Array.from(a);                                            // [1, 512, 768]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на случайных байтах всех двенадцати видов: после одного вызова байты каждого элемента идут в обратном порядке,
+  после двух — как были;
+- объяснено, почему элементы `Float32Array` нельзя переставлять через `getFloat32` и
+  `setFloat32`: Chrome превратил байты 01 00 80 7F в 7F C0 00 01, а не в 7F 80 00 01; назван шаг
+  NumericToRawBytes, который это разрешает.
+</Criteria>
+</Task>
+
+<Task title="6. Хватит ли Float16" level="medium" time="12">
+<Goal>выбирать вид с плавающей точкой по допустимой ошибке.</Goal>
+
+Напишите `pickFloat(values, eps)`: самый маленький из `Float16Array`, `Float32Array` и
+`Float64Array`, в котором каждое значение сохраняется с ошибкой не больше `eps`. Округление
+проверяйте `Math.f16round` и `Math.fround`, без создания видов.
+
+<Example>
+```js
+pickFloat([0.5, 0.25, 1024], 0).name;   // "Float16Array"
+pickFloat([0.1], 0.001).name;           // "Float16Array"
+pickFloat([0.1], 1e-6).name;            // "Float32Array"
+pickFloat([0.1], 0).name;               // "Float64Array"
+pickFloat([70000], 1).name;             // "Float32Array"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- `pickFloat([Infinity, -0, NaN], 0)` — `Float16Array`; объяснено, почему одна проверка
+  `Math.abs(r - x) <= eps` отвергла бы `Infinity` и `NaN`;
+- 2049 при `eps` 0.5 требует `Float32Array`, а 2050 — нет; объяснено почему;
+- на 378 379 значениях `Math.f16round` совпадает с записью во `Float16Array`; названы шаги 21.3.2.18 и
+  NumericToRawBytes, которые делают их одинаковыми.
+</Criteria>
+</Task>
+
+<Task title="7. «Карточки 2.0»: ссылка с проверкой" level="medium" time="12">
+<Goal>принимать чужую ссылку и не падать на испорченной.</Goal>
+
+Напишите `packProgress(counts)` — ссылку по разделу 17 лекции (версия 1 — байт, число карточек —
+`Uint16` big-endian, потом счётчики, всё — base64url без «=») — и `unpackProgress(link)`:
+`Uint8Array` счётчиков или `null`, если строка не base64url, короче заголовка, версия не 1 или
+число карточек не совпало. Исключений наружу нет.
+
+<Example>
+```js
+packProgress(Uint8Array.of(3, 0, 255, 12));   // "AQAEAwD_DA"
+Array.from(unpackProgress("AQAEAwD_DA"));     // [3, 0, 255, 12]
+unpackProgress("AgAEAwD_DA");                 // null — версия 2
+unpackProgress("AQAFAwD_DA");                 // null — заявлено 5 карточек, пришло 4
+unpackProgress("AQAEAwD/DA");                 // null — «/» нет в base64url
+unpackProgress("AQ");                         // null — нет заголовка
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- 1000 случайных наборов из 0–39 счётчиков проходят туда и обратно, а в ссылках только A–Z, a–z, 0–9, «-» и «\_»;
+- объяснено, почему `lastChunkHandling: "strict"` не прочтёт эти ссылки: по MDN
+  [Uint8Array.fromBase64()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/fromBase64)
+  в этом режиме «the last chunk must be exactly 4 characters long with padding = characters, and the overflow bits
+  must be 0»;
+- результат — копия: `byteOffset` 0, а в его буфере только счётчики; объяснено, чем подмассив
+  `subarray(3)` опасен для `DataView` (лекция, раздел 11).
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. base64 своими руками" level="hard" time="10">
+<Goal>собрать base64 из битовых операций.</Goal>
+
+Напишите `myToBase64(bytes, options)` без `toBase64` и `btoa`: каждые три байта — 24 бита,
+четыре куска по 6 (схема раздела 12 лекции), алфавит A–Z, a–z, 0–9 и «+/» или «-\_», «=» до кратности четырём,
+если не `omitPadding`.
+
+<Example>
+```js
+myToBase64(Uint8Array.of(77, 97, 110));                                                  // "TWFu"
+myToBase64(Uint8Array.of(77, 97));                                                       // "TWE="
+myToBase64(Uint8Array.of(77));                                                           // "TQ=="
+myToBase64(new Uint8Array(0));                                                           // ""
+myToBase64(Uint8Array.of(251, 255, 1), { alphabet: "base64url", omitPadding: true });   // "-_8B"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- на 1000 случайных подмассивах длиной 0–50 и четырёх наборах настроек результат совпадает с
+  `toBase64`;
+- объяснено, какие биты последних одного или двух байтов уходят в последние знаки, откуда берутся один или два
+  «=» и на какой документ ссылается шаг 9 раздела 23.3.2.3.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: setFromHex" level="hard" time="10">
+<Goal>читать алгоритм, который заранее не разбирали.</Goal>
+
+Прочитайте Uint8Array.prototype.setFromHex
+([23.3.2.2](https://tc39.es/ecma262/2026/#sec-uint8array.prototype.setfromhex)) вместе с FromHex (23.3.3.8) и
+предскажите:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const a = new Uint8Array(3);
+console.log(JSON.stringify(a.setFromHex("0102030405")), a.join());
+const b = new Uint8Array(4);
+console.log(run(() => b.setFromHex("0a0bzz0c")), b.join());
+const c = new Uint8Array(4);
+console.log(run(() => c.setFromHex("0a0b0")), c.join(), run(() => c.setFromHex(255)));
+const rab = new ArrayBuffer(4, { maxByteLength: 4 });
+const d = new Uint8Array(rab, 0, 4);
+rab.resize(2);
+console.log(run(() => d.setFromHex("")), JSON.stringify(new Uint8Array(0).setFromHex("zz")), run(() => Uint8Array.fromHex("zz")));
+```
+
+<Criteria>
+- предсказаны четыре строки;
+- названы шаги setFromHex, из-за которых `b` получил два байта, хотя метод бросил, и шаг FromHex, из-за
+  которого `c` не получил ни одного;
+- объяснено, почему «zz» прошло в пустой массив, но не в `fromHex`, и какие шаги бросают
+  `TypeError` в третьей и четвёртой строках.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array/fromBase64)
+(Uint8Array.fromBase64(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

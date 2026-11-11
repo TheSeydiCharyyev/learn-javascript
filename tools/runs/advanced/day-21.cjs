@@ -25,13 +25,72 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-21');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture', 'student'];
+const PAGES = ['lecture', 'student', 'tasks'];
 // a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
-const EXPECT = {};
+const EXPECT = {
+  'tasks #0': ['0 255 212 195 178 161 5 -44 a1b2', 'RangeError RangeError RangeError -95'],
+  'tasks #1': ['191 0 0 0 bf00 bf00 bf00 bf00 bf bf00 bf bf bf00', '16777216 true 0 75'],
+  'tasks #2': ['TWFu TWE= TQ __4=', '77,97 77,97 SyntaxError SyntaxError SyntaxError'],
+  'tasks #8': ['{"read":6,"written":3} 1,2,3', 'SyntaxError 10,11,0,0', 'SyntaxError 0,0,0,0 TypeError', 'TypeError {"read":0,"written":0} SyntaxError'],
+};
 // Examples of the tasks call functions the student writes. These reference solutions make every
 // "expression;   // value" line of an example checkable: the value must equal the comment (before " — ").
 // No template literals inside: Node reads these strings as templates first.
-const SOLUTIONS = {};
+const SOLUTIONS = {
+  imageSize: `function imageSize(input) {
+  const bytes = typeof input === "string" ? Uint8Array.fromBase64(input) : input;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const hex = bytes.subarray(0, 8).toHex();
+  if (hex === "89504e470d0a1a0a" && bytes.length >= 24) return { type: "png", width: dv.getUint32(16), height: dv.getUint32(20) };
+  if (hex.startsWith("47494638") && bytes.length >= 10) return { type: "gif", width: dv.getUint16(6, true), height: dv.getUint16(8, true) };
+  if (hex.startsWith("424d") && bytes.length >= 26) return { type: "bmp", width: dv.getInt32(18, true), height: Math.abs(dv.getInt32(22, true)) };
+  return null;
+}`,
+  swapBytes: `function swapBytes(view) {
+  const size = view.BYTES_PER_ELEMENT;
+  if (size === 1) return view;
+  const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);
+  const get = { 2: "getUint16", 4: "getUint32", 8: "getBigUint64" }[size];
+  const set = get.replace("get", "set");
+  for (let i = 0; i < view.byteLength; i += size) dv[set](i, dv[get](i, true), false);
+  return view;
+}`,
+  pickFloat: `function pickFloat(values, eps) {
+  const kinds = [[Float16Array, Math.f16round], [Float32Array, Math.fround]];
+  for (const [Kind, round] of kinds) {
+    if (values.every((x) => { const r = round(x); return Object.is(r, x) || Math.abs(r - x) <= eps; })) return Kind;
+  }
+  return Float64Array;
+}`,
+  packProgress: `function packProgress(counts) {
+  const packed = new Uint8Array(3 + counts.length);
+  const head = new DataView(packed.buffer);
+  head.setUint8(0, 1);
+  head.setUint16(1, counts.length);
+  packed.set(counts, 3);
+  return packed.toBase64({ alphabet: "base64url", omitPadding: true });
+}`,
+  unpackProgress: `function unpackProgress(link) {
+  let bytes;
+  try { bytes = Uint8Array.fromBase64(link, { alphabet: "base64url" }); } catch { return null; }
+  if (bytes.length < 3) return null;
+  const head = new DataView(bytes.buffer);
+  if (head.getUint8(0) !== 1 || head.getUint16(1) !== bytes.length - 3) return null;
+  return bytes.slice(3);
+}`,
+  myToBase64: `function myToBase64(bytes, { alphabet = "base64", omitPadding = false } = {}) {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" + (alphabet === "base64url" ? "-_" : "+/");
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const left = bytes.length - i;
+    const n = (bytes[i] << 16) | ((left > 1 ? bytes[i + 1] : 0) << 8) | (left > 2 ? bytes[i + 2] : 0);
+    out += abc[n >> 18] + abc[(n >> 12) & 63];
+    out += left > 1 ? abc[(n >> 6) & 63] : omitPadding ? "" : "=";
+    out += left > 2 ? abc[n & 63] : omitPadding ? "" : "=";
+  }
+  return out;
+}`,
+};
 const NEEDS = {};
 const checkable = (code) => {
   const direct = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
@@ -205,6 +264,73 @@ const a9 = new Uint8Array(9);
 const r9 = a9.setFromBase64("PGI+ TURO PC9i Pg==");
 console.log(JSON.stringify(r8), a8.join(), JSON.stringify(r9), a9.join());`,
   ['{"read":9,"written":6} 60,98,62,77,68,78,0,0 {"read":14,"written":9} 60,98,62,77,68,78,60,47,98'], 'student homework 4: "PGI+ TURO PC9i Pg==" into 8 bytes — read 9 (the space counts), written 6; into 9 bytes — read 14, written 9', 'student-h4.html');
+  // the tasks: what the criteria ask to find, with the reference solutions (probe d21_tasks.txt before writing)
+  await told(`${SOLUTIONS.imageSize}
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const png = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAIAAAA=";
+const file = new Uint8Array(100);
+file.set(Uint8Array.fromBase64(png), 7);
+const bytes = file.subarray(7);
+console.log(JSON.stringify(imageSize(bytes)), new DataView(bytes.buffer).getUint32(16), JSON.stringify(imageSize("R0lGODlhQAHIAIAAAA==")));
+console.log(run(() => [new Uint8Array(0), Uint8Array.of(0x89, 0x50), Uint8Array.of(66, 77, 1), Uint8Array.of(71, 73, 70, 56), "", "iVBORw0KGgo="].map(imageSize).join()));`,
+  ['{"type":"png","width":640,"height":480} 3401 {"type":"gif","width":320,"height":200}', 'ok'],
+  'task 4: the PNG from byte 7 of a 100-byte file — 640 × 480, while new DataView(bytes.buffer) reads 3401 from the start of the buffer; the GIF as base64 — 320 × 200; short files give null without an error', 'task4.html');
+  await told(`${SOLUTIONS.swapBytes}
+const kinds = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, BigInt64Array, BigUint64Array, Float16Array, Float32Array, Float64Array];
+let bad = 0, cases = 0;
+for (const K of kinds) for (let t = 0; t < 50; t++) {
+  cases++;
+  const s = K.BYTES_PER_ELEMENT;
+  const raw = Uint8Array.from({ length: s * 5 }, () => Math.floor(Math.random() * 256));
+  const v = new K(raw.slice().buffer);
+  swapBytes(v);
+  const once = new Uint8Array(v.buffer);
+  for (let i = 0; i < raw.length; i++) { const e = Math.floor(i / s) * s; if (once[i] !== raw[e + s - 1 - (i - e)]) bad++; }
+  swapBytes(v);
+  if (new Uint8Array(v.buffer).join() !== raw.join()) bad++;
+}
+const nanBytes = Uint8Array.of(0x01, 0x00, 0x80, 0x7F);
+const fdv = new DataView(nanBytes.buffer);
+fdv.setFloat32(0, fdv.getFloat32(0, true), false);
+const viaInt = Float32Array.from([0]);
+new Uint8Array(viaInt.buffer).set([0x01, 0x00, 0x80, 0x7F]);
+swapBytes(viaInt);
+console.log(cases, bad, nanBytes.join(" "), new Uint8Array(viaInt.buffer).join(" "));`,
+  ['600 0 127 192 0 1 127 128 0 1'],
+  'task 5: random bytes of all twelve kinds — once reverses every element, twice gives the bytes back; getFloat32/setFloat32 turned 01 00 80 7F into 7F C0 00 01, swapBytes gives 7F 80 00 01', 'task5.html');
+  await told(`${SOLUTIONS.pickFloat}
+const absOnly = (x) => Math.abs(Math.f16round(x) - x) <= 0;
+console.log([pickFloat([Infinity, -0, NaN], 0), pickFloat([2049], 0.5), pickFloat([2050], 0.5)].map((K) => K.name).join(" "), absOnly(Infinity), absOnly(NaN), absOnly(-0));
+let diff = 0, n = 0;
+for (let i = -70000; i <= 70000; i += 0.37) { n++; const x = i * (1 + Math.random()); if (!Object.is(Math.f16round(x), Float16Array.of(x)[0])) diff++; }
+console.log(n, diff);`,
+  ['Float16Array Float32Array Float16Array false false true', '378379 0'],
+  'task 6: [Infinity, -0, NaN] fit Float16Array, the bare Math.abs check rejects Infinity and NaN; 2049 at eps 0.5 needs Float32Array, 2050 does not; Math.f16round = a write into Float16Array on 378379 values', 'task6.html');
+  await told(`${SOLUTIONS.packProgress}
+${SOLUTIONS.unpackProgress}
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+let bad = 0;
+for (let t = 0; t < 1000; t++) {
+  const counts = Uint8Array.from({ length: Math.floor(Math.random() * 40) }, () => Math.floor(Math.random() * 256));
+  const link = packProgress(counts);
+  if (!/^[A-Za-z0-9_-]*$/.test(link) || unpackProgress(link).join() !== counts.join()) bad++;
+}
+const back = unpackProgress(packProgress(Uint8Array.of(5, 6)));
+console.log(bad, run(() => Uint8Array.fromBase64("AQAEAwD_DA", { alphabet: "base64url", lastChunkHandling: "strict" })), back.byteOffset, back.buffer.byteLength);
+const sub = Uint8Array.fromBase64(packProgress(Uint8Array.of(5, 6)), { alphabet: "base64url" }).subarray(3);
+console.log(new DataView(sub.buffer).getUint8(0), new DataView(back.buffer).getUint8(0));`,
+  ['0 SyntaxError 0 2', '1 5'],
+  'task 7: 1000 random sets go there and back, links only of A–Z a–z 0–9 - _; strict cannot read a link without "="; the result is a copy (byteOffset 0, a buffer of the counters only) — a DataView over a subarray\'s buffer reads the version byte 1', 'task7.html');
+  await told(`${SOLUTIONS.myToBase64}
+let bad = 0, cases = 0;
+for (let t = 0; t < 1000; t++) {
+  const big = Uint8Array.from({ length: 60 }, () => Math.floor(Math.random() * 256));
+  const start = Math.floor(Math.random() * 10);
+  const bytes = big.subarray(start, start + Math.floor(Math.random() * 51));
+  for (const opts of [undefined, { alphabet: "base64url" }, { omitPadding: true }, { alphabet: "base64url", omitPadding: true }]) { cases++; if (myToBase64(bytes, opts) !== bytes.toBase64(opts)) bad++; }
+}
+console.log(cases, bad);`,
+  ['4000 0'], 'task 8: on 1000 random subarrays of 0–50 bytes and four sets of options myToBase64 = toBase64', 'task8.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -347,6 +473,35 @@ console.log(JSON.stringify(r8), a8.join(), JSON.stringify(r9), a9.join());`,
       && ['DataView, Uint8Array.prototype.setFromBase64()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 3
       && !/tc39\.es\/ecma262\/2026\/#/.test(notes),
     'student: the quotes of MDN DataView and setFromBase64() as MDN writes them; the footer names both and ECMA-262 2026; MDN is linked there and twice in the text; section numbers without links');
+  }
+
+  // the tasks: the steps the criteria ask for, the MDN page they quote, the links and the footer
+  {
+    const tsteps = [
+      ['sec-frombase64', 'If chunkLength < 2, then', '10.e.i'],
+      ['sec-decodefinalbase64chunk', 'If throwOnExtraBits is true and bytes [2] ≠ 0, throw a SyntaxError exception', '6'],
+      ['sec-numerictorawbytes', 'converting value to IEEE 754-2019 binary16 format using roundTiesToEven mode', '1.a'],
+      ['sec-uint8array.prototype.setfromhex', 'If string is not a String, throw a TypeError exception', '3'],
+      ['sec-uint8array.prototype.setfromhex', 'If IsTypedArrayOutOfBounds (taRecord) is true, throw a TypeError exception', '5'],
+      ['sec-uint8array.prototype.setfromhex', 'Let result be FromHex (string, byteLength)', '7'],
+      ['sec-uint8array.prototype.setfromhex', 'Perform SetUint8ArrayBytes (into, bytes)', '12'],
+      ['sec-uint8array.prototype.setfromhex', 'If result. [[Error]] is not none, then', '13'],
+      ['sec-fromhex', 'Repeat, while read < length and the number of elements in bytes < maxLength', '6'],
+    ];
+    const twrong = tsteps.filter(([id, needle, n]) => at(id, needle).join() !== n).map(([id, needle, n]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${n}`);
+    check(twrong.length === 0 && num('sec-frombase64') === '23.3.3.7' && num('sec-decodefinalbase64chunk') === '23.3.3.5' && num('sec-fromhex') === '23.3.3.8'
+      && f('sec-uint8array.prototype.tobase64').includes('the base64 encoding specified in section 4 of RFC 4648'),
+    `tasks: ECMA-262 — FromBase64 10.e.i ("T==="), DecodeFinalBase64Chunk 6 ("TWF=" strict), NumericToRawBytes 1.a (float16, as Math.f16round step 4), setFromHex 3/5/7/12/13 and FromHex 6 (task 9); 23.3.3.5, 23.3.3.7, 23.3.3.8; toBase64 step 9 — RFC 4648, section 4 ${twrong.join('; ')}`);
+    const fb = plain(mdn('reference/global_objects/uint8array/frombase64'));
+    const tasksHtml = read('advanced/day-21/tasks.html');
+    const quote = 'the last chunk must be exactly 4 characters long with padding = characters, and the overflow bits must be 0';
+    const tAnchors = [...new Set([...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(fb.includes(quote) && flat(tasksHtml).includes(`«${quote}»`)
+      && tAnchors.every((a) => spec.includes(`id="${a}"`)) && tNamed.length === 1 && tNamed.every(([id, n]) => num(id) === n)
+      && ['Uint8Array.fromBase64()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => tFooter.includes(s)) && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 2,
+    'tasks: MDN fromBase64() — strict wants «the last chunk … exactly 4 characters long with padding = characters, and the overflow bits must be 0»; the tc39.es anchor exists with its number (23.3.2.2); the footer names fromBase64() and ECMA-262 2026');
   }
 
   // the reference table holds every row of the plan as a link with its mark, every anchor of the lecture exists

@@ -1,6 +1,6 @@
 // The home page's lists, made at build time from the plans in tools/ (stage 3 of the move, 09.11.2026): the course
-// cards, the menu and the module cards, once in Russian and once in English — what tools/build-index.mjs writes into
-// index.html, from the same data (plan-days.mjs, plan-modules.mjs, plan-en.mjs, home-data.mjs). A day is ready when
+// cards, the menu and the module cards, once in Russian and once in English — what tools/build-index.mjs wrote into
+// index.html (removed 11.11.2026), from the plans: plan-days.mjs, plan-modules.mjs, plan-en.mjs, home-data.mjs. A day is ready when
 // its three pages are written (HTML or MDX); the English list links to a day's en/ pages when it has them, otherwise
 // to the Russian ones, its title marked RU.
 import path from "node:path";

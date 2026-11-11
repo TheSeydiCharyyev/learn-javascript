@@ -1,5 +1,5 @@
 // English names for the home page: day titles of courses 1-3 and module names, in the order of the plan.
-// The Russian ones live in plan-days.mjs and plan-modules.mjs; build-index.mjs uses both.
+// The Russian ones live in plan-days.mjs and plan-modules.mjs; the site's home page (site/lib/home-lists.ts) uses both.
 
 export const MODULE_NAMES_EN = {
   E1: 'Introduction and tools',

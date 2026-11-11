@@ -1,6 +1,7 @@
 // The data of the home page that is not in the plans: the courses (number, folder, name, a line about each), the
-// colour and icon of each module, and the words of the page in Russian and English. Written as HTML (entities):
-// tools/build-index.mjs puts it into index.html as is, the site (site/lib/home-lists.ts) decodes it into text.
+// colour and icon of each module, and the words of the page in Russian and English. Written as HTML (entities, from
+// the time tools/build-index.mjs put it into index.html — removed 11.11.2026, the home page is the site's): the site
+// (site/lib/home-lists.ts) decodes it into text.
 import { MODULE_NAMES_EN } from './plan-en.mjs';
 
 // the courses on the home page, in order; a course needs a day plan in plan-days.mjs and English titles in plan-en.mjs

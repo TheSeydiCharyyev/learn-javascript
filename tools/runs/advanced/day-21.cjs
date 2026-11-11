@@ -4,7 +4,8 @@
 // is Ashgabat time and Russian.
 //   node tools/runs/advanced/day-21.cjs            every block: code head, output; checks below
 //   node tools/runs/advanced/day-21.cjs --quiet    only the checks
-// Checks: a result-box right after a block equals its output; the cheatsheet runs without an error; the experiments
+// Checks: a result-box right after a block equals its output (the notes: the comment of every console.log line); the
+// homework of the notes in Chrome and the steps it asks for; the cheatsheet runs without an error; the experiments
 // the lecture only tells about (26 names of DataView.prototype and no getUint8Clamped, Math.f16round of 65519 and 1e-8,
 // the fraction bits and the largest numbers of the table of section 7, the alignment a view needs and DataView does
 // not, a detached buffer, whitespace in base64, the methods only Uint8Array has, the 44 bytes of the WAV header); what
@@ -24,7 +25,7 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-21');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
+const PAGES = ['lecture', 'student'];
 // a block of the tasks without a result-box: its output by "tasks #index"; the tasks ask to predict these
 const EXPECT = {};
 // Examples of the tasks call functions the student writes. These reference solutions make every
@@ -181,6 +182,29 @@ console.log(Uint8Array.fromBase64("AQ\\nID\\t").join(), Uint8Array.fromBase64(wa
 console.log("toBase64" in Uint8ClampedArray.prototype, typeof Int8Array.fromBase64, Object.getOwnPropertyNames(Uint8Array.prototype).sort().join(), Object.getOwnPropertyNames(Uint8Array).filter((n) => n.startsWith("from")).sort().join());`,
   ['1,2,3 44', 'false undefined BYTES_PER_ELEMENT,constructor,setFromBase64,setFromHex,toBase64,toHex fromBase64,fromHex'],
   'lecture 11, 12, 16: fromBase64 skips a newline and a tab; the WAV header is 44 bytes; toBase64, toHex, setFrom…, fromBase64, fromHex are own properties of Uint8Array only', 'uint8.html');
+  // the notes: the homework, in Chrome (probe d21_student.txt before writing)
+  await told(`const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const buf = new ArrayBuffer(4);
+const dv = new DataView(buf);
+dv.setUint32(0, 0x12345678);
+console.log(new Uint8Array(buf).join(" "), dv.getUint32(0, true).toString(16), new Uint32Array(buf)[0].toString(16), dv.getUint16(1).toString(16), run(() => dv.getUint32(1)));`,
+  ['18 52 86 120 78563412 78563412 3456 RangeError'], 'student homework 1: 0x12345678 big-endian — bytes 18 52 86 120; little-endian and the view read 78563412; getUint16(1) — 3456; getUint32(1) — RangeError', 'student-h1.html');
+  await told(`const lastBit = (x) => { const d = new DataView(new ArrayBuffer(2)); d.setFloat16(0, x); return d.getUint16(0) & 1; };
+console.log(Float16Array.of(1024.5, 1025.5, 4097, 4098, 4102).join(" "));
+console.log([1025, 2047, 4100, 8188].every((x) => Math.f16round(x) === x), [1024.5, 2047.5, 4098, 4101, 8190].some((x) => Math.f16round(x) === x));
+console.log([1024, 1025, 1026, 4096, 4100, 4104].map(lastBit).join(""));`,
+  ['1024 1026 4096 4096 4104', 'true false', '010010'], 'student homework 2: 1024.5 → 1024, 1025.5 → 1026, 4097 → 4096 (not a tie), 4098 → 4096, 4102 → 4104; steps 1 between 1024 and 2048, 4 between 4096 and 8192; the last bit of the fraction: 1025 and 4100 odd, 1024, 1026, 4096, 4104 even', 'student-h2.html');
+  await told(`const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const n = [1, 2, 3, 4, 5];
+console.log(n.map((k) => new Uint8Array(k).toBase64().length).join(" "), n.map((k) => new Uint8Array(k).toBase64({ omitPadding: true }).length).join(" "));
+console.log(Uint8Array.fromBase64("AQIDBAU").join(), run(() => Uint8Array.fromBase64("AQIDBAU", { lastChunkHandling: "strict" })), Uint8Array.fromBase64("AQIDBAU", { lastChunkHandling: "stop-before-partial" }).join());`,
+  ['4 4 4 8 8 2 3 4 6 7', '1,2,3,4,5 SyntaxError 1,2,3'], 'student homework 3: toBase64 of 1…5 bytes — 4 4 4 8 8 signs, without "=" — 2 3 4 6 7; "AQIDBAU": loose 1,2,3,4,5, strict SyntaxError, stop-before-partial 1,2,3', 'student-h3.html');
+  await told(`const a8 = new Uint8Array(8);
+const r8 = a8.setFromBase64("PGI+ TURO PC9i Pg==");
+const a9 = new Uint8Array(9);
+const r9 = a9.setFromBase64("PGI+ TURO PC9i Pg==");
+console.log(JSON.stringify(r8), a8.join(), JSON.stringify(r9), a9.join());`,
+  ['{"read":9,"written":6} 60,98,62,77,68,78,0,0 {"read":14,"written":9} 60,98,62,77,68,78,60,47,98'], 'student homework 4: "PGI+ TURO PC9i Pg==" into 8 bytes — read 9 (the space counts), written 6; into 9 bytes — read 14, written 9', 'student-h4.html');
   await b.close();
 
   // what the lecture says about the text of ECMA-262 2026
@@ -296,6 +320,33 @@ console.log("toBase64" in Uint8ClampedArray.prototype, typeof Int8Array.fromBase
     check(hasAll(plan, ['**21. DataView, порядок байтов, Float16 и base64.**', '**22. SharedArrayBuffer и Atomics.**']) && hasAll(ahead, ["day3: 21, re: /\\b(?:DataView|Float16Array)\\b", "day3: 22, re: /\\b(?:SharedArrayBuffer|Atomics)\\b/"])
       && read('docs/plan-0-overview.md').includes('## Курс 4. Web APIs'),
     'lecture 12, 18: the plan and check-ahead — DataView, Float16Array, base64 are day 21, SharedArrayBuffer and Atomics day 22; course 4 is the Web APIs (btoa, atob)');
+  }
+
+  // the notes: the steps and sections they name, the MDN pages they quote, the footer
+  {
+    const nsteps = [
+      ['sec-setviewvalue', 'Let getIndex be ? ToIndex (requestIndex)', '3'],
+      ['sec-setviewvalue', 'Set isLittleEndian to ToBoolean (isLittleEndian)', '6'],
+      ['sec-setviewvalue', 'If IsViewOutOfBounds (viewRecord) is true, throw a TypeError exception', '10'],
+      ['sec-setviewvalue', 'Perform SetValueInBuffer (view. [[ViewedArrayBuffer]], bufferIndex, type, numberValue, false, unordered, isLittleEndian)', '15'],
+      ['sec-isviewoutofbounds', 'If IsDetachedBuffer (view. [[ViewedArrayBuffer]]) is true, then', '3'],
+      ['sec-frombase64', 'If remaining = 1 and chunkLength = 2, or if remaining = 2 and chunkLength = 3, then', '10.i'],
+      ['sec-frombase64', 'Set read to index', '10.l.iv'],
+    ];
+    const nwrong = nsteps.filter(([id, needle, n]) => at(id, needle).join() !== n).map(([id, needle, n]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${n}`);
+    check(nwrong.length === 0 && num('sec-getviewvalue') === '25.3.1.5' && num('sec-setviewvalue') === '25.3.1.6' && num('sec-numerictorawbytes') === '25.1.3.17' && num('sec-math.f16round') === '21.3.2.18' && num('sec-frombase64') === '23.3.3.7',
+      `student: ECMA-262 — SetViewValue 3, 6, 10, 15 (the table; 4–5 and 13 — above), IsViewOutOfBounds 3 (a detached buffer is out of bounds too), FromBase64 10.i (homework 4: stops before a chunk that does not fit) and 10.l.iv (read — the index in the string, spaces included); 25.3.1.5, 25.3.1.6, 25.1.3.17, 21.3.2.18, 23.3.3.7 ${nwrong.join('; ')}`);
+    const sfb = plain(mdn('reference/global_objects/uint8array/setfrombase64'));
+    const big = sfb.slice(sfb.indexOf('### Decoding a big string into a small array'), sfb.indexOf('### Setting data at a specific offset'));
+    check(hasAll(big, ['without discarding any bits', 'const uint8Array = new Uint8Array(8);', 'uint8Array.setFromBase64("PGI+ TURO PC9i Pg==");', '{ read: 9, written: 6 }', '[60, 98, 62, 77, 68, 78, 0, 0]']),
+      'student homework 4: MDN setFromBase64() — «Decoding a big string into a small array», «without discarding any bits», the same string into 8 bytes gives read 9, written 6');
+    const notes = read('advanced/day-21/student.html');
+    const nflat = flat(notes);
+    const nFooter = notes.slice(notes.indexOf('<div class="sources">'));
+    check(nflat.includes('«DataView defaults to big-endian read and write, but most platforms use little-endian»') && nflat.includes('«without discarding any bits»') && nflat.includes('Decoding a big string into a small array')
+      && ['DataView, Uint8Array.prototype.setFromBase64()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 3
+      && !/tc39\.es\/ecma262\/2026\/#/.test(notes),
+    'student: the quotes of MDN DataView and setFromBase64() as MDN writes them; the footer names both and ECMA-262 2026; MDN is linked there and twice in the text; section numbers without links');
   }
 
   // the reference table holds every row of the plan as a link with its mark, every anchor of the lecture exists

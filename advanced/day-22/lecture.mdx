@@ -1,0 +1,781 @@
+---
+title: День 22 — SharedArrayBuffer и Atomics
+day: День 22 • урок 1
+heading: SharedArrayBuffer и Atomics
+lead: Курс 3, Advanced. Модуль «Двоичные данные и модель памяти» — третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+---
+
+<Goals>
+- открывать изолированную страницу и проверять это свойством `crossOriginIsolated`;
+- делиться общим буфером со вторым потоком и отличать его от `ArrayBuffer`;
+- объяснять, почему теряется прибавление, и чинить это через `Atomics.add`, `compareExchange` и замок;
+- проходить DoWait по шагам и выбирать между `wait`, `waitAsync` и `notify`.
+</Goals>
+
+<Toc />
+
+## 1. Зачем общая память {#why}
+
+До сих пор весь наш код шёл в одном потоке: у страницы один агент со своим стеком, очередью и кучей
+(день 9), и долгий цикл её замораживает. Второй поток даёт `Worker` — Web API курса 4, сегодня только
+инструмент: создать поток, передать данные, получить ответ. У `Worker` свой агент, а вместе со страницей
+они — кластер агентов.
+
+Данные между агентами передаёт `postMessage`. Обычные значения он копирует, а `ArrayBuffer` может
+перенести, как `transfer` дня 20. Общая память — третий путь: `SharedArrayBuffer`, блок байтов, который
+видят оба потока сразу. Страница MDN
+[SharedArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)
+обещает: «a side effect to the block in one agent will eventually become visible in the other agent».
+Слово *eventually* («в конце концов») мы разберём завтра, в дне 23 о модели памяти. Сегодня — сам буфер и
+объект [Atomics](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics):
+он даёт операции, которые не мешают друг другу, и способ подождать другой поток.
+
+В спецификации оба живут рядом с буферами дня 20: `SharedArrayBuffer` — раздел
+[25.2](https://tc39.es/ecma262/2026/#sec-sharedarraybuffer-objects), `Atomics` —
+[25.4](https://tc39.es/ecma262/2026/#sec-atomics-object).
+
+## 2. Изоляция страницы {#isolate}
+
+Откройте консоль на любой странице и наберите `typeof SharedArrayBuffer`. Скорее всего, ответ будет
+`"undefined"`. MDN объясняет почему: после атаки Spectre общую память в 2018 году отключили, а теперь
+действует правило «To use shared memory your document must be in a secure context and cross-origin
+isolated». Без изоляции «the constructor on the global object is hidden». Изоляцию включают два заголовка
+ответа сервера:
+
+| Заголовок | Значение | Что он делает |
+| --- | --- | --- |
+| `Cross-Origin-Opener-Policy` | `same-origin` | страница не делит группу окон с чужими сайтами |
+| `Cross-Origin-Embedder-Policy` | `require-corp` | с чужих адресов грузится только то, что само это разрешило |
+
+ECMA-262 о заголовках молчит: это правило хозяина, браузера (день 1). Live Server умеет добавлять свои
+заголовки — положите в папку проекта файл `.vscode/settings.json`:
+
+```js file=".vscode/settings.json"
+{
+  "liveServer.settings.headers": {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp"
+  }
+}
+```
+
+Live Server читает настройки только при запуске. Если он уже работает, остановите его (кнопка «Port : 5500»
+внизу окна) и запустите снова. Страница дня — `index.html` с модулем (день 30 курса 2):
+
+```html file="index.html"
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"><title>День 22</title></head>
+<body><script type="module" src="main.js"></script></body>
+</html>
+```
+
+Блоки без имени файла пишите в `main.js` или вставляйте в консоль этой страницы. Проверка:
+
+```js
+console.log(crossOriginIsolated, typeof SharedArrayBuffer, typeof Atomics);
+```
+
+<ResultBox>
+true function object
+</ResultBox>
+
+Без заголовков вывод будет `false undefined object`, а `new SharedArrayBuffer(8)` бросит
+`ReferenceError: SharedArrayBuffer is not defined`. `Atomics` есть всегда (раздел 7). У изоляции есть
+цена: картинка с другого адреса без заголовка `Cross-Origin-Resource-Policy` не загрузится. Поэтому
+заголовки — в настройках этой папки, а не всего VS Code: другие проекты не пострадают.
+
+## 3. Второй поток: копия или общая память {#worker}
+
+Поток — это отдельный файл. `new Worker("worker.js")` загружает его и запускает в новом агенте.
+`postMessage` отправляет значение, а обработчик `onmessage` на другой стороне его получает. Пошлём в поток два
+буфера, обычный и общий, и пусть он запишет 99 в первый байт каждого:
+
+```js file="worker.js"
+onmessage = (e) => {
+  new Uint8Array(e.data)[0] = 99;
+  postMessage("готово");
+};
+```
+
+```js file="main.js"
+const worker = new Worker("worker.js"); // курс 4
+const plain = new ArrayBuffer(4);
+const shared = new SharedArrayBuffer(4);
+worker.postMessage(plain); // курс 4
+worker.postMessage(shared); // курс 4
+let answers = 0;
+worker.onmessage = () => {
+  answers++;
+  if (answers === 2) console.log(new Uint8Array(plain)[0], new Uint8Array(shared)[0], plain.byteLength);
+};
+```
+
+<ResultBox>
+0 99 4
+</ResultBox>
+
+<Scheme src="scheme-share.svg">Копия против общего блока</Scheme>
+
+`ArrayBuffer` скопирован: поток записал 99 в свою копию, а у страницы остался 0 и длина 4. С общим
+буфером иначе. MDN: на той стороне получается «a new, private `SharedArrayBuffer` object», но «the shared
+data block referenced by the two `SharedArrayBuffer` objects is the same data block». В спецификации
+разницу держит одна проверка — IsSharedArrayBuffer
+([25.2.2.2](https://tc39.es/ecma262/2026/#sec-issharedarraybuffer)): у обоих буферов есть слот
+\[\[ArrayBufferData\]\], но у общего в нём лежит Shared Data Block, а не обычный Data Block.
+
+## 4. Конструктор SharedArrayBuffer {#ctor}
+
+SharedArrayBuffer(length \[, options\])
+([25.2.3.1](https://tc39.es/ecma262/2026/#sec-sharedarraybuffer-length)): шаг 1 — без `new` нельзя;
+шаг 2 — длина через ToIndex, как у `ArrayBuffer`; шаг 3 — `maxByteLength` из настроек; шаг 4 —
+AllocateSharedArrayBuffer ([25.2.2.1](https://tc39.es/ecma262/2026/#sec-allocatesharedarraybuffer)). Там
+шаг 3.a бросает `RangeError`, если длина больше максимума, а шаги 6–7 по тексту стандарта выделяют
+растущему буферу блок **сразу под максимум**.
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return `${e.name}: ${e.message}`; } };
+const sab = new SharedArrayBuffer(8);
+console.log(sab.byteLength, sab.growable, sab.maxByteLength, Object.prototype.toString.call(sab), sab instanceof ArrayBuffer);
+console.log(run(() => SharedArrayBuffer(8)), "|", run(() => new SharedArrayBuffer(-1)));
+const g = new SharedArrayBuffer(4, { maxByteLength: 16 });
+console.log(g.byteLength, g.growable, g.maxByteLength, "|", run(() => new SharedArrayBuffer(8, { maxByteLength: 4 })));
+const abLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength").get;
+console.log(run(() => abLength.call(sab)), "|", new Int32Array(sab).length, new DataView(sab).byteLength, ArrayBuffer.isView(new Uint8Array(sab)));
+```
+
+<ResultBox>
+8 false 8 \[object SharedArrayBuffer\] false\
+TypeError: Constructor SharedArrayBuffer requires 'new' | RangeError: Invalid array buffer length\
+4 true 16 | RangeError: Invalid array buffer max length\
+TypeError: Method get ArrayBuffer.prototype.byteLength called on incompatible receiver #\<SharedArrayBuffer> | 2 8 true
+</ResultBox>
+
+`SharedArrayBuffer` — не наследник `ArrayBuffer`: `instanceof` отвечает «нет», а геттер `byteLength` от
+`ArrayBuffer` его не принимает (методы `ArrayBuffer` проверяют IsSharedArrayBuffer). Виды и `DataView`
+строятся над ним так же. Раздел [25.2.7](https://tc39.es/ecma262/2026/#sec-growable-sharedarraybuffer-guidelines)
+советует брать `maxByteLength` поменьше, не больше 1073741824 байт (1 ГиБ).
+
+## 5. grow, slice и чего у общего буфера нет {#grow}
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return `${e.name}: ${e.message}`; } };
+const g = new SharedArrayBuffer(4, { maxByteLength: 8 });
+const all = new Uint8Array(g);
+const fixed = new Uint8Array(g, 0, 4);
+g.grow(6);
+console.log(g.byteLength, all.length, fixed.length, run(() => g.grow(5)), "|", run(() => g.grow(9)), "|", g.grow(6));
+all[1] = 5;
+const part = g.slice(1, 3);
+new Uint8Array(part)[0] = 7;
+console.log(part.byteLength, part.growable, new Uint8Array(g)[1], part instanceof SharedArrayBuffer);
+console.log("transfer" in g, "resize" in g, "detached" in g, run(() => ArrayBuffer.prototype.transfer.call(g)));
+console.log(run(() => new SharedArrayBuffer(4).grow(4)));
+```
+
+<ResultBox>
+6 6 4 RangeError: SharedArrayBuffer.prototype.grow: Invalid length parameter | RangeError: SharedArrayBuffer.prototype.grow: Invalid length parameter | undefined\
+2 false 5 true\
+false false false TypeError: Method ArrayBuffer.prototype.transfer called on incompatible receiver #\<SharedArrayBuffer>\
+TypeError: Method SharedArrayBuffer.prototype.grow called on incompatible receiver #\<SharedArrayBuffer>
+</ResultBox>
+
+`grow` ([25.2.5.3](https://tc39.es/ecma262/2026/#sec-sharedarraybuffer.prototype.grow)) только
+увеличивает буфер. Шаг 12.c: та же длина — ничего не делать; шаг 12.d: меньше текущей или больше максимума —
+`RangeError`. MDN: «For security reasons, `SharedArrayBuffer`s cannot be reduced in size, only grown».
+Шаг 2 требует слот \[\[ArrayBufferMaxByteLength\]\] — у неизменяемого буфера его нет, отсюда «incompatible
+receiver». Сам шаг 12 — петля «сравнить и заменить»: два потока могут растить буфер одновременно. Вид без
+длины следит за буфером (`all` — 6), вид с длиной — нет (`fixed` — 4), как в дне 20.
+
+`slice` ([25.2.5.6](https://tc39.es/ecma262/2026/#sec-sharedarraybuffer.prototype.slice)) копирует
+байты в **новый** общий буфер со своим блоком (шаг 18), поэтому 7 в копии оригинал не тронула:
+
+| | `ArrayBuffer` (день 20) | `SharedArrayBuffer` |
+| --- | --- | --- |
+| изменить длину | `resize` — в обе стороны | `grow` — только больше |
+| перенести | `transfer`, `detached` | нет: раздел [25.2.6](https://tc39.es/ecma262/2026/#sec-properties-of-the-sharedarraybuffer-instances) — «never detached» |
+| `postMessage` | копия или перенос | новый объект, тот же блок |
+| `slice` | новый `ArrayBuffer` | новый `SharedArrayBuffer`, свой блок |
+
+## 6. Гонка: два потока и ++ {#race}
+
+Два потока прибавляют по единице к одному счётчику, каждый миллион раз:
+
+```js file="counter.js"
+onmessage = (e) => {
+  const counts = new Int32Array(e.data.shared);
+  for (let i = 0; i < e.data.n; i++) counts[0]++;
+  postMessage("готово");
+};
+```
+
+```js file="main.js"
+const shared = new SharedArrayBuffer(4);
+const counts = new Int32Array(shared);
+const n = 1_000_000;
+let finished = 0;
+for (let k = 0; k < 2; k++) {
+  const worker = new Worker("counter.js"); // курс 4
+  worker.postMessage({ shared, n }); // курс 4
+  worker.onmessage = () => {
+    finished++;
+    if (finished === 2) console.log(counts[0], counts[0] < 2 * n);
+  };
+}
+```
+
+<ResultBox>
+1631280 true
+</ResultBox>
+
+Число у вас будет своё: в девяти запусках у нас вышло от 1 088 314 до 1 631 280, ни разу не два миллиона.
+Ошибки нет, ответ неверный: `counts[0]++` — это три действия (прочитать, прибавить, записать), и между
+чтением и записью другой поток успевает записать своё:
+
+<Scheme src="scheme-race.svg">Как теряется прибавление</Scheme>
+
+## 7. Atomics.add и вся семья {#rmw}
+
+`Atomics.add` ([25.4.4](https://tc39.es/ecma262/2026/#sec-atomics.add)) описывает прибавление функцией,
+которая «performs the following steps atomically», и передаёт её в AtomicReadModifyWrite
+([25.4.3.17](https://tc39.es/ecma262/2026/#sec-atomicreadmodifywrite)). Шаг 1 проверяет вид и индекс,
+шаги 2–3 превращают значение в число, шаг 7 читает, меняет и пишет ячейку **одним шагом**: никто не
+вклинится между чтением и записью. Добавим в поток второй счётчик:
+
+```js file="counter.js"
+onmessage = (e) => {
+  const counts = new Int32Array(e.data.shared);
+  for (let i = 0; i < e.data.n; i++) {
+    counts[0]++;
+    Atomics.add(counts, 1, 1);
+  }
+  postMessage("готово");
+};
+```
+
+В `main.js` из раздела 6 поменяйте две строки: буфер `new SharedArrayBuffer(8)` и вывод
+`console.log(counts[0] < 2 * n, counts[1])`.
+
+<ResultBox>
+true 2000000
+</ResultBox>
+
+Обычный счётчик снова потерял прибавления, атомарный — ровно два миллиона. Теперь проверки шага 1:
+ValidateIntegerTypedArray ([25.4.3.1](https://tc39.es/ecma262/2026/#sec-validateintegertypedarray))
+пропускает только целые виды, шаг 4.b; ValidateAtomicAccess
+([25.4.3.2](https://tc39.es/ecma262/2026/#sec-validateatomicaccess)) — только индекс внутри вида, шаг 4:
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return `${e.name}: ${e.message}`; } };
+const u8 = new Uint8Array(new SharedArrayBuffer(4));
+console.log(Atomics.add(u8, 0, 250), Atomics.add(u8, 0, 10), u8[0], Atomics.sub(u8, 1, 1), u8[1]);
+console.log(Atomics.add(u8, 2, 3.9), u8[2], Atomics.add(u8, 3, "5"), u8[3]);
+console.log(run(() => Atomics.add(new Float64Array(new SharedArrayBuffer(8)), 0, 1)));
+console.log(run(() => Atomics.add(new Uint8ClampedArray(new SharedArrayBuffer(2)), 0, 1)));
+console.log(run(() => Atomics.add(u8, 4, 1)), "|", run(() => Atomics.add(new BigInt64Array(new SharedArrayBuffer(8)), 0, 1)));
+```
+
+<ResultBox>
+0 250 4 0 255\
+0 3 0 5\
+TypeError: \[object Float64Array\] is not an integer typed array.\
+TypeError: \[object Uint8ClampedArray\] is not an integer typed array.\
+RangeError: Invalid atomic access index | TypeError: Cannot convert 1 to a BigInt
+</ResultBox>
+
+`add` возвращает **старое** значение. 250 + 10 = 260 не помещается в байт, и в ячейке 4 — так же, как у
+ToUint8 дня 20; 0 − 1 даёт 255. Дробь 3.9 прошла через ToIntegerOrInfinity и стала 3, строка `"5"` —
+числом 5. Числа с плавающей точкой атомарно не меняются вовсе. `Uint8ClampedArray` тоже нельзя: насыщение —
+не арифметика по модулю. `BigInt64Array` принимает только BigInt.
+
+Остальные методы устроены так же, меняется только действие над ячейкой:
+
+| Метод | Что кладёт в ячейку | Что возвращает |
+| --- | --- | --- |
+| `add`, `sub` | старое ± значение | старое |
+| `and`, `or`, `xor` | побитовое действие (день 6) | старое |
+| `exchange` | новое значение | старое |
+| `compareExchange` | новое, если старое равно ожидаемому | старое |
+| `load` | ничего | значение |
+| `store` | новое значение | значение после ToIntegerOrInfinity |
+
+Пример с MDN, все методы подряд:
+
+```js
+const ta = new Uint8Array(new SharedArrayBuffer(1));
+ta[0] = 5;
+console.log(Atomics.add(ta, 0, 12), Atomics.and(ta, 0, 1), Atomics.or(ta, 0, 12), Atomics.xor(ta, 0, 1), Atomics.exchange(ta, 0, 7), ta[0]);
+```
+
+<ResultBox>
+5 17 1 13 12 7
+</ResultBox>
+
+5 + 12 = 17; 17 & 1 = 1; 1 \| 12 = 13; 13 ^ 1 = 12; `exchange` кладёт 7 и отдаёт 12. Работают методы и
+над обычным `ArrayBuffer` — MDN: «used with `SharedArrayBuffer` and `ArrayBuffer` objects», — только в
+одном потоке смысла в них мало, а ждать на такой памяти нельзя (раздел 11).
+
+## 8. load и store {#loadstore}
+
+`Atomics.load` ([25.4.9](https://tc39.es/ecma262/2026/#sec-atomics.load)) читает ячейку,
+`Atomics.store` ([25.4.11](https://tc39.es/ecma262/2026/#sec-atomics.store)) пишет. Что они возвращают:
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return `${e.name}: ${e.message}`; } };
+const i8 = new Int8Array(new SharedArrayBuffer(2));
+console.log(Atomics.store(i8, 0, 300), Atomics.load(i8, 0), (i8[1] = 300), i8[1]);
+console.log(Atomics.store(i8, 1, -1.9), Atomics.load(i8, 1), Atomics.store(i8, 1, "x"), Atomics.load(i8, 1));
+const big = new BigInt64Array(new SharedArrayBuffer(8));
+console.log(Atomics.store(big, 0, 2n ** 64n + 5n), Atomics.load(big, 0), run(() => Atomics.store(big, 0, 5)));
+```
+
+<ResultBox>
+300 44 300 44\
+-1 -1 0 0\
+18446744073709551621n 5n TypeError: Cannot convert 5 to a BigInt
+</ResultBox>
+
+`store` на шаге 8 возвращает v — значение после ToIntegerOrInfinity (шаг 3), а не то, что легло в
+байты на шаге 7. Ровно так ведёт себя и присваивание: у `i8[1] = 300` значение тоже 300, а в ячейке 44.
+Дробь −1.9 стала −1, строка `"x"` — 0.
+
+Зачем `load` и `store`, если есть `i8[0]`? Оба зовут GetValueFromBuffer и SetValueInBuffer с порядком
+`seq-cst`, а обычное чтение и запись — с порядком `unordered`. Обычный доступ компилятор и процессор вправе
+переставить или взять из своей копии, атомарный — нет; подробно — в дне 23. Правило на сегодня: ячейку,
+которую пишет другой поток, читайте через `Atomics.load`.
+
+## 9. compareExchange и замок {#cas}
+
+`compareExchange` ([25.4.6](https://tc39.es/ecma262/2026/#sec-atomics.compareexchange)) пишет новое
+значение, только если в ячейке лежит ожидаемое. Для общего блока шаг 13.a делает это одной операцией,
+AtomicCompareExchangeInSharedBlock. Шаг 15 возвращает то, что было в ячейке, — MDN: «whether it was equal
+to the expected value or not».
+
+```js
+const m = new Int32Array(new SharedArrayBuffer(4));
+console.log(Atomics.compareExchange(m, 0, 0, 1), m[0], Atomics.compareExchange(m, 0, 0, 2), m[0], Atomics.compareExchange(m, 0, 1, 0), m[0]);
+```
+
+<ResultBox>
+0 1 1 1 1 0
+</ResultBox>
+
+Первая замена удалась — вернулся ожидаемый 0, вторая нет — вернулась 1. Отсюда **замок**: 0 — свободно,
+1 — занято. Кто первым поменял 0 на 1, тот вошёл, остальные пробуют снова:
+
+```js
+const lock = (s, i) => { while (Atomics.compareExchange(s, i, 0, 1) !== 0) Atomics.pause(); };
+const unlock = (s, i) => Atomics.store(s, i, 0);
+```
+
+`Atomics.pause()` подсказывает процессору: «я кручусь в цикле ожидания», и он может сберечь силы. В
+Chrome он есть, а в тексте ECMA-262 2026 его нет: в стандарт он пока не вошёл. Замок мы проверим
+в практике (раздел 14).
+
+На странице `compareExchange` у MDN есть «атомарный сумматор», и в нём ошибка:
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return `${e.name}: ${e.message}`; } };
+function add(mem, index, a) {
+  let done = false;
+  while (!done) {
+    const value = Atomics.load(mem, index);
+    done = Atomics.compareExchange(mem, index, value, value + a) === value;
+  }
+  return value + a;
+}
+const mem = new Int32Array(new SharedArrayBuffer(4));
+console.log(run(() => add(mem, 0, 5)), mem[0]);
+```
+
+<ResultBox>
+ReferenceError: value is not defined 5
+</ResultBox>
+
+`value` объявлена через `const` внутри тела `while`, а это блок: за его скобками переменной нет. Хуже
+того, запись уже прошла (`mem[0]` — 5), а функция бросила ошибку: повтор после такой ошибки прибавит
+дважды. Правильная петля возвращает значение прямо из удачной попытки — она будет в разделе 16.
+
+## 10. isLockFree и сам объект Atomics {#lockfree}
+
+```js
+console.log([1, 2, 3, 4, 8, 16].map((n) => Atomics.isLockFree(n)).join(" "), typeof Atomics.pause, Atomics.pause(), Object.prototype.toString.call(Atomics));
+console.log(Object.getOwnPropertyNames(Atomics).join(" "));
+```
+
+<ResultBox>
+true true false true true false function undefined \[object Atomics\]\
+load store add sub and or xor exchange compareExchange isLockFree wait waitAsync notify pause
+</ResultBox>
+
+`isLockFree` ([25.4.8](https://tc39.es/ecma262/2026/#sec-atomics.islockfree)): для 4 байт шаг 5 всегда
+отвечает `true`, для 1, 2 и 8 — поле записи агента, для остальных — `false`. Атомарность есть всегда,
+`isLockFree` говорит лишь, хватает ли процессору одной команды (MDN: «Experts only»). Сам `Atomics` —
+обычный объект, как `Math`: не конструктор и не функция, 14 методов.
+
+## 11. wait по шагам {#wait}
+
+`Atomics.wait` ([25.4.13](https://tc39.es/ecma262/2026/#sec-atomics.wait)) и `Atomics.waitAsync` —
+это одна операция, DoWait ([25.4.3.14](https://tc39.es/ecma262/2026/#sec-dowait)), в двух режимах. Шаги:
+
+| Шаг | Что делает | Если нет |
+| --- | --- | --- |
+| 1 | вид — только `Int32Array` или `BigInt64Array` | `TypeError` |
+| 3 | буфер — только общий | `TypeError` |
+| 4 | индекс внутри вида | `RangeError` |
+| 8–11 | `timeout` в миллисекундах: `NaN` и `undefined` → ∞, отрицательное → 0 | |
+| 12 | в режиме `sync` агент должен уметь спать — AgentCanSuspend | `TypeError` |
+| 19–20 | в ячейке не то значение — сразу `"not-equal"` | |
+| 27–32 | встать в очередь, уснуть, вернуть `"ok"` или `"timed-out"` | |
+
+AgentCanSuspend ([9.6.2](https://tc39.es/ecma262/2026/#sec-agentcansuspend)) возвращает поле
+\[\[CanBlock\]\] записи агента. У главного потока страницы браузер ставит в него «нет»: страница не должна
+замирать. Порядок шагов видно по ошибкам:
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return `${e.name}: ${e.message}`; } };
+const flags = new Int32Array(new SharedArrayBuffer(4));
+let calls = 0;
+const timeout = { valueOf() { calls++; return 10; } };
+console.log(run(() => Atomics.wait(flags, 0, 5)));
+console.log(run(() => Atomics.wait(flags, 0, 0, timeout)), calls);
+console.log(run(() => Atomics.wait(new Int32Array(4), 0, 0, timeout)), calls);
+console.log(run(() => Atomics.wait(new Int16Array(new SharedArrayBuffer(4)), 0, 0)), "|", run(() => Atomics.wait(flags, 9, 0, timeout)), calls);
+```
+
+<ResultBox>
+TypeError: Atomics.wait cannot be called in this context\
+TypeError: Atomics.wait cannot be called in this context 1\
+TypeError: \[object Int32Array\] is not a shared typed array. 1\
+TypeError: \[object Int16Array\] is not an int32 or BigInt64 typed array. | RangeError: Invalid atomic access index 1
+</ResultBox>
+
+На странице `wait` бросает, даже когда значение не совпало: шаг 12 стоит раньше шага 20. Но `timeout`
+к этому времени уже прочитан, шаг 8 (`calls` — 1). Необщий буфер и чужой индекс ловятся на шагах 3 и 4 —
+до `timeout`, поэтому `calls` дальше не растёт. Ждать по-настоящему можно во втором потоке:
+
+```js file="waiter.js"
+onmessage = (e) => {
+  const flags = new Int32Array(e.data);
+  const first = Atomics.wait(flags, 0, 5);
+  const second = Atomics.wait(flags, 0, 0, 50);
+  const third = Atomics.wait(flags, 0, 0);
+  postMessage([first, second, third, flags[0]]);
+};
+```
+
+```js file="main.js"
+const flags = new Int32Array(new SharedArrayBuffer(4));
+const worker = new Worker("waiter.js"); // курс 4
+worker.postMessage(flags.buffer); // курс 4
+worker.onmessage = (e) => console.log(e.data.join(" "));
+setTimeout(() => {
+  Atomics.store(flags, 0, 1);
+  console.log("разбудили:", Atomics.notify(flags, 0));
+}, 300);
+```
+
+<ResultBox>
+разбудили: 1\
+not-equal timed-out ok 1
+</ResultBox>
+
+Первый вызов ждал 5, а в ячейке 0 — сразу `"not-equal"`. Второй проспал свои 50 мс — `"timed-out"`.
+Третий спал, пока страница через 300 мс не записала 1 и не позвала `notify`. MDN предупреждает: `"ok"`
+приходит «regardless of whether the expected value has changed» — значение проверяют сами.
+
+## 12. notify и очередь ожидающих {#notify}
+
+`Atomics.notify` ([25.4.15](https://tc39.es/ecma262/2026/#sec-atomics.notify)): шаги 3–4 — сколько
+будить (без числа — всех, отрицательное — никого); шаг 8 — найти очередь ячейки; шаг 10 — снять первых;
+шаг 14 — вернуть их число. Очередь (WaiterList, [25.4.2](https://tc39.es/ecma262/2026/#sec-waiterlist-records))
+одна на ячейку для всего кластера, в ней записи Waiter Record
+([25.4.1](https://tc39.es/ecma262/2026/#sec-waiter-record)): агент, срок, результат.
+
+<Scheme src="scheme-wait.svg">Очередь ожидающих и notify</Scheme>
+
+`waitAsync` ждёт и на странице (раздел 13), поэтому очередь можно увидеть в одном потоке:
+
+```js
+const a = new Int32Array(new SharedArrayBuffer(4));
+const first = Atomics.waitAsync(a, 0, 0);
+const second = Atomics.waitAsync(a, 0, 0);
+const third = Atomics.waitAsync(a, 0, 0, 100);
+console.log(first.async, Atomics.notify(a, 0, 1), Atomics.notify(a, 0, -1), Atomics.notify(a, 0), Atomics.notify(a, 0));
+console.log(await first.value, await second.value, await third.value);
+```
+
+<ResultBox>
+true 1 0 2 0\
+ok ok ok
+</ResultBox>
+
+Когда выполняется обещание разбуженного? Проверим вместе с таймером, поставленным **до** `notify`:
+
+```js
+const a = new Int32Array(new SharedArrayBuffer(4));
+const order = [];
+for (const name of ["А", "Б", "В"]) Atomics.waitAsync(a, 0, 0).value.then(() => order.push(name));
+setTimeout(() => order.push("таймер"), 0);
+Atomics.notify(a, 0, 1);
+await null;
+console.log(order.join(" ") || "пусто");
+await new Promise((r) => setTimeout(r, 0));
+console.log(order.join(" "));
+Atomics.notify(a, 0);
+await new Promise((r) => setTimeout(r, 0));
+console.log(order.join(" "));
+```
+
+<ResultBox>
+пусто\
+таймер А\
+таймер А Б В
+</ResultBox>
+
+Будят по очереди: первым встал — первым разбужен. Но вот **Chrome против текста**. По ECMA-262 2026,
+если будит тот же агент, что ждёт, NotifyWaiter
+([25.4.3.12](https://tc39.es/ecma262/2026/#sec-notifywaiter), шаг 3.b) выполняет обещание сразу, и «А»
+появилась бы после `await null`, раньше таймера. Chrome 157 ставит задачу (как для чужого агента, шаг 4),
+и она идёт после таймера. Вывод: не считайте такты, а ждите само обещание.
+
+## 13. waitAsync: ждать на странице {#waitasync}
+
+`waitAsync` ([25.4.14](https://tc39.es/ecma262/2026/#sec-atomics.waitasync)) — DoWait в режиме `async`.
+Шаг 12 его не касается, поэтому страница не засыпает. Вместо строки он возвращает объект
+`{ async, value }`: шаги 20.c–20.e — `{ async: false, value: "not-equal" }`; шаг 21 — при нулевом
+сроке сразу `{ async: false, value: "timed-out" }` (заметка шага 21.a: чтобы не заводить обещание зря);
+шаги 33–35 — `{ async: true, value: обещание }`. MDN: «The promise is never rejected».
+
+```js
+const a = new Int32Array(new SharedArrayBuffer(4));
+const r1 = Atomics.waitAsync(a, 0, 7);
+const r2 = Atomics.waitAsync(a, 0, 0, 0);
+const r3 = Atomics.waitAsync(a, 0, 0, 30);
+const r4 = Atomics.waitAsync(a, 0, 0, -5);
+console.log(r1.async, r1.value, r2.async, r2.value, r3.async, r3.value instanceof Promise, r4.value);
+const t0 = Date.now();
+console.log(await r3.value, Date.now() - t0 >= 25);
+```
+
+<ResultBox>
+false not-equal false timed-out true true timed-out\
+timed-out true
+</ResultBox>
+
+Отрицательный срок стал нулём (шаг 11). Дождаться, пока счётчик дорастёт до нужного числа, можно только
+петлёй: `"ok"` не значит, что число достигнуто, а между `load` и `waitAsync` значение может смениться —
+тогда придёт `"not-equal"`:
+
+```js
+async function until(s, i, value) {
+  let seen;
+  while ((seen = Atomics.load(s, i)) < value) {
+    const r = Atomics.waitAsync(s, i, seen);
+    if (r.async) await r.value;
+  }
+}
+```
+
+## 14. Практика: старт по сигналу и три счётчика {#practice}
+
+Соберём всё вместе. Два потока ждут общего старта, потом считают тремя способами: `++`, `Atomics.add` и
+`++` под замком. Ячейки общего буфера: 0 — старт, 1 — сколько потоков готово, 2 — сколько закончило,
+3 — замок, 4–6 — счётчики.
+
+```js file="count.js"
+const lock = (s, i) => { while (Atomics.compareExchange(s, i, 0, 1) !== 0) Atomics.pause(); };
+const unlock = (s, i) => Atomics.store(s, i, 0);
+onmessage = (e) => {
+  const s = new Int32Array(e.data.shared);
+  Atomics.add(s, 1, 1);
+  Atomics.notify(s, 1);
+  Atomics.wait(s, 0, 0);
+  for (let i = 0; i < e.data.n; i++) {
+    s[4]++;
+    Atomics.add(s, 5, 1);
+    lock(s, 3);
+    s[6]++;
+    unlock(s, 3);
+  }
+  Atomics.add(s, 2, 1);
+  Atomics.notify(s, 2);
+};
+```
+
+```js file="main.js"
+const shared = new SharedArrayBuffer(7 * 4);
+const s = new Int32Array(shared);
+const n = 200_000;
+for (let k = 0; k < 2; k++) new Worker("count.js").postMessage({ shared, n }); // курс 4
+async function until(i, value) {
+  let seen;
+  while ((seen = Atomics.load(s, i)) < value) {
+    const r = Atomics.waitAsync(s, i, seen);
+    if (r.async) await r.value;
+  }
+}
+await until(1, 2);
+Atomics.store(s, 0, 1);
+Atomics.notify(s, 0);
+await until(2, 2);
+console.log(s[4], s[4] < 2 * n, s[5], s[6]);
+```
+
+<ResultBox>
+398266 true 400000 400000
+</ResultBox>
+
+Первое число у вас будет своим, остальные — ровно 400 000. Старт по сигналу нужен, потому что поток
+запускается десятки миллисекунд: без сигнала первый мог бы досчитать до того, как начнёт второй, и
+гонки бы не было. Если `notify` придёт раньше, чем поток уснул, его `wait` увидит в ячейке 1 и вернёт
+`"not-equal"` — сигнал не потеряется: DoWait сравнивает значение и встаёт в очередь в одной критической
+секции (шаги 17–31).
+
+## 15. Ошибки дня {#errors}
+
+| Что случилось | Текст в Chrome | Где искать |
+| --- | --- | --- |
+| страница не изолирована | `ReferenceError: SharedArrayBuffer is not defined` | заголовки, перезапуск Live Server |
+| `grow` у неизменяемого буфера | `TypeError: Method SharedArrayBuffer.prototype.grow called on incompatible receiver #<SharedArrayBuffer>` | 25.2.5.3, шаг 2 |
+| `Atomics` над дробным или насыщающим видом | `TypeError: [object Float64Array] is not an integer typed array.` | 25.4.3.1, шаг 4.b |
+| индекс за концом вида | `RangeError: Invalid atomic access index` | 25.4.3.2, шаг 4 |
+| `wait` не над `Int32Array`/`BigInt64Array` | `TypeError: [object Int16Array] is not an int32 or BigInt64 typed array.` | DoWait, шаг 1 |
+| `wait` над обычным буфером | `TypeError: [object Int32Array] is not a shared typed array.` | DoWait, шаг 3 |
+| `wait` на странице | `TypeError: Atomics.wait cannot be called in this context` | DoWait, шаг 12 |
+
+## 16. «Карточки 2.0»: общий счётчик без переполнения {#cards}
+
+На дне 20 счётчик ответов был `Uint8ClampedArray`, чтобы остановиться на 255. Пусть ответы считают двое:
+страница и поток, который проверяет колоду. `Atomics.add` над `Uint8ClampedArray` нельзя, а над
+`Uint8Array` счётчик перевалит через 255. Насыщение придётся сделать самим, петлёй из раздела 9:
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return `${e.name}: ${e.message}`; } };
+const known = new Uint8Array(new SharedArrayBuffer(3));
+function bump(counts, i) {
+  for (;;) {
+    const old = Atomics.load(counts, i);
+    if (old === 255) return old;
+    if (Atomics.compareExchange(counts, i, old, old + 1) === old) return old + 1;
+  }
+}
+for (let k = 0; k < 300; k++) bump(known, 0);
+console.log(known[0], bump(known, 1), known.join());
+console.log(run(() => Atomics.add(new Uint8ClampedArray(new SharedArrayBuffer(3)), 0, 1)));
+```
+
+<ResultBox>
+255 1 255,1,0\
+TypeError: \[object Uint8ClampedArray\] is not an integer typed array.
+</ResultBox>
+
+Если между `load` и `compareExchange` другой поток успел прибавить, замена не удастся, и петля попробует
+снова с новым значением. Ни одно прибавление не потеряется, и за 255 счётчик не выйдет.
+
+## 17. Что будет завтра {#next}
+
+День 23 — модель памяти: что значит *eventually* у MDN, почему обычное чтение `s[4]` может увидеть старое
+значение, что такое гонка данных и happens-before. Разбирать будем на программах сегодняшнего дня.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [25.2 SharedArrayBuffer Objects](https://tc39.es/ecma262/2026/#sec-sharedarraybuffer-objects) | общий блок байтов; разделы 1–5 | <Full /> |
+| [25.2.1 Fixed-length and Growable SharedArrayBuffer Objects](https://tc39.es/ecma262/2026/#sec-fixed-length-and-growable-sharedarraybuffer-objects) | неизменяемый и растущий буфер | <Brief /> |
+| [25.2.2 Abstract Operations for SharedArrayBuffer Objects](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-sharedarraybuffer-objects) | AllocateSharedArrayBuffer, IsSharedArrayBuffer | <Brief /> |
+| [25.2.3 The SharedArrayBuffer Constructor](https://tc39.es/ecma262/2026/#sec-sharedarraybuffer-constructor) | только с `new`; раздел 4 | <Brief /> |
+| [25.2.4 Properties of the SharedArrayBuffer Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-sharedarraybuffer-constructor) | `prototype`, `Symbol.species` | <Brief /> |
+| [25.2.5 Properties of the SharedArrayBuffer Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-sharedarraybuffer-prototype-object) | `byteLength`, `grow`, `slice`…; раздел 5 | <Brief /> |
+| [25.2.6 Properties of SharedArrayBuffer Instances](https://tc39.es/ecma262/2026/#sec-properties-of-the-sharedarraybuffer-instances) | никогда не отсоединяется | <Brief /> |
+| [25.2.7 Growable SharedArrayBuffer Guidelines](https://tc39.es/ecma262/2026/#sec-growable-sharedarraybuffer-guidelines) | максимум — поменьше, не больше 1 ГиБ | <Brief /> |
+| [25.4 The Atomics Object](https://tc39.es/ecma262/2026/#sec-atomics-object) | неделимые операции и ожидание; разделы 7–14 | <Full /> |
+| [25.4.1 Waiter Record](https://tc39.es/ecma262/2026/#sec-waiter-record) | один ожидающий: агент, срок, результат | <Brief /> |
+| [25.4.2 WaiterList Records](https://tc39.es/ecma262/2026/#sec-waiterlist-records) | очередь ожидающих ячейки, одна на кластер | <Brief /> |
+| [25.4.3 Abstract Operations for Atomics](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-atomics) | проверки вида и индекса, DoWait | <Brief /> |
+| [25.4.4 Atomics.add](https://tc39.es/ecma262/2026/#sec-atomics.add) | прибавить, вернуть старое | <Brief /> |
+| [25.4.5 Atomics.and](https://tc39.es/ecma262/2026/#sec-atomics.and) | побитовое И | <Brief /> |
+| [25.4.6 Atomics.compareExchange](https://tc39.es/ecma262/2026/#sec-atomics.compareexchange) | заменить, если ожидаемое | <Brief /> |
+| [25.4.7 Atomics.exchange](https://tc39.es/ecma262/2026/#sec-atomics.exchange) | заменить, вернуть старое | <Brief /> |
+| [25.4.8 Atomics.isLockFree](https://tc39.es/ecma262/2026/#sec-atomics.islockfree) | 4 — всегда `true` | <Brief /> |
+| [25.4.9 Atomics.load](https://tc39.es/ecma262/2026/#sec-atomics.load) | чтение `seq-cst` | <Brief /> |
+| [25.4.10 Atomics.or](https://tc39.es/ecma262/2026/#sec-atomics.or) | побитовое ИЛИ | <Brief /> |
+| [25.4.11 Atomics.store](https://tc39.es/ecma262/2026/#sec-atomics.store) | возвращает значение до обрезки | <Brief /> |
+| [25.4.12 Atomics.sub](https://tc39.es/ecma262/2026/#sec-atomics.sub) | вычесть, вернуть старое | <Brief /> |
+| [25.4.13 Atomics.wait](https://tc39.es/ecma262/2026/#sec-atomics.wait) | DoWait в режиме `sync` | <Brief /> |
+| [25.4.14 Atomics.waitAsync](https://tc39.es/ecma262/2026/#sec-atomics.waitasync) | DoWait в режиме `async` | <Brief /> |
+| [25.4.15 Atomics.notify](https://tc39.es/ecma262/2026/#sec-atomics.notify) | разбудить первых, вернуть число | <Brief /> |
+| [25.4.16 Atomics.xor](https://tc39.es/ecma262/2026/#sec-atomics.xor) | исключающее ИЛИ | <Brief /> |
+| <a href="https://tc39.es/ecma262/2026/#sec-atomics-%symbol.tostringtag%">25.4.17 Atomics \[ %Symbol.toStringTag% \]</a> | `"[object Atomics]"` | <Brief /> |
+| [MDN: Atomics](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics) | не конструктор; все методы статические | <Full /> |
+| [MDN: Atomics.add()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/add) | гонка и её починка; раздел 7 | <Full /> |
+| [MDN: Atomics.and()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/and) | 17 & 1 = 1 | <Brief /> |
+| [MDN: Atomics.compareExchange()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/compareExchange) | замок; ошибка в сумматоре; раздел 9 | <Full /> |
+| [MDN: Atomics.exchange()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/exchange) | положить новое, отдать старое | <Brief /> |
+| [MDN: Atomics.isLockFree()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/isLockFree) | «Experts only» | <Brief /> |
+| [MDN: Atomics.load()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/load) | читать то, что пишет другой поток; раздел 8 | <Full /> |
+| [MDN: Atomics.notify()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/notify) | число разбуженных; раздел 12 | <Full /> |
+| [MDN: Atomics.or()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/or) | 1 \| 12 = 13 | <Brief /> |
+| [MDN: Atomics.pause()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/pause) | подсказка в петле замка; в ECMA-262 2026 нет | <Brief /> |
+| [MDN: Atomics.store()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/store) | 300 в `Int8Array`: вернёт 300, ляжет 44; раздел 8 | <Full /> |
+| [MDN: Atomics.sub()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/sub) | 0 − 1 в байте — 255 | <Brief /> |
+| [MDN: Atomics.wait()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait) | только во втором потоке; раздел 11 | <Full /> |
+| [MDN: Atomics.waitAsync()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/waitAsync) | `{ async, value }`; раздел 13 | <Full /> |
+| [MDN: Atomics.xor()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/xor) | 13 ^ 1 = 12 | <Brief /> |
+| [MDN: SharedArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer) | изоляция, общий блок; разделы 1–3 | <Full /> |
+| [MDN: SharedArrayBuffer.prototype.byteLength](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer/byteLength) | длина в байтах | <Brief /> |
+| [MDN: SharedArrayBuffer.prototype.grow()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer/grow) | только больше | <Brief /> |
+| [MDN: SharedArrayBuffer.prototype.growable](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer/growable) | задан ли `maxByteLength` | <Brief /> |
+| [MDN: SharedArrayBuffer.prototype.maxByteLength](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer/maxByteLength) | у неизменяемого равен длине | <Brief /> |
+| [MDN: SharedArrayBuffer() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer/SharedArrayBuffer) | только с `new`; раздел 4 | <Full /> |
+| [MDN: SharedArrayBuffer.prototype.slice()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer/slice) | копия в новом блоке | <Brief /> |
+| [MDN: SharedArrayBuffer\[Symbol.species\]](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer/Symbol.species) | чем `slice` строит копию | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// изоляция: .vscode/settings.json → liveServer.settings.headers (COOP same-origin, COEP require-corp)
+// crossOriginIsolated === true, иначе SharedArrayBuffer не определён; Atomics есть всегда
+// new SharedArrayBuffer(n, { maxByteLength: m })   // grow — только больше; slice — новый блок
+// postMessage(sab) — у потока новый объект, блок тот же                // Worker — курс 4
+
+// Atomics — только целые виды; add/sub/and/or/xor/exchange → старое; store → v до обрезки
+// ++ двух потоков теряет прибавления; compareExchange(ta, i, ожидаемое, новое) → старое
+
+// wait — Int32Array/BigInt64Array над общим буфером, только в Worker → "not-equal" | "timed-out" | "ok"
+// waitAsync → { async: false, value: строка } или { async: true, value: обещание }
+// notify(ta, i, count) → сколько разбудили; первым встал — первым разбужен
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему на обычной странице `typeof SharedArrayBuffer` — `"undefined"`, а `typeof Atomics` — `"object"`?
+   <Answer>Конструктор спрятан, пока страница не изолирована заголовками COOP и COEP. `Atomics`
+   работает и с обычным `ArrayBuffer`, поэтому есть всегда.</Answer>
+2. Два потока сделали по миллиону `counts[0]++`. Почему в ячейке меньше двух миллионов?
+   <Answer>`++` — это чтение, прибавление и запись. Между чтением и записью другой поток пишет своё, и
+   одно из двух прибавлений пропадает. `Atomics.add` делает всё одним неделимым шагом.</Answer>
+3. Что вернёт `Atomics.store(new Int8Array(new SharedArrayBuffer(1)), 0, 300)` и что ляжет в ячейку?
+   <Answer>Вернёт 300 — значение после ToIntegerOrInfinity (шаг 8); в ячейке будет 44.</Answer>
+4. Почему `Atomics.wait` на странице бросает, даже если значение не совпало?
+   <Answer>Шаг 12 DoWait (AgentCanSuspend) стоит раньше сравнения на шаге 20; главный поток
+   браузера спать не может. На странице ждут через `waitAsync`.</Answer>
+5. Что значит `"ok"` от `wait`?
+   <Answer>Что поток разбудил `notify` — и только. Изменилось ли значение, надо проверить самому,
+   поэтому ждут в петле.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)
+(SharedArrayBuffer и его методы, Atomics и его методы, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

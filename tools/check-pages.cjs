@@ -7,7 +7,7 @@
 //   NODE_PATH=... node tools/check-pages.cjs intermediate 3    only day 3 of course 2
 // The course folder is optional and defaults to essentials.
 // The pages are the built site (site/out, `pnpm build` in site/ first — stage 4 of the move to Next.js, 09.11.2026),
-// served by tools/lib/site.cjs: only the pages that are written (day 21 of Advanced has only its lecture).
+// served by tools/lib/site.cjs: only the pages that are written (a day in progress shows only its written pages).
 // Playwright comes from the goose folder; the browser is the installed Chrome.
 const { chromium } = require('playwright');
 const path = require('node:path');

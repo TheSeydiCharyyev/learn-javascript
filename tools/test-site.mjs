@@ -36,9 +36,16 @@ check('page: the licence footer', /CC BY-SA/.test(p.text(p.first('div.sources'))
 check('page: a node as HTML again', /^<div class="sources">[\s\S]*<a href="https:\/\/creativecommons\.org\/licenses\/by-sa\/4\.0\/">/.test(p.outer(p.first('div.sources'))));
 check('page: the title', site.page('essentials/day-01/en/lecture.html').title?.startsWith('Day 1'), String(site.page('essentials/day-01/en/lecture.html').title));
 
-// the written pages of a day folder: MDX or HTML (day 21 of Advanced has only its lecture, in HTML)
+// the written pages of a day folder: MDX or HTML, only the pages that exist (a day in progress has one or two)
 check('dayPages: a day in MDX', site.dayPages('essentials/day-01/en').join(' ') === 'essentials/day-01/en/lecture.html essentials/day-01/en/student.html essentials/day-01/en/tasks.html');
-check('dayPages: a day with one page in HTML', site.dayPages('advanced/day-21').join(' ') === 'advanced/day-21/lecture.html');
+fs.mkdirSync(path.join(ROOT, 'tools', '.cache'), { recursive: true });
+const half = fs.mkdtempSync(path.join(ROOT, 'tools', '.cache', 'day-'));
+try {
+  fs.writeFileSync(path.join(half, 'lecture.mdx'), '');
+  fs.writeFileSync(path.join(half, 'tasks.html'), '');
+  const rel = path.relative(ROOT, half).replace(/\\/g, '/');
+  check('dayPages: a day half written (MDX and HTML)', site.dayPages(rel).join(' ') === `${rel}/lecture.html ${rel}/tasks.html`, site.dayPages(rel).join(' '));
+} finally { fs.rmSync(half, { recursive: true, force: true }); }
 
 // the freshness check: a source newer than the build
 const src = path.join(ROOT, 'essentials/day-01/lecture.mdx');

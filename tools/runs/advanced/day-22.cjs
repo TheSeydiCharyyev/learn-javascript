@@ -22,7 +22,11 @@
 // the reference table holds all 49 rows of the day's plan (23 of MDN, 26 of ECMA-262) as links with their marks, every
 // tc39.es anchor exists and every link whose text starts with a number names the section of that number. The notes: each
 // of their 3 blocks prints what the comments of its console.log lines say; the table of wait and waitAsync and the
-// homework answers in Chrome; the steps they name; the 3 MDN pages they quote; the footer and the links.
+// homework answers in Chrome; the steps they name; the 3 MDN pages they quote; the footer and the links. The tasks: the
+// warm-ups and task 9 print what EXPECT says; every line of the 5 examples holds with the reference solutions (SOLUTIONS);
+// the experiments of the criteria — bumpTo and atomicMax in two threads, the practice of the lecture with makeLock,
+// waitUntil woken without a change, checker.js of task 7 with watchProgress; the steps they ask for, the MDN page they
+// quote, the links and the footer.
 // Playwright and live-server come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -43,6 +47,87 @@ const ISOLATE = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Emb
 // result-boxes whose first number is a race count: [section, the bound it stays under]
 const RACE = { 6: 2000000, 14: 400000 };
 const quiet = process.argv.includes('--quiet');
+// a block of the tasks without a result-box: its output by "tasks #index" (js blocks of the page); the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['4 4 2 1 1 false', 'RangeError RangeError RangeError TypeError [object SharedArrayBuffer]'],
+  'tasks #1': ['0 127 -128 200 -56', '0 5 4 7 RangeError TypeError'],
+  'tasks #2': ['timed-out not-equal promise 0 0', 'TypeError TypeError RangeError RangeError'],
+  'tasks #9': ['Big true true', 'TypeError', 'TypeError', 'TypeError', '5 TypeError'],
+};
+// Examples of the tasks call functions the student writes. These reference solutions make every
+// "expression;   // value" line of an example checkable: the value must equal the comment (before " — "). The check is
+// awaited, so a line may await too ("await waitUntil(...);   // 3"). No template literals inside: Node reads these
+// strings as templates first.
+const SOLUTIONS = {
+  bumpTo: `function bumpTo(ta, i, limit) {
+  for (;;) {
+    const old = Atomics.load(ta, i);
+    if (old >= limit) return old;
+    if (Atomics.compareExchange(ta, i, old, old + 1) === old) return old + 1;
+  }
+}`,
+  atomicMax: `function atomicMax(ta, i, x) {
+  for (;;) {
+    const old = Atomics.load(ta, i);
+    if (old >= x) return old;
+    if (Atomics.compareExchange(ta, i, old, x) === old) return old;
+  }
+}`,
+  makeLock: `function makeLock(s, i) {
+  return {
+    tryLock: () => Atomics.compareExchange(s, i, 0, 1) === 0,
+    lock() { while (Atomics.compareExchange(s, i, 0, 1) !== 0) Atomics.pause(); },
+    unlock() { if (Atomics.compareExchange(s, i, 1, 0) !== 1) throw new Error("замок свободен"); },
+  };
+}`,
+  waitUntil: `async function waitUntil(s, i, predicate, ms = Infinity) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = Atomics.load(s, i);
+    if (predicate(v)) return v;
+    const left = end - Date.now();
+    if (left <= 0) return null;
+    const r = Atomics.waitAsync(s, i, v, left);
+    if (r.async) await r.value;
+  }
+}`,
+  watchProgress: `async function watchProgress(s, total, onStep) {
+  let shown = 0;
+  while (shown < total) {
+    const r = Atomics.waitAsync(s, 0, shown);
+    if (r.async) await r.value;
+    const done = Atomics.load(s, 0);
+    if (done !== shown) { shown = done; onStep(done, Atomics.load(s, 1)); }
+  }
+}`,
+  makeSemaphore: `function makeSemaphore(s, i, n) {
+  Atomics.store(s, i, n);
+  return {
+    async acquire() {
+      for (;;) {
+        const v = Atomics.load(s, i);
+        if (v > 0) { if (Atomics.compareExchange(s, i, v, v - 1) === v) return; continue; }
+        const r = Atomics.waitAsync(s, i, 0);
+        if (r.async) await r.value;
+      }
+    },
+    release() { Atomics.add(s, i, 1); Atomics.notify(s, i, 1); },
+  };
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `await __check(${JSON.stringify(m[1])}, async () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `async function __check(text, fn, want) {
+  const got = JSON.stringify(await fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 const LF = String.fromCharCode(10);
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -200,6 +285,29 @@ const stepPaths = (html, needle) => {
     }
   }
 
+  // the tasks: the warm-ups and task 9 print what EXPECT says, every line of an example holds with the reference solution
+  const taskFiles = {};
+  {
+    const ctx2 = await b.newContext();
+    const tp = await ctx2.newPage();
+    await tp.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
+    const tblocks = await tp.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => ({ code: pre.textContent, file: pre.dataset.file || null, example: !!pre.closest('.example'), box: !!(pre.nextElementSibling && pre.nextElementSibling.matches('.result-box')) })));
+    await ctx2.close();
+    check(tblocks.length === 10 && tblocks.filter((x) => x.example).length === 5 && tblocks.filter((x) => x.file).length === 1 && tblocks.every((x) => !x.box),
+      `tasks: 10 js blocks — 5 examples, checker.js of task 7, 4 to predict; no result-box (${tblocks.length})`);
+    for (const [i, blk] of tblocks.entries()) {
+      if (blk.file) { taskFiles[blk.file] = blk.code; continue; }
+      const code = blk.example ? checkable(blk.code) : blk.code;
+      const want = blk.example ? null : EXPECT[`tasks #${i}`];
+      const out = await runFolder(b, page({ 'main.js': code }), { lines: want ? want.length : (code.match(/await __check\(/g) || []).length });
+      if (!quiet) { console.log(`\n--- tasks #${i}${blk.example ? ' (example)' : ''}: ${blk.code.split(LF)[blk.example ? 1 : 0]}`); for (const l of out) console.log(`    > ${l}`); }
+      if (blk.example) {
+        for (const l of out.filter((x) => x.startsWith('EX-'))) check(l.startsWith('EX-OK'), `tasks #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(out.length > 0 && out.every((l) => l.startsWith('EX-')) && out.length === (code.match(/await __check\(/g) || []).length, `tasks #${i} example runs with the reference solution: ${out.length} lines`);
+      } else check(!!want && same(out, want), `tasks #${i} ${blk.code.split(LF)[1].slice(0, 60)}: ${JSON.stringify(out)}`);
+    }
+  }
+
   // section 7 tells the two changes of main.js in words: they are the ones the run made
   check(lectureText.includes('буфер new SharedArrayBuffer(8) и вывод') && lectureText.includes('console.log(counts[0] < 2 * n, counts[1])'),
     'lecture 7: the text asks for new SharedArrayBuffer(8) and console.log(counts[0] < 2 * n, counts[1]) in main.js of section 6');
@@ -342,6 +450,59 @@ for (let k = 0; k < 3; k++) Atomics.waitAsync(a, 0, 0);
 console.log(Atomics.notify(new Int32Array(4), 0), run(() => Atomics.notify(new Int16Array(new SharedArrayBuffer(4)), 0)), Atomics.notify(a, 0, 2.9), Atomics.notify(a, 0, Infinity));` }),
   ['0 TypeError: [object Int16Array] is not an int32 or BigInt64 typed array. 2 1'],
   'student homework 4: notify on a non-shared Int32Array — 0; on Int16Array — TypeError; count 2.9 wakes 2 of the 3, Infinity — the one left');
+
+  // the tasks: the experiments of the criteria, in threads where they say so
+  await told(page({ 'w.js': `${SOLUTIONS.bumpTo}
+${SOLUTIONS.atomicMax}
+onmessage = (e) => {
+  const s = new Int32Array(e.data.shared);
+  let best = -1, x = e.data.seed;
+  for (let k = 0; k < 100000; k++) {
+    bumpTo(s, 0, 150000);
+    x = (x * 1103515245 + 12345) % 2147483648;
+    const v = x % 1000000;
+    if (v > best) best = v;
+    atomicMax(s, 1, v);
+  }
+  postMessage(best);
+};`, 'main.js': `const shared = new SharedArrayBuffer(8);
+const s = new Int32Array(shared);
+const bests = [];
+for (const seed of [7, 99]) {
+  const w = new Worker("w.js");
+  w.onmessage = (e) => { bests.push(e.data); if (bests.length === 2) console.log(s[0], s[1] === Math.max(...bests)); };
+  w.postMessage({ shared, seed });
+}` }), ['150000 true'], 'task 4: two threads, 100 000 bumpTo(s, 0, 150000) each — exactly 150 000; atomicMax of random numbers from both — the largest of all');
+  {
+    // the practice of the lecture (section 14) with makeLock in place of lock and unlock
+    const count = js.find((x) => x.file === 'count.js').code;
+    const lockLines = count.split(LF).slice(0, 2).join(LF);
+    const withLock = count.replace(lockLines, `${SOLUTIONS.makeLock}\nconst lock = (s, i) => makeLock(s, i).lock();\nconst unlock = (s, i) => makeLock(s, i).unlock();`);
+    const out = await runFolder(b, page({ 'count.js': withLock, 'main.js': mains[14] }), { lines: 1 });
+    const [unguarded, under, added, locked] = (out[0] || '').split(' ');
+    check(out.length === 1 && Number(unguarded) < 400000 && under === 'true' && added === '400000' && locked === '400000' && lockLines.startsWith('const lock') && withLock.includes('makeLock(s, i).lock()'),
+      `task 5: the practice of the lecture with makeLock — the counter under the lock exactly 400 000, ++ without it fewer ${JSON.stringify(out)}`);
+  }
+  await told(page({ 'main.js': `${SOLUTIONS.waitUntil}
+const s = new Int32Array(new SharedArrayBuffer(4));
+setTimeout(() => Atomics.notify(s, 0), 20);
+setTimeout(() => { Atomics.store(s, 0, 1); Atomics.notify(s, 0); }, 60);
+const t0 = Date.now();
+const v = await waitUntil(s, 0, (x) => x === 1);
+console.log(v, Date.now() - t0 >= 55);
+const r = Atomics.waitAsync(s, 0, 1, 0);
+console.log(r.async, r.value);` }), ['1 true', 'false timed-out'],
+  'task 6: notify without store at 20 ms does not end the wait — the value comes with store at 60 ms; a timeout of 0 is answered at once, without a promise (DoWait step 21)');
+  await told(page({ 'checker.js': taskFiles['checker.js'], 'main.js': `${SOLUTIONS.watchProgress}
+const shared = new SharedArrayBuffer(8);
+const s = new Int32Array(shared);
+const deck = Array.from({ length: 50 }, (_, k) => ({ answer: k % 7 === 0 ? "?" : "ok", right: "ok" }));
+const calls = [];
+new Worker("checker.js").postMessage({ shared, deck });
+await watchProgress(s, 50, (done, errors) => calls.push([done, errors]));
+const up = calls.every((c, k) => k === 0 || c[0] > calls[k - 1][0]);
+console.log(up, calls.at(-1).join("/"), calls.filter((c) => c[0] === 50).length);` }), ['true 50/8 1'],
+  'task 7: checker.js of the task with a deck of 50 — onStep gets only growing done, the last call is 50/8, and only one');
   await b.close();
 
   // every message of the table of errors is printed by some block or experiment
@@ -494,6 +655,33 @@ console.log(Atomics.notify(new Int32Array(4), 0), run(() => Atomics.notify(new I
       && ['SharedArrayBuffer, Atomics.wait(), Atomics.notify()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 4
       && !/tc39\.es\/ecma262\/2026\/#/.test(notes),
     'student: the quotes of MDN SharedArrayBuffer, Atomics.wait() and Atomics.notify() as MDN writes them, count defaults to Infinity; the footer names the three and ECMA-262 2026; MDN is linked there and three times in the text; section numbers without links');
+  }
+
+  // the tasks: the steps the criteria ask for, the MDN page they quote, the links and the footer
+  {
+    const tsteps = [
+      ['sec-validateatomicaccess', 'Let accessIndex be ? ToIndex (requestIndex)', '2'],
+      ['sec-atomics.notify', 'Let byteIndexInBuffer be ? ValidateAtomicAccess (taRecord, index)', '2'],
+      ['sec-sharedarraybuffer.prototype.slice', 'If IsSharedArrayBuffer (O) is false, throw a TypeError exception', '3'],
+      ['sec-sharedarraybuffer.prototype.slice', 'Let ctor be ? SpeciesConstructor (O, %SharedArrayBuffer%)', '14'],
+      ['sec-sharedarraybuffer.prototype.slice', 'Let new be ? Construct (ctor,', '15'],
+      ['sec-sharedarraybuffer.prototype.slice', 'If IsSharedArrayBuffer (new) is false, throw a TypeError exception', '17'],
+      ['sec-sharedarraybuffer.prototype.slice', 'If ArrayBufferByteLength (new, seq-cst) < newLen, throw a TypeError exception', '19'],
+    ];
+    const twrong = tsteps.filter(([id, needle, k]) => at(id, needle).join() !== k).map(([id, needle, k]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${k}`);
+    check(twrong.length === 0 && num('sec-sharedarraybuffer.prototype.slice') === '25.2.5.6' && num('sec-sharedarraybuffer-%symbol.species%') === '25.2.4.2'
+      && f('sec-sharedarraybuffer-%symbol.species%').includes('Return the this value') && num('sec-validateatomicaccess') === '25.4.3.2' && num('sec-sharedarraybuffer.prototype.grow') === '25.2.5.3',
+    `tasks: ECMA-262 — ValidateAtomicAccess 2 (ToIndex: −1 is a RangeError), notify 2 before 7 (task 3), slice 3/14/15/17/19 (task 9; 18 — above), species 25.2.4.2 returns the this value; grow 25.2.5.3 ${twrong.join('; ')}`);
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
+    const cas = plain(mdn('reference/global_objects/atomics/compareexchange'));
+    const quote = 'if the value had been updated by another thread in the meantime, the write would fail';
+    const tAnchors = [...new Set([...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(cas.includes(quote) && flat(tasksHtml).includes(`«${quote}»`)
+      && tAnchors.every((a) => spec.includes(`id="${a}"`)) && tNamed.length === 1 && tNamed.every(([id, k]) => num(id) === k)
+      && ['Atomics.compareExchange()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => tFooter.includes(s)) && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 2,
+    'tasks: MDN compareExchange() — «if the value had been updated by another thread in the meantime, the write would fail»; the tc39.es anchor exists with its number (25.2.5.6); the footer names compareExchange() and ECMA-262 2026');
   }
 
   // the days the lecture points to, read as text without tags

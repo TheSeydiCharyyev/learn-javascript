@@ -20,7 +20,9 @@
 // names in 25.2, 25.4, 9.6.2, 10.4.5, 25.1.6.1; no Atomics.pause) is checked against tools/.cache/ecma262-2026.html; the
 // MDN pages it quotes are in tools/.cache/mdn-content.git and say what it says; the days it points to say what it says;
 // the reference table holds all 49 rows of the day's plan (23 of MDN, 26 of ECMA-262) as links with their marks, every
-// tc39.es anchor exists and every link whose text starts with a number names the section of that number.
+// tc39.es anchor exists and every link whose text starts with a number names the section of that number. The notes: each
+// of their 3 blocks prints what the comments of its console.log lines say; the table of wait and waitAsync and the
+// homework answers in Chrome; the steps they name; the 3 MDN pages they quote; the footer and the links.
 // Playwright and live-server come from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -34,7 +36,6 @@ const ROOT = path.join(__dirname, '../../..');
 const MDN_GIT = path.join(ROOT, 'tools/.cache/mdn-content.git');
 const DAY = path.join(ROOT, 'advanced/day-22');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
-const PAGES = ['lecture'];
 const ORIGIN = 'http://127.0.0.1:5590';
 const OTHER = 'http://127.0.0.1:5591';
 const LIVE_PORT = 5596;
@@ -180,6 +181,25 @@ const stepPaths = (html, needle) => {
   }
   check(n === 19, `lecture: every result-box had a block or a folder before it (${n})`);
 
+  // the notes: every console.log line writes its output in its comment, "console.log(x);   // 3 — why"
+  {
+    const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+      .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
+    const ctx1 = await b.newContext();
+    const sp = await ctx1.newPage();
+    await sp.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
+    const sblocks = await sp.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
+    await ctx1.close();
+    check(sblocks.length === 3 && sblocks.every((x) => x.js && !x.file), `student: 3 js blocks without a file name (${sblocks.length})`);
+    for (const [i, blk] of sblocks.entries()) {
+      const want = commented(blk.code);
+      const out = await runFolder(b, page({ 'main.js': blk.code }), { lines: want.length });
+      printed.push(...out);
+      if (!quiet) { console.log(`\n--- student #${i}: ${blk.code.split(LF)[1]}`); for (const l of out) console.log(`    > ${l}`); }
+      check(want.length > 0 && same(out, want), `student #${i}: output = comments ${JSON.stringify(out)}`);
+    }
+  }
+
   // section 7 tells the two changes of main.js in words: they are the ones the run made
   check(lectureText.includes('буфер new SharedArrayBuffer(8) и вывод') && lectureText.includes('console.log(counts[0] < 2 * n, counts[1])'),
     'lecture 7: the text asks for new SharedArrayBuffer(8) and console.log(counts[0] < 2 * n, counts[1]) in main.js of section 6');
@@ -295,6 +315,33 @@ const w = new Worker("w.js");
 w.onmessage = (e) => console.log(e.data);
 w.postMessage(s.buffer);` }), ['0', 'not-equal'],
   'lecture 14: a signal that came before the thread went to sleep is not lost — notify woke nobody (0), the later wait sees 1 and returns "not-equal"');
+
+  // the notes: the table of wait and waitAsync, the homework in Chrome
+  await told(page({ 'w.js': `onmessage = (e) => {
+  const a = new Int32Array(e.data);
+  postMessage([Atomics.wait(a, 0, 0, 0), Atomics.wait(a, 0, 0, -5), Atomics.wait(a, 0, 1)].join(" "));
+};`, 'main.js': `const a = new Int32Array(new SharedArrayBuffer(4));
+const w = new Worker("w.js");
+w.onmessage = (e) => console.log(e.data, Atomics.waitAsync(a, 0, 0, -5).value);
+w.postMessage(a.buffer);` }), ['timed-out timed-out not-equal timed-out'],
+  'student, the table: wait in a thread with timeout 0 or less — "timed-out", a wrong value — "not-equal"; waitAsync with a negative timeout — "timed-out" at once');
+  await told(page({ 'main.js': `const u16 = new Uint16Array(new SharedArrayBuffer(4));
+console.log(Atomics.add(u16, 0, 70000), u16[0], Atomics.exchange(u16, 1, -1), u16[1], Atomics.store(u16, 1, -1), u16[1]);` }), ['0 4464 0 65535 -1 65535'],
+  'student homework 1: add returns the old 0, 70000 lies as 4464; exchange returns 0, −1 lies as 65535; store returns −1 (step 8), the cell holds 65535');
+  await told(page({ 'main.js': 'console.log([1, 2, 3, 4, 5, 6, 7, 8].map((n) => Atomics.isLockFree(n)).join(" "));' }), ['true true false true false false false true'],
+    'student homework 2: isLockFree 1–8 in Chrome — true true false true false false false true (4 by the standard, 1, 2, 8 from the agent record, the rest false)');
+  await told(page({ 'main.js': `const run = (f) => { try { return f(); } catch (e) { return e.name + ": " + e.message; } };
+const a = new Int32Array(new SharedArrayBuffer(4));
+console.log(Atomics.waitAsync(a, 0, "0", NaN).async, Atomics.waitAsync(a, 0, 0, -1).value, Atomics.waitAsync(a, 0, 2 ** 32).async, Atomics.waitAsync(a, 0, 2 ** 32 + 1).value);
+console.log(run(() => Atomics.waitAsync(a, 0, 0n)), "|", run(() => Atomics.waitAsync(new BigInt64Array(new SharedArrayBuffer(8)), 0, 0)));` }),
+  ['true timed-out true not-equal', 'TypeError: Cannot convert a BigInt value to a number | TypeError: Cannot convert 0 to a BigInt'],
+  'student homework 3: "0" and NaN — waits (ToInt32, NaN → ∞); −1 — "timed-out" at once; 2 ** 32 is 0 by ToInt32 — waits, 2 ** 32 + 1 is 1 — "not-equal"; 0n — ToInt32 throws, 0 for BigInt64Array — ToBigInt64 throws');
+  await told(page({ 'main.js': `const run = (f) => { try { return f(); } catch (e) { return e.name + ": " + e.message; } };
+const a = new Int32Array(new SharedArrayBuffer(4));
+for (let k = 0; k < 3; k++) Atomics.waitAsync(a, 0, 0);
+console.log(Atomics.notify(new Int32Array(4), 0), run(() => Atomics.notify(new Int16Array(new SharedArrayBuffer(4)), 0)), Atomics.notify(a, 0, 2.9), Atomics.notify(a, 0, Infinity));` }),
+  ['0 TypeError: [object Int16Array] is not an int32 or BigInt64 typed array. 2 1'],
+  'student homework 4: notify on a non-shared Int32Array — 0; on Int16Array — TypeError; count 2.9 wakes 2 of the 3, Infinity — the one left');
   await b.close();
 
   // every message of the table of errors is printed by some block or experiment
@@ -421,6 +468,32 @@ w.postMessage(s.buffer);` }), ['0', 'not-equal'],
       && says(cas, 'whether it was equal to the expected value or not') && cas.includes(adderFn.trim())
       && says(wait, 'regardless of whether the expected value has changed') && says(wa, 'The promise is never rejected'),
     'lecture 7, 9, 10, 11, 13: MDN Atomics — «used with SharedArrayBuffer and ArrayBuffer objects», «Experts only»; compareExchange — «whether it was equal…», the atomic adder exactly as the lecture copies it; wait — «regardless of whether the expected value has changed»; waitAsync — «The promise is never rejected»');
+  }
+
+  // the notes: the steps and sections they name, the MDN pages they quote, the footer
+  {
+    const nsteps = [
+      ['sec-dowait', 'If arrayTypeName is "BigInt64Array", let v be ? ToBigInt64 (value)', '6'],
+      ['sec-dowait', 'Else, let v be ? ToInt32 (value)', '7'],
+      ['sec-atomics.notify', 'Let taRecord be ? ValidateIntegerTypedArray (typedArray, true)', '1'],
+      ['sec-atomics.notify', 'Let intCount be ? ToIntegerOrInfinity (count)', '4.a'],
+      ['sec-atomics.notify', 'If IsSharedArrayBuffer (buffer) is false, return +0', '7'],
+    ];
+    const nwrong = nsteps.filter(([id, needle, k]) => at(id, needle).join() !== k).map(([id, needle, k]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${k}`);
+    check(nwrong.length === 0 && num('sec-atomics.store') === '25.4.11' && num('sec-atomics.islockfree') === '25.4.8' && num('sec-atomics.notify') === '25.4.15'
+      && num('sec-atomicreadmodifywrite') === '25.4.3.17' && num('sec-validateintegertypedarray') === '25.4.3.1' && num('sec-allocatesharedarraybuffer') === '25.2.2.1',
+    `student: ECMA-262 — DoWait 6–7 (homework 3: ToBigInt64, ToInt32), notify 1/4.a/7 (homework 4; 3–4 — above), 25.4.11 step 8, 25.4.8, 25.4.3.17 step 7, 25.4.3.1 step 4.b, 25.2.2.1 steps 6–7, 25.4.3.12 step 3.b (above) ${nwrong.join('; ')}`);
+    const notes = builtSite.htmlOfFile(path.join(DAY, 'student.html')); // read() is declared below
+    const nflat = flat(notes);
+    const nFooter = notes.slice(notes.indexOf('<div class="sources">'));
+    const sab = plain(mdn('reference/global_objects/sharedarraybuffer'));
+    const wait = plain(mdn('reference/global_objects/atomics/wait'));
+    const notify = plain(mdn('reference/global_objects/atomics/notify'));
+    const nq = [[sab, 'To use shared memory your document must be in a secure context and cross-origin isolated'], [wait, 'regardless of whether the expected value has changed'], [notify, 'will return 0 on non-shared ArrayBuffer objects']];
+    check(nq.every(([text, quote]) => text.includes(quote) && nflat.includes(`«${quote}»`)) && notify.includes('Defaults to Infinity')
+      && ['SharedArrayBuffer, Atomics.wait(), Atomics.notify()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 4
+      && !/tc39\.es\/ecma262\/2026\/#/.test(notes),
+    'student: the quotes of MDN SharedArrayBuffer, Atomics.wait() and Atomics.notify() as MDN writes them, count defaults to Infinity; the footer names the three and ECMA-262 2026; MDN is linked there and three times in the text; section numbers without links');
   }
 
   // the days the lecture points to, read as text without tags

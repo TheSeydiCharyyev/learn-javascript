@@ -43,6 +43,115 @@ const quiet = process.argv.includes('--quiet');
 // section 14: the second line of the MDN cache — right after the collection, before or after its cleanup job
 const GAP = ['undefined 1', "{word: 'kitap'} 2"];
 const GAP_RUNS = 12;
+// a block of the tasks without a result-box: its output by "tasks #index" (js blocks of the page); the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['- b - - e'],
+  'tasks #1': ['true false false false'],
+  'tasks #2': ['ok TypeError ok TypeError TypeError ok TypeError'],
+  'tasks #8': ['Uncaught Error: сбой', 'c,микрозадача,b,a'],
+};
+// reference solutions of the tasks: every "expression;   // value" line of an example must give the comment; the check is
+// awaited, so a line may await too. No template literals inside: Node reads these strings as templates first.
+const SOLUTIONS = {
+  makeCache: `function makeCache(load, keep = 0) {
+  const map = new Map();
+  const recent = [];
+  const registry = new FinalizationRegistry((key) => {
+    if (!map.get(key)?.deref()) map.delete(key);
+  });
+  return {
+    get(key) {
+      let value = map.get(key)?.deref();
+      if (value === undefined) {
+        value = load(key);
+        map.set(key, new WeakRef(value));
+        registry.register(value, key);
+      }
+      if (keep > 0) {
+        const at = recent.indexOf(value);
+        if (at !== -1) recent.splice(at, 1);
+        recent.push(value);
+        if (recent.length > keep) recent.shift();
+      }
+      return value;
+    },
+    get size() { return map.size; },
+  };
+}`,
+  makeTracker: `function makeTracker() {
+  const freed = [];
+  let tracked = 0;
+  const registry = new FinalizationRegistry((id) => freed.push(id));
+  return {
+    track(obj, id) { tracked++; registry.register(obj, id); },
+    freed() { return [...freed].sort((x, y) => x - y); },
+    alive() { return tracked - freed.length; },
+  };
+}`,
+  openConnection: `const leaks = new FinalizationRegistry(({ name, log }) => log.push("утечка: " + name));
+function openConnection(name, log) {
+  const conn = {
+    name,
+    closed: false,
+    close() {
+      if (conn.closed) return;
+      conn.closed = true;
+      leaks.unregister(conn);
+      log.push("закрыто: " + name);
+    },
+  };
+  leaks.register(conn, { name, log }, conn);
+  return conn;
+}`,
+  makeEmitter: `function makeEmitter() {
+  let refs = [];
+  return {
+    on(listener) { refs.push(new WeakRef(listener)); },
+    emit(msg) {
+      refs = refs.filter((r) => r.deref() !== undefined);
+      for (const r of refs) r.deref().handle(msg);
+      return refs.length;
+    },
+    get size() { return refs.length; },
+  };
+}`,
+  cachedOnce: `function cachedOnce(getter) {
+  const cache = new Map(), pending = new Map();
+  const registry = new FinalizationRegistry((key) => {
+    if (!cache.get(key)?.deref()) cache.delete(key);
+  });
+  return async (key) => {
+    const hit = cache.get(key)?.deref();
+    if (hit !== undefined) return hit;
+    if (pending.has(key)) return pending.get(key);
+    const promise = (async () => {
+      try {
+        const value = await getter(key);
+        cache.set(key, new WeakRef(value));
+        registry.register(value, key);
+        return value;
+      } finally {
+        pending.delete(key);
+      }
+    })();
+    pending.set(key, promise);
+    return promise;
+  };
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `await __check(${JSON.stringify(m[1])}, async () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `async function __check(text, fn, want) {
+  const got = JSON.stringify(await fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 const LF = String.fromCharCode(10);
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -142,6 +251,9 @@ const swap = (code, from, to) => (code.split(from).length === 2 ? code.replace(f
   await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
   const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
   const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
+  const taskBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => ({ code: pre.textContent, file: pre.dataset.file || null, example: !!pre.closest('.example'), box: !!(pre.nextElementSibling && pre.nextElementSibling.matches('.result-box')) })));
+  const tasksText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -338,6 +450,86 @@ console.log([() => new WeakRef(Symbol.for("k")), () => FinalizationRegistry(() =
     `student homework 3: five TypeErrors — 26.1.1.1 step 2, 26.2.1.1 step 1, 26.2.3.2 steps 4 and 5.a, 26.2.3.3 step 3 ${JSON.stringify(out)}`);
   }
 
+  // the tasks: the warm-ups and task 9 print what EXPECT says, every line of an example holds with the reference solution
+  {
+    check(taskBlocks.length === 9 && taskBlocks.filter((x) => x.example).length === 5 && taskBlocks.every((x) => !x.file && !x.box)
+      && taskBlocks.filter((x) => usesGc(x.code)).length === 6
+      && tasksText.includes('Код пишем в папке дня 22 рядом с gc.js лекции (раздел 3): блок с nextGC() — это main.js, после запуска нажмите «Collect garbage».'),
+    `tasks: 9 js blocks — 5 examples, 4 to predict, 6 of them import nextGC (1, 4–7, 9); no files, no result-box; the folder of day 22 with gc.js (${taskBlocks.length}, ${taskBlocks.filter((x) => usesGc(x.code)).length})`);
+    for (const [i, blk] of taskBlocks.entries()) {
+      const code = blk.example ? checkable(blk.code) : blk.code;
+      const want = blk.example ? null : EXPECT[`tasks #${i}`];
+      const out = await runFolder(b, page(code), { lines: want ? want.length : (code.match(/await __check\(/g) || []).length, gc: usesGc(blk.code) });
+      if (!quiet) { console.log(`\n--- tasks #${i}${blk.example ? ' (example)' : ''}${usesGc(blk.code) ? ' (gc)' : ''}: ${blk.code.split(LF).find((l) => !l.startsWith('import ')).slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      if (blk.example) {
+        for (const l of out.filter((x) => x.startsWith('EX-'))) check(l.startsWith('EX-OK'), `tasks #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(out.length > 0 && out.every((l) => l.startsWith('EX-')) && out.length === (code.match(/await __check\(/g) || []).length, `tasks #${i} example runs with the reference solution: ${out.length} lines`);
+      } else check(!!want && same(out, want), `tasks #${i} ${blk.code.split(LF).find((l) => !l.startsWith('import ')).slice(0, 60)}: ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the tasks: the experiments of the criteria, with the reference solutions
+  {
+    const G = 'import { nextGC } from "./gc.js";' + LF;
+    const t4 = await runFolder(b, page(`${G}${SOLUTIONS.makeCache}
+let loads = 0;
+const cache = makeCache((word) => { loads++; return { word }; });
+let card = cache.get("kitap");
+console.log(cache.get("kitap") === card, loads, cache.size);
+card = null;
+await nextGC();
+console.log(cache.get("kitap").word, loads, cache.size);`), { lines: 2, gc: true });
+    check(same(t4, ['true 1 1', 'kitap 2 1']) && !SOLUTIONS.makeCache.includes('.has('), `task 4: with keep = 0 the cache is the one of section 15 — after a collection one more load, one entry ${JSON.stringify(t4)}; no has()`);
+    const many = (loop) => `${G}${SOLUTIONS.makeTracker}
+const tracker = makeTracker();
+let cards = Array.from({ length: 1000 }, (_, i) => ({ id: i }));
+${loop}
+const kept = cards.slice(0, 10);
+cards = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 100));
+console.log(tracker.freed().length, tracker.alive(), kept.length);`;
+    const t5a = await runFolder(b, page(many('cards.forEach((card) => tracker.track(card, card.id));')), { lines: 1, gc: true });
+    const t5b = await runFolder(b, page(many('for (const card of cards) tracker.track(card, card.id);')), { lines: 1, gc: true });
+    check(same(t5a, ['990 10 10']) && same(t5b, ['989 11 10']), `task 5: 1000 cards, 10 kept — forEach ${JSON.stringify(t5a)}, for…of at the top level ${JSON.stringify(t5b)} (one more alive, section 16)`);
+    const holding = swap(SOLUTIONS.openConnection, 'leaks.register(conn, { name, log }, conn);', 'leaks.register(conn, { name, log, conn }, conn);');
+    const t6 = holding ? await runFolder(b, page(`${G}${holding}
+const log = [];
+let second = openConnection("galam", log);
+second = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 100));
+console.log(log.join() || "пусто");`), { lines: 1, gc: true }) : [];
+    check(same(t6, ['пусто']), `task 6: a held value that points at the connection keeps it — no «утечка» after a collection ${JSON.stringify(t6)}`);
+    const t7 = await runFolder(b, page(`${G}${SOLUTIONS.makeEmitter}
+const emitter = makeEmitter();
+const got = [];
+const a = { handle: (m) => got.push("a:" + m) };
+emitter.on(a);
+emitter.on({ handle: (m) => got.push("c:" + m) });
+console.log(emitter.emit("salam"));
+await nextGC();
+console.log(emitter.emit("sag bol"), got.join(), emitter.size);`), { lines: 2, gc: true });
+    check(same(t7, ['2', '1 a:salam,c:salam,a:sag bol 1']), `task 7: a listener made right in the call of on() is gone after a collection ${JSON.stringify(t7)}`);
+    const t8 = await runFolder(b, page(`${G}${SOLUTIONS.cachedOnce}
+let loads = 0;
+const get = cachedOnce(async (word) => { loads++; await new Promise((r) => setTimeout(r, 10)); return { word }; });
+let [x, y] = await Promise.all([get("kitap"), get("kitap")]);
+x = null;
+y = null;
+await nextGC();
+const [p, q] = await Promise.all([get("kitap"), get("kitap")]);
+console.log(p === q, loads, p.word);
+let fails = 1;
+const shaky = cachedOnce(async (word) => { loads++; if (fails-- > 0) throw new Error("сеть"); return { word }; });
+const first = await shaky("galam").then(() => "ok", (e) => e.message);
+console.log(first, (await shaky("galam")).word, loads);`), { lines: 2, gc: true });
+    check(same(t8, ['true 2 kitap', 'сеть galam 4']), `task 8: after a collection two gets at once — one load, one object; a failed load is not kept, the next get loads again ${JSON.stringify(t8)}`);
+    const t9 = swap(taskBlocks[8]?.code ?? '', '  if (calls.length === 1) { queueMicrotask(() => calls.push("микрозадача")); throw new Error("сбой"); }', '  if (calls.length === 1) queueMicrotask(() => calls.push("микрозадача"));');
+    const t9out = t9 ? await runFolder(b, page(t9), { lines: 1, gc: true }) : [];
+    check(same(t9out, ['c,b,a,микрозадача']), `task 9: without throw the three calls are one cleanup job — the microtask after all of them ${JSON.stringify(t9out)}`);
+  }
+
   // the constructors have only prototype (26.1.2, 26.2.2); the cheatsheet runs without output
   {
     const out = await runFolder(b, page('console.log(Object.getOwnPropertyNames(WeakRef).join(), Object.getOwnPropertyNames(FinalizationRegistry).join(), WeakRef.prototype[Symbol.toStringTag], FinalizationRegistry.prototype[Symbol.toStringTag]);'), { lines: 1 });
@@ -411,6 +603,24 @@ console.log([() => new WeakRef(Symbol.for("k")), () => FinalizationRegistry(() =
     'student: the footer names MDN Memory management, WeakRef, FinalizationRegistry and ECMA-262 2026; MDN is linked once (the footer); section numbers without links');
   }
 
+  // the tasks: their quotes, the steps they ask for (in the list of steps below), the link, the footer
+  {
+    const tq = [...tasksText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => m[1].replace(/\s+/g, ' '));
+    // «Uncaught Error: сбой» is the console line of task 9 (EXPECT), the others come from MDN and DevTools
+    const tmissing = tq.filter((x) => !M.memory.includes(x) && x !== devtoolsLabel && x !== EXPECT['tasks #8'][0]);
+    check(tq.length === 3 && tmissing.length === 0 && tq.includes('It should only be used for cleanup — and non-critical cleanup') && tq.includes('Uncaught Error: сбой'),
+      `tasks: ${tq.length} English quotes (MDN Memory management, the DevTools button, the console line of task 9) as written there ${tmissing.join(' | ')}`);
+    check(['26.2.3.2, шаг 5.b', 'шаг 9.13 (1, 2 или 3)', '(шаг 3.a)', 'по шагу 3.c (знак ?) и шагу 2 раздела 9.9.4.1', '(9.9.2, заметка 5)', '(9.9.3, заметка 1;', '(9.11)', '(9.9.1)'].every((s) => tasksText.includes(s)),
+      'tasks: they ask for 26.2.3.2 step 5.b, 9.13 steps 1–3, 9.12 steps 3.a and 3.c, 9.9.4.1 step 2, 9.9.2 note 5, 9.9.3 note 1, 9.11, 9.9.1');
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
+    const tAnchors = [...new Set([...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(tAnchors.every((a) => spec.includes(`id="${a}"`)) && tNamed.length === 1 && tNamed.every(([id, k]) => num(id) === k)
+      && ['FinalizationRegistry, WeakRef, Memory management', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => tFooter.includes(s)) && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 1,
+    'tasks: the tc39.es anchor exists with its number (9.12); the footer names MDN FinalizationRegistry, WeakRef, Memory management and ECMA-262 2026; MDN is linked once');
+  }
+
   // the MDN texts the lecture retells
   {
     check(hasAll(M.memory, ['malloc()', 'free()', 'Allocate the memory you need', 'Use the allocated memory', 'Release the allocated memory', 'is undecidable', 'Reference-counting garbage collection', 'Mark-and-sweep algorithm', 'an object is unreachable', 'It is also not possible to programmatically trigger garbage collection in JavaScript', 'node --expose-gc --inspect index.js'])
@@ -457,9 +667,14 @@ console.log([() => new WeakRef(Symbol.for("k")), () => FinalizationRegistry(() =
     ['sec-cleanup-finalization-registry', 'Perform ? HostCallJobCallback (callback, undefined, «cell.[[HeldValue]]»)', '3.c'],
     ['sec-clear-kept-objects', 'Set agentRecord.[[KeptAlive]] to a new empty List', '2'],
     ['sec-addtokeptobjects', 'Append value to agentRecord.[[KeptAlive]]', '2'],
+    // the tasks: 2 (5.b), 3 (9.13 step 3), 9 (9.12 3.a, 9.9.4.1 step 2)
+    ['sec-finalization-registry.prototype.register', 'Set unregisterToken to empty', '5.b'],
+    ['sec-canbeheldweakly', 'Return false', '3'],
+    ['sec-cleanup-finalization-registry', 'Choose any such cell', '3.a'],
+    ['sec-host-cleanup-finalization-registry', 'If cleanupResult is an abrupt completion, perform any host-defined steps for reporting the error', '2'],
   ];
   const wrong = steps.filter(([id, needle, k]) => at(id, needle).join() !== k).map(([id, needle, k]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${k}`);
-  check(wrong.length === 0, `ECMA-262: ${steps.length} step numbers the lecture names (26.1.1.1 1/2/4/5, 26.1.3.2 3, 26.1.4.1 2/2.a/2.b/3, 26.2.1.1 1/2/7, 26.2.3.2 3–7, 26.2.3.3 3/5/6, 9.13 1–2, 9.12 3.b–3.c, 9.10 2, 9.11 2): ${wrong.join('; ') || 'all right'}`);
+  check(wrong.length === 0, `ECMA-262: ${steps.length} step numbers the lecture and the tasks name (26.1.1.1 1/2/4/5, 26.1.3.2 3, 26.1.4.1 2/2.a/2.b/3, 26.2.1.1 1/2/7, 26.2.3.2 3–7/5.b, 26.2.3.3 3/5/6, 9.13 1–3, 9.12 3.a–3.c, 9.9.4.1 2, 9.10 2, 9.11 2): ${wrong.join('; ') || 'all right'}`);
   check(num('sec-weak-ref-target') === '26.1.1.1' && num('sec-weak-ref.prototype.deref') === '26.1.3.2' && num('sec-weakrefderef') === '26.1.4.1' && num('sec-finalization-registry-cleanup-callback') === '26.2.1.1'
     && num('sec-finalization-registry.prototype.register') === '26.2.3.2' && num('sec-finalization-registry.prototype.unregister') === '26.2.3.3' && num('sec-host-cleanup-finalization-registry') === '9.9.4.1'
     && num('sec-clear-kept-objects') === '9.10' && num('sec-addtokeptobjects') === '9.11' && num('sec-cleanup-finalization-registry') === '9.12' && num('sec-canbeheldweakly') === '9.13'

@@ -1,0 +1,563 @@
+---
+title: "День 23 — Модель памяти: гонки данных и happens-before"
+day: День 23 • урок 1
+heading: "Модель памяти: гонки данных и happens-before"
+lead: Курс 3, Advanced. Модуль «Двоичные данные и модель памяти» — четвёртый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+  h3 { color: #065f46; }
+  .step-number { background: #10b981; }
+  .toc a { color: #047857; }
+---
+
+<Goals>
+- объяснять, почему два потока могут увидеть то, чего не даёт ни одно чередование их шагов;
+- называть события памяти и порядки главы 29: is-agent-order-before, reads-from, synchronizes-with, happens-before;
+- проходить определения гонки и гонки данных по шагам и находить гонки данных в своих программах;
+- строить флаг готовности, который работает по стандарту, а не по удаче.
+</Goals>
+
+<Toc />
+
+## 1. Зачем модель памяти {#why}
+
+День 22 оставил три вопроса. Страница MDN
+[SharedArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)
+обещала, что запись в общий блок другой поток увидит «eventually» — когда именно? Почему обычное чтение `s[4]` может вернуть старое значение? И чем порядок `unordered` у обычного
+доступа отличается от `seq-cst` у `Atomics`? Ответы — в главе
+[29](https://tc39.es/ecma262/2026/#sec-memory-model) спецификации, модели памяти.
+
+Она не похожа на остальной стандарт. Обычно спецификация — алгоритм: шаг 1, шаг 2. Глава 29 —
+набор правил, которым должно удовлетворять всё исполнение целиком. Заметка в её начале прямо говорит: «the
+model is not expressible algorithmically». Главное обещание главы — в первом абзаце: «When the program has no
+data races (defined below), the ordering of events appears as sequentially consistent». Если в программе
+нет гонок данных, она ведёт себя так, будто шаги потоков просто чередуются. Если гонки есть — возможны
+«astonishments», сюрпризы, но не всё что угодно: «there is no undefined behaviour».
+
+## 2. Опыт: 0 и 0 {#sb}
+
+Два потока, две ячейки, в начале обе 0. Поток А пишет `x = 1` и читает `y`, поток Б пишет `y = 1` и
+читает `x`. Перед каждым раундом оба ждут друг друга на барьере из `Atomics`, чтобы стартовать вместе. Раундов
+— 200 000, у каждого свои ячейки `x[r]` и `y[r]`. Все опыты дня — в изолированной папке дня 22 (раздел 2 его
+лекции: `.vscode/settings.json` и `index.html`), файлы из блоков кладём рядом:
+
+```js file="sb.js"
+onmessage = (e) => {
+  const { shared, me, n, atomic } = e.data;
+  const bar = new Int32Array(shared, 0, 1);
+  const x = new Int32Array(shared, 4, n), y = new Int32Array(shared, 4 + 4 * n, n);
+  const got = new Int32Array(shared, 4 + 8 * n + 4 * n * me, n);
+  for (let r = 0; r < n; r++) {
+    Atomics.add(bar, 0, 1);
+    while (Atomics.load(bar, 0) < 2 * (r + 1));
+    const [mine, other] = me === 0 ? [x, y] : [y, x];
+    if (atomic) { Atomics.store(mine, r, 1); got[r] = Atomics.load(other, r); }
+    else { mine[r] = 1; got[r] = other[r]; }
+  }
+  postMessage("готово");
+};
+```
+
+```js file="main.js"
+const n = 200000;
+function test(atomic) {
+  const shared = new SharedArrayBuffer(4 + 16 * n);
+  return new Promise((resolve) => {
+    let finished = 0;
+    for (const me of [0, 1]) {
+      const worker = new Worker("sb.js"); // курс 4
+      worker.onmessage = () => {
+        if (++finished < 2) return;
+        const a = new Int32Array(shared, 4 + 8 * n, n), b = new Int32Array(shared, 4 + 12 * n, n);
+        let zeros = 0;
+        for (let r = 0; r < n; r++) if (a[r] === 0 && b[r] === 0) zeros++;
+        resolve(zeros);
+      };
+      worker.postMessage({ shared, me, n, atomic }); // курс 4
+    }
+  });
+}
+console.log("обычные:", await test(false), "из", n);
+console.log("Atomics:", await test(true), "из", n);
+```
+
+<ResultBox>
+обычные: 26355 из 200000\
+Atomics: 0 из 200000
+</ResultBox>
+
+<Scheme src="scheme-sb.svg">Чередования против буфера записи</Scheme>
+
+Первое число у вас будет своим, у нас — от 20 954 до 27 167 в восьми запусках. Ни одно чередование шагов
+не даёт 0 и 0: кто-то пишет первым, и второй это увидит. А при обычном доступе так выходит примерно в каждом
+восьмом раунде. Процессор держит запись в своём буфере и читает другую ячейку из памяти раньше, чем запись
+дошла до остальных. С `Atomics` — ни разу: атомарные события стоят в одном порядке, «agreed upon by all agents»
+(раздел [29.1](https://tc39.es/ecma262/2026/#sec-memory-model-fundamentals)). Страница MDN
+[Atomics](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics) говорит о том
+же проще: атомарные операции следят, «that operations are finished before the next operation starts». Обычная программа здесь —
+программа с гонкой данных, и стандарт разрешает ей этот сюрприз.
+
+## 3. События памяти {#events}
+
+Модель говорит не о строках кода, а о **событиях**. Каждое чтение и запись общего блока добавляет событие в
+список агента (Agent Events Record, [29.2](https://tc39.es/ecma262/2026/#sec-agent-event-records)). Событий
+три вида: ReadSharedMemory, WriteSharedMemory и ReadModifyWriteSharedMemory (таблицы 92–94). У каждого есть поля
+\[\[Block\]\], \[\[ByteIndex\]\], \[\[ElementSize\]\] — где и сколько байтов — и два главных:
+
+| Поле | Значения | Что значит |
+| --- | --- | --- |
+| \[\[Order\]\] | `seq-cst`, `unordered`, у записи ещё `init` | какой порядок событию обещан |
+| \[\[NoTear\]\] | `true` или `false` | можно ли собрать значение из байтов разных записей |
+
+Откуда берутся поля, видно в SetValueInBuffer
+([25.1.3.18](https://tc39.es/ecma262/2026/#sec-setvalueinbuffer), шаги 9.c–9.d) и GetRawBytesFromSharedBlock
+([25.1.3.15](https://tc39.es/ecma262/2026/#sec-getrawbytesfromsharedblock), шаги 5–9). Порядок передаёт
+вызывающий: обычный доступ вида — `unordered`, `Atomics.load` и `Atomics.store` — `seq-cst`. `Atomics.add` и его
+семья дают одно событие ReadModifyWriteSharedMemory, всегда `seq-cst`. А новый общий блок
+(CreateSharedByteDataBlock, [6.2.9.2](https://tc39.es/ecma262/2026/#sec-createsharedbytedatablock), шаг 6.a)
+сразу записывает в каждый байт ноль событием с порядком `init`. Заметка 1 раздела 29.1 добавляет: «No
+orderings weaker than sequentially consistent and stronger than unordered, such as release-acquire, are
+supported». Середины между двумя порядками в JavaScript нет.
+
+Самое неожиданное — шаг 6 GetRawBytesFromSharedBlock: байты чтения — «nondeterministically chosen byte values».
+Чтение по стандарту не берёт значение из памяти, а **выбирает** его. Заметка шага 7 объясняет: так описано
+поведение «hardware with weak consistency». Выбор записывается в Chosen Value Record
+([29.3](https://tc39.es/ecma262/2026/#sec-chosen-value-records)).
+
+## 4. Какие исполнения допустимы {#valid}
+
+Все события всех агентов плюс выбранные значения — это candidate execution, «кандидат»
+([29.4](https://tc39.es/ecma262/2026/#sec-candidate-executions)). Вспомогательные операции раздела 29.5 собирают
+из него множества событий и байты, которые прочитает чтение. Дальше модель проверяет кандидата правилами 29.7.
+Кандидат становится допустимым исполнением ([29.7.5](https://tc39.es/ecma262/2026/#sec-valid-executions)), если:
+
+| Правило | Раздел | Коротко |
+| --- | --- | --- |
+| выбранные значения сходятся | 29.7.1 | чтение выбрало те байты, что дали записи, у которых оно читает |
+| чтение согласовано | 29.7.2 | нельзя читать из будущего и из уже перезаписанного |
+| нет разрыва | 29.7.3 | там, где \[\[NoTear\]\] — `true`, значение из одной записи |
+| атомарные последовательны | 29.7.4 | все события можно выстроить в один порядок памяти |
+
+Плюс happens-before должен быть строгим частичным порядком. И последняя фраза 29.7.5: «All programs have at
+least one valid execution». Браузер может выдать любое допустимое исполнение — и только допустимое.
+
+## 5. Порядки между событиями {#relations}
+
+Правилам нужны отношения между событиями (раздел 29.6). Первые три — кирпичи:
+
+- **is-agent-order-before** ([29.6.1](https://tc39.es/ecma262/2026/#sec-agent-order)) — порядок событий внутри
+  одного агента, как они шли в его коде;
+- **reads-from** ([29.6.3](https://tc39.es/ecma262/2026/#sec-reads-from)) — чтение берёт байты у этой записи
+  (побайтно — reads-bytes-from, 29.6.2);
+- **synchronizes-with** ([29.6.5](https://tc39.es/ecma262/2026/#sec-synchronizes-with)) — запись «передаёт»
+  порядок чтению.
+
+Условие synchronizes-with для общей памяти строгое: «R reads-from W in execution, R.\[\[Order\]\] is seq-cst,
+W.\[\[Order\]\] is seq-cst, and R and W have equal memory ranges». Атомарное чтение, которое увидело атомарную
+запись того же размера по тому же адресу. Ещё synchronizes-with дают события Synchronize: их добавляет
+критическая секция очереди ожидающих дня 22 (EnterCriticalSection,
+[25.4.3.6](https://tc39.es/ecma262/2026/#sec-entercriticalsection), шаг 3.g). И события хозяина
+(host-synchronizes-with, [29.6.4](https://tc39.es/ecma262/2026/#sec-host-synchronizes-with)): заметка 2 называет
+среди них `postMessage` между потоками.
+
+## 6. happens-before {#hb}
+
+Из кирпичей строится главное отношение — happens-before
+([29.6.6](https://tc39.es/ecma262/2026/#sec-happens-before)). E happens-before D, если верно одно из четырёх:
+E идёт раньше D в одном агенте; E synchronizes-with D; E — нулевая запись `init`, а диапазоны пересекаются; есть
+событие F между ними: E happens-before F и F happens-before D. Последнее правило делает отношение
+транзитивным: из стрелок порядка агента и synchronizes-with складываются цепочки.
+
+<Scheme src="scheme-hb.svg">Цепочка happens-before у флага готовности</Scheme>
+
+Так работает флаг готовности. Поток пишет данные обычным доступом, потом `Atomics.store` флага. Страница
+читает флаг `Atomics.load` и, увидев 1, читает данные. Запись флага synchronizes-with его чтение. С порядком
+агента с обеих сторон получается цепочка: запись данных happens-before их чтения. Заметка к 29.6.6 добавляет:
+happens-before включает порядок агента, поэтому однопоточная программа работает как раньше.
+
+## 7. Гонка и гонка данных по шагам {#races}
+
+**Гонка** — Races ([29.8](https://tc39.es/ecma262/2026/#sec-races)). События E и D в гонке, если это разные
+события (шаг 1), которые happens-before не связало ни в одну сторону (шаг 1.a), и при этом либо обе — записи с
+пересекающимися байтами (шаг 1.a.i), либо одно читает у другого (шаг 1.a.ii). Шаг 1.a написан так: «If it is
+not the case that both E happens-before D in execution and D happens-before E in execution». Буквально «неверно,
+что оба сразу» выполнялось бы всегда: happens-before — строгий порядок, двух направлений сразу не бывает. Тогда
+гонкой были бы и упорядоченные записи одного потока, и обещание 29.10 потеряло бы смысл. Читаем «ни в одну
+сторону»; так же шаг записан и в текущем черновике стандарта.
+
+**Гонка данных** — Data Races ([29.9](https://tc39.es/ecma262/2026/#sec-data-races)): гонка (шаг 1), в которой
+хотя бы одно событие не `seq-cst` (шаг 1.a) или диапазоны пересекаются, но не равны (шаг 1.b). Гонка двух
+атомарных операций одного размера — гонка, но не гонка данных: так и задуманы `Atomics.add` из двух потоков.
+
+| Что делают два потока | Гонка? | Гонка данных? |
+| --- | --- | --- |
+| оба `counts[0]++` (день 22, раздел 6) | да: две записи, порядка нет | да: `unordered` |
+| оба `Atomics.add(counts, 0, 1)` | да | нет: оба `seq-cst`, диапазоны равны |
+| `Atomics.store` в `Int32Array`, `Atomics.load` через `Int16Array` тех же байтов | да | да: диапазоны пересекаются, не равны |
+| поток пишет обычным доступом до `postMessage`, страница читает после | нет: `postMessage` — host-synchronizes-with | нет |
+| запись данных и чтение после флага на `Atomics` (раздел 6) | нет: happens-before | нет |
+
+## 8. Программы без гонок данных {#drf}
+
+Раздел [29.10](https://tc39.es/ecma262/2026/#sec-data-race-freedom) короткий. Исполнение без гонок данных, если
+никакие два события в нём не в гонке данных. Программа без гонок данных, если таковы все её исполнения. И
+обещание: «The memory model guarantees sequential consistency of all events for data race free programs». Опыт
+раздела 2 с `Atomics` — такая программа, поэтому 0 и 0 не бывает. Обычная версия — нет, и стандарт её не
+защищает.
+
+Важно слово «все исполнения». Программа, где гонки данных не случилось сегодня, но могла случиться при
+другом раскладе потоков, — не программа без гонок данных.
+
+## 9. Опыт: разорванное значение {#tear}
+
+Что можно прочитать при гонке данных? Правило 29.7.3, Tear Free Reads
+([29.7.3](https://tc39.es/ecma262/2026/#sec-tear-free-aligned-reads)): если у чтения \[\[NoTear\]\] — `true`,
+оно не может собрать значение из байтов разных записей того же размера. Когда \[\[NoTear\]\] — `true`, решает
+IsNoTearConfiguration ([25.1.3.13](https://tc39.es/ecma262/2026/#sec-isnotearconfiguration)): шаг 1 — целые виды
+без насыщения всегда; шаг 2 — BigInt-виды только с порядком `seq-cst`; шаг 3 — остальные, то есть дробные виды,
+никогда. `DataView` передаёт `isTypedArray` = `false` (день 21), и для него разрыв разрешён всегда.
+Проверим: писатель кладёт в восемь байт то 0, то −1, читатель три миллиона раз считает значения, которых никто
+не писал.
+
+```js file="tear.js"
+onmessage = (e) => {
+  const { shared, kind, role } = e.data;
+  const sync = new Int32Array(shared, 0, 2);
+  const dv = new DataView(shared);
+  const view = kind === "DataView" ? null : new globalThis[kind](shared, 64, 1);
+  const values = kind === "DataView" || kind === "BigInt64Array" ? [0n, -1n] : [0, -1];
+  const write = view ? (v) => { view[0] = v; } : (v) => dv.setBigInt64(64, v);
+  const read = view ? () => view[0] : () => dv.getBigInt64(64);
+  if (role === "writer") {
+    Atomics.store(sync, 1, 1);
+    for (let k = 0; Atomics.load(sync, 0) === 0; k++) write(values[k % 2]);
+    return;
+  }
+  while (Atomics.load(sync, 1) === 0);
+  let torn = 0;
+  for (let k = 0; k < 3_000_000; k++) {
+    const v = read();
+    if (v !== values[0] && v !== values[1]) torn++;
+  }
+  Atomics.store(sync, 0, 1);
+  postMessage(torn);
+};
+```
+
+```js file="main.js"
+function torn(kind) {
+  const shared = new SharedArrayBuffer(128);
+  new Worker("tear.js").postMessage({ shared, kind, role: "writer" }); // курс 4
+  const reader = new Worker("tear.js"); // курс 4
+  reader.postMessage({ shared, kind, role: "reader" }); // курс 4
+  return new Promise((resolve) => { reader.onmessage = (e) => resolve(e.data); });
+}
+const result = [];
+for (const kind of ["DataView", "Float64Array", "BigInt64Array", "Int32Array"]) result.push(kind + ": " + await torn(kind));
+console.log(result.join(", "));
+```
+
+<ResultBox>
+DataView: 2205, Float64Array: 0, BigInt64Array: 0, Int32Array: 0
+</ResultBox>
+
+<Scheme src="scheme-tear.svg">Значение из байтов двух записей</Scheme>
+
+Ячейка `sync[1]` нужна, чтобы читатель не начал раньше писателя. `DataView` рвётся: у нас от 2 466 до 4 671
+значений в восьми запусках, хотя смещение 64 выровнено. `Int32Array` не рвётся по стандарту. `Float64Array` и
+обычный `BigInt64Array` стандарт рвать разрешает, но в наших запусках разрыва не было ни разу — полагаться на это
+нельзя.
+Заметка к 29.7.3 говорит короче: \[\[NoTear\]\] — `true` у целого вида и `false` у дробного и у `DataView`; про
+BigInt подробнее — шаг 2 IsNoTearConfiguration.
+
+## 10. Согласованное чтение и «в конце концов» {#coherent}
+
+Правило Coherent Reads ([29.7.2](https://tc39.es/ecma262/2026/#sec-coherent-reads)) запрещает читать из
+будущего: чтение не может взять байты у записи, которую оно happens-before (шаг 1.b.i). И из прошлого,
+которое уже закрыли: нельзя взять запись W, если между ней и чтением по happens-before стоит другая запись V тех
+же байтов (шаг 1.b.ii). Поток, который сам записал 5, а потом прочитал ячейку, без чужих записей увидит 5.
+
+А «eventually» MDN — это раздел Sequentially Consistent Atomics
+([29.7.4](https://tc39.es/ecma262/2026/#sec-memory-order)). Его третье условие запрещает бесконечно много чтений
+перед `seq-cst` записью, а заметка 2 объясняет смысл: «seq-cst writes become visible to seq-cst reads with
+equal memory range in finite time». Обещание «в конце концов увидят» стандарт даёт атомарным записям и
+атомарным чтениям. Обычному чтению никто не обещал, что оно когда-нибудь увидит новое значение.
+
+## 11. Что разрешено компилятору {#compiler}
+
+Заметка 2 раздела [29.11](https://tc39.es/ecma262/2026/#sec-shared-memory-guidelines) обращается к авторам
+движков. Почти всё, что можно делать с однопоточным кодом, можно и с общей памятью, кроме четырёх правил:
+«Atomics are carved in stone» — атомарные события нельзя убрать или переставить; «Reads must be stable» — одно
+чтение видит одно значение; «Writes must be stable» — нельзя добавлять записи, которых нет в программе; у
+чтения должно оставаться хоть одно возможное значение. Среди разрешённого — «hoisting non-atomic reads out of
+loops even if that affects termination». Обычное чтение можно вынести из цикла, даже если цикл станет вечным:
+
+```js file="spin.js"
+onmessage = (e) => {
+  const flag = new Int32Array(e.data);
+  while (flag[0] === 0);
+  postMessage("поток увидел флаг");
+};
+```
+
+```js file="main.js"
+const flag = new Int32Array(new SharedArrayBuffer(4));
+const worker = new Worker("spin.js"); // курс 4
+worker.onmessage = (e) => console.log(e.data);
+worker.postMessage(flag.buffer); // курс 4
+setTimeout(() => Atomics.store(flag, 0, 1), 50);
+```
+
+<ResultBox>
+поток увидел флаг
+</ResultBox>
+
+Chrome чтение из цикла не вынес — поток вышел. Но стандарт разрешает движку прочитать `flag[0]` один раз до
+цикла, и тогда поток крутится вечно. Правильный цикл ожидания — `Atomics.load(flag, 0)` или, лучше,
+`Atomics.wait` (день 22): атомарное чтение «carved in stone».
+
+Заметка 3 того же раздела — для генерации машинного кода. Обычные чтение и запись становятся обычными командами
+процессора. Атомарные — командой между двумя полными барьерами («a full (sequentially consistent) fence, a
+regular load or store, and a full fence»). `Atomics.add` — LOCK-командой на x86. Отсюда и цена: атомарный
+доступ медленнее, поэтому в общих ячейках его нужно ровно столько, сколько нужно для отсутствия гонок данных.
+
+## 12. Практика: флаг готовности {#ready}
+
+Самая частая задача: поток готовит данные, страница ждёт и читает. Правильная версия — по схеме раздела 6:
+
+```js file="producer.js"
+onmessage = (e) => {
+  const flag = new Int32Array(e.data, 0, 1);
+  const data = new Float64Array(e.data, 8, 1000);
+  for (let i = 0; i < data.length; i++) data[i] = i * 0.5;
+  Atomics.store(flag, 0, 1);
+  Atomics.notify(flag, 0);
+};
+```
+
+```js file="main.js"
+const shared = new SharedArrayBuffer(8 + 8 * 1000);
+const flag = new Int32Array(shared, 0, 1);
+const data = new Float64Array(shared, 8, 1000);
+new Worker("producer.js").postMessage(shared); // курс 4
+while (Atomics.load(flag, 0) === 0) {
+  const r = Atomics.waitAsync(flag, 0, 0);
+  if (r.async) await r.value;
+}
+let sum = 0;
+for (const x of data) sum += x;
+console.log(sum);
+```
+
+<ResultBox>
+249750
+</ResultBox>
+
+Данные — `Float64Array`, обычный доступ, и это законно: каждая запись данных happens-before каждого чтения.
+Цепочку даёт `Atomics.load`, который прочитал 1: он synchronizes-with `Atomics.store` потока. `waitAsync` только
+избавляет от пустого кручения. Поэтому флаг после пробуждения читаем атомарно, в петле, как `until` дня 22. Сумма
+0.5 · (0 + 1 + … + 999) = 249 750.
+
+Что будет, если и флаг сделать обычным? Проверим тем же раундовым опытом, что в разделе 2: поток пишет `data[r] =
+1`, потом `flag[r] = 1`, страница читает флаг, потом данные и считает раунды, где флаг уже 1, а данных ещё нет:
+
+```js file="mp.js"
+onmessage = (e) => {
+  const { shared, me, n, atomic } = e.data;
+  const bar = new Int32Array(shared, 0, 1);
+  const data = new Int32Array(shared, 4, n), flag = new Int32Array(shared, 4 + 4 * n, n), bad = new Int32Array(shared, 4 + 8 * n, n);
+  for (let r = 0; r < n; r++) {
+    Atomics.add(bar, 0, 1);
+    while (Atomics.load(bar, 0) < 2 * (r + 1));
+    if (me === 0) { data[r] = 1; if (atomic) Atomics.store(flag, r, 1); else flag[r] = 1; }
+    else { const f = atomic ? Atomics.load(flag, r) : flag[r]; const d = data[r]; bad[r] = f === 1 && d === 0 ? 1 : 0; }
+  }
+  postMessage("готово");
+};
+```
+
+```js file="main.js"
+const n = 200000;
+function test(atomic) {
+  const shared = new SharedArrayBuffer(4 + 12 * n);
+  return new Promise((resolve) => {
+    let finished = 0;
+    for (const me of [0, 1]) {
+      const worker = new Worker("mp.js"); // курс 4
+      worker.onmessage = () => { if (++finished === 2) resolve(new Int32Array(shared, 4 + 8 * n, n).reduce((s, v) => s + v, 0)); };
+      worker.postMessage({ shared, me, n, atomic }); // курс 4
+    }
+  });
+}
+console.log("обычный флаг:", await test(false), "Atomics:", await test(true), "из", n);
+```
+
+<ResultBox>
+обычный флаг: 3561 Atomics: 0 из 200000
+</ResultBox>
+
+С обычным флагом страница несколько тысяч раз увидела «готово» без данных (у нас — от 3 561 до 6 670 в восьми
+запусках). С атомарным флагом — ни разу, и это гарантия, а не удача. Кто переставил чтения или записи —
+процессор или компилятор, — программе не видно, а стандарт разрешает и то и другое: это гонка данных.
+
+## 13. Практика: гонки данных в программах дня 22 {#day22}
+
+Пройдём программы дня 22 с определениями разделов 29.8–29.9:
+
+| Программа дня 22 | Где гонка данных | Почему |
+| --- | --- | --- |
+| раздел 6: `counts[0]++` из двух потоков | между записями потоков | обе `unordered`, happens-before нет |
+| раздел 7: `Atomics.add(counts, 1, 1)` | нет | гонка есть, но оба `seq-cst`, диапазоны равны |
+| разделы 6–7: страница читает `counts` после двух «готово» | нет | `postMessage` — host-synchronizes-with |
+| раздел 11: поток читает `flags[0]` после `wait` | нет | `notify` вышел из критической секции, поток вошёл в неё снова (25.4.3.11, шаг 8) |
+| раздел 14: `s[4]++` | между потоками | нарочно — для сравнения |
+| раздел 14: `s[6]++` под замком | нет | `compareExchange` читает у `Atomics.store` прошлого `unlock` — synchronizes-with |
+
+Гонку раздела 6 можно убрать и без тысяч атомарных операций. Пусть каждый поток считает у себя, а в общую
+ячейку прибавит один раз:
+
+```js file="counter.js"
+onmessage = (e) => {
+  const counts = new Int32Array(e.data.shared);
+  let mine = 0;
+  for (let i = 0; i < e.data.n; i++) mine++;
+  Atomics.add(counts, 0, mine);
+  postMessage("готово");
+};
+```
+
+```js file="main.js"
+const shared = new SharedArrayBuffer(4);
+const counts = new Int32Array(shared);
+const n = 1_000_000;
+let finished = 0;
+for (let k = 0; k < 2; k++) {
+  const worker = new Worker("counter.js"); // курс 4
+  worker.postMessage({ shared, n }); // курс 4
+  worker.onmessage = () => {
+    finished++;
+    if (finished === 2) console.log(counts[0]);
+  };
+}
+```
+
+<ResultBox>
+2000000
+</ResultBox>
+
+Два атомарных события вместо двух миллионов — и программа без гонок данных.
+
+## 14. Рекомендации стандарта {#guidelines}
+
+Заметка 1 раздела 29.11 — для программистов. Первая рекомендация: «We recommend programs be kept data race
+free». Для таких программ «it is not necessary to understand the details of the memory model». Вторая — если
+гонки всё-таки есть, пусть хотя бы атомарные операции в них не участвуют: разные ячейки для атомарного и
+обычного доступа, один размер доступа к одной ячейке. «The program should treat shared memory as strongly typed
+as much as possible». Тогда гоняющиеся обычные доступы хотя бы не разорвут значения. Переведём в правила:
+
+| Правило | Как в коде |
+| --- | --- |
+| ячейку, которую одновременно пишут и читают разные потоки, — только через `Atomics` | счётчики, флаги, замки |
+| данные можно трогать обычным доступом, если их отделяет цепочка happens-before | флаг на `Atomics`, `wait` и `notify`, `postMessage` |
+| одна ячейка — один вид и один размер | не смешивать `Int32Array` и `Int16Array` над одними байтами |
+| ждать — `Atomics.wait` / `waitAsync`, не цикл с обычным чтением | раздел 11 |
+| для общих значений — целые виды | `DataView` и дробные виды могут разорваться |
+
+## 15. «Карточки 2.0»: прогресс без гонок данных {#cards}
+
+В задании 7 дня 22 поток проверяет колоду, а страница показывает прогресс: ячейка 0 — сколько проверено,
+ячейка 1 — сколько ошибок. Поток прибавлял обе через `Atomics.add`, страница читала через `Atomics.load` —
+гонок данных нет. Можно ли ошибки считать обычным `s[1]++`? Запись ошибки `unordered` идёт в потоке раньше
+`Atomics.add(s, 0, 1)`. Страница, прочитав `done` атомарно, получает цепочку happens-before до всех ошибок,
+посчитанных раньше. Но поток уже считает следующую карточку и снова пишет `s[1]`, а страница в это же время
+читает `s[1]`. Их не связывает ничего — это гонка данных. Вывод: ячейку, которую поток продолжает менять, пока
+страница читает, — только через `Atomics`:
+
+```js
+function report(s) {
+  return { done: Atomics.load(s, 0), errors: Atomics.load(s, 1) };
+}
+```
+
+Обычным чтением можно взять только то, что поток больше не меняет. Например, итог после последнего
+`done === total` — цепочка happens-before до него уже есть.
+
+## 16. Что будет завтра {#next}
+
+Модуль A5 закончен. День 24 открывает модуль A6 «Память и ресурсы»: `WeakRef` и `FinalizationRegistry` — как
+узнать, что объект собрал сборщик мусора, и почему на это нельзя полагаться.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [29 Memory Model](https://tc39.es/ecma262/2026/#sec-memory-model) | модель — правила, а не алгоритм; разделы 1, 2 | <Full /> |
+| [29.1 Memory Model Fundamentals](https://tc39.es/ecma262/2026/#sec-memory-model-fundamentals) | события, \[\[Order\]\], \[\[NoTear\]\]; раздел 3 | <Full /> |
+| [29.2 Agent Events Records](https://tc39.es/ecma262/2026/#sec-agent-event-records) | список событий агента | <Brief /> |
+| [29.3 Chosen Value Records](https://tc39.es/ecma262/2026/#sec-chosen-value-records) | выбранные байты чтения | <Brief /> |
+| [29.4 Candidate Executions](https://tc39.es/ecma262/2026/#sec-candidate-executions) | кандидат исполнения | <Brief /> |
+| [29.5 Abstract Operations for the Memory Model](https://tc39.es/ecma262/2026/#sec-abstract-operations-for-the-memory-model) | множества событий и байты чтения | <Brief /> |
+| [29.5.1 EventSet](https://tc39.es/ecma262/2026/#sec-event-set) | все события кандидата | <Brief /> |
+| [29.5.2 SharedDataBlockEventSet](https://tc39.es/ecma262/2026/#sec-sharedatablockeventset) | только события общих блоков | <Brief /> |
+| [29.5.3 HostEventSet](https://tc39.es/ecma262/2026/#sec-hosteventset) | события хозяина | <Brief /> |
+| [29.5.4 ComposeWriteEventBytes](https://tc39.es/ecma262/2026/#sec-composewriteeventbytes) | байты из нескольких записей | <Brief /> |
+| [29.5.5 ValueOfReadEvent](https://tc39.es/ecma262/2026/#sec-valueofreadevent) | что прочитало чтение | <Brief /> |
+| [29.6 Relations of Candidate Executions](https://tc39.es/ecma262/2026/#sec-relations-of-candidate-executions) | отношения между событиями; раздел 5 | <Brief /> |
+| [29.6.1 is-agent-order-before](https://tc39.es/ecma262/2026/#sec-agent-order) | порядок внутри агента | <Brief /> |
+| [29.6.2 reads-bytes-from](https://tc39.es/ecma262/2026/#sec-reads-bytes-from) | у каких записей взят каждый байт | <Brief /> |
+| [29.6.3 reads-from](https://tc39.es/ecma262/2026/#sec-reads-from) | чтение берёт у записи | <Brief /> |
+| [29.6.4 host-synchronizes-with](https://tc39.es/ecma262/2026/#sec-host-synchronizes-with) | `postMessage` и прочее от хозяина | <Brief /> |
+| [29.6.5 synchronizes-with](https://tc39.es/ecma262/2026/#sec-synchronizes-with) | оба `seq-cst`, диапазоны равны | <Brief /> |
+| [29.6.6 happens-before](https://tc39.es/ecma262/2026/#sec-happens-before) | цепочки порядка; раздел 6 | <Full /> |
+| [29.7 Properties of Valid Executions](https://tc39.es/ecma262/2026/#sec-properties-of-valid-executions) | правила допустимости; раздел 4 | <Brief /> |
+| [29.7.1 Valid Chosen Reads](https://tc39.es/ecma262/2026/#sec-valid-chosen-reads) | выбор сходится с записями | <Brief /> |
+| [29.7.2 Coherent Reads](https://tc39.es/ecma262/2026/#sec-coherent-reads) | не из будущего, не из перезаписанного | <Brief /> |
+| [29.7.3 Tear Free Reads](https://tc39.es/ecma262/2026/#sec-tear-free-aligned-reads) | разрыв; раздел 9 | <Brief /> |
+| [29.7.4 Sequentially Consistent Atomics](https://tc39.es/ecma262/2026/#sec-memory-order) | порядок памяти; «eventually» | <Brief /> |
+| [29.7.5 Valid Executions](https://tc39.es/ecma262/2026/#sec-valid-executions) | у любой программы есть допустимое исполнение | <Brief /> |
+| [29.8 Races](https://tc39.es/ecma262/2026/#sec-races) | гонка по шагам; раздел 7 | <Full /> |
+| [29.9 Data Races](https://tc39.es/ecma262/2026/#sec-data-races) | не `seq-cst` или неравные диапазоны | <Full /> |
+| [29.10 Data Race Freedom](https://tc39.es/ecma262/2026/#sec-data-race-freedom) | без гонок данных — последовательно; раздел 8 | <Full /> |
+| [29.11 Shared Memory Guidelines](https://tc39.es/ecma262/2026/#sec-shared-memory-guidelines) | советы программистам и движкам; разделы 11, 14 | <Full /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// без гонок данных — ведёт себя как чередование шагов (29.10); с гонками — «сюрпризы», но не что угодно
+// событие: Read / Write / ReadModifyWrite; [[Order]]: seq-cst (Atomics), unordered (обычный доступ), init (нули)
+// happens-before: порядок агента + synchronizes-with (оба seq-cst, равные диапазоны) + init + цепочки
+// гонка: нет happens-before ни туда ни сюда, и две записи или чтение у записи (29.8)
+// гонка данных: гонка, где не оба seq-cst или диапазоны пересекаются не полностью (29.9)
+// не рвутся: целые виды всегда, BigInt-виды — только через Atomics; DataView и дробные — могут (25.1.3.13)
+// «eventually» — только для seq-cst записи и seq-cst чтения (29.7.4)
+// обычное чтение в цикле движок вправе вынести из цикла — ждать через Atomics.wait / waitAsync
+// флаг готовности: данные обычным доступом → Atomics.store(flag) | Atomics.load(flag) → данные
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему опыт раздела 2 с обычным доступом может дать 0 и 0, а с `Atomics` — нет?
+   <Answer>Обычная программа — с гонкой данных, ей последовательность не обещана; процессор держит запись в буфере.
+   Атомарные события стоят в одном порядке для всех агентов (29.1), программа без гонок данных
+   последовательна (29.10).</Answer>
+2. Когда запись synchronizes-with чтение общей памяти?
+   <Answer>Когда чтение берёт у неё байты, оба `seq-cst` и диапазоны равны (29.6.5). Ещё — события Synchronize
+   критической секции и события хозяина, например `postMessage`.</Answer>
+3. Два потока делают `Atomics.add(c, 0, 1)`. Это гонка? Гонка данных?
+   <Answer>Гонка — да: две записи без happens-before. Гонка данных — нет: оба `seq-cst`, диапазоны равны.</Answer>
+4. Почему `DataView` может прочитать число, которое никто не записывал, а `Int32Array` — нет?
+   <Answer>У `DataView` `isTypedArray` — `false`, \[\[NoTear\]\] — `false`; у целого вида IsNoTearConfiguration шаг 1
+   даёт `true`, и правило 29.7.3 запрещает собирать значение из разных записей.</Answer>
+5. Чем опасен цикл `while (flag[0] === 0);` в потоке?
+   <Answer>Обычное чтение движок вправе вынести из цикла (29.11), и цикл станет вечным; и обещания
+   «в конце концов увидит» у обычного чтения нет (29.7.4). Ждать надо `Atomics.load` или `Atomics.wait`.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)
+(SharedArrayBuffer, Atomics, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

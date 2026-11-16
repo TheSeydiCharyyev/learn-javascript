@@ -1,0 +1,130 @@
+---
+title: День 23 — конспект
+css: |
+  h1 { border-bottom-color: #10b981; }
+  h2 { color: #047857; background: #ecfdf5; border-left-color: #10b981; }
+---
+
+# День 23. Модель памяти: гонки данных и happens-before
+
+<Subtitle>Выжимка лекции: события памяти, happens-before, гонка и гонка данных, разрыв, флаг готовности.</Subtitle>
+
+## Главное
+
+<Definition>
+Модель памяти (глава 29) — правила для всего исполнения сразу. Доступ к общему блоку — событие: чтение, запись
+или чтение-изменение-запись, с порядком \[\[Order\]\] (`seq-cst` у `Atomics`, `unordered` у обычного доступа,
+`init` у нулей) и признаком \[\[NoTear\]\]. Программа без гонок данных ведёт себя как чередование шагов потоков
+(29.10); с гонками возможны сюрпризы, но не что угодно.
+</Definition>
+
+## Доступ и его события
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const sab = new SharedArrayBuffer(16);
+const kinds = [Int8Array, Uint32Array, BigInt64Array, Float64Array, Uint8ClampedArray];
+console.log(kinds.map((K) => K.name + " " + run(() => Atomics.load(new K(sab), 0))).join(", "));   // Int8Array ok, Uint32Array ok, BigInt64Array ok, Float64Array TypeError, Uint8ClampedArray TypeError — атомарно — только целые виды
+console.log(typeof DataView.prototype.getInt32, run(() => Atomics.load(new DataView(sab), 0)), run(() => Atomics.store(new Float32Array(sab), 0, 1)));   // function TypeError TypeError — у DataView и дробных видов есть только обычный доступ
+```
+
+| Доступ | \[\[Order\]\] | \[\[NoTear\]\] |
+| --- | --- | --- |
+| `ta[i]` целого вида (`Int8Array` … `Uint32Array`) | `unordered` | `true` |
+| `ta[i]` у `BigInt64Array`, `BigUint64Array` | `unordered` | `false` |
+| `Atomics.load`, `Atomics.store` | `seq-cst` | `true` |
+| `Atomics.add` и семья — одно событие чтения-изменения-записи | `seq-cst` | `true` |
+| `ta[i]` у `Float32Array`, `Float64Array` | `unordered` | `false` |
+| `DataView`: `getInt32`, `setFloat64`… | `unordered` | `false` |
+| новый `SharedArrayBuffer` — нули | `init` | `true` |
+
+<Remember>
+\[\[NoTear\]\] решает IsNoTearConfiguration (25.1.3.13): целые виды — всегда, BigInt-виды — только с
+`seq-cst`, дробные — никогда; `DataView` передаёт `isTypedArray` = `false` — ему разрыв разрешён всегда. В опыте
+лекции он выдал тысячи значений, которых никто не писал, а `Int32Array` — ни одного. Порядков два, середины нет:
+«No orderings weaker than sequentially consistent and stronger than unordered, such as release-acquire, are
+supported» (29.1).
+</Remember>
+
+## Чередования
+
+```js
+function interleavings(a, b) {
+  if (!a.length) return [b];
+  if (!b.length) return [a];
+  return [...interleavings(a.slice(1), b).map((t) => [a[0], ...t]), ...interleavings(a, b.slice(1)).map((t) => [b[0], ...t])];
+}
+const A = [["x", 1], ["r1", "y"]], B = [["y", 1], ["r2", "x"]];
+const results = interleavings(A, B).map((steps) => {
+  const m = { x: 0, y: 0 };
+  for (const [k, v] of steps) m[k] = typeof v === "number" ? v : m[v];
+  return m.r1 + " " + m.r2;
+});
+console.log(results.length, [...new Set(results)].sort().join(" | "));   // 6 0 1 | 1 0 | 1 1 — шесть чередований, «0 0» нет ни в одном
+```
+
+<Remember>
+«Последовательно» — значит, как одно из чередований. С обычными `x[r]`, `y[r]` опыт лекции давал «0 0» примерно в
+каждом восьмом раунде — программе с гонкой данных последовательность не обещана; с `Atomics` — ни разу: атомарные
+события стоят в одном порядке, «agreed upon by all agents» (29.1). Обещание «eventually» страницы MDN
+[SharedArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)
+по 29.7.4 (заметка 2) дано только атомарным: «seq-cst writes become visible to seq-cst reads with equal memory
+range in finite time».
+</Remember>
+
+## Гонка и гонка данных
+
+```js
+const overlap = (e, d) => e.start < d.start + d.size && d.start < e.start + e.size;
+const equal = (e, d) => e.start === d.start && e.size === d.size;
+const race = (e, d, hb) => e !== d && !hb(e, d) && !hb(d, e) && ((e.write && d.write && overlap(e, d)) || e.from === d || d.from === e);
+const dataRace = (e, d, hb) => race(e, d, hb) && (e.order !== "seq-cst" || d.order !== "seq-cst" || (overlap(e, d) && !equal(e, d)));
+const none = () => false;
+const a = { write: true, order: "unordered", start: 0, size: 4 }, b = { write: true, order: "unordered", start: 0, size: 4 };
+const c = { write: true, order: "seq-cst", start: 0, size: 4 }, d = { write: true, order: "seq-cst", start: 0, size: 4 };
+const w = { write: true, order: "seq-cst", start: 0, size: 4 }, r = { write: false, order: "seq-cst", start: 0, size: 2, from: w };
+const first = { write: true, order: "unordered", start: 0, size: 4 }, second = { write: true, order: "unordered", start: 0, size: 4 };
+const sameAgent = (x, y) => x === first && y === second;
+console.log(race(a, b, none), dataRace(a, b, none), "|", race(c, d, none), dataRace(c, d, none));   // true true | true false — два ++; два Atomics.add
+console.log(race(w, r, none), dataRace(w, r, none), "|", race(first, second, sameAgent), dataRace(first, second, sameAgent));   // true true | false false — Int32 и Int16 над одними байтами; две записи одного потока
+```
+
+| Определение | Шаги | Коротко |
+| --- | --- | --- |
+| гонка (29.8) | 1, 1.a, 1.a.i, 1.a.ii | разные события, happens-before нет ни туда ни сюда; две записи с общими байтами или чтение у записи |
+| гонка данных (29.9) | 1, 1.a, 1.b | гонка, где не оба `seq-cst` или диапазоны пересекаются, но не равны |
+
+<Remember>
+happens-before (29.6.6) — порядок агента, synchronizes-with, нулевые записи `init` и цепочки из них.
+synchronizes-with: чтение берёт байты у записи, оба `seq-cst`, диапазоны равны (29.6.5); ещё — критическая
+секция `wait`/`notify` и `postMessage` (29.6.4). Флаг готовности: данные → `Atomics.store(flag, 0, 1)` |
+`Atomics.load(flag, 0)` вернул 1 → данные; после `waitAsync` флаг читаем атомарно. Цикл `while (flag[0] === 0);`
+движок вправе сделать вечным: 29.11 разрешает «hoisting non-atomic reads out of loops even if that affects
+termination». Шаг 1.a раздела 29.8 читаем как «ни в одну сторону».
+</Remember>
+
+<Homework>
+1. Где гонка и где гонка данных (шаги 29.8–29.9)? а) А пишет `s[0] = 1`, Б тогда же делает `Atomics.load(s, 0)` —
+   в исполнении, где Б прочитал 1, и где прочитал 0; программа без гонок данных? б) А: `s[1] = 5;
+   Atomics.store(s, 0, 1)`; Б: `Atomics.load(s, 0)` вернул 1, потом Б читает `s[1]`. в) А и Б — `Atomics.add`
+   через `Int16Array` на байте 0, В — `Atomics.load` через `Int32Array` тех же байтов. г) А пишет `s[0] = 1` и
+   вызывает `postMessage`, Б читает `s[0]` в `onmessage`. Проверьте функциями `race` и `dataRace`.
+2. Переберите функцией `interleavings` чередования «передачи сообщения»: А — `data = 1`, потом `flag = 1`; Б —
+   `f = flag`, потом `d = data`. Какие пары `f d` получаются и какой нет? Почему опыт лекции с обычным флагом её
+   всё-таки показал, а с `Atomics.store` и `Atomics.load` — нет?
+3. Можно ли по стандарту прочитать значение, которого никто не писал, при гонке доступов одного размера через
+   `Int16Array`; `BigInt64Array`; `Atomics` у `BigInt64Array`; `Float32Array`; `DataView`? Шаг 25.1.3.13 — для
+   каждого.
+4. На странице MDN SharedArrayBuffer сказано: «Depending on the system (the CPU, the OS, the Browser) it can take
+   a while until the change is propagated to all contexts. To synchronize, atomic operations are needed». Какой
+   раздел главы 29 обещает видимость «in finite time» и каким событиям? Почему у `while (flag[0] === 0);` его нет?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)
+(SharedArrayBuffer, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

@@ -15,7 +15,9 @@
 // 25.4.3.6, 25.4.3.11, 10.4.5.17, 25.3.1.5) is checked against tools/.cache/ecma262-2026.html, and so are the texts it
 // retells (29, 29.1, 29.6.4–29.6.6, 29.7.3–29.7.5, 29.10, 29.11); the days it points to say what it says; the reference
 // table holds all 28 rows of the day's plan (all of ECMA-262) with their marks, every tc39.es anchor exists and every
-// link whose text starts with a number names the section of that number; the footer.
+// link whose text starts with a number names the section of that number; the footer. The notes: each of their 3 blocks
+// prints what the comments of its console.log lines say; homework 1 and 2 with the notes' own race/dataRace and
+// interleavings; homework 3 by IsNoTearConfiguration; their English quotes; the footer and the links.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -122,6 +124,9 @@ const stepPaths = (html, needle) => {
   const lectureText = await src.evaluate(() => document.querySelector('.container').innerText);
   await src.goto(builtSite.urlOfFile(path.join(DAY22, 'lecture.html')));
   const folder22 = await src.evaluate(() => Object.fromEntries([...document.querySelectorAll('pre.code[data-file]')].filter((pre) => ['index.html', '.vscode/settings.json'].includes(pre.dataset.file)).map((pre) => [pre.dataset.file, pre.textContent])));
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
+  const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
+  const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -161,6 +166,48 @@ const stepPaths = (html, needle) => {
     last = null;
   }
   check(n === 6, `lecture: every result-box had a folder before it (${n})`);
+
+  // the notes: every console.log line writes its output in its comment; the homework 1–2 with the notes' own functions
+  {
+    const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+      .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
+    check(notesBlocks.length === 3 && notesBlocks.every((x) => x.js && !x.file), `student: 3 js blocks without a file name (${notesBlocks.length})`);
+    for (const [i, blk] of notesBlocks.entries()) {
+      const want = commented(blk.code);
+      const out = await runFolder(b, page({ 'main.js': blk.code }), { lines: want.length });
+      if (!quiet) { console.log(`\n--- student #${i}: ${blk.code.split(LF)[0]}`); for (const l of out) console.log(`    > ${l}`); }
+      check(want.length > 0 && same(out, want), `student #${i}: output = comments ${JSON.stringify(out)}`);
+    }
+    const inter = notesBlocks[1].code.slice(0, notesBlocks[1].code.indexOf('const A ='));
+    const out2 = await runFolder(b, page({ 'main.js': `${inter}
+const A = [["data", 1], ["flag", 1]], B = [["f", "flag"], ["d", "data"]];
+const results = interleavings(A, B).map((steps) => {
+  const m = { data: 0, flag: 0 };
+  for (const [k, v] of steps) m[k] = typeof v === "number" ? v : m[v];
+  return m.f + " " + m.d;
+});
+console.log(results.length, [...new Set(results)].sort().join(" | "));` }), { lines: 1 });
+    check(same(out2, ['6 0 0 | 0 1 | 1 1']), `student homework 2: interleavings of message passing — 0 0, 0 1, 1 1, never «1 0» (the lecture saw it with a plain flag) ${JSON.stringify(out2)}`);
+    const defs = notesBlocks[2].code.slice(0, notesBlocks[2].code.indexOf('const a ='));
+    const out1 = await runFolder(b, page({ 'main.js': `${defs}
+const wa = { write: true, order: "unordered", start: 0, size: 4 };
+const rb1 = { write: false, order: "seq-cst", start: 0, size: 4, from: wa };
+const init = { write: true, order: "init", start: 0, size: 4 };
+const rb0 = { write: false, order: "seq-cst", start: 0, size: 4, from: init };
+const hbInit = (x, y) => x === init;
+const w1 = { write: true, order: "unordered", start: 4, size: 4 }, r1 = { write: false, order: "unordered", start: 4, size: 4, from: w1 };
+const chain = (x, y) => x === w1 && y === r1;
+const addA = { write: true, order: "seq-cst", start: 0, size: 2 }, addB = { write: true, order: "seq-cst", start: 0, size: 2 };
+const loadC = { write: false, order: "seq-cst", start: 0, size: 4, from: addB };
+const wd = { write: true, order: "unordered", start: 0, size: 4 }, rd = { write: false, order: "unordered", start: 0, size: 4, from: wd };
+const host = (x, y) => x === wd && y === rd;
+console.log("a", race(wa, rb1, none), dataRace(wa, rb1, none), race(wa, rb0, hbInit), dataRace(wa, rb0, hbInit));
+console.log("b", race(w1, r1, chain), dataRace(w1, r1, chain));
+console.log("c", race(addA, addB, none), dataRace(addA, addB, none), race(addB, loadC, none), dataRace(addB, loadC, none));
+console.log("d", race(wd, rd, host), dataRace(wd, rd, host));` }), { lines: 4 });
+    check(same(out1, ['a true true false false', 'b false false', 'c true false true true', 'd false false']),
+      `student homework 1 with race and dataRace of the notes: a) a data race where B read 1, none where B read the zero (init hb) — the program is not data race free; b) the chain — no race; c) the two Int16 adds race, not a data race, Int32 load against them — a data race; d) postMessage — no race ${JSON.stringify(out1)}`);
+  }
 
   // the cheatsheet; report() of «Карточки 2.0»
   {
@@ -213,6 +260,24 @@ reader.postMessage({ shared, kind: "DataView", role: "reader" });` }), { lines: 
     check(sab.includes('will eventually become visible in the other agent') && atomics.includes('that operations are finished before the next operation starts')
       && lectureText.includes('«eventually»') && lectureText.includes('«that operations are finished before the next operation starts»'),
     'lecture 1, 2: MDN SharedArrayBuffer — the change «will eventually become visible», MDN Atomics — «that operations are finished before the next operation starts»');
+    const nquotes = [...notesText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => norm(m[1]));
+    const nmissing = nquotes.filter((x) => !corpus.includes(x));
+    check(nquotes.length >= 6 && nmissing.length === 0 && nquotes.includes('Depending on the system (the CPU, the OS, the Browser) it can take a while until the change is propagated to all contexts. To synchronize, atomic operations are needed'),
+      `student: ${nquotes.length} English quotes of the notes, the MDN one of homework 4 among them; not found in ECMA-262 2026 or MDN: ${nmissing.join(' | ') || 'none'}`);
+  }
+
+  // the notes: homework 3 by IsNoTearConfiguration (25.1.3.13; DataView reads with isTypedArray false), the footer and links
+  {
+    const noTear = (type, isTypedArray, order) => isTypedArray && (['Int8', 'Uint8', 'Int16', 'Uint16', 'Int32', 'Uint32'].includes(type) || (['BigInt64', 'BigUint64'].includes(type) && order !== 'init' && order !== 'unordered'));
+    const answers = [noTear('Int16', true, 'unordered'), noTear('BigInt64', true, 'unordered'), noTear('BigInt64', true, 'seq-cst'), noTear('Float32', true, 'unordered'), noTear('Int16', false, 'unordered')]
+      .map((t) => (t ? 'нельзя' : 'можно'));
+    check(same(answers, ['нельзя', 'можно', 'нельзя', 'можно', 'можно']) && notesText.includes('IsNoTearConfiguration (25.1.3.13): целые виды — всегда, BigInt-виды — только с seq-cst, дробные — никогда'),
+      `student homework 3: a torn value is ${answers.join(', ')} for Int16Array, BigInt64Array, Atomics on BigInt64Array, Float32Array, DataView (steps 1, 2, 2, 3; DataView — isTypedArray false); the notes state the rule`);
+    const notes = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
+    const nFooter = notes.slice(notes.indexOf('<div class="sources">'));
+    check(['SharedArrayBuffer', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notes.match(/developer\.mozilla\.org/g) || []).length === 2
+      && !/tc39\.es\/ecma262\/2026\/#/.test(notes),
+    'student: the footer names MDN SharedArrayBuffer and ECMA-262 2026; MDN is linked there and once in the text; section numbers without links');
   }
 
   // the steps the lecture names

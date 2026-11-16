@@ -1,0 +1,135 @@
+---
+title: День 24 — конспект
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+---
+
+# День 24. WeakRef и FinalizationRegistry: сборка мусора
+
+<Subtitle>Выжимка лекции: достижимость, слабая ссылка, живость, реестр очистки, кэш без щели.</Subtitle>
+
+## Главное
+
+<Definition>
+Сборщик мусора убирает объекты, до которых не дойти по ссылкам от корней (пометка и очистка); цикл без пути от
+корня — тоже мусор. `WeakRef` смотрит на объект, не удерживая его, а `FinalizationRegistry` после уборки цели может
+вызвать функцию с сохранённым значением. Стандарт ничего не обещает (9.9.1): уберут ли объект и когда, решает
+движок, поэтому всё о сборке написано со словом «may».
+</Definition>
+
+## Достижимость и слабая ссылка
+
+Блоки с `nextGC()` запускайте в папке дня 22 рядом с `gc.js` лекции (раздел 3) и нажимайте «Collect garbage»
+(DevTools → Memory).
+
+```js
+import { nextGC } from "./gc.js";
+function makeReader() {
+  const hidden = { word: "kitap" };
+  return { read: () => hidden.word, ref: new WeakRef(hidden) };
+}
+const { read, ref: rh } = makeReader();
+let pair = { word: "galam" };
+pair.self = pair;
+const rp = new WeakRef(pair);
+const notes = new WeakMap([[pair, { about: pair }]]);
+pair = null;
+await nextGC();
+console.log(rh.deref()?.word, rp.deref(), read());   // kitap undefined kitap — объект замыкания жив; пару не удержали ни цикл, ни значение WeakMap
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| `new WeakRef(target)` | 26.1.1.1: 1, 2, 4, 5 | только с `new`; цель проходит CanBeHeldWeakly; AddToKeptObjects; цель — в слот \[\[WeakRefTarget\]\] |
+| `ref.deref()` | 26.1.4.1: 2, 3 | цель на месте — AddToKeptObjects и вернуть её; слот пуст — `undefined` |
+| уборка | 9.9.3 | набор «not live» — empty во всех `WeakRef`, ячейках реестров, ключах `WeakMap` и элементах `WeakSet` сразу |
+| CanBeHeldWeakly | 9.13: 1, 2 | объект или символ не из `Symbol.for` |
+
+<Remember>
+Живость (9.9.2): значение живо, если лежит в \[\[KeptAlive\]\] или его личность можно наблюдать не через
+`WeakRef` — сравнением `===`, ключом `Map`. Ключ `WeakMap`, элемент `WeakSet`, цель и токен ячейки реестра живым
+его не делают (заметка 5); на деле движки считают достижимость (заметка 6). Список \[\[KeptAlive\]\] пополняют
+конструктор и `deref` (9.11), а чистит ClearKeptObjects в конце синхронной работы (9.10). Опыт лекции: миллион
+объектов вызвал сборку посреди задания — `a`, полученная через `deref`, осталась, нетронутая `b` убрана.
+</Remember>
+
+## Реестр очистки
+
+```js
+import { nextGC } from "./gc.js";
+const calls = [];
+const registry = new FinalizationRegistry((held) => calls.push(held));
+let a = { id: 1 }, b = { id: 2 }, c = { id: 3 };
+registry.register(a, "a");
+registry.register(b, "b", b);
+registry.register(c, { card: c });
+console.log(registry.unregister(b), registry.unregister(b));   // true false — токен = цель: снимаем, пока она в руках
+a = null;
+b = null;
+c = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 50));
+console.log(calls.join() || "пусто");   // a — b снята токеном, c держит её же сохранённое значение
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| `new FinalizationRegistry(fn)` | 26.2.1.1: 1, 2, 7 | только с `new`; функция вызываемая; пустой список \[\[Cells\]\] |
+| `register(target, held, token)` | 26.2.3.2: 3–7 | цель — CanBeHeldWeakly; цель и значение разные; токен держится слабо или `undefined`; ячейка — в список |
+| `unregister(token)` | 26.2.3.3: 3, 5, 6 | токен — CanBeHeldWeakly; убрать все ячейки токена; ответ — нашлась ли хоть одна |
+| задание очистки | 9.9.4.1, 9.12 | хозяин ставит его «at some future time»; оно убирает ячейку и вызывает функцию со значением |
+
+<Remember>
+Функция очистки видит только сохранённое значение: цель уже убрана, и её `WeakRef` пуст — MDN: «cleared at the same
+time or before any cleanup callback». Значение реестр держит сильно, поэтому цель туда не кладут: `{ card: c }`
+держит `c` вечно. Реестр, который никто не держит, может промолчать (9.9.3, заметка 1) — держите его в живой
+переменной, как `keep` в `gc.js`. Вызова может не быть вовсе: «It should only be used for cleanup — and
+non-critical cleanup».
+</Remember>
+
+## Что можно держать слабо и кэш
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+console.log(run(() => new WeakRef({})), run(() => new WeakRef(Symbol("s"))), run(() => new WeakRef(Symbol.for("s"))), run(() => new WeakRef("kitap")));   // ok ok TypeError TypeError — 9.13: объект и символ не из Symbol.for
+const r = new FinalizationRegistry(() => {});
+const card = {};
+console.log(run(() => r.register(card, card)), run(() => r.register(card, 1, "t")), r.register(card, 1, Symbol.iterator), r.unregister(Symbol.iterator));   // TypeError TypeError undefined true — цель и значение совпали; токен — тоже по 9.13
+```
+
+| Кэш на `WeakRef` | Сразу после сборки | Итог |
+| --- | --- | --- |
+| `if (cache.has(key)) return cache.get(key).deref();` (MDN) | `has` — «да», `deref` — `undefined`, пока задание очистки не выполнилось | щель: вместо карточки `undefined` |
+| `const hit = map.get(key)?.deref(); if (hit !== undefined) return hit;` | значения нет — загрузить заново, записать новый `WeakRef` | щели нет |
+| проверка `deref()` в функции реестра | старый вызов не сотрёт запись нового значения (два `get` одного слова) | запись живого значения цела |
+
+<Remember>
+Чего не делать: закрывать файлы и соединения в функции реестра (вызова может не быть; завтра — `using`); ждать,
+что `deref()` когда-нибудь вернёт `undefined` (9.9.1); считать по реестру «ровно» — движок держит то, что выглядит
+недостижимым (в лекции выжила карточка № 999 у `for…of` на верхнем уровне модуля); проверять `has` у кэша на
+`WeakRef`.
+</Remember>
+
+<Homework>
+1. Переживёт ли сборку в Chrome (проверьте с `nextGC()`)? а) объект, на который смотрит только `WeakRef`;
+   б) объект из замыкания функции, которую ещё можно вызвать; в) ключ `WeakMap`, значение которого ссылается на
+   сам ключ; г) цель реестра с сохранённым значением `{ card: цель }`; д) цель, у которой в этом задании уже
+   вызывали `deref()`, — если сборка случится до конца задания. Для в), г) и д) найдите правило: заметку 9.9.2,
+   раздел 9.11 или строку MDN.
+2. Перепишите `get` кэша MDN (раздел 14 лекции) так, чтобы сразу после сборки он не возвращал `undefined`.
+   Проверьте: после `nextGC()` `get("kitap")` отдаёт карточку `kitap`, а загрузок становится на одну больше.
+3. Что бросит и на каком шаге: `new WeakRef(Symbol.for("k"))`; `FinalizationRegistry(() => {})`;
+   `registry.register(card, card)`; `registry.register(card, "k", 5)`; `registry.unregister("k")`?
+4. В функции реестра закрывают соединение с сервером. Назовите два места стандарта, из-за которых вызова может не
+   быть (9.9.1 и заметка 1 раздела 9.9.3), и опыт лекции, где его не было. Что поставить вместо реестра?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Memory_management)
+(Memory management, WeakRef, FinalizationRegistry, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

@@ -20,7 +20,11 @@
 // tools/.cache/ecma262-2026.html, and so are the notes and texts it retells (9.9.1–9.9.4.1, 26.1.5, 26.2.4) and the MDN
 // texts; the days it points to say what it says; the reference table holds all 29 rows of the day's plan (21 of ECMA-262,
 // 8 of MDN) with their marks and titles, every tc39.es anchor exists and every link whose text starts with a number names
-// the section of that number; the footer.
+// the section of that number; the footer. The notes: each of their 3 blocks (2 with nextGC) prints what the comments of
+// its console.log lines say; homework 1 — what survives a collection (а–г by experiment, д by the one of section 7);
+// homework 2 — get that reads deref() first loads again after nextGC(), 5 times; homework 3 — five TypeErrors with the
+// texts of Chrome; homework 4 — the places of the spec and the lecture; their English quotes, the steps of their tables,
+// the footer and the links.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -121,6 +125,7 @@ const swap = (code, from, to) => (code.split(from).length === 2 ? code.replace(f
   let bad = 0, checked = 0;
   const check = (ok, text) => { checked++; if (!ok) bad++; if (!ok || !quiet) console.log(`${ok ? 'OK  ' : 'BAD '} ${text}`); };
   const same = (a, x) => JSON.stringify(a) === JSON.stringify(x);
+  let keptInJob = false; // section 7: a target deref()-ed in the job outlives a collection inside it (homework 1 д of the notes too)
 
   // the blocks of the lecture in page order, with the section each one is in; the folder of day 22
   const ctx0 = await b.newContext();
@@ -134,6 +139,9 @@ const swap = (code, from, to) => (code.split(from).length === 2 ? code.replace(f
   const lectureText = await src.evaluate(() => document.querySelector('.container').innerText);
   await src.goto(builtSite.urlOfFile(path.join(DAY22, 'lecture.html')));
   const indexHtml = await src.evaluate(() => [...document.querySelectorAll('pre.code[data-file]')].find((pre) => pre.dataset.file === 'index.html')?.textContent);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
+  const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
+  const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -251,10 +259,83 @@ console.log((await get("kitap")) === second, loads);`;
       runs.push((await runFolder(b, page(kept.code), { lines: 2 })).join(' / '));
       controls.push((await runFolder(b, page(control), { lines: 2 })).join(' / '));
     }
-    check(kept?.section === 7 && !usesGc(kept.code) && runs.length === 3 && runs.every((r) => r === 'начало задания: a / конец задания: a undefined')
-      && controls.every((r) => r === 'начало задания / конец задания: undefined undefined')
-      && !lectureText.includes('Увидеть это опытом нельзя') && lectureText.includes('Уберите первый deref — и пропадут обе.'),
-    `lecture 7: no gc.js, a million objects in the job — 3 times ${JSON.stringify([...new Set(runs)])}; without the first deref ${JSON.stringify([...new Set(controls)])}`);
+    keptInJob = kept?.section === 7 && !usesGc(kept.code) && runs.length === 3 && runs.every((r) => r === 'начало задания: a / конец задания: a undefined')
+      && controls.every((r) => r === 'начало задания / конец задания: undefined undefined');
+    check(keptInJob && !lectureText.includes('Увидеть это опытом нельзя') && lectureText.includes('Уберите первый deref — и пропадут обе.'),
+      `lecture 7: no gc.js, a million objects in the job — 3 times ${JSON.stringify([...new Set(runs)])}; without the first deref ${JSON.stringify([...new Set(controls)])}`);
+  }
+
+  // the notes: every console.log line writes its output in its comment
+  {
+    const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+      .map((l) => l.slice(l.indexOf('//') + 2).trim().split(' — ')[0]);
+    check(notesBlocks.length === 3 && notesBlocks.every((x) => x.js && !x.file) && notesBlocks.filter((x) => usesGc(x.code)).length === 2
+      && notesText.includes('Блоки с nextGC() запускайте в папке дня 22 рядом с gc.js лекции (раздел 3) и нажимайте «Collect garbage» (DevTools → Memory).'),
+    `student: 3 js blocks without a file name, 2 of them import nextGC; the notes send them to the folder of day 22 with gc.js (${notesBlocks.length})`);
+    for (const [i, blk] of notesBlocks.entries()) {
+      const want = commented(blk.code);
+      const out = await runFolder(b, page(blk.code), { lines: want.length, gc: usesGc(blk.code) });
+      if (!quiet) { console.log(`\n--- student #${i}${usesGc(blk.code) ? ' (gc)' : ''}: ${blk.code.split(LF).find((l) => !l.startsWith('import ')).slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      check(want.length > 0 && same(out, want), `student #${i}: output = comments ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the notes, homework 1: what survives a collection in Chrome — а) only a WeakRef, б) a closure, в) a WeakMap key its
+  // value points to, г) a target whose held value points to it; д) a target deref()-ed in the job (the experiment of
+  // section 7 above)
+  {
+    const out = await runFolder(b, page(`import { nextGC } from "./gc.js";
+let only = { n: "а" };
+const ra = new WeakRef(only);
+only = null;
+function makeReader() {
+  const hidden = { n: "б" };
+  return { read: () => hidden.n, ref: new WeakRef(hidden) };
+}
+const { read, ref: rb } = makeReader();
+const map = new WeakMap();
+let key = { n: "в" };
+map.set(key, { key });
+const rc = new WeakRef(key);
+key = null;
+const registry = new FinalizationRegistry(() => {});
+let target = { n: "г" };
+registry.register(target, { card: target });
+const rd = new WeakRef(target);
+target = null;
+await nextGC();
+console.log([ra, rb, rc, rd].map((r) => r.deref()?.n ?? "убран").join(" "), read());`), { lines: 1, gc: true });
+    check(same(out, ['убран б убран г б']) && keptInJob, `student homework 1: а) убран, б) жив, в) убран, г) жив ${JSON.stringify(out)}; д) жив до конца задания — the experiment of section 7 (${keptInJob})`);
+  }
+
+  // the notes, homework 2: get of the MDN cache that reads deref() first never returns undefined after a collection
+  {
+    const code = cacheBlock.code;
+    const fn = code.slice(code.indexOf('function cached(getter) {'), code.indexOf(`${LF}}${LF}`, code.indexOf('function cached(getter) {')) + 2);
+    const fixed = swap(fn, `    if (cache.has(key)) {${LF}      return cache.get(key).deref();${LF}    }`, `    const hit = cache.get(key)?.deref();${LF}    if (hit !== undefined) return hit;`);
+    const main = (cached) => `import { nextGC } from "./gc.js";
+${cached}
+let loads = 0;
+const get = cached((word) => { loads++; return { word }; });
+let card = await get("kitap");
+console.log((await get("kitap")) === card, loads);
+card = null;
+await nextGC();
+console.log((await get("kitap"))?.word, loads);`;
+    const runs = [];
+    for (let k = 0; fixed && k < 5; k++) runs.push((await runFolder(b, page(main(fixed)), { lines: 2, gc: true })).join(' / '));
+    check(runs.length === 5 && runs.every((r) => r === 'true 1 / kitap 2'), `student homework 2: get that takes deref() first — after nextGC() it loads «kitap» again, 5 times ${JSON.stringify([...new Set(runs)])}`);
+  }
+
+  // the notes, homework 3: what each line throws (the steps — in the list of steps below)
+  {
+    const out = await runFolder(b, page(`const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+const registry = new FinalizationRegistry(() => {});
+const card = {};
+console.log([() => new WeakRef(Symbol.for("k")), () => FinalizationRegistry(() => {}), () => registry.register(card, card), () => registry.register(card, "k", 5), () => registry.unregister("k")].map(run).join(" | "));`), { lines: 1 });
+    check(same(out, ["TypeError: WeakRef: invalid target | TypeError: Constructor FinalizationRegistry requires 'new' | TypeError: FinalizationRegistry.prototype.register: target and holdings must not be same | TypeError: Invalid unregisterToken ('5') | TypeError: Invalid unregisterToken ('k')"])
+      && notesText.includes('registry.register(card, "k", 5); registry.unregister("k")?'),
+    `student homework 3: five TypeErrors — 26.1.1.1 step 2, 26.2.1.1 step 1, 26.2.3.2 steps 4 and 5.a, 26.2.3.3 step 3 ${JSON.stringify(out)}`);
   }
 
   // the constructors have only prototype (26.1.2, 26.2.2); the cheatsheet runs without output
@@ -308,6 +389,26 @@ console.log((await get("kitap")) === second, loads);`;
     const quotes = [...lectureText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => m[1].replace(/\s+/g, ' '));
     const missing = quotes.filter((x) => !corpus.includes(x));
     check(quotes.length >= 30 && missing.length === 0, `quotes: ${quotes.length} English quotes of the lecture, not found in ECMA-262 2026 (9.9–9.13, 26), the 8 MDN pages or DevTools: ${missing.join(' | ') || 'none'}`);
+    const nquotes = [...notesText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => m[1].replace(/\s+/g, ' '));
+    const nmissing = nquotes.filter((x) => !corpus.includes(x));
+    check(nquotes.length >= 6 && nmissing.length === 0 && nquotes.includes('It should only be used for cleanup — and non-critical cleanup') && nquotes.includes('cleared at the same time or before any cleanup callback'),
+      `student: ${nquotes.length} English quotes of the notes (MDN on non-critical cleanup and the cleared WeakRef among them); not found: ${nmissing.join(' | ') || 'none'}`);
+  }
+
+  // the notes: the steps of their tables are the ones the lecture names (checked in the list of steps below); homework 4
+  {
+    check(['26.1.1.1: 1, 2, 4, 5', '26.1.4.1: 2, 3', '9.13: 1, 2', '26.2.1.1: 1, 2, 7', '26.2.3.2: 3–7', '26.2.3.3: 3, 5, 6', '9.9.4.1, 9.12'].every((s) => notesText.includes(s))
+      && notesText.includes('в лекции выжила карточка № 999 у for…of на верхнем уровне модуля'),
+    'student: the tables name the steps of the lecture — 26.1.1.1: 1, 2, 4, 5; 26.1.4.1: 2, 3; 9.13: 1, 2; 26.2.1.1: 1, 2, 7; 26.2.3.2: 3–7; 26.2.3.3: 3, 5, 6; 9.9.4.1, 9.12; card 999 of the lecture');
+    check(f('sec-weakref-invariants').includes('does not make any guarantees that any object or symbol will be garbage collected') && (notes('sec-weakref-execution')[1] ?? '').includes('Implementations may omit FinalizationRegistry callbacks for any reason')
+      && lectureText.includes('Объект собрали, а вызова не было') && lectureText.includes('try…finally, завтра — using')
+      && notesText.includes('(9.9.1 и заметка 1 раздела 9.9.3), и опыт лекции, где его не было'),
+    'student homework 4: 9.9.1 — no guarantee, 9.9.3 note 1 — callbacks may be omitted; the lecture: section 12 (no call), section 17 (try…finally, tomorrow using)');
+    const notesHtml = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
+    const nFooter = notesHtml.slice(notesHtml.indexOf('<div class="sources">'));
+    check(['Memory management, WeakRef, FinalizationRegistry', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => nFooter.includes(s)) && (notesHtml.match(/developer\.mozilla\.org/g) || []).length === 1
+      && !/tc39\.es\/ecma262\/2026\/#/.test(notesHtml),
+    'student: the footer names MDN Memory management, WeakRef, FinalizationRegistry and ECMA-262 2026; MDN is linked once (the footer); section numbers without links');
   }
 
   // the MDN texts the lecture retells

@@ -51,7 +51,7 @@ css: |
 Из кода — никак. MDN: «It is also not possible to programmatically trigger garbage collection in JavaScript».
 Есть только флаги движка для отладки: учебник показывает `node --expose-gc --inspect index.js`, после которого в
 Node появляется функция `gc()`. В языке её нет, и в обычном Chrome тоже. Поэтому в Chrome сборку запускают руками:
-DevTools → вкладка Memory → значок корзины «Collect garbage». А чтобы код узнал,
+DevTools → вкладка Memory → значок метёлки «Collect garbage». А чтобы код узнал,
 что сборка прошла, сделаем помощник — файл `gc.js` в папке с `index.html` дня 22 (изоляция сегодня не нужна, но
 папка готовая):
 
@@ -165,9 +165,31 @@ specification does not make any guarantees that any object or symbol will be gar
 [9.11](https://tc39.es/ecma262/2026/#sec-addtokeptobjects)), а чистит ClearKeptObjects
 ([9.10](https://tc39.es/ecma262/2026/#sec-clear-kept-objects)) — «when a synchronous sequence of ECMAScript
 executions completes». MDN говорит то же словами: цель не уберут «until the end of the current JavaScript job».
-Внутри одного задания `deref` стабилен. Увидеть это опытом нельзя: Chrome собирает между заданиями, и нажатие
-кнопки тоже приходит между ними. Зато видно другое правило 9.9.3 (заметка 2): все `WeakRef` одной цели
-пустеют вместе.
+Внутри одного задания `deref` стабилен, и это видно опытом: сборщик работает и посреди задания, если оно само
+много выделяет. После `await` идёт новое задание, список \[\[KeptAlive\]\] в нём пуст; первый `deref` кладёт туда `a`,
+а `b` в этом задании никто не трогает. Миллион мелких объектов вызывает сборки прямо в задании — кнопка и `gc.js`
+не нужны:
+
+```js
+let a = { name: "a" }, b = { name: "b" };
+const ra = new WeakRef(a), rb = new WeakRef(b);
+a = null;
+b = null;
+await new Promise((r) => setTimeout(r, 0));
+console.log("начало задания:", ra.deref()?.name);
+let junk = [];
+for (let i = 0; i < 1e6; i++) junk.push({ i });
+junk = null;
+console.log("конец задания:", ra.deref()?.name, rb.deref()?.name);
+```
+
+<ResultBox>
+начало задания: a\
+конец задания: a undefined
+</ResultBox>
+
+`b` убрана посреди задания, а `a` на месте: её держит список до конца задания. Уберите первый `deref` — и
+пропадут обе. Видно и другое правило 9.9.3 (заметка 2): все `WeakRef` одной цели пустеют вместе.
 
 ```js
 import { nextGC } from "./gc.js";
@@ -448,8 +470,9 @@ kitap 2
 значение загружается заново. Тот, кто вызвал `get`, получил `undefined` вместо карточки. У вас вторая строка
 может выйти и `{word: 'kitap'} 2`: если задание очистки кэша выполнится раньше задания `nextGC`, щель закроется до
 проверки. Порядок заданий решает хозяин: 9.9.4.1 обещает лишь, что задание выполнят «at some future time». У нас
-`undefined` выпал в 7 запусках из 12: окно короткое, но настоящее. Заметьте: проверку `deref()` в реестре MDN поставила правильно. Без неё реестр стёр бы новую запись,
-сделанную после сборки.
+`undefined` выпал в 7 запусках из 12: окно короткое, но настоящее. Заметьте: проверку `deref()` в реестре MDN поставила правильно. Функция реестра может прийти «after a new
+object has been added with this key»: например, два `get` загружали одно слово одновременно, и второй заменил
+запись первого. Без проверки реестр стёр бы запись живого значения.
 
 ## 15. «Карточки 2.0»: кэш без щели {#cards}
 

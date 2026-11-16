@@ -1,0 +1,254 @@
+---
+title: День 23 — задания
+---
+
+# День 23. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация, [tc39.es/ecma262/2026/](https://tc39.es/ecma262/2026/), и консоль Chrome. Код пишем в изолированной папке дня 22. Каждое «почему» — с номером раздела и шага главы 29. Функции `race`, `dataRace` и `interleavings` — из конспекта дня.</Subtitle>
+
+## Разминка
+
+<Task title="1. Гонка или нет" level="easy" time="7">
+<Goal>проходить определения 29.8 и 29.9 по шагам.</Goal>
+
+```js
+const overlap = (e, d) => e.start < d.start + d.size && d.start < e.start + e.size;
+const equal = (e, d) => e.start === d.start && e.size === d.size;
+const race = (e, d, hb) => e !== d && !hb(e, d) && !hb(d, e) && ((e.write && d.write && overlap(e, d)) || e.from === d || d.from === e);
+const dataRace = (e, d, hb) => race(e, d, hb) && (e.order !== "seq-cst" || d.order !== "seq-cst" || (overlap(e, d) && !equal(e, d)));
+const none = () => false;
+const ws = { write: true, order: "seq-cst", start: 0, size: 4 };
+const pairs = {
+  a: [ws, { write: false, order: "unordered", start: 0, size: 4, from: ws }],
+  b: [{ write: false, order: "unordered", start: 0, size: 4 }, { write: false, order: "unordered", start: 0, size: 4 }],
+  c: [{ write: true, order: "unordered", start: 0, size: 4 }, { write: true, order: "seq-cst", start: 4, size: 4 }],
+  d: [{ write: true, order: "seq-cst", start: 1, size: 1 }, ws],
+  e: [ws, { write: true, order: "seq-cst", start: 0, size: 4 }],
+};
+console.log(Object.entries(pairs).map(([k, [x, y]]) => k + " " + race(x, y, none) + " " + dataRace(x, y, none)).join(" | "));
+```
+
+<Criteria>
+- предсказана строка;
+- для каждой пары назван шаг 29.8 или 29.9, который решил ответ, и строчка кода, которая даёт такие события.
+</Criteria>
+</Task>
+
+<Task title="2. Две записи крест-накрест" level="easy" time="7">
+<Goal>перебирать чередования и видеть, чего в них нет.</Goal>
+
+```js
+function interleavings(a, b) {
+  if (!a.length) return [b];
+  if (!b.length) return [a];
+  return [...interleavings(a.slice(1), b).map((t) => [a[0], ...t]), ...interleavings(a, b.slice(1)).map((t) => [b[0], ...t])];
+}
+const A = [["x", 1], ["y", 2]], B = [["y", 1], ["x", 2]];
+const results = interleavings(A, B).map((steps) => {
+  const m = { x: 0, y: 0 };
+  for (const [k, v] of steps) m[k] = v;
+  return m.x + " " + m.y;
+});
+console.log(results.length, [...new Set(results)].sort().join(" | "));
+```
+
+<Criteria>
+- предсказана строка: сколько чередований и какие итоги `x y`;
+- объяснено, почему итога «1 1» нет ни в одном чередовании: каким должен быть порядок четырёх записей;
+- объяснено, почему для `Atomics.store` вместо обычных записей «1 1» запрещён и стандартом: что говорит 29.10.
+</Criteria>
+</Task>
+
+<Task title="3. Выравнивание" level="easy" time="6">
+<Goal>связывать правило 29.7.3 с конструкторами видов.</Goal>
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const sab = new SharedArrayBuffer(16);
+console.log(run(() => Atomics.load(new BigUint64Array(sab), 1)), run(() => Atomics.store(new Float16Array(sab), 0, 1)), run(() => Atomics.exchange(new Int16Array(sab, 2), 0, 5)), run(() => new Int32Array(sab, 2)), run(() => new DataView(sab, 3).getInt32(0)));
+```
+
+<Criteria>
+- предсказана строка;
+- объяснено, почему вид не построить со смещением, не кратным размеру элемента (день 20), и зачем это
+  шагу 1.a.i раздела 29.7.3;
+- объяснено, почему `DataView` читает с любого байта и что это значит для разрыва.
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. «Карточки 2.0»: статистика колоды из двух потоков" level="medium" time="12">
+<Goal>находить гонки данных в готовой программе и убирать их.</Goal>
+
+Два потока проверяют по половине колоды, страница ждёт и печатает итог. В программе три гонки данных:
+
+```js file="check.js"
+onmessage = (e) => {
+  const { shared, deck, from, to } = e.data;
+  const s = new Int32Array(shared);
+  for (let i = from; i < to; i++) {
+    if (deck[i].answer === deck[i].right) s[0]++;
+    else s[1]++;
+  }
+  s[2]++;
+};
+```
+
+```js file="main.js"
+const shared = new SharedArrayBuffer(12);
+const s = new Int32Array(shared);
+const deck = Array.from({ length: 200000 }, (_, k) => ({ answer: k % 9 === 0 ? "?" : "ok", right: "ok" }));
+for (const [from, to] of [[0, 100000], [100000, 200000]]) new Worker("check.js").postMessage({ shared, deck, from, to }); // курс 4
+function show() {
+  if (s[2] < 2) { setTimeout(show, 10); return; }
+  console.log("верных:", s[0], "ошибок:", s[1]);
+}
+show();
+```
+
+Найдите все три и перепишите обе части так, чтобы гонок данных не осталось.
+
+<Criteria>
+- для каждой гонки данных названы оба события и шаги 29.8–29.9;
+- исправленная программа в пяти запусках печатает «верных: 177777 ошибок: 22223»;
+- объяснено, почему сломанная программа у вас, скорее всего, тоже напечатала верные числа и почему это ничего
+  не доказывает (29.10: «all its executions»);
+- объяснено, почему после `Atomics.load(s, 2)`, вернувшего 2, страница может читать `s[0]` и `s[1]` обычным
+  доступом.
+</Criteria>
+</Task>
+
+<Task title="5. Флаг готовности по стандарту" level="medium" time="12">
+<Goal>передавать данные между потоками без гонки данных.</Goal>
+
+Напишите `publish(flag, data, values)` — записать `values` в `data` и поднять флаг, — и
+`async receive(flag, data)` — дождаться флага и вернуть копию данных массивом. Ждать — через `waitAsync`, флаг
+после пробуждения — через `Atomics.load` (лекция, раздел 12).
+
+<Example>
+```js
+const shared = new SharedArrayBuffer(16);
+const flag = new Int32Array(shared, 0, 1), data = new Int32Array(shared, 4, 3);
+setTimeout(() => publish(flag, data, [7, 8, 9]), 20);
+await receive(flag, data);          // [7, 8, 9]
+Atomics.load(flag, 0);              // 1
+await receive(flag, data);          // [7, 8, 9]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- поток публикует 100 000 чисел, страница получает их все: сумма сходится;
+- названа цепочка happens-before от записи `data[i]` до чтения: какие шаги 29.6.5 и 29.6.6 её дают;
+- объяснено, что сломается, если `publish` поднимет флаг до записи данных.
+</Criteria>
+</Task>
+
+<Task title="6. Все исходы двух потоков" level="medium" time="12">
+<Goal>обобщить перебор чередований.</Goal>
+
+Напишите `outcomes(a, b, show)`: `a` и `b` — шаги двух потоков вида `["x", 1]` (записать число) или
+`["r", "x"]` (прочитать ячейку `x` в `r`), в начале все ячейки — 0; вернуть отсортированный массив разных
+итогов: значения имён из `show` через пробел.
+
+<Example>
+```js
+outcomes([["x", 1], ["r1", "y"]], [["y", 1], ["r2", "x"]], ["r1", "r2"]);           // ["0 1", "1 0", "1 1"]
+outcomes([["data", 1], ["flag", 1]], [["f", "flag"], ["d", "data"]], ["f", "d"]);   // ["0 0", "0 1", "1 1"]
+outcomes([["x", 1], ["y", 2]], [["y", 1], ["x", 2]], ["x", "y"]);                   // ["1 2", "2 1", "2 2"]
+outcomes([["x", 1], ["x", 2]], [["r", "x"]], ["r"]);                                // ["0", "1", "2"]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- для первых двух примеров назван итог, которого нет, и опыт лекции, где он всё-таки появился при обычном
+  доступе;
+- объяснено, почему перебор чередований описывает только программы без гонок данных.
+</Criteria>
+</Task>
+
+<Task title="7. happens-before своими руками" level="medium" time="14">
+<Goal>строить happens-before по правилам 29.6.</Goal>
+
+Напишите `dataRaces(agents)`: `agents` — массив списков событий по агентам (как в конспекте: `write`, `order`,
+`start`, `size`, `from`). Постройте happens-before: порядок внутри списка, synchronizes-with по 29.6.5 (чтение
+берёт у записи, оба `seq-cst`, диапазоны равны) и цепочки из них (29.6.6). Верните все пары в гонке данных.
+
+<Example>
+```js
+const wData = { write: true, order: "unordered", start: 4, size: 4 };
+const wFlag = { write: true, order: "seq-cst", start: 0, size: 4 };
+const rFlag = { write: false, order: "seq-cst", start: 0, size: 4, from: wFlag };
+const rData = { write: false, order: "unordered", start: 4, size: 4, from: wData };
+dataRaces([[wData, wFlag], [rFlag, rData]]).length;          // 0
+const pFlag = { ...wFlag, order: "unordered" };
+const qFlag = { ...rFlag, order: "unordered", from: pFlag };
+dataRaces([[wData, pFlag], [qFlag, rData]]).length;          // 2
+const add1 = { write: true, order: "seq-cst", start: 0, size: 4 }, add2 = { ...add1 };
+dataRaces([[add1], [add2]]).length;                          // 0
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- `Atomics.store` через `Int32Array` в одном агенте и `Atomics.load` через `Int16Array` тех же байтов в другом —
+  одна гонка данных (лекция, раздел 7);
+- объяснено, какое правило 29.6.6 делает обход графа нужным, а не только соседние события.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Барьер для потоков" level="hard" time="10">
+<Goal>собрать барьер на wait и notify.</Goal>
+
+Напишите `makeBarrier(s, i, n)` с методом `wait()`: поток ждёт, пока до барьера не дойдут все `n` потоков.
+`s[i]` — сколько пришло, `s[i + 1]` — номер поколения. Последний пришедший обнуляет счётчик, увеличивает
+поколение и будит остальных. Остальные спят в `Atomics.wait`, пока поколение не сменится. По MDN
+[Atomics.wait()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait)
+«It is blocking and cannot be used in the main thread», поэтому барьер — только для потоков.
+
+<Criteria>
+- четыре потока по 1000 раундов: каждый пишет номер раунда в свою ячейку, проходит барьер, читает все ячейки и
+  снова проходит барьер — ни одной чужой ячейки со старым номером;
+- без второго барьера в раунде такие ячейки появляются: объяснено почему;
+- объяснено, почему поколение надо прочитать до `Atomics.add`, а не после.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: из чьих байтов число" level="hard" time="10">
+<Goal>читать алгоритм, который заранее не разбирали.</Goal>
+
+Прочитайте ComposeWriteEventBytes ([29.5.4](https://tc39.es/ecma262/2026/#sec-composewriteeventbytes)) и
+ValueOfReadEvent (29.5.5). Вот их перевод для записей WriteSharedMemory; предскажите:
+
+```js
+function compose(byteIndex, Ws) {
+  const bytes = [];
+  let at = byteIndex;
+  for (const W of Ws) { bytes.push(W.payload[at - W.start]); at++; }
+  return bytes;
+}
+const w1 = { start: 0, payload: [0, 0, 0, 0] }, w2 = { start: 0, payload: [255, 255, 255, 255] }, w3 = { start: 2, payload: [17, 34] };
+console.log(compose(0, [w1, w1, w1, w1]).join(), compose(0, [w2, w2, w1, w1]).join(), compose(0, [w1, w1, w3, w3]).join(), compose(2, [w3, w2]).join());
+```
+
+<Criteria>
+- предсказана строка;
+- для чтения через `Int32Array` с байта 0 (\[\[NoTear\]\] — `true`) и записей `w1`, `w2` через `Int32Array`
+  объяснено, какой из первых трёх наборов запрещает 29.7.3, а какой разрешает: заметка там говорит «It is
+  possible, however, for an aligned read event to read from multiple write events with overlapping ranges»;
+- назван шаг 29.5.4, который другой: что делает алгоритм для события ReadModifyWriteSharedMemory.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait)
+(Atomics.wait(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

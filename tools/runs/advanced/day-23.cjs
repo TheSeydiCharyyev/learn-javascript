@@ -17,7 +17,11 @@
 // table holds all 28 rows of the day's plan (all of ECMA-262) with their marks, every tc39.es anchor exists and every
 // link whose text starts with a number names the section of that number; the footer. The notes: each of their 3 blocks
 // prints what the comments of its console.log lines say; homework 1 and 2 with the notes' own race/dataRace and
-// interleavings; homework 3 by IsNoTearConfiguration; their English quotes; the footer and the links.
+// interleavings; homework 3 by IsNoTearConfiguration; their English quotes; the footer and the links. The tasks: the
+// warm-ups and task 9 print what EXPECT says; every line of the 3 examples holds with the reference solutions (SOLUTIONS,
+// an awaited check); the experiments of the criteria — the program of task 4 runs and a fixed one is exact, publish and
+// receive across threads, an Int32/Int16 pair in dataRaces, the barrier in four threads with two waits a round and
+// without the second; the step of 29.5.4, the quotes, the link and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -35,6 +39,86 @@ const ISOLATE = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Emb
 // a count that differs from run to run: after these words, a number above 0
 const VARY = /^(обычные: |DataView: |обычный флаг: )(\d+)(.*)$/;
 const quiet = process.argv.includes('--quiet');
+// a block of the tasks without a result-box: its output by "tasks #index" (js blocks of the page); the tasks ask to predict these
+const EXPECT = {
+  'tasks #0': ['a true true | b false false | c false false | d true true | e true false'],
+  'tasks #1': ['6 1 2 | 2 1 | 2 2'],
+  'tasks #2': ['ok TypeError ok RangeError ok'],
+  'tasks #8': ['0,0,0,0 255,255,0,0 0,0,17,34 17,255'],
+};
+// reference solutions of the tasks: every "expression;   // value" line of an example must give the comment; the check is
+// awaited, so a line may await too. No template literals inside: Node reads these strings as templates first.
+const SOLUTIONS = {
+  publish: `function publish(flag, data, values) {
+  for (let i = 0; i < values.length; i++) data[i] = values[i];
+  Atomics.store(flag, 0, 1);
+  Atomics.notify(flag, 0);
+}`,
+  receive: `async function receive(flag, data) {
+  while (Atomics.load(flag, 0) === 0) {
+    const r = Atomics.waitAsync(flag, 0, 0);
+    if (r.async) await r.value;
+  }
+  return Array.from(data);
+}`,
+  outcomes: `function outcomes(a, b, show) {
+  const runs = (x, y) => (!x.length ? [y] : !y.length ? [x] : [...runs(x.slice(1), y).map((t) => [x[0], ...t]), ...runs(x, y.slice(1)).map((t) => [y[0], ...t])]);
+  const seen = new Set();
+  for (const steps of runs(a, b)) {
+    const m = {};
+    for (const [k, v] of steps) m[k] = typeof v === "number" ? v : (m[v] ?? 0);
+    seen.add(show.map((k) => m[k] ?? 0).join(" "));
+  }
+  return [...seen].sort();
+}`,
+  dataRaces: `function dataRaces(agents) {
+  const all = agents.flat();
+  const overlap = (e, d) => e.start < d.start + d.size && d.start < e.start + e.size;
+  const equal = (e, d) => e.start === d.start && e.size === d.size;
+  const next = new Map(all.map((e) => [e, []]));
+  for (const list of agents) for (let i = 0; i + 1 < list.length; i++) next.get(list[i]).push(list[i + 1]);
+  for (const r of all) if (next.has(r.from) && r.order === "seq-cst" && r.from.order === "seq-cst" && equal(r, r.from)) next.get(r.from).push(r);
+  const hb = (e, d) => {
+    const seen = new Set(), stack = [...next.get(e)];
+    while (stack.length) { const x = stack.pop(); if (x === d) return true; if (!seen.has(x)) { seen.add(x); stack.push(...next.get(x)); } }
+    return false;
+  };
+  const out = [];
+  for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+    const e = all[i], d = all[j];
+    const race = !hb(e, d) && !hb(d, e) && ((e.write && d.write && overlap(e, d)) || e.from === d || d.from === e);
+    if (race && (e.order !== "seq-cst" || d.order !== "seq-cst" || (overlap(e, d) && !equal(e, d)))) out.push([e, d]);
+  }
+  return out;
+}`,
+  makeBarrier: `function makeBarrier(s, i, n) {
+  return {
+    wait() {
+      const gen = Atomics.load(s, i + 1);
+      if (Atomics.add(s, i, 1) === n - 1) {
+        Atomics.store(s, i, 0);
+        Atomics.add(s, i + 1, 1);
+        Atomics.notify(s, i + 1);
+      } else {
+        while (Atomics.load(s, i + 1) === gen) Atomics.wait(s, i + 1, gen);
+      }
+    },
+  };
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(?!const |let )(.+?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `await __check(${JSON.stringify(m[1])}, async () => (${m[1]}), ${JSON.stringify(m[2])});` : line;
+  });
+  return `async function __check(text, fn, want) {
+  const got = JSON.stringify(await fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 const LF = String.fromCharCode(10);
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -127,6 +211,9 @@ const stepPaths = (html, needle) => {
   await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
   const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
   const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
+  const taskBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => ({ code: pre.textContent, file: pre.dataset.file || null, example: !!pre.closest('.example'), box: !!(pre.nextElementSibling && pre.nextElementSibling.matches('.result-box')) })));
+  const tasksText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -209,6 +296,97 @@ console.log("d", race(wd, rd, host), dataRace(wd, rd, host));` }), { lines: 4 })
       `student homework 1 with race and dataRace of the notes: a) a data race where B read 1, none where B read the zero (init hb) — the program is not data race free; b) the chain — no race; c) the two Int16 adds race, not a data race, Int32 load against them — a data race; d) postMessage — no race ${JSON.stringify(out1)}`);
   }
 
+  // the tasks: the warm-ups and task 9 print what EXPECT says, every line of an example holds with the reference solution
+  const taskFiles = {};
+  {
+    check(taskBlocks.length === 9 && taskBlocks.filter((x) => x.example).length === 3 && taskBlocks.filter((x) => x.file).length === 2 && taskBlocks.every((x) => !x.box),
+      `tasks: 9 js blocks — 3 examples, the 2 files of task 4, 4 to predict; no result-box (${taskBlocks.length})`);
+    for (const [i, blk] of taskBlocks.entries()) {
+      if (blk.file) { taskFiles[blk.file] = blk.code; continue; }
+      const code = blk.example ? checkable(blk.code) : blk.code;
+      const want = blk.example ? null : EXPECT[`tasks #${i}`];
+      const out = await runFolder(b, page({ 'main.js': code }), { lines: want ? want.length : (code.match(/await __check\(/g) || []).length });
+      if (!quiet) { console.log(`\n--- tasks #${i}${blk.example ? ' (example)' : ''}: ${blk.code.split(LF)[0]}`); for (const l of out) console.log(`    > ${l}`); }
+      if (blk.example) {
+        for (const l of out.filter((x) => x.startsWith('EX-'))) check(l.startsWith('EX-OK'), `tasks #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(out.length > 0 && out.every((l) => l.startsWith('EX-')) && out.length === (code.match(/await __check\(/g) || []).length, `tasks #${i} example runs with the reference solution: ${out.length} lines`);
+      } else check(!!want && same(out, want), `tasks #${i} ${blk.code.split(LF)[0].slice(0, 60)}: ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the tasks: the experiments of the criteria
+  {
+    // task 4: the program of the task runs (with its data races the counts may come short); a fixed one is exact, 5 times
+    const buggy = await runFolder(b, page({ 'check.js': taskFiles['check.js'], 'main.js': taskFiles['main.js'] }), { lines: 1 });
+    const m = (buggy[0] || '').match(/^верных: (\d+) ошибок: (\d+)$/);
+    check(!!m && Number(m[1]) + Number(m[2]) <= 200000 && hasAll(taskFiles['check.js'], ['s[0]++', 's[1]++', 's[2]++']) && taskFiles['main.js'].includes('if (s[2] < 2)'),
+      `task 4: the program of the task runs and has its three racing places (s[0]++/s[1]++, s[2]++, the page reads s[2] and s[0], s[1] plainly) ${JSON.stringify(buggy)}`);
+    const fixed = { 'check.js': `onmessage = (e) => {
+  const { shared, deck, from, to } = e.data;
+  const s = new Int32Array(shared);
+  let right = 0, wrong = 0;
+  for (let i = from; i < to; i++) {
+    if (deck[i].answer === deck[i].right) right++;
+    else wrong++;
+  }
+  Atomics.add(s, 0, right);
+  Atomics.add(s, 1, wrong);
+  Atomics.add(s, 2, 1);
+  Atomics.notify(s, 2);
+};`, 'main.js': `const shared = new SharedArrayBuffer(12);
+const s = new Int32Array(shared);
+const deck = Array.from({ length: 200000 }, (_, k) => ({ answer: k % 9 === 0 ? "?" : "ok", right: "ok" }));
+for (const [from, to] of [[0, 100000], [100000, 200000]]) new Worker("check.js").postMessage({ shared, deck, from, to });
+let seen;
+while ((seen = Atomics.load(s, 2)) < 2) { const r = Atomics.waitAsync(s, 2, seen); if (r.async) await r.value; }
+console.log("верных:", s[0], "ошибок:", s[1]);` };
+    const runs = [];
+    for (let k = 0; k < 5; k++) runs.push(...await runFolder(b, page(fixed), { lines: 1 }));
+    check(runs.length === 5 && runs.every((l) => l === 'верных: 177777 ошибок: 22223'), `task 4: a fixed program (counts of its own and one Atomics.add each, the page waits on s[2]) prints «верных: 177777 ошибок: 22223» 5 times ${JSON.stringify([...new Set(runs)])}`);
+    const out5 = await runFolder(b, page({ 'pub.js': `${SOLUTIONS.publish}
+onmessage = (e) => {
+  const flag = new Int32Array(e.data, 0, 1), data = new Int32Array(e.data, 4, 100000);
+  publish(flag, data, Array.from({ length: 100000 }, (_, k) => k % 1000));
+};`, 'main.js': `${SOLUTIONS.receive}
+const shared = new SharedArrayBuffer(4 + 4 * 100000);
+const flag = new Int32Array(shared, 0, 1), data = new Int32Array(shared, 4, 100000);
+new Worker("pub.js").postMessage(shared);
+const got = await receive(flag, data);
+console.log(got.length, got.reduce((s, v) => s + v, 0));` }), { lines: 1 });
+    check(same(out5, ['100000 49950000']), `task 5: a thread publishes 100 000 numbers, the page receives them all — the sum 49 950 000 ${JSON.stringify(out5)}`);
+    const out7 = await runFolder(b, page({ 'main.js': `${SOLUTIONS.dataRaces}
+const store32 = { write: true, order: "seq-cst", start: 0, size: 4 };
+const load16 = { write: false, order: "seq-cst", start: 0, size: 2, from: store32 };
+console.log(dataRaces([[store32], [load16]]).length);` }), { lines: 1 });
+    check(same(out7, ['1']), `task 7: Atomics.store through Int32Array and Atomics.load through Int16Array of the same bytes in two agents — one data race ${JSON.stringify(out7)}`);
+    const barrier = (second) => page({ 'b.js': `${SOLUTIONS.makeBarrier}
+onmessage = (e) => {
+  const { shared, me, n, rounds } = e.data;
+  const s = new Int32Array(shared, 0, 2), cells = new Int32Array(shared, 8, n);
+  const barrier = makeBarrier(s, 0, n);
+  let bad = 0;
+  for (let r = 1; r <= rounds; r++) {
+    cells[me] = r;
+    barrier.wait();
+    for (let k = 0; k < n; k++) if (cells[k] !== r) bad++;
+    ${second ? 'barrier.wait();' : ''}
+  }
+  postMessage(bad);
+};`, 'main.js': `const n = 4, rounds = 1000;
+const shared = new SharedArrayBuffer(8 + 4 * n);
+const bad = [];
+for (let me = 0; me < n; me++) {
+  const w = new Worker("b.js");
+  w.onmessage = (e) => { bad.push(e.data); if (bad.length === n) console.log(bad.join(" ")); };
+  w.postMessage({ shared, me, n, rounds });
+}` });
+    const with2 = await runFolder(b, barrier(true), { lines: 1 });
+    const with1 = await runFolder(b, barrier(false), { lines: 1 });
+    const stale = (with1[0] || '').split(' ').map(Number);
+    check(same(with2, ['0 0 0 0']) && stale.length === 4 && stale.reduce((x, y) => x + y, 0) > 0,
+      `task 8: four threads, 1000 rounds — with two barriers a round no stale cell ${JSON.stringify(with2)}; without the second one they appear ${JSON.stringify(with1)}`);
+  }
+
   // the cheatsheet; report() of «Карточки 2.0»
   {
     const cheat = js.find((x) => x.cheat);
@@ -264,6 +442,25 @@ reader.postMessage({ shared, kind: "DataView", role: "reader" });` }), { lines: 
     const nmissing = nquotes.filter((x) => !corpus.includes(x));
     check(nquotes.length >= 6 && nmissing.length === 0 && nquotes.includes('Depending on the system (the CPU, the OS, the Browser) it can take a while until the change is propagated to all contexts. To synchronize, atomic operations are needed'),
       `student: ${nquotes.length} English quotes of the notes, the MDN one of homework 4 among them; not found in ECMA-262 2026 or MDN: ${nmissing.join(' | ') || 'none'}`);
+  }
+
+  // the tasks: the step of 29.5.4 task 9 asks for, their quotes, the links and the footer
+  {
+    const wait = plain(mdn('reference/global_objects/atomics/wait'));
+    const ch29 = flat(spec.slice(spec.indexOf('id="sec-memory-model"'), spec.indexOf('<emu-annex')));
+    const tq = [...tasksText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => m[1].replace(/\s+/g, ' '));
+    const tmissing = tq.filter((x) => !ch29.includes(x) && !wait.includes(x));
+    check(at('sec-composewriteeventbytes', 'If W is a WriteSharedMemory event, then').join() === '3.c' && at('sec-composewriteeventbytes', 'Let bytesModified be W.[[ModifyOp]] (bytes, W.[[Payload]])').join() === '3.d.iii'
+      && num('sec-composewriteeventbytes') === '29.5.4' && num('sec-valueofreadevent') === '29.5.5' && tq.length === 3 && tmissing.length === 0
+      && tq.includes('It is blocking and cannot be used in the main thread') && tq.includes('all its executions'),
+    `tasks: ECMA-262 29.5.4 — 3.c takes the byte of a WriteSharedMemory payload, 3.d (3.d.iii) runs [[ModifyOp]] for a read-modify-write; ${tq.length} English quotes (29.10, the note of 29.7.3, MDN Atomics.wait) as written there ${tmissing.join(' | ')}`);
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
+    const tAnchors = [...new Set([...tasksHtml.matchAll(/https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)/g)].map((m) => m[1]))];
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [m[1], m[2]]);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(tAnchors.every((a) => spec.includes(`id="${a}"`)) && tNamed.length === 1 && tNamed.every(([id, k]) => num(id) === k)
+      && ['Atomics.wait()', 'ECMA-262 2026', 'Mozilla Contributors'].every((s) => tFooter.includes(s)) && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 2,
+    'tasks: the tc39.es anchor exists with its number (29.5.4); the footer names Atomics.wait() and ECMA-262 2026; MDN is linked twice');
   }
 
   // the notes: homework 3 by IsNoTearConfiguration (25.1.3.13; DataView reads with isTypedArray false), the footer and links

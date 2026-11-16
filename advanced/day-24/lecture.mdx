@@ -1,0 +1,646 @@
+---
+title: "День 24 — WeakRef и FinalizationRegistry: сборка мусора"
+day: День 24 • урок 1
+heading: "WeakRef и FinalizationRegistry: сборка мусора"
+lead: Курс 3, Advanced. Модуль «Управление ресурсами и памятью» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+  h3 { color: #9a3412; }
+  .step-number { background: #f97316; }
+  .toc a { color: #c2410c; }
+---
+
+<Goals>
+- объяснять, как сборщик мусора решает, что выбросить, и почему циклы ему не мешают;
+- держать объект слабо через `WeakRef` и узнавать о его уборке через `FinalizationRegistry`;
+- проходить по шагам конструкторы, `deref`, `register` и `unregister` и знать, что такое живость;
+- строить кэш, который не держит память, и понимать, почему на сборку мусора нельзя полагаться.
+</Goals>
+
+<Toc />
+
+## 1. Зачем {#why}
+
+На дне 1 курса 2 мы оставили вопрос: «Как браузер решает, что можно выбросить из памяти, — тема курса 3».
+Сегодня ответ. Он начинается в учебнике MDN
+[Memory management](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Memory_management): в C память
+выделяют и освобождают руками, `malloc()` и `free()`, а JavaScript выделяет её сам и сам убирает. Это и есть сборка
+мусора. Стандарт описывает её очень осторожно — в разделе
+[9.9](https://tc39.es/ecma262/2026/#sec-weakref-processing-model) и в главе
+[26](https://tc39.es/ecma262/2026/#sec-managing-memory) «Managing Memory», где живут `WeakRef` и
+`FinalizationRegistry`. Это первый день модуля A6; завтра — `using` и `DisposableStack`.
+
+## 2. Жизненный цикл памяти и достижимость {#reach}
+
+У памяти три этапа: выделить, использовать, освободить. Первые два в JavaScript происходят сами, когда мы
+создаём объекты и пользуемся ими. С третьим трудно: понять, что память «больше не нужна», в общем случае нельзя
+— MDN называет эту задачу «undecidable». Поэтому сборщики решают задачу попроще.
+
+Первый подход — **подсчёт ссылок**: на объект никто не ссылается — его можно убрать. Он ломается на циклах: два
+объекта ссылаются друг на друга, а снаружи до них не добраться, и счётчики у обоих никогда не станут нулём.
+Второй — **пометка и очистка** (mark-and-sweep). Он сводит «объект не нужен» к «an object is unreachable»: от
+корней — глобального объекта, переменных, стека — сборщик идёт по ссылкам, помечает всё, до чего дошёл, и
+убирает остальное. «Currently, all modern engines ship a mark-and-sweep garbage collector», и цикл, до которого
+не дойти от корня, ему не мешает.
+
+<Scheme src="scheme-reach.svg">Пометка от корней и недостижимый цикл</Scheme>
+
+## 3. Как вызвать сборку {#gc}
+
+Из кода — никак. MDN: «It is also not possible to programmatically trigger garbage collection in JavaScript».
+Есть только флаги движка для отладки: учебник показывает `node --expose-gc --inspect index.js`, после которого в
+Node появляется функция `gc()`. В языке её нет, и в обычном Chrome тоже. Поэтому в Chrome сборку запускают руками:
+DevTools → вкладка Memory → значок корзины «Collect garbage». А чтобы код узнал,
+что сборка прошла, сделаем помощник — файл `gc.js` в папке с `index.html` дня 22 (изоляция сегодня не нужна, но
+папка готовая):
+
+```js file="gc.js"
+const keep = new Set();
+export function nextGC() {
+  return new Promise((resolve) => {
+    const registry = new FinalizationRegistry(() => { keep.delete(registry); resolve(); });
+    keep.add(registry);
+    registry.register({}, "пробный объект");
+  });
+}
+```
+
+`nextGC()` регистрирует пустой объект, на который больше никто не ссылается. Его уберёт первая же полная сборка,
+и реестр вызовет функцию, которая выполнит обещание. Сам реестр лежит в `keep` — зачем, станет видно в
+разделе 12. Дальше блоки — это `main.js`: запускаем блок и нажимаем «Collect garbage».
+
+## 4. Опыт: цикл и замыкание {#cycle}
+
+```js
+import { nextGC } from "./gc.js";
+let a = { name: "a" }, b = { name: "b" };
+a.other = b;
+b.other = a;
+const ra = new WeakRef(a), rb = new WeakRef(b);
+function makeReader() {
+  const hidden = { name: "в замыкании" };
+  return { read: () => hidden.name, ref: new WeakRef(hidden) };
+}
+const { read, ref: rc } = makeReader();
+a = null;
+b = null;
+await nextGC();
+console.log(ra.deref(), rb.deref(), rc.deref()?.name, read());
+```
+
+<ResultBox>
+undefined undefined в замыкании в замыкании
+</ResultBox>
+
+Цикл `a ⇄ b` собран целиком: подсчёт ссылок его бы оставил. А объект `hidden` пережил сборку, хотя ни одна
+переменная модуля на него не смотрит: его держит замыкание `read` (день 1 курса 2). Пока функцию можно вызвать,
+объект достижим.
+
+## 5. WeakRef по шагам {#weakref}
+
+`WeakRef` — «an object that is used to refer to a target object or symbol without preserving it from garbage
+collection» (раздел [26.1](https://tc39.es/ecma262/2026/#sec-weak-ref-objects)). Конструктор WeakRef(target)
+([26.1.1.1](https://tc39.es/ecma262/2026/#sec-weak-ref-target)): шаг 1 — только с `new`; шаг 2 — цель
+должна проходить CanBeHeldWeakly (раздел 9); шаг 4 — AddToKeptObjects(target); шаг 5 — цель кладётся в слот
+\[\[WeakRefTarget\]\]. `deref` ([26.1.3.2](https://tc39.es/ecma262/2026/#sec-weak-ref.prototype.deref)) зовёт
+WeakRefDeref ([26.1.4.1](https://tc39.es/ecma262/2026/#sec-weakrefderef)): цель на месте — снова AddToKeptObjects
+и вернуть её (шаг 2), слот пуст — `undefined` (шаг 3).
+
+```js
+import { nextGC } from "./gc.js";
+let card = { word: "kitap" };
+const ref = new WeakRef(card);
+card = null;
+console.log(ref.deref()?.word);
+setTimeout(() => console.log("до сборки:", ref.deref()?.word), 0);
+await nextGC();
+console.log("после сборки:", ref.deref());
+```
+
+<ResultBox>
+kitap\
+до сборки: kitap\
+после сборки: undefined
+</ResultBox>
+
+<Scheme src="scheme-weakref.svg">Сильная и слабая ссылки</Scheme>
+
+Сильных ссылок на объект нет уже после `card = null`, но в таймере он ещё на месте: никто его не убирал. После
+сборки слот пуст. Пустым его делает раздел Execution ([9.9.3](https://tc39.es/ecma262/2026/#sec-weakref-execution)):
+если набор значений «not live», реализация «may» поставить empty во все `WeakRef`, ячейки реестров, ключи
+`WeakMap` и элементы `WeakSet` с этими значениями — сразу, атомарно.
+
+## 6. Без сборки ничего не происходит {#nogc}
+
+```js
+let card = { word: "kitap" };
+const ref = new WeakRef(card);
+card = null;
+setTimeout(() => console.log("через 3 с, без сборки:", ref.deref()?.word), 3000);
+```
+
+<ResultBox>
+через 3 с, без сборки: kitap
+</ResultBox>
+
+Раздел Objectives ([9.9.1](https://tc39.es/ecma262/2026/#sec-weakref-invariants)) начинается так: «This
+specification does not make any guarantees that any object or symbol will be garbage collected». Недостижимый
+объект можно убрать «after long periods of time, or never at all», поэтому всё, что связано со сборкой,
+стандарт пишет со словом «may». MDN добавляет: «A `WeakRef` might never return `undefined` from `deref`».
+
+## 7. Живость и «держит до конца задания» {#liveness}
+
+Кого можно убирать, решает **живость** — раздел Liveness ([9.9.2](https://tc39.es/ecma262/2026/#sec-liveness)).
+Набор значений жив, если какое-то из них лежит в списке \[\[KeptAlive\]\] агента или если есть будущее
+исполнение, где `WeakRefDeref` всегда возвращает `undefined` (WeakRef-oblivious), но личность значения всё равно
+наблюдается — сравнением `===` или ключом `Map` (заметка 4). Проще: объект жив, если до него можно добраться не
+через `WeakRef`. Заметка 5: ключ `WeakMap`, элемент `WeakSet` и цель в ячейке реестра живым его не делают.
+Заметка 6: живость неразрешима, «engines use conservative approximations such as reachability».
+Заметки 1–2 закрывают лазейку с циклами: если живость `v` зависит от цели `WeakRef` `r`, то о живости `r`
+нельзя судить, опираясь на живость `v`, — «which would be circular reasoning». Поэтому живость определена для
+наборов значений: цикл, который виден только через `WeakRef`, живым не считается.
+
+Список \[\[KeptAlive\]\] пополняют конструктор и `deref` (AddToKeptObjects,
+[9.11](https://tc39.es/ecma262/2026/#sec-addtokeptobjects)), а чистит ClearKeptObjects
+([9.10](https://tc39.es/ecma262/2026/#sec-clear-kept-objects)) — «when a synchronous sequence of ECMAScript
+executions completes». MDN говорит то же словами: цель не уберут «until the end of the current JavaScript job».
+Внутри одного задания `deref` стабилен. Увидеть это опытом нельзя: Chrome собирает между заданиями, и нажатие
+кнопки тоже приходит между ними. Зато видно другое правило 9.9.3 (заметка 2): все `WeakRef` одной цели
+пустеют вместе.
+
+```js
+import { nextGC } from "./gc.js";
+let target = { name: "цель" };
+const r1 = new WeakRef(target), r2 = new WeakRef(target);
+const notes = new WeakMap([[target, "заметка"]]);
+console.log(r1.deref() === r2.deref(), notes.get(target));
+target = null;
+await nextGC();
+console.log(r1.deref(), r2.deref());
+```
+
+<ResultBox>
+true заметка\
+undefined undefined
+</ResultBox>
+
+## 8. WeakMap: слабы ключи, но и значения тоже {#weakmap}
+
+`WeakMap` дня 14 курса 2 держит ключ слабо. А значение? Заметка 5 раздела 9.9.2: «if a key in a WeakMap is not
+live, then its corresponding value is not necessarily live either». Значит, значение, которое ссылается на свой же
+ключ, не удерживает его — иначе пара жила бы вечно:
+
+```js
+import { nextGC } from "./gc.js";
+const owners = new WeakMap();
+let key = { name: "ключ" };
+owners.set(key, { owner: key });
+const rk = new WeakRef(key);
+key = null;
+await nextGC();
+console.log(rk.deref());
+```
+
+<ResultBox>
+undefined
+</ResultBox>
+
+Учебник MDN объясняет, почему так нужно: если бы ключ хранился «as an actual reference», вышла бы циклическая
+ссылка, и ни ключ, ни значение никогда не стали бы мусором. Такую пару называют эфемероном: значение живёт,
+пока жив ключ. `WeakMap` и `WeakRef` дополняют друг друга. У первой слабы ключи, и по живому ключу значение
+всегда на месте. У второго слаба сама цель, и она может пропасть.
+
+## 9. Что можно держать слабо {#weakly}
+
+CanBeHeldWeakly ([9.13](https://tc39.es/ecma262/2026/#sec-canbeheldweakly)): объект — да (шаг 1); символ — да,
+если он не из реестра `Symbol.for` (шаг 2, KeyForSymbol); остальное — нет. Заметка объясняет: символ из
+`Symbol.for` можно получить заново по имени, у него нет «language identity». Хорошо известные символы,
+например `Symbol.iterator`, держать слабо можно, хотя их вряд ли когда-нибудь уберут.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const obj = {};
+console.log(run(() => WeakRef(obj)), "|", run(() => new WeakRef(1)), "|", run(() => new WeakRef(Symbol.for("x"))));
+console.log(run(() => new WeakRef(Symbol("x"))), run(() => new WeakRef(Symbol.iterator)), run(() => new WeakMap([[Symbol("y"), 1]])), "|", run(() => new WeakSet([Symbol.for("z")])));
+```
+
+<ResultBox>
+TypeError: Constructor WeakRef requires 'new' | TypeError: WeakRef: invalid target | TypeError: WeakRef: invalid target\
+ok ok ok | TypeError: Invalid value used in weak set
+</ResultBox>
+
+То же правило решает для ключей `WeakMap` (день 14 курса 2) и элементов `WeakSet` (день 15): символ-ключ
+законен, а символ из `Symbol.for` — нет.
+
+## 10. FinalizationRegistry по шагам {#registry}
+
+`FinalizationRegistry` — «an object that manages registration and unregistration of cleanup operations that are
+performed when target objects and symbols are garbage collected» (раздел
+[26.2](https://tc39.es/ecma262/2026/#sec-finalization-registry-objects)). Конструктор
+([26.2.1.1](https://tc39.es/ecma262/2026/#sec-finalization-registry-cleanup-callback)): шаг 1 — только с `new`;
+шаг 2 — функция очистки обязана быть вызываемой; шаг 7 — пустой список \[\[Cells\]\]. `register(target,
+heldValue, unregisterToken)` ([26.2.3.2](https://tc39.es/ecma262/2026/#sec-finalization-registry.prototype.register)):
+шаг 3 — цель проходит CanBeHeldWeakly; шаг 4 — цель и сохранённое значение не могут совпадать; шаг 5 — токен
+либо держится слабо, либо `undefined`; шаги 6–7 — ячейка в список. `unregister(token)`
+([26.2.3.3](https://tc39.es/ecma262/2026/#sec-finalization-registry.prototype.unregister)) убирает все ячейки с
+этим токеном и отвечает, нашлась ли хоть одна (шаги 5–6).
+
+<Scheme src="scheme-registry.svg">Ячейки реестра и путь до обратного вызова</Scheme>
+
+Когда цель убрана, 9.9.3 ставит в ячейку empty и, по выбору реализации, зовёт HostEnqueueFinalizationRegistryCleanupJob
+([9.9.4.1](https://tc39.es/ecma262/2026/#sec-host-cleanup-finalization-registry)). Задание очистки выполняет
+CleanupFinalizationRegistry ([9.12](https://tc39.es/ecma262/2026/#sec-cleanup-finalization-registry)): убирает
+ячейку и вызывает функцию с сохранённым значением.
+
+```js
+import { nextGC } from "./gc.js";
+const log = [];
+const registry = new FinalizationRegistry((held) => log.push(held));
+let a = { id: 1 }, b = { id: 2 };
+const token = {};
+registry.register(a, "a");
+registry.register(b, "b", token);
+console.log(registry.unregister(token), registry.unregister(token));
+a = null;
+b = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 50));
+console.log(log.join() || "пусто");
+```
+
+<ResultBox>
+true false\
+a
+</ResultBox>
+
+Ячейку `b` убрали токеном — о её цели реестр уже не сообщит. Часто токеном делают саму цель: снять
+регистрацию можно, пока объект у вас в руках, а держать его токен не будет — по 9.9.2 (заметка 5) поле
+\[\[UnregisterToken\]\] живым не делает:
+
+```js
+import { nextGC } from "./gc.js";
+const calls = [];
+const registry = new FinalizationRegistry((held) => calls.push(held));
+let card = { word: "kitap" };
+registry.register(card, "kitap", card);
+console.log(registry.unregister(card), registry.unregister(card));
+let other = { word: "galam" };
+registry.register(other, "galam", other);
+other = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 50));
+console.log(calls.join() || "пусто");
+```
+
+<ResultBox>
+true false\
+galam
+</ResultBox>
+
+Первая регистрация снята — второй `unregister` уже ничего не нашёл. Вторая цель, хоть и была своим же
+токеном, убрана, и вызов пришёл. Ошибки шагов:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const obj = {};
+const r = new FinalizationRegistry(() => {});
+console.log(run(() => new FinalizationRegistry(123)), "|", run(() => FinalizationRegistry(() => {})));
+console.log(run(() => r.register(obj, obj)), "|", run(() => r.register(obj, 1, 2)), "|", run(() => r.unregister(1)), "|", r.register(obj, 1, undefined), r.unregister({}));
+```
+
+<ResultBox>
+TypeError: FinalizationRegistry: cleanup must be callable | TypeError: Constructor FinalizationRegistry requires 'new'\
+TypeError: FinalizationRegistry.prototype.register: target and holdings must not be same | TypeError: Invalid unregisterToken ('2') | TypeError: Invalid unregisterToken ('1') | undefined false
+</ResultBox>
+
+## 11. Что видит функция очистки {#cleanup}
+
+К моменту вызова цели уже нет. MDN: «the `WeakRef`'s target is cleared at the same time or before any cleanup
+callback associated with the registry is called». А сохранённое значение реестр держит сильно: «If the held
+value is an object, the registry keeps a _strong_ reference to it». Отсюда ловушка: значение, которое ссылается на
+цель, не даст цели умереть.
+
+```js
+import { nextGC } from "./gc.js";
+let card = { word: "kitap" };
+const ref = new WeakRef(card);
+const seen = [];
+const registry = new FinalizationRegistry((held) => seen.push(held + ": " + ref.deref()));
+registry.register(card, "kitap");
+card = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 50));
+console.log(seen.join());
+const calls = [];
+const watcher = new FinalizationRegistry((held) => calls.push(typeof held === "object" ? "объект" : held));
+let a = { word: "a" }, b = { word: "b" };
+const ra = new WeakRef(a), rb = new WeakRef(b);
+watcher.register(a, "a");
+watcher.register(b, { card: b });
+a = null;
+b = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 50));
+console.log(calls.join() || "пусто", ra.deref(), rb.deref()?.word);
+```
+
+<ResultBox>
+kitap: undefined\
+a undefined b
+</ResultBox>
+
+Функция очистки получила только `"kitap"`: сама карточка уже недоступна. Во втором опыте карточка `a` убрана
+и пришёл вызов, а `b` жива: её держит сохранённое значение `{ card: b }`, а его держит реестр. Сохраняйте в
+реестре только то, что нужно для уборки, — ключ, имя, номер, — но не саму цель.
+
+## 12. Когда реестр молчит {#silent}
+
+```js
+import { nextGC } from "./gc.js";
+const log = [];
+function watch(obj) {
+  const registry = new FinalizationRegistry((held) => log.push(held));
+  registry.register(obj, "вызов");
+}
+let a = {};
+watch(a);
+a = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 100));
+console.log(log.length);
+```
+
+<ResultBox>
+0
+</ResultBox>
+
+Объект собрали, а вызова не было: реестр жил только внутри `watch` и сам стал мусором. Заметка 1 раздела 9.9.3
+это разрешает: «Implementations may omit FinalizationRegistry callbacks for any reason, e.g., if the
+FinalizationRegistry itself becomes dead». Поэтому `nextGC` держит свои реестры в `keep`: ячейка реестра его не
+удерживает.
+
+## 13. Прототипы {#proto}
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return `${e.name}: ${e.message}`; } };
+const ref = new WeakRef({}), reg = new FinalizationRegistry(() => {});
+console.log(Object.getOwnPropertyNames(WeakRef.prototype).join(), Object.getOwnPropertyNames(FinalizationRegistry.prototype).join(), Object.prototype.toString.call(ref), Object.prototype.toString.call(reg));
+console.log(run(() => WeakRef.prototype.deref.call({})), "|", run(() => FinalizationRegistry.prototype.register.call(ref, {}, 1)));
+```
+
+<ResultBox>
+constructor,deref constructor,register,unregister \[object WeakRef\] \[object FinalizationRegistry\]\
+TypeError: Method WeakRef.prototype.deref called on incompatible receiver #\<Object> | TypeError: Method FinalizationRegistry.prototype.register called on incompatible receiver #\<WeakRef>
+</ResultBox>
+
+У `WeakRef.prototype` всего два свойства. Про `constructor` MDN пишет, что он «normative optional»: движок вправе
+его не давать, чтобы чужой код не добрался до `WeakRef` и не подглядывал за сборкой. Все крупные движки его дают.
+Экземпляры — обычные объекты со слотами: \[\[WeakRefTarget\]\] у `WeakRef`
+([26.1.5](https://tc39.es/ecma262/2026/#sec-properties-of-weak-ref-instances)), \[\[Cells\]\] и \[\[CleanupCallback\]\]
+у реестра ([26.2.4](https://tc39.es/ecma262/2026/#sec-properties-of-finalization-registry-instances)).
+
+## 14. Кэш на WeakRef: пример MDN и его щель {#cache}
+
+Учебник MDN предлагает кэш: `Map` от ключа к `WeakRef` значения. `WeakMap` тут не годится — у неё слабы ключи,
+а не значения (раздел 8). Первый вариант MDN честно проверяет `deref()` и загружает заново, если пусто. Он верен,
+но копит записи: значения убраны, а `WeakRef` в `Map` остаются навсегда. Чтобы `Map` не росла, второй вариант
+чистит записи реестром:
+
+```js
+import { nextGC } from "./gc.js";
+function cached(getter) {
+  const cache = new Map();
+  const registry = new FinalizationRegistry((key) => {
+    if (!cache.get(key)?.deref()) {
+      cache.delete(key);
+    }
+  });
+  return async (key) => {
+    if (cache.has(key)) {
+      return cache.get(key).deref();
+    }
+    const value = await getter(key);
+    cache.set(key, new WeakRef(value));
+    registry.register(value, key);
+    return value;
+  };
+}
+let loads = 0;
+const get = cached((word) => { loads++; return { word }; });
+let card = await get("kitap");
+console.log((await get("kitap")) === card, loads);
+card = null;
+await nextGC();
+console.log(await get("kitap"), loads);
+await new Promise((r) => setTimeout(r, 50));
+console.log((await get("kitap"))?.word, loads);
+```
+
+<ResultBox>
+true 1\
+undefined 1\
+kitap 2
+</ResultBox>
+
+Сразу после сборки кэш вернул `undefined`. Значение уже убрано, а задание очистки реестра ещё не выполнилось:
+запись в `Map` есть, `cache.has(key)` отвечает «да», а `deref()` — `undefined`. Через задание запись удалена, и
+значение загружается заново. Тот, кто вызвал `get`, получил `undefined` вместо карточки. У вас вторая строка
+может выйти и `{word: 'kitap'} 2`: если задание очистки кэша выполнится раньше задания `nextGC`, щель закроется до
+проверки. Порядок заданий решает хозяин: 9.9.4.1 обещает лишь, что задание выполнят «at some future time». У нас
+`undefined` выпал в 7 запусках из 12: окно короткое, но настоящее. Заметьте: проверку `deref()` в реестре MDN поставила правильно. Без неё реестр стёр бы новую запись,
+сделанную после сборки.
+
+## 15. «Карточки 2.0»: кэш без щели {#cards}
+
+Исправим: брать значение из `deref()` и загружать заново, если его нет, — не глядя на `has`.
+
+```js
+import { nextGC } from "./gc.js";
+function makeCache(load) {
+  const map = new Map();
+  const registry = new FinalizationRegistry((key) => {
+    if (!map.get(key)?.deref()) map.delete(key);
+  });
+  return {
+    get(key) {
+      const hit = map.get(key)?.deref();
+      if (hit !== undefined) return hit;
+      const value = load(key);
+      map.set(key, new WeakRef(value));
+      registry.register(value, key);
+      return value;
+    },
+    get size() { return map.size; },
+  };
+}
+let loads = 0;
+const cache = makeCache((word) => { loads++; return { word, sound: new Array(1000).fill(word) }; });
+let card = cache.get("kitap");
+console.log(cache.get("kitap") === card, loads, cache.size);
+card = null;
+await nextGC();
+console.log(cache.get("kitap").word, loads, cache.size);
+await new Promise((r) => setTimeout(r, 50));
+console.log(loads, cache.size);
+```
+
+<ResultBox>
+true 1 1\
+kitap 2 1\
+2 1
+</ResultBox>
+
+Пока карточку кто-то держит, кэш отдаёт тот же объект. После сборки — загружает новый, и запись одна: реестр
+пришёл позже, увидел живой новый `WeakRef` и ничего не стёр. Тяжёлую «озвучку» каждого слова кэш не держит —
+её держат те, кто ею пользуется.
+
+## 16. Учёт освобождённых объектов {#freed}
+
+Реестр может считать, сколько объектов уже убрано. Создадим тысячу карточек, десять оставим, остальные отпустим:
+
+```js
+import { nextGC } from "./gc.js";
+let freed = 0;
+const registry = new FinalizationRegistry(() => { freed++; });
+let cards = Array.from({ length: 1000 }, (_, i) => ({ id: i }));
+for (const card of cards) registry.register(card, card.id);
+const kept = cards.slice(0, 10);
+cards = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 100));
+console.log("освобождено:", freed, "оставлено:", kept.length);
+```
+
+<ResultBox>
+освобождено: 989 оставлено: 10
+</ResultBox>
+
+Не 990, а 989. Если записывать в реестр номера, видно, кто выжил: последняя карточка, номер 999 — последнее
+значение переменной цикла `for…of` на верхнем уровне модуля. С циклом по индексу или с тем же `for…of` внутри
+функции убираются все. Проверим с `forEach` и номерами:
+
+```js
+import { nextGC } from "./gc.js";
+const alive = new Set(Array.from({ length: 1000 }, (_, i) => i));
+const registry = new FinalizationRegistry((id) => alive.delete(id));
+let cards = Array.from({ length: 1000 }, (_, i) => ({ id: i }));
+cards.forEach((card) => registry.register(card, card.id));
+cards = null;
+await nextGC();
+await new Promise((r) => setTimeout(r, 100));
+console.log("не убрано:", alive.size);
+```
+
+<ResultBox>
+не убрано: 0
+</ResultBox>
+
+Убрана вся тысяча: функция `forEach` закончилась, и её параметр `card` больше ничего не держит. Это не ошибка: MDN предупреждает, что движок «may hold references to things
+which look like they are unreachable», а стандарт требует лишь не убирать живое. Считать по реестру можно
+«не меньше чем», но не «ровно».
+
+## 17. Чего не делать {#avoid}
+
+У страницы MDN [WeakRef](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakRef)
+есть раздел «Avoid where possible»: «Correct use of `WeakRef` takes careful thought, and it's best avoided if
+possible». На странице [FinalizationRegistry](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry)
+тот же совет. Авторы предложения `WeakRef` перечисляют, откуда берётся непредсказуемость: объекты одного возраста
+убирают в разное время («due to generational collection»), сборку делят на части и ведут параллельно,
+эвристики меняются от версии к версии, а движок «may hold references to things which look like they are
+unreachable (e.g., in closures, or inline caches)» — это мы видели в разделе 16. Учебник MDN говорит прямо, для
+чего годится реестр: «It should only be used for cleanup — and non-critical cleanup».
+
+| Не стоит | Почему | Вместо этого |
+| --- | --- | --- |
+| закрывать файлы, соединения, таймеры в функции реестра | вызова может не быть вовсе (9.9.3) | `try…finally`, завтра — `using` |
+| рассчитывать, что `deref()` когда-нибудь вернёт `undefined` | объект могут не убрать никогда (9.9.1) | явное удаление из структуры |
+| считать по реестру «ровно столько» | движок держит то, что выглядит недостижимым (раздел 16) | «не меньше чем» |
+| создавать реестр в функции и забывать о нём | мёртвый реестр молчит (раздел 12) | держать реестр в живой переменной |
+| проверять `has` у кэша на `WeakRef` | запись живёт дольше значения (раздел 14) | смотреть на результат `deref()` |
+
+## 18. Ошибки дня {#errors}
+
+| Что случилось | Текст в Chrome | Где искать |
+| --- | --- | --- |
+| `WeakRef` без `new` | `TypeError: Constructor WeakRef requires 'new'` | 26.1.1.1, шаг 1 |
+| цель — число, строка, символ из `Symbol.for` | `TypeError: WeakRef: invalid target` | 26.1.1.1, шаг 2; 9.13 |
+| функция очистки — не функция | `TypeError: FinalizationRegistry: cleanup must be callable` | 26.2.1.1, шаг 2 |
+| цель и сохранённое значение совпали | `TypeError: FinalizationRegistry.prototype.register: target and holdings must not be same` | 26.2.3.2, шаг 4 |
+| токен — не объект и не `undefined` | `TypeError: Invalid unregisterToken ('2')` | 26.2.3.2, шаг 5; 26.2.3.3, шаг 3 |
+| символ из `Symbol.for` в `WeakSet` | `TypeError: Invalid value used in weak set` | 9.13 |
+
+## 19. Что будет завтра {#next}
+
+День 25 — `using`, `await using` и `DisposableStack`: как освобождать ресурсы точно в нужный момент, а не «когда-нибудь».
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [9.9 Processing Model of WeakRef and FinalizationRegistry Targets](https://tc39.es/ecma262/2026/#sec-weakref-processing-model) | когда можно убрать цель; разделы 5–7 | <Full /> |
+| [9.9.1 Objectives](https://tc39.es/ecma262/2026/#sec-weakref-invariants) | никаких обещаний; «may»; раздел 6 | <Brief /> |
+| [9.9.2 Liveness](https://tc39.es/ecma262/2026/#sec-liveness) | живость, \[\[KeptAlive\]\]; раздел 7 | <Full /> |
+| [9.9.3 Execution](https://tc39.es/ecma262/2026/#sec-weakref-execution) | empty во всех слабых местах сразу | <Brief /> |
+| [9.9.4 Host Hooks](https://tc39.es/ecma262/2026/#sec-weakref-host-hooks) | задание очистки ставит хозяин | <Brief /> |
+| [9.10 ClearKeptObjects](https://tc39.es/ecma262/2026/#sec-clear-kept-objects) | конец синхронной работы | <Brief /> |
+| [9.11 AddToKeptObjects](https://tc39.es/ecma262/2026/#sec-addtokeptobjects) | держать до конца задания | <Brief /> |
+| [9.12 CleanupFinalizationRegistry](https://tc39.es/ecma262/2026/#sec-cleanup-finalization-registry) | убрать ячейку, вызвать функцию | <Brief /> |
+| [9.13 CanBeHeldWeakly](https://tc39.es/ecma262/2026/#sec-canbeheldweakly) | объект или незарегистрированный символ; раздел 9 | <Brief /> |
+| [26 Managing Memory](https://tc39.es/ecma262/2026/#sec-managing-memory) | глава слабых ссылок | <Brief /> |
+| [26.1 WeakRef Objects](https://tc39.es/ecma262/2026/#sec-weak-ref-objects) | слабая ссылка; раздел 5 | <Full /> |
+| [26.1.1 The WeakRef Constructor](https://tc39.es/ecma262/2026/#sec-weak-ref-constructor) | только с `new` | <Brief /> |
+| [26.1.2 Properties of the WeakRef Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-weak-ref-constructor) | только `prototype` | <Brief /> |
+| [26.1.3 Properties of the WeakRef Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-weak-ref-prototype-object) | `deref`, `constructor` — normative optional | <Brief /> |
+| [26.1.4 WeakRef Abstract Operations](https://tc39.es/ecma262/2026/#sec-weakref-abstract-operations) | WeakRefDeref | <Brief /> |
+| [26.1.5 Properties of WeakRef Instances](https://tc39.es/ecma262/2026/#sec-properties-of-weak-ref-instances) | слот \[\[WeakRefTarget\]\] | <Brief /> |
+| [26.2 FinalizationRegistry Objects](https://tc39.es/ecma262/2026/#sec-finalization-registry-objects) | реестр очистки; разделы 10–12 | <Full /> |
+| [26.2.1 The FinalizationRegistry Constructor](https://tc39.es/ecma262/2026/#sec-finalization-registry-constructor) | функция очистки обязательна | <Brief /> |
+| [26.2.2 Properties of the FinalizationRegistry Constructor](https://tc39.es/ecma262/2026/#sec-properties-of-the-finalization-registry-constructor) | только `prototype` | <Brief /> |
+| [26.2.3 Properties of the FinalizationRegistry Prototype Object](https://tc39.es/ecma262/2026/#sec-properties-of-the-finalization-registry-prototype-object) | `register`, `unregister` | <Brief /> |
+| [26.2.4 Properties of FinalizationRegistry Instances](https://tc39.es/ecma262/2026/#sec-properties-of-finalization-registry-instances) | слоты \[\[Cells\]\], \[\[CleanupCallback\]\] | <Brief /> |
+| [MDN: Memory management](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Memory_management) | достижимость, пометка и очистка, кэш; разделы 2, 14 | <Full /> |
+| [MDN: FinalizationRegistry](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry) | реестр очистки; раздел 10 | <Full /> |
+| [MDN: FinalizationRegistry() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry/FinalizationRegistry) | только с `new` и функцией | <Brief /> |
+| [MDN: FinalizationRegistry.prototype.register()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry/register) | цель, значение, токен; раздел 10 | <Full /> |
+| [MDN: FinalizationRegistry.prototype.unregister()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry/unregister) | `true`, если ячейка нашлась | <Brief /> |
+| [MDN: WeakRef](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakRef) | слабая ссылка, «Avoid where possible»; разделы 5, 17 | <Full /> |
+| [MDN: WeakRef.prototype.deref()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakRef/deref) | цель или `undefined`; раздел 5 | <Full /> |
+| [MDN: WeakRef() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakRef/WeakRef) | только с `new` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// сборщик: пометка от корней; недостижимое (и циклы) — мусор; вызвать из кода нельзя — DevTools → Memory → Collect garbage
+// new WeakRef(obj) — слабая ссылка; ref.deref() → obj или undefined; цель держится до конца задания (9.10–9.11)
+// слабо можно держать: объект, символ не из Symbol.for (9.13) — то же для ключей WeakMap и WeakSet
+// new FinalizationRegistry(fn); registry.register(target, held, token); registry.unregister(token) → true / false
+// fn(held) вызывают «may», «eventually», после сборки; мёртвый реестр может промолчать
+// стандарт не обещает сборку вовсе (9.9.1): только для экономии памяти, не для логики программы
+// кэш: const hit = map.get(key)?.deref(); if (hit !== undefined) return hit; — не has()
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему два объекта, ссылающиеся друг на друга, собираются, хотя у каждого есть ссылка?
+   <Answer>Сборщик ищет достижимое от корней; до цикла от корня не дойти, значит, он мусор. Подсчёт ссылок
+   здесь ошибся бы.</Answer>
+2. Что делает шаг 4 конструктора `WeakRef` и зачем?
+   <Answer>AddToKeptObjects: новая цель держится до конца текущей синхронной работы (ClearKeptObjects), поэтому
+   `deref` в том же задании её вернёт.</Answer>
+3. Почему функция реестра в разделе 12 не вызвалась?
+   <Answer>Реестр сам стал мусором; 9.9.3 разрешает не вызывать функции мёртвого реестра.</Answer>
+4. В чём щель кэша MDN и как её закрыть?
+   <Answer>Между сборкой и заданием очистки запись в `Map` есть, а значения нет: `has` — «да», `deref` —
+   `undefined`. Смотреть на результат `deref()` и загружать заново, если `undefined`.</Answer>
+5. Можно ли держать слабо `Symbol.for("x")`? А `Symbol.iterator`?
+   <Answer>Первый — нет: у него нет «language identity» (9.13, шаг 2). Второй — да, хоть его и вряд ли уберут.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Memory_management)
+(Memory management, WeakRef, FinalizationRegistry и их методы, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-262 2026](https://tc39.es/ecma262/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

@@ -1,0 +1,834 @@
+---
+title: "День 25 — using, await using и DisposableStack"
+day: День 25 • урок 1
+heading: "using, await using и DisposableStack"
+lead: Курс 3, Advanced. Модуль «Управление ресурсами и памятью» — второй, последний день. 45 минут.
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+  h3 { color: #9a3412; }
+  .step-number { background: #f97316; }
+  .toc a { color: #c2410c; }
+---
+
+<Goals>
+- освобождать ресурсы объявлениями `using` и `await using` и знать, где их можно писать;
+- проходить по шагам запись ресурса, его закрытие в конце блока и склейку ошибок в `SuppressedError`;
+- собирать ресурсы вручную через `DisposableStack` и `AsyncDisposableStack`, передавать их через `move`;
+- закрывать таймеры, слушатели и генераторы точно в конце блока.
+</Goals>
+
+<Toc />
+
+## 1. Зачем {#why}
+
+Вчера сборщик мусора убирал объекты «когда-нибудь», а реестр годился только для некритичной уборки. Сегодня —
+уборка в точный момент. Учебник MDN
+[JavaScript resource management](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Resource_management)
+отделяет её от памяти: «Resource management is about managing resources that are not automatically cleaned up by
+JavaScript» — открытые файлы, соединения, замки потоков, таймеры, слушатели. Утечка такого ресурса ломает
+программу, поэтому учебник называет это не оптимизацией, а «a core feature to write correct programs».
+
+В ECMA-262 2026 этой темы нет. Предложение Explicit Resource Management влили в черновик стандарта 24 июня 2026
+года, оно выйдет в ECMA-262 2027. Ссылки дня ведут на черновик [tc39.es/ecma262](https://tc39.es/ecma262/) от 12
+ноября 2026 года; номера разделов в черновике ещё могут сдвинуться. Chrome всё это уже умеет. Блоки дня — это
+`main.js` в папке дня 22: страница грузит его модулем, а в модуле можно и `await`, и `using` на верхнем уровне.
+
+## 2. Задача: два ресурса и try…finally {#problem}
+
+Без нового синтаксиса уборку пишут в `finally`. Для двух ресурсов учебник MDN показывает, что одного `finally`
+мало: «If stream2.getReader() throws, then reader1 does not get released; if reader1.releaseLock() throws an
+error, then reader2 does not get released». Приходится вкладывать `try…finally` в `try…finally` — по одному на
+ресурс. Объявление `using` делает то же без вложенности. Вот таймер и слушатель, которые снимают себя сами в
+конце блока:
+
+```js
+const log = [];
+function every(ms, fn) {
+  const id = setInterval(fn, ms);
+  return { [Symbol.dispose]() { clearInterval(id); log.push("таймер снят"); } };
+}
+function listen(target, type, fn) {
+  target.addEventListener(type, fn);
+  return { [Symbol.dispose]() { target.removeEventListener(type, fn); log.push("слушатель снят"); } };
+}
+const bus = new EventTarget();
+let ticks = 0;
+{
+  using timer = every(10, () => ticks++);
+  using sub = listen(bus, "ping", () => log.push("ping"));
+  bus.dispatchEvent(new Event("ping"));
+  await new Promise((r) => setTimeout(r, 55));
+}
+const seen = ticks;
+bus.dispatchEvent(new Event("ping"));
+await new Promise((r) => setTimeout(r, 50));
+console.log(log.join(" | "));
+console.log("тики в блоке:", seen > 0, "| после блока новых:", ticks - seen);
+```
+
+<ResultBox>
+ping | слушатель снят | таймер снят\
+тики в блоке: true | после блока новых: 0
+</ResultBox>
+
+`every` и `listen` возвращают объект с методом `[Symbol.dispose]` — это и есть **освобождаемый** (disposable)
+ресурс. Блок кончился — `using` вызвал оба метода, сначала у слушателя, потом у таймера. Второй `ping` уже
+никто не услышал, и таймер больше не тикал.
+
+## 3. using по шагам {#steps}
+
+Объявление `using` описано рядом с `let` и `const` — в разделе
+[14.3.1](https://tc39.es/ecma262/#sec-let-and-const-declarations) черновика. Грамматика: `using`, без перевода
+строки, и список привязок с параметром `~Pattern` — деструктуризации нет. Дальше два момента.
+
+**Запись.** Когда выполняется привязка, BindingEvaluation
+([14.3.1.3](https://tc39.es/ecma262/#sec-bindingevaluation)) на шаге 5.d зовёт AddDisposableResource
+([7.5.2](https://tc39.es/ecma262/#sec-adddisposableresource)). Она достаёт метод через GetDisposeMethod
+([7.5.3](https://tc39.es/ecma262/#sec-getdisposemethod)) и кладёт в стек окружения блока запись DisposableResource
+([7.5.1](https://tc39.es/ecma262/#sec-disposableresource-records)) с тремя полями: \[\[ResourceValue\]\] — сам
+объект, \[\[Kind\]\] — sync-dispose или async-dispose, \[\[DisposeMethod\]\] — найденный метод.
+
+**Закрытие.** Блок ([14.2.2](https://tc39.es/ecma262/#sec-block-runtime-semantics-evaluation)) выполняет свои
+операторы, а на шаге 6 зовёт DisposeResources ([7.5.4](https://tc39.es/ecma262/#sec-disposeresources)) — с тем,
+чем кончились операторы: обычным концом, `return`, `break` или ошибкой. Шаг 4 проходит стек «in reverse List
+order»: последний записанный закрывается первым.
+
+```js
+const log = [];
+const res = (name) => ({ [Symbol.dispose]() { log.push("закрыт " + name); } });
+{
+  using a = res("a");
+  using b = res("b"), c = res("c");
+  log.push("тело");
+}
+log.push("после блока");
+function f() {
+  using r = res("r");
+  return (log.push("return считает"), "значение");
+}
+log.push(f());
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+тело | закрыт c | закрыт b | закрыт a | после блока | return считает | закрыт r | значение
+</ResultBox>
+
+<Scheme src="scheme-stack.svg">Стек ресурсов блока: запись при объявлении, закрытие в обратном порядке</Scheme>
+
+Обратный порядок не случаен. MDN: `resource2` закрывают раньше `resource1`, «because resource2 may have a
+dependency on resource1». В функции значение `return` считается до закрытия: вернётся «значение», но ресурс `r` к
+этому моменту уже закрыт — тело функции ([15.2.6](https://tc39.es/ecma262/#sec-function-definitions-runtime-semantics-evaluation))
+тоже зовёт DisposeResources.
+
+## 4. Где можно и где нельзя {#where}
+
+Справочник MDN [using](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/using)
+перечисляет места: блок, тело функции, статический блок класса, верхний уровень модуля, начало `for`, `for…of` и
+`for await…of`. Нельзя — на верхнем уровне скрипта, прямо в `case` у `switch` и в `for…in`. Почему со скриптом так
+строго, объясняет учебник: переменные верхнего уровня скрипта живут, пока живёт страница, «which practically
+means the resource can never be freed». В черновике это ранние ошибки: «It is a Syntax Error if ContainsUsing of
+StatementList is true» — для скрипта ([16.1.1](https://tc39.es/ecma262/#sec-scripts-static-semantics-early-errors))
+и для `case` ([14.12.1](https://tc39.es/ecma262/#sec-switch-statement-static-semantics-early-errors)).
+
+```js
+const syntax = (src, script) => {
+  try { script ? (0, eval)(src) : new Function(src); return "ok"; }
+  catch (e) { return e.name + ": " + e.message; }
+};
+console.log(syntax("using x = null;", true));
+console.log(syntax("switch (1) { case 1: using x = null; }"));
+console.log(syntax("for (using x in {}) {}"));
+console.log(syntax("using { a } = {};"));
+console.log(syntax("using x;"));
+console.log(syntax("let using = 1; return using;"));
+```
+
+<ResultBox>
+SyntaxError: Unexpected identifier 'x'\
+SyntaxError: Unexpected identifier 'x'\
+SyntaxError: Invalid 'using' in for-in loop\
+SyntaxError: Unexpected token '\{'\
+SyntaxError: Missing initializer in using declaration\
+ok
+</ResultBox>
+
+Косвенный `eval` выполняет строку как скрипт. Тексты Chrome в первых двух строках странные: «Unexpected identifier
+'x'». Дело в том, что `using` не зарезервировано — это обычное имя (последняя строка), и там, где объявление
+запрещено, V8 читает `using` как имя, а `x` после него уже лишний. А вот модуль и статический блок разрешены: модуль
+закрывает свои ресурсы, когда доходит до конца
+([16.2.1.7.3.2](https://tc39.es/ecma262/#sec-source-text-module-record-execute-module), ExecuteModule), блок
+класса — сразу после себя ([15.7.12](https://tc39.es/ecma262/#sec-runtime-semantics-evaluateclassstaticblockbody)).
+
+```js
+const log = [];
+class Deck {
+  static {
+    using r = { [Symbol.dispose]() { log.push("static: закрыт"); } };
+    log.push("static: тело");
+  }
+}
+using top = { [Symbol.dispose]() { console.log("модуль закрыл top"); } };
+log.push("конец модуля");
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+static: тело | static: закрыт | конец модуля\
+модуль закрыл top
+</ResultBox>
+
+## 5. Замыкание держит закрытый ресурс {#closure}
+
+`using` закрывает ресурс в конце области видимости, но сам объект может жить дольше — если на него смотрит
+замыкание. Учебник предупреждает: в JavaScript нет «ownership mechanism like Rust». Пример MDN:
+
+```js
+class Resource {
+  #disposed = false;
+  getValue() { if (this.#disposed) throw new Error("Resource is disposed"); return 1; }
+  [Symbol.dispose]() { this.#disposed = true; }
+}
+const run = (f) => { try { return f(); } catch (e) { return e.message; } };
+function example() { using resource = new Resource(); return () => resource.getValue(); }
+console.log(run(example()));
+function example2() { const resource = new Resource(); return () => { using r2 = resource; return r2.getValue(); }; }
+const g = example2();
+console.log(run(g), "|", run(g));
+```
+
+<ResultBox>
+Resource is disposed\
+1 | Resource is disposed
+</ResultBox>
+
+Первая функция вернула стрелку, а ресурс закрыла на выходе — стрелка всегда работает с закрытым. Во второй
+ресурс объявлен через `const`, а `using` стоит внутри стрелки: ресурс закроется после первого вызова, второй
+вызов уже его не получит. Такой же сюрприз — `export` переменной из `using`: MDN пишет, что импортёр «will always
+receive a disposed resource».
+
+## 6. Что можно положить в using {#values}
+
+AddDisposableResource проверяет значение по шагам. `null` и `undefined` — можно: шаг 2.a просто ничего не
+записывает, поэтому `using r = maybe()` с необязательным ресурсом законно. Не объект — GetDisposeMethod, шаг 1:
+TypeError. Объект без метода — шаг 3.b: тоже TypeError. Метод запоминается в записи при объявлении, а переменная,
+как у `const`, неизменяема.
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+console.log(run(() => { using x = null, y = undefined; }));
+console.log(run(() => { using x = 5; }));
+console.log(run(() => { using x = {}; }));
+console.log(run(() => { using x = { [Symbol.dispose]: 42 }; }));
+console.log(run(() => { using x = null; x = 1; }));
+const said = [];
+{
+  const card = { [Symbol.dispose]() { said.push("старый"); } };
+  using c = card;
+  card[Symbol.dispose] = () => said.push("новый");
+}
+console.log(said.join());
+```
+
+<ResultBox>
+ok\
+TypeError: An object is expected with \`using\` declarations\
+TypeError: Symbol(Symbol.dispose) is not a function\
+TypeError: Symbol(Symbol.dispose) is not a function\
+TypeError: Assignment to using variable.\
+старый
+</ResultBox>
+
+Метод заменили после объявления, а закрыл старый: в записи лежит то, что GetDisposeMethod нашёл на шаге 2. MDN
+пишет то же: метод «is already saved at the time of declaration». Строка с `42` падает раньше — в GetMethod
+([7.3.10](https://tc39.es/ecma262/#sec-getmethod)): значение есть, но вызвать его нельзя.
+
+## 7. using в циклах {#loops}
+
+В `for (using … ; … ; …)` ресурс один на весь цикл: ForLoopEvaluation
+([14.7.4.2](https://tc39.es/ecma262/#sec-runtime-semantics-forloopevaluation)) закрывает его на шаге 13, после
+последнего шага цикла. В `for (using … of …)` ресурс свой у каждого шага: ForIn/OfBodyEvaluation
+([14.7.5.7](https://tc39.es/ecma262/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset))
+записывает его на шаге 8.h.vii.4.d и закрывает в конце итерации на шаге 8.k.i.
+
+```js
+const log = [];
+const res = (name) => ({ name, [Symbol.dispose]() { log.push("закрыт " + name); } });
+let n = 0;
+for (using r = res("for"); n < 3; n++) log.push("шаг " + n);
+console.log(log.join(" "));
+log.length = 0;
+for (using r of [res("1"), res("2"), res("3")]) log.push("шаг " + r.name);
+console.log(log.join(" "));
+log.length = 0;
+try { for (using r = res("x"), i = 0; i < 1; i++) {} } catch (e) { log.push(e.message); }
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+шаг 0 шаг 1 шаг 2 закрыт for\
+шаг 1 закрыт 1 шаг 2 закрыт 2 шаг 3 закрыт 3\
+закрыт x | An object is expected with \`using\` declarations
+</ResultBox>
+
+Третий цикл — ловушка: в `using` все привязки должны быть ресурсами, и счётчик `i = 0` — не объект. Заметьте, что
+`x` всё равно закрыт: объявление сорвалось, и шаг 8.a ForLoopEvaluation закрыл то, что успели записать. Счётчик
+пишут отдельным `let` снаружи, как `n` выше.
+
+## 8. Ошибки при закрытии {#errors}
+
+Учебник MDN: «Errors thrown when attempting to dispose one resource will not prevent disposal of other
+resources». Посмотрим, что выходит наружу.
+
+```js
+const log = [];
+try {
+  using a = { [Symbol.dispose]() { log.push("a"); } };
+  using b = { [Symbol.dispose]() { log.push("b"); throw new Error("b сломался"); } };
+  using c = { [Symbol.dispose]() { log.push("c"); } };
+} catch (e) {
+  log.push(e.constructor.name + ": " + e.message);
+}
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+c | b | a | Error: b сломался
+</ResultBox>
+
+`b` бросил, но `a` всё равно закрыт, а наружу ушла сама ошибка `b`. Это шаг 4.e.iii.2 DisposeResources: если
+до сих пор всё было хорошо, ошибка просто становится итогом. Если же итог уже ошибка — тело блока бросило или
+бросил предыдущий ресурс, — работает шаг 4.e.iii.1: создаётся SuppressedError, в его `error` идёт новая ошибка,
+в `suppressed` — прежняя. Пример учебника:
+
+```js
+class MyReader { [Symbol.dispose]() { throw new Error("Failed to release lock on reader"); } }
+class MyWriter { [Symbol.dispose]() { throw new Error("Failed to release lock on writer"); } }
+function doSomething() {
+  using reader = new MyReader();
+  using writer = new MyWriter();
+  throw new Error("Failed to read");
+}
+try {
+  doSomething();
+} catch (e) {
+  console.log(String(e));
+  console.log("e.error:", e.error.message);
+  console.log("e.suppressed.error:", e.suppressed.error.message);
+  console.log("e.suppressed.suppressed:", e.suppressed.suppressed.message);
+}
+```
+
+<ResultBox>
+SuppressedError: An error was suppressed during disposal\
+e.error: Failed to release lock on reader\
+e.suppressed.error: Failed to release lock on writer\
+e.suppressed.suppressed: Failed to read
+</ResultBox>
+
+<Scheme src="scheme-suppressed.svg">Как растёт цепочка SuppressedError: каждая новая ошибка оборачивает прежний итог</Scheme>
+
+Тело бросило «Failed to read». `writer` закрывается первым и бросает — итог становится SuppressedError, где
+`error` — ошибка `writer`, `suppressed` — «Failed to read». Потом бросает `reader` — и эта цепочка уходит в
+`suppressed` нового внешнего SuppressedError. Ни одна ошибка не потеряна. Сравните с днём 11: там ошибка в
+`finally` съедала исходную бесследно.
+
+## 9. Ошибка на странице MDN using {#mdn-error}
+
+Справочник [using](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/using) в разделе
+«Error handling» разбирает тот же случай — два ресурса `CantDisposeMe` и ошибку «Error in main block» — и
+рисует структуру так: снаружи `error` — «Can't dispose resource2», внутри `suppressed` — «Can't dispose
+resource1», рядом `error` — «Error in main block». Проверим в Chrome:
+
+```js
+class CantDisposeMe {
+  #name;
+  constructor(name) { this.#name = name; }
+  [Symbol.dispose]() { throw new Error("Can't dispose " + this.#name); }
+}
+let error;
+try {
+  using resource1 = new CantDisposeMe("resource1");
+  using resource2 = new CantDisposeMe("resource2");
+  throw new Error("Error in main block");
+} catch (e) { error = e; }
+console.log("error:", error.error.message);
+console.log("suppressed.error:", error.suppressed.error.message);
+console.log("suppressed.suppressed:", error.suppressed.suppressed.message);
+```
+
+<ResultBox>
+error: Can't dispose resource1\
+suppressed.error: Can't dispose resource2\
+suppressed.suppressed: Error in main block
+</ResultBox>
+
+Chrome делает по 7.5.4: `resource2` закрывается первым, его ошибка оборачивает исходную и уходит внутрь, а
+снаружи оказывается ошибка `resource1`, закрытого последним. Ровно так выходит и в учебнике MDN (раздел 8). На
+странице `using` уровни перепутаны: «Can't dispose resource1» стоит внутри, а «Error in main block» — в `error`,
+хотя исходная ошибка всегда оказывается в самом глубоком `suppressed`.
+
+## 10. SuppressedError {#suppressed}
+
+Конструктор SuppressedError(error, suppressed, message)
+([20.5.8.1.1](https://tc39.es/ecma262/#sec-suppressederror)) работает и без `new` (шаг 1), сообщение ставит,
+только если оно передано (шаг 3), а `error` и `suppressed` создаёт неперечисляемыми свойствами (шаги 4–5).
+Сообщение по умолчанию — пустая строка прототипа
+([20.5.8.3.2](https://tc39.es/ecma262/#sec-suppressederror.prototype.message)); `using` берёт своё: «An error was
+suppressed during disposal».
+
+```js
+const e = new SuppressedError(new Error("позже"), new Error("раньше"), "сообщение");
+const f = SuppressedError(1, 2);
+console.log(e.name, e.message, e.error.message, e.suppressed.message);
+console.log(JSON.stringify(f.message), f.error, f.suppressed, f instanceof SuppressedError, Object.keys(e).length, SuppressedError.length);
+```
+
+<ResultBox>
+SuppressedError сообщение позже раньше\
+"" 1 2 true 0 3
+</ResultBox>
+
+Чем это отличается от `AggregateError` и `cause` (дни 26 и 27 курса 2)? MDN: «Compared to AggregateError, SuppressedError represents an
+error that happened during the handling of another error, while AggregateError represents a list of unrelated
+errors». И это не `cause`: ошибка не вызвана прежней, а случилась, пока прежнюю обрабатывали.
+
+## 11. Протокол и символы {#protocol}
+
+Чтобы объект работал с `using`, ему нужен метод под ключом
+[Symbol.dispose](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/dispose).
+Это хорошо известный символ ([20.4.2.3](https://tc39.es/ecma262/#sec-symbol.dispose)): «The using declaration looks
+up this symbol on the variable initializer for the method to call when the variable goes out of scope». Его пара
+для `await using` — `Symbol.asyncDispose` ([20.4.2.1](https://tc39.es/ecma262/#sec-symbol.asyncdispose)). На дне 17
+мы насчитали в Chrome 15 таких символов при 13 в таблице 1 стандарта 2026 года. В черновике таблица 1
+([6.1.5.1](https://tc39.es/ecma262/#sec-well-known-symbols)) уже на 15 строк — эти два вошли.
+
+Что метод должен делать, пишет интерфейс Disposable ([27.2.1.1](https://tc39.es/ecma262/#sec-disposable-interface)):
+повторный вызов «should avoid repeating clean-up logic against the already-disposed resource and should not throw
+an exception». И честно добавляет: «However, this requirement is not enforced» — следить за этим автору класса.
+
+```js
+class Session {
+  #open = true;
+  constructor(name, log) { this.name = name; this.log = log; }
+  [Symbol.dispose]() {
+    if (!this.#open) return;
+    this.#open = false;
+    this.log.push("сессия " + this.name + " закрыта");
+  }
+}
+const log = [];
+{
+  using s = new Session("kitap", log);
+  s[Symbol.dispose]();
+}
+console.log(log.join(" | "), "|", typeof Symbol.dispose, Object.getOwnPropertyDescriptor(Symbol, "dispose").writable);
+```
+
+<ResultBox>
+сессия kitap закрыта | symbol false
+</ResultBox>
+
+Сессию закрыли руками внутри блока, а в конце блока `using` вызвал метод ещё раз — флаг `#open` не дал закрыть
+дважды. Если у класса уже есть `close()` или `releaseLock()`, учебник предлагает просто псевдоним:
+`MyReader.prototype[Symbol.dispose] = MyReader.prototype.releaseLock`.
+
+## 12. Итераторы и генераторы {#iterators}
+
+На дне 13 курса 2 мы видели у итераторов метод `[Symbol.dispose]` и обещали: он нужен `using`. В черновике это
+Iterator.prototype \[ %Symbol.dispose% \] ([27.1.3.3.17](https://tc39.es/ecma262/#sec-iterator.prototype-%25symbol.dispose%25)):
+шаг 2 берёт метод `return`, шаг 3 его вызывает. На дне 29 — пара для асинхронных итераторов
+([27.1.4.1](https://tc39.es/ecma262/#sec-%25asynciteratorprototype%25-%25symbol.asyncdispose%25)), тогда
+ещё не вошедшая в стандарт 2026 года. Генератор под `using` закрывается в конце блока, и его `finally` выполняется:
+
+```js
+const log = [];
+function* words() {
+  try { yield "kitap"; yield "galam"; yield "depder"; }
+  finally { log.push("генератор закрыт"); }
+}
+{
+  using it = words();
+  log.push(it.next().value);
+}
+log.push(Iterator.prototype[Symbol.dispose].name);
+async function* lines() {
+  try { yield "a"; yield "b"; }
+  finally { log.push("асинхронный закрыт"); }
+}
+{
+  await using it = lines();
+  log.push((await it.next()).value);
+}
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+kitap | генератор закрыт | \[Symbol.dispose\] | a | асинхронный закрыт
+</ResultBox>
+
+Генератор отдал одно слово из трёх — `using` вызвал `return()`, и сработал `finally`, как при `break` в `for…of`.
+У итератора массива метод тоже есть (он общий, на прототипе), но `return` у него нет — шаг 3 ничего не делает.
+
+## 13. await using {#await-using}
+
+`await using` ждёт при закрытии, а не при объявлении — MDN: «the await does not have an awaiting effect when the
+variable is first declared, but only when the variable goes out of scope». GetDisposeMethod с async-dispose
+сначала ищет `[Symbol.asyncDispose]` (шаг 4), а если его нет — берёт `[Symbol.dispose]` и оборачивает его
+функцией, которая возвращает обещание (шаги 6–10). Каждое закрытие DisposeResources ждёт (шаг 4.e.ii) — по одному,
+не параллельно, — и порядок общий для `using` и `await using`: обратный.
+
+```js
+const log = [];
+const later = (ms, text) => new Promise((r) => setTimeout(() => { log.push(text); r(); }, ms));
+{
+  await using a = { async [Symbol.asyncDispose]() { await later(30, "a закрыт"); } };
+  await using b = { [Symbol.dispose]() { log.push("b закрыт (синхронно)"); } };
+  using c = { [Symbol.dispose]() { log.push("c закрыт"); } };
+  await using d = { async [Symbol.asyncDispose]() { await later(10, "d закрыт"); } };
+}
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+d закрыт | c закрыт | b закрыт (синхронно) | a закрыт
+</ResultBox>
+
+`d` ждали 10 мс, и только потом закрылись `c`, `b` и `a`, хотя `a` закрывался дольше всех. Пишут `await using`
+там же, где `await`: в `async`-функциях и на верхнем уровне модуля. В циклах MDN различает четыре сочетания —
+`for (using x of y)`, `for await (using x of y)`, `for (await using x of y)` и `for await (await using x of y)`:
+первое `await` — про перебор, второе — про закрытие.
+
+## 14. Неявный await и пример MDN {#implicit}
+
+`null` в `await using` — тоже законный ресурс, но с подвохом. AddDisposableResource на шагах 2.b–2.c записывает
+пустую запись async-dispose — «to ensure we will still perform an Await». DisposeResources ставит флаг
+`needsAwait` (шаг 4.f) и ждёт один раз — перед следующим синхронным ресурсом (шаг 4.d) или в самом конце (шаг
+5), если до этого ни одного ожидания не было. Первый пример MDN на странице
+[await using](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/await_using):
+
+```js
+async function example() {
+  await using nothing = null;
+  console.log("Example call");
+}
+example().then(() => console.log("Example done"));
+Promise.resolve().then(() => console.log("Microtask done"));
+await new Promise((r) => setTimeout(r, 20));
+async function example2() {
+  using nothing = null;
+  console.log("Example call 2");
+}
+example2().then(() => console.log("Example done 2"));
+Promise.resolve().then(() => console.log("Microtask done 2"));
+```
+
+<ResultBox>
+Example call\
+Microtask done\
+Example done\
+Example call 2\
+Example done 2\
+Microtask done 2
+</ResultBox>
+
+С `await using` функция завершилась на одну микрозадачу позже — как и обещает MDN. Второй пример той же страницы —
+две функции сразу, у второй необязательный ресурс равен `null`:
+
+```js
+class Resource {
+  #name;
+  constructor(name) { this.#name = name; }
+  async [Symbol.asyncDispose]() { console.log("Disposing resource " + this.#name); }
+}
+async function example(id, createOptionalResource) {
+  await using required = new Resource("required " + id);
+  await using optional = createOptionalResource ? new Resource("optional") : null;
+  await using another = new Resource("another " + id);
+}
+example(1, true);
+example(2, false);
+```
+
+<ResultBox>
+Disposing resource another 1\
+Disposing resource another 2\
+Disposing resource optional\
+Disposing resource required 2\
+Disposing resource required 1
+</ResultBox>
+
+У MDN последние две строки идут наоборот — «required 1», потом «required 2», — с пояснением, что `null` дал
+лишнее ожидание. Пройдём по шагам 7.5.4. Обе функции закрыли `another` и ждут — микрозадача 1. В первой
+следующий ресурс `optional`: он закрывается и снова ждёт. Во второй следующий — пустая запись от `null`: шаг 4.f
+только ставит флаг, а `required 2` — ресурс async-dispose, шаг 4.d его не касается, и в шаге 5 ожидание уже было.
+Значит, `required 2` закрывается в той же микрозадаче, что `optional`, а `required 1` — в следующей. Chrome прав;
+пример MDN описывает правило, которого в стандарте нет ни в черновике, ни в тексте предложения 2024 года.
+
+<Scheme src="scheme-ticks.svg">Пример MDN по микрозадачам: где на самом деле закрывается required 2</Scheme>
+
+## 15. DisposableStack {#stack}
+
+Объявление удобно, но привязано к блоку. Иногда ресурс получают в одном месте, а закрыть хотят в другом, или у
+ресурса нет `[Symbol.dispose]`. Для этого
+[DisposableStack](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack)
+([27.3](https://tc39.es/ecma262/#sec-disposablestack-objects)) — сам освобождаемый объект со своим стеком записей.
+Состояний два: pending и disposed. MDN честно оговаривается: «A DisposableStack is not exactly a "stack" in terms of
+its interface» — положить можно, а снять одну запись нельзя.
+
+Методы: `use(value)` ([27.3.3.7](https://tc39.es/ecma262/#sec-disposablestack.prototype.use)) записывает ресурс —
+та же AddDisposableResource, что у `using`; `defer(fn)` ([27.3.3.3](https://tc39.es/ecma262/#sec-disposablestack.prototype.defer))
+— просто функцию; `adopt(value, fn)` ([27.3.3.1](https://tc39.es/ecma262/#sec-disposablestack.prototype.adopt)) —
+значение без протокола и функцию для него: шаг 5.a вызовет `fn` с `this` = `undefined` и значением в аргументе.
+`dispose()` ([27.3.3.4](https://tc39.es/ecma262/#sec-disposablestack.prototype.dispose)) переводит стек в disposed и
+зовёт DisposeResources; второй вызов ничего не делает (шаг 3). Под ключом `[Symbol.dispose]` лежит та же функция
+`dispose` ([27.3.3.8](https://tc39.es/ecma262/#sec-disposablestack.prototype-%25symbol.dispose%25)).
+
+```js
+const log = [];
+const stack = new DisposableStack();
+stack.use({ [Symbol.dispose]() { log.push("use"); } });
+stack.defer(() => log.push("defer 1"));
+const url = stack.adopt("blob:kitap", function (v) { log.push("adopt " + v + ", this = " + this); });
+stack.defer(() => log.push("defer 2"));
+stack.use(null);
+console.log(url, stack.disposed, Object.prototype.toString.call(stack), stack[Symbol.dispose] === stack.dispose);
+console.log(stack.dispose(), stack.disposed, stack.dispose());
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+blob:kitap false \[object DisposableStack\] true\
+undefined true undefined\
+defer 2 | adopt blob:kitap, this = undefined | defer 1 | use
+</ResultBox>
+
+`defer 1` и `defer 2` дали «2, 1» — обратный порядок, как у `using`. `adopt` вернул своё значение: это удобно для
+строк и чисел — MDN так освобождает адрес `URL.createObjectURL`. После `dispose` стек закрыт навсегда:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+const done = new DisposableStack();
+done.dispose();
+console.log(run(() => done.use(null)));
+console.log(run(() => done.move()));
+console.log(run(() => new DisposableStack().defer(5)));
+console.log(run(() => new DisposableStack().use(5)));
+console.log(run(() => DisposableStack()));
+```
+
+<ResultBox>
+ReferenceError: Cannot call DisposableStack.prototype.use on an already-disposed DisposableStack\
+ReferenceError: Cannot call DisposableStack.prototype.move on an already-disposed DisposableStack\
+TypeError: 5 is not a function\
+TypeError: An object is expected with \`using\` declarations\
+TypeError: Constructor DisposableStack requires 'new'
+</ResultBox>
+
+Закрытый стек отвечает ReferenceError (шаг 3 у `use`, `defer`, `adopt` и `move`). `use(5)` падает той же
+TypeError, что `using x = 5`: внутри та же операция, и Chrome даже называет `using`.
+
+## 16. move: передать владение {#move}
+
+`move()` ([27.3.3.6](https://tc39.es/ecma262/#sec-disposablestack.prototype.move)) создаёт новый стек, переносит в
+него все записи (шаг 6), старый очищает и помечает disposed (шаги 7–8) — ничего не закрывая. Так открывают
+несколько ресурсов «всё или ничего»: если один не открылся, уже открытые закроются; если открылись все — их
+забирают наружу.
+
+```js
+const log = [];
+function openAll(names) {
+  using stack = new DisposableStack();
+  for (const n of names) {
+    if (n === "?") throw new Error("не открылся: " + n);
+    stack.defer(() => log.push("закрыт " + n));
+  }
+  return stack.move();
+}
+const all = openAll(["a", "b"]);
+log.push("открыто");
+all.dispose();
+console.log(log.join(" "));
+log.length = 0;
+try { openAll(["x", "y", "?"]); } catch (e) { log.push(e.message); }
+console.log(log.join(" "));
+```
+
+<ResultBox>
+открыто закрыт b закрыт a\
+закрыт y закрыт x не открылся: ?
+</ResultBox>
+
+В первом вызове `using stack` в конце функции закрыл пустой стек — записи уже уехали в `all`. Во втором ошибка
+вылетела раньше `move`, и `using` закрыл `y` и `x`. Учебник MDN строит так конструктор класса: `move()` в последней
+строке, а `[Symbol.dispose]` класса зовёт `dispose()` перенесённого стека.
+
+## 17. AsyncDisposableStack {#async-stack}
+
+[AsyncDisposableStack](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack)
+([27.4](https://tc39.es/ecma262/#sec-asyncdisposablestack-objects)) — то же для асинхронной уборки. Вместо
+`dispose` — `disposeAsync()` ([27.4.3.4](https://tc39.es/ecma262/#sec-asyncdisposablestack.prototype.disposeAsync)):
+она возвращает обещание и ждёт каждую функцию по очереди. `use` принимает и синхронные ресурсы — как `await using`.
+
+```js
+const log = [];
+const s = new AsyncDisposableStack();
+s.defer(async () => { await new Promise((r) => setTimeout(r, 10)); log.push("async defer"); });
+s.use({ [Symbol.dispose]() { log.push("sync use"); } });
+s.adopt("v", async (v) => log.push("adopt " + v));
+const p = s.disposeAsync();
+console.log(p instanceof Promise, s.disposed);
+await p;
+console.log(log.join(" | "), await s.disposeAsync());
+```
+
+<ResultBox>
+true true\
+adopt v | sync use | async defer undefined
+</ResultBox>
+
+Стек помечен disposed сразу (шаг 4), ещё до конца уборки, поэтому `disposed` уже `true`. Второй `disposeAsync()`
+вернул `undefined` — шаг 3.
+
+## 18. «Карточки 2.0»: тренировка без утечек {#cards}
+
+Тренировка «Карточек 2.0» держит три ресурса: связь с колодой (как `openConnection` из задания 6 дня 24),
+автосохранение по таймеру и слушатель ответов. `startTraining` открывает их «всё или ничего», а снаружи хватает
+одного `using`:
+
+```js
+const log = [];
+const bus = new EventTarget();
+let saves = 0;
+function every(ms, fn) {
+  const id = setInterval(fn, ms);
+  return { [Symbol.dispose]() { clearInterval(id); log.push("автосохранение снято"); } };
+}
+function listen(type, fn) {
+  bus.addEventListener(type, fn);
+  return { [Symbol.dispose]() { bus.removeEventListener(type, fn); log.push("ответы сняты"); } };
+}
+function connect(name) {
+  log.push("связь: " + name);
+  return { [Symbol.dispose]() { log.push("связь закрыта: " + name); } };
+}
+function startTraining(name, cards) {
+  using stack = new DisposableStack();
+  stack.use(connect(name));
+  if (cards.length === 0) throw new Error("колода пуста: " + name);
+  stack.use(every(10, () => saves++));
+  stack.use(listen("answer", (e) => log.push("ответ " + e.detail)));
+  return stack.move();
+}
+{
+  using training = startTraining("Haýwanlar", ["it", "pişik"]);
+  bus.dispatchEvent(new CustomEvent("answer", { detail: "it" }));
+  await new Promise((r) => setTimeout(r, 35));
+}
+bus.dispatchEvent(new CustomEvent("answer", { detail: "pişik" }));
+console.log(log.join(" | "));
+console.log("сохранения были:", saves > 0);
+log.length = 0;
+try { using t = startTraining("Reňkler", []); } catch (e) { log.push(e.message); }
+console.log(log.join(" | "));
+```
+
+<ResultBox>
+связь: Haýwanlar | ответ it | ответы сняты | автосохранение снято | связь закрыта: Haýwanlar\
+сохранения были: true\
+связь: Reňkler | связь закрыта: Reňkler | колода пуста: Reňkler
+</ResultBox>
+
+Второй ответ пришёл после блока, и его никто не услышал. Пустая колода сорвала открытие посередине — связь,
+открытая раньше, всё равно закрылась. Ни одного `finally` в коде нет.
+
+## 19. Ошибки дня и что будет завтра {#errors-next}
+
+| Что случилось | Текст в Chrome | Где искать |
+| --- | --- | --- |
+| `using` с числом или строкой | ``TypeError: An object is expected with `using` declarations`` | 7.5.3, шаг 1 |
+| объект без `[Symbol.dispose]` | `TypeError: Symbol(Symbol.dispose) is not a function` | 7.5.2, шаг 3.b |
+| присваивание переменной `using` | `TypeError: Assignment to using variable.` | 14.3.1: привязка как у `const` |
+| `using` без `=` | `SyntaxError: Missing initializer in using declaration` | 14.3.1.1 |
+| `using` в `for…in` | `SyntaxError: Invalid 'using' in for-in loop` | 14.7.5.1 |
+| `using` на верхнем уровне скрипта, в `case` | `SyntaxError: Unexpected identifier 'x'` | 16.1.1; 14.12.1 |
+| метод закрытого стека | `ReferenceError: Cannot call DisposableStack.prototype.use on an already-disposed DisposableStack` | 27.3.3.7, шаг 3 |
+| `defer` не с функцией | `TypeError: 5 is not a function` | 27.3.3.3, шаг 4 |
+| `DisposableStack()` без `new` | `TypeError: Constructor DisposableStack requires 'new'` | 27.3.1.1, шаг 1 |
+
+Модуль A6 закончен: вчера память, которую убирают «когда-нибудь», сегодня ресурсы, которые закрывают точно в конце
+блока. День 26 открывает модуль A7 — ECMA-402 изнутри: языковые теги и согласование локалей.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [MDN: JavaScript resource management](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Resource_management) | задача, `using`, стеки, ошибки; разделы 1–3, 8, 16 | <Full /> |
+| [MDN: using](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/using) | где можно, циклы, замыкание; разделы 3–9 | <Full /> |
+| [MDN: await using](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/await_using) | закрытие с ожиданием, неявный `await`; разделы 13–14 | <Full /> |
+| [MDN: Symbol.dispose](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/dispose) | ключ метода закрытия; раздел 11 | <Full /> |
+| [MDN: Symbol.asyncDispose](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/asyncDispose) | ключ асинхронного закрытия | <Brief /> |
+| [MDN: SuppressedError](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SuppressedError) | ошибка при обработке ошибки; разделы 8–10 | <Full /> |
+| [MDN: SuppressedError() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SuppressedError/SuppressedError) | `error`, `suppressed`, `message`; работает без `new` | <Brief /> |
+| [MDN: SuppressedError: error](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SuppressedError/error) | позднейшая ошибка | <Brief /> |
+| [MDN: SuppressedError: suppressed](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SuppressedError/suppressed) | прежний итог | <Brief /> |
+| [MDN: DisposableStack](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack) | стек записей вручную; разделы 15–16 | <Full /> |
+| [MDN: DisposableStack() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/DisposableStack) | только с `new` | <Brief /> |
+| [MDN: DisposableStack.prototype.use()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/use) | записать ресурс, как `using` | <Full /> |
+| [MDN: DisposableStack.prototype.defer()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/defer) | записать функцию | <Full /> |
+| [MDN: DisposableStack.prototype.adopt()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/adopt) | значение без протокола и функция для него | <Brief /> |
+| [MDN: DisposableStack.prototype.dispose()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/dispose) | закрыть всё в обратном порядке | <Full /> |
+| [MDN: DisposableStack.prototype.disposed](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/disposed) | `true` после `dispose` и `move` | <Brief /> |
+| [MDN: DisposableStack.prototype.move()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/move) | передать записи новому стеку | <Brief /> |
+| [MDN: DisposableStack.prototype\[Symbol.dispose\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DisposableStack/Symbol.dispose) | та же функция, что `dispose` | <Brief /> |
+| [MDN: AsyncDisposableStack](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack) | стек для асинхронной уборки; раздел 17 | <Brief /> |
+| [MDN: AsyncDisposableStack() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/AsyncDisposableStack) | только с `new` | <Brief /> |
+| [MDN: AsyncDisposableStack.prototype.use()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/use) | принимает и синхронные ресурсы | <Brief /> |
+| [MDN: AsyncDisposableStack.prototype.defer()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/defer) | асинхронная функция уборки | <Brief /> |
+| [MDN: AsyncDisposableStack.prototype.adopt()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/adopt) | значение и асинхронная функция | <Brief /> |
+| [MDN: AsyncDisposableStack.prototype.disposeAsync()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/disposeAsync) | обещание, уборка по очереди | <Brief /> |
+| [MDN: AsyncDisposableStack.prototype.disposed](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/disposed) | `true` сразу после вызова `disposeAsync` | <Brief /> |
+| [MDN: AsyncDisposableStack.prototype.move()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/move) | как у `DisposableStack` | <Brief /> |
+| [MDN: AsyncDisposableStack.prototype\[Symbol.asyncDispose\]()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncDisposableStack/Symbol.asyncDispose) | та же функция, что `disposeAsync` | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// { using r = getResource(); … } — в конце блока r[Symbol.dispose](); null и undefined — можно
+// несколько using — закрываются в обратном порядке; ошибки не теряются: SuppressedError(error, suppressed)
+// нельзя: верхний уровень скрипта, case у switch, for…in, деструктуризация, присваивание
+// for (using r of list) — закрытие на каждом шаге; for (using r = …; …) — один раз после цикла
+// await using — ждёт при закрытии; берёт [Symbol.asyncDispose], иначе [Symbol.dispose]
+// const s = new DisposableStack(); s.use(r); s.defer(fn); s.adopt(v, fn); s.dispose(); s.move()
+// AsyncDisposableStack: то же, но disposeAsync() и асинхронные функции
+// источник: черновик ECMA-262 2027 — 7.5, 14.3.1, 20.5.8, 27.2–27.4
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. В каком порядке закрываются `a`, `b`, `c`, объявленные через `using` подряд, и почему так?
+   <Answer>`c`, `b`, `a`: DisposeResources (7.5.4, шаг 4) идёт по стеку с конца. Поздний ресурс может зависеть от
+   раннего, поэтому его закрывают первым.</Answer>
+2. Тело блока бросило ошибку, и оба ресурса при закрытии тоже бросили. Где окажется исходная ошибка?
+   <Answer>В самом глубоком `suppressed`: каждая новая ошибка становится `error` нового SuppressedError, а прежний
+   итог уходит в его `suppressed` (шаг 4.e.iii.1).</Answer>
+3. Почему `using x = null` законно, а `using x = 5` — нет?
+   <Answer>AddDisposableResource пропускает `null` и `undefined` (шаг 2.a), а для остального зовёт GetDisposeMethod,
+   и тот бросает TypeError, если значение не объект (шаг 1).</Answer>
+4. Зачем `move()`, если есть `dispose()`?
+   <Answer>`move()` ничего не закрывает: переносит записи в новый стек и помечает старый закрытым. Так функция
+   открывает ресурсы «всё или ничего» и отдаёт их наружу.</Answer>
+5. Почему в примере MDN с двумя вызовами `required 2` закрывается раньше `required 1`?
+   <Answer>`null` в `await using` только ставит флаг (шаг 4.f); ждут перед синхронным ресурсом (4.d) или в конце,
+   если ожиданий ещё не было (5). `required 2` асинхронный, ожидание уже было — он закрывается в той же микрозадаче,
+   что `optional`.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Resource_management)
+(JavaScript resource management, using, await using, DisposableStack, AsyncDisposableStack, SuppressedError и их
+методы, авторы — Mozilla Contributors), лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/);
+главный источник дня — черновик спецификации [ECMA-262 2027](https://tc39.es/ecma262/) от 12 ноября 2026 года.
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

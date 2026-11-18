@@ -18,7 +18,11 @@
 // the draft, and so are the texts it retells; the draft is the one of 12 November 2026 and has table 1 of 15 symbols
 // (13 in 2026); the days it points to say what it says; the reference table holds all 27 rows of the day's plan (all
 // MDN) with their marks and titles, every tc39.es anchor exists in the draft and every link whose text starts with a
-// number names the section of that number; the footer names the draft.
+// number names the section of that number; the footer names the draft. The notes: each of their 3 blocks prints what
+// the comments of its console.log lines say; homework 1 — the chain of SuppressedError; 2 — five SyntaxErrors with the
+// texts of Chrome; 3 — the reference solution (two using for nested try…finally, openThree with DisposableStack and
+// move); 4 — the experiment of lecture 14 without the null resource; their quotes (the one of the draft in its place),
+// the steps of their tables, the footer and the links.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -127,7 +131,11 @@ const swap = (code, from, to) => (code.split(from).length === 2 ? code.replace(f
   const lectureText = await src.evaluate(() => document.querySelector('.container').innerText);
   await src.goto(builtSite.urlOfFile(path.join(DAY22, 'lecture.html')));
   const indexHtml = await src.evaluate(() => [...document.querySelectorAll('pre.code[data-file]')].find((pre) => pre.dataset.file === 'index.html')?.textContent);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
+  const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
+  const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
+  let noNullSame = false; // section 14: the two calls without the null resource keep their order (homework 4 of the notes too)
 
   let section = 0;
   for (const it of items) { if (it.kind === 'h2') section = it.section; else it.section = section; }
@@ -184,7 +192,8 @@ async function example2() {
 example1();
 example2();`), { lines: 5 });
     const twoCalls = boxes.find((x) => x.lines[0] === 'Disposing resource another 1');
-    check(!!twoCalls && twoCalls.section === 14 && same(out, twoCalls.lines),
+    noNullSame = !!twoCalls && twoCalls.section === 14 && same(out, twoCalls.lines);
+    check(noNullSame,
       `lecture 14: without the null resource in the second call the order is the same — ${JSON.stringify(out)}`);
     const withNull = await runFolder(b, page(`const res = (name) => ({ [Symbol.dispose]() { console.log("закрыт " + name); } });
 async function f() {
@@ -210,6 +219,70 @@ Promise.resolve().then(() => console.log("микрозадача"));`), { lines:
     const out = await runFolder(b, page(`const it = [1, 2].values();
 console.log(typeof it[Symbol.dispose], Object.hasOwn(it, Symbol.dispose), it.return, it[Symbol.dispose](), it.next().value);`), { lines: 1 });
     check(same(out, ['function false undefined undefined 1']), `lecture 12: an array iterator has [Symbol.dispose] from the prototype, no return — the call does nothing, the iterator goes on ${JSON.stringify(out)}`);
+  }
+
+  // the notes: every console.log line writes its output in its comment
+  {
+    const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+      .map((l) => l.slice(l.lastIndexOf('//') + 2).trim().split(' — ')[0]);
+    check(notesBlocks.length === 3 && notesBlocks.every((x) => x.js && !x.file)
+      && notesText.includes('Блоки конспекта — это main.js в папке дня 22, как в лекции.'),
+    `student: 3 js blocks without a file name, main.js of the folder of day 22 (${notesBlocks.length})`);
+    for (const [i, blk] of notesBlocks.entries()) {
+      const want = commented(blk.code);
+      const out = await runFolder(b, page(blk.code), { lines: want.length });
+      if (!quiet) { console.log(`\n--- student #${i}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      check(want.length > 0 && same(out, want), `student #${i}: output = comments ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the notes, homework 1–3: by experiment
+  {
+    const hw1 = await runFolder(b, page(`const res = (name, fail) => ({ [Symbol.dispose]() { if (fail) throw new Error(name); } });
+try {
+  using a = res("a", true);
+  using b = res("b", true);
+  using c = res("c");
+  throw new Error("тело");
+} catch (e) {
+  console.log(e.error.message, e.suppressed.error.message, e.suppressed.suppressed.message, e.suppressed.suppressed instanceof SuppressedError);
+}`), { lines: 1 });
+    check(same(hw1, ['a b тело false']), `student homework 1: e.error — a, e.suppressed.error — b, e.suppressed.suppressed — the error of the body itself ${JSON.stringify(hw1)}`);
+    const hw2 = await runFolder(b, page(`const syntax = (src, script) => { try { script ? (0, eval)(src) : new Function(src); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+console.log([syntax("using x = null;", true), syntax("switch (k) { case 1: using r = open(); }"), syntax("for (using k in obj) {}"), syntax("using { a } = obj;"), syntax("using r;")].join(" | "));`), { lines: 1 });
+    check(same(hw2, ["SyntaxError: Unexpected identifier 'x' | SyntaxError: Unexpected identifier 'r' | SyntaxError: Invalid 'using' in for-in loop | SyntaxError: Unexpected token '{' | SyntaxError: Missing initializer in using declaration"])
+      && notesText.includes('`using { a } = obj;`'.replace(/`/g, '')),
+    `student homework 2: five SyntaxErrors — 16.1.1, 14.12.1, the grammar of 14.7.5, ~Pattern of 14.3.1, 14.3.1.1 ${JSON.stringify(hw2)}`);
+    const hw3 = await runFolder(b, page(`const log = [];
+const res = (name) => {
+  if (name === "?") throw new Error("не открылся");
+  log.push("открыт " + name);
+  return { [Symbol.dispose]() { log.push("закрыт " + name); } };
+};
+function readBoth() {
+  using r1 = res("reader1");
+  using r2 = res("reader2");
+  log.push("читаем");
+}
+readBoth();
+console.log(log.join(" | "));
+log.length = 0;
+function openThree(names) {
+  using stack = new DisposableStack();
+  for (const n of names) stack.use(res(n));
+  return stack.move();
+}
+try { openThree(["1", "2", "?"]); } catch (e) { log.push(e.message); }
+console.log(log.join(" | "));
+log.length = 0;
+const three = openThree(["1", "2", "3"]);
+log.push("работаем");
+three.dispose();
+console.log(log.join(" | "));`), { lines: 3 });
+    check(same(hw3, ['открыт reader1 | открыт reader2 | читаем | закрыт reader2 | закрыт reader1', 'открыт 1 | открыт 2 | закрыт 2 | закрыт 1 | не открылся', 'открыт 1 | открыт 2 | открыт 3 | работаем | закрыт 3 | закрыт 2 | закрыт 1']),
+      `student homework 3: the reference solution — two using instead of nested try…finally; openThree with DisposableStack and move: a failed third closes 2, then 1; all three close only after dispose() ${JSON.stringify(hw3)}`);
+    check(noNullSame && notesText.includes('Уберите во втором вызове строку с optional совсем — изменится ли порядок?'),
+      'student homework 4: without the line of optional in the second call the order is the same — the experiment of lecture 14');
   }
   await b.close();
 
@@ -266,6 +339,25 @@ console.log(typeof it[Symbol.dispose], Object.hasOwn(it, Symbol.dispose), it.ret
     ];
     const lost = fromDraft.filter(([inLecture, id, quote]) => !lectureText.replace(/\s+/g, ' ').includes(inLecture) || !f(id).includes(quote)).map(([, id, quote]) => `${num(id)} «${quote.slice(0, 30)}»`);
     check(lost.length === 0, `quotes: ${fromDraft.length} quotes the lecture gives to the draft stand in their places and in their clauses (7.5.4, 16.1.1, 7.5.2, 27.2.1.1 twice): ${lost.join(' | ') || 'all'}`);
+    const nquotes = [...notesText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => m[1].replace(/\s+/g, ' '));
+    const nmissing = nquotes.filter((x) => !corpus.includes(x));
+    check(nquotes.length >= 6 && nmissing.length === 0
+      && notesText.replace(/\s+/g, ' ').includes('прямо в case (14.12.1) — «It is a Syntax Error if ContainsUsing of StatementList is true»')
+      && nquotes.includes('A DisposableStack is not exactly a "stack" in terms of its interface') && nquotes.includes('Assignment to using variable.'),
+    `student: ${nquotes.length} English quotes of the notes — the draft (16.1.1 and 14.12.1, in its place), MDN, the output of Chrome; not found: ${nmissing.join(' | ') || 'none'}`);
+  }
+
+  // the notes: the steps of their tables are the ones the lecture names (checked in the list of steps below), the footer
+  {
+    const table = ['14.3.1.3, шаг 5.d → 7.5.2', '14.2.2, шаг 6 → 7.5.4', '7.5.4, шаг 4.e.iii', '14.7.4.2, шаг 13; 14.7.5.7, шаг 8.k.i', '27.3.3.7: 3, 4', '27.3.3.3: 3, 4',
+      '27.3.3.1: 5.a', '27.3.3.4: 3, 5', '27.3.3.6: 6–8', '27.3.3.8', '7.5.3: 4, 6–10', '7.5.4: 4.e.ii', '7.5.2: 2.b–2.c; 7.5.4: 4.d, 4.f, 5'];
+    check(table.every((s) => notesText.includes(s)) && notesText.includes('в for…in — грамматика 14.7.5 (~Using)'),
+      `student: the tables name the steps of the lecture (${table.length}: 14.3.1.3 5.d, 14.2.2 6, 7.5.4 4.e.iii, the loops, 27.3.3.x, 7.5.3, the null); for…in — the grammar of 14.7.5`);
+    const notesHtml = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
+    const nFooter = notesHtml.slice(notesHtml.indexOf('<div class="sources">'));
+    check(['JavaScript resource management, using, await using, DisposableStack, SuppressedError', 'черновик спецификации <a href="https://tc39.es/ecma262/">ECMA-262 2027</a> от 12 ноября 2026 года', 'Mozilla Contributors'].every((s) => nFooter.includes(s))
+      && (notesHtml.match(/developer\.mozilla\.org/g) || []).length === 1 && !/tc39\.es\/ecma262\/#/.test(notesHtml),
+    'student: the footer names the MDN pages and the draft of ECMA-262 2027 of 12 November 2026; MDN is linked once; section numbers without links');
   }
 
   // section 9: the MDN page using draws its own example the other way round; the guide draws the same case right

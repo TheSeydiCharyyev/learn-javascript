@@ -1,0 +1,143 @@
+---
+title: День 25 — конспект
+css: |
+  h1 { border-bottom-color: #f97316; }
+  h2 { color: #c2410c; background: #fff7ed; border-left-color: #f97316; }
+---
+
+# День 25. using, await using и DisposableStack
+
+<Subtitle>Выжимка лекции: using и стек ресурсов, где его нельзя писать, ошибки и SuppressedError, await using, DisposableStack и move.</Subtitle>
+
+## Главное
+
+<Definition>
+`using` — объявление вроде `const`: при объявлении ресурс записывается в стек окружения, а в конце блока, функции
+или модуля его метод `[Symbol.dispose]()` вызывается — в обратном порядке и при любом выходе: обычном, `return`,
+`break` или ошибке. `await using` ещё и ждёт каждое закрытие. `DisposableStack` — тот же стек, которым управляют
+вручную. Источник — черновик ECMA-262 2027: в издании 2026 года этого нет.
+</Definition>
+
+## Порядок закрытия и ошибки
+
+Блоки конспекта — это `main.js` в папке дня 22, как в лекции.
+
+```js
+const log = [];
+const res = (name, fail) => ({ [Symbol.dispose]() { log.push(name); if (fail) throw new Error(name + " сломался"); } });
+try {
+  using a = res("a", true);
+  using b = res("b");
+  using c = res("c", true);
+  throw new Error("тело");
+} catch (e) {
+  console.log(log.join(" "));   // c b a — с конца, хотя c и a бросили
+  console.log(e.error.message + " | " + e.suppressed.error.message + " | " + e.suppressed.suppressed.message);   // a сломался | c сломался | тело — позднейшая снаружи, ошибка тела глубже всех
+}
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| объявление | 14.3.1.3, шаг 5.d → 7.5.2 | `null` и `undefined` — пропуск (2.a); не объект — TypeError (7.5.3, шаг 1); нет метода — TypeError (3.b) |
+| конец блока | 14.2.2, шаг 6 → 7.5.4 | стек с конца (шаг 4); каждый метод вызывается, даже если прежний бросил |
+| ошибка при закрытии | 7.5.4, шаг 4.e.iii | итог уже ошибка — новый SuppressedError: `error` — новая, `suppressed` — прежняя; иначе ошибка становится итогом |
+| циклы | 14.7.4.2, шаг 13; 14.7.5.7, шаг 8.k.i | `for (using r = …; …)` — один раз после цикла; `for (using r of …)` — на каждом шаге |
+
+<Remember>
+Нельзя: на верхнем уровне скрипта (16.1.1) и прямо в `case` (14.12.1) — «It is a Syntax Error if ContainsUsing of
+StatementList is true»; в `for…in` — грамматика 14.7.5 (`~Using`); с деструктуризацией (`~Pattern`) и без `=`
+(14.3.1.1). `using` — не зарезервированное слово, поэтому V8 там пишет «Unexpected identifier 'x'». Метод
+запоминается при объявлении, переменную не переприсвоить — «Assignment to using variable.» Замыкание и `export`
+держат уже закрытый ресурс: «JavaScript does not have an ownership mechanism like Rust».
+</Remember>
+
+## DisposableStack и move
+
+```js
+const log = [];
+function openAll(names) {
+  using stack = new DisposableStack();
+  for (const n of names) {
+    if (n === "?") throw new Error("не открылся");
+    stack.defer(() => log.push("закрыт " + n));
+  }
+  stack.adopt("blob:kitap", (url) => log.push("отозван " + url));
+  return stack.move();
+}
+const all = openAll(["a", "b"]);
+console.log(all.disposed, all.dispose(), all.disposed, log.join(" | "));   // false undefined true отозван blob:kitap | закрыт b | закрыт a — move забрал записи, dispose закрыл с конца
+log.length = 0;
+try { openAll(["x", "?"]); } catch (e) { console.log(log.join(" | ") + " | " + e.message); }   // закрыт x | не открылся — до move не дошли, using закрыл открытое
+```
+
+| Метод | Шаги | Коротко |
+| --- | --- | --- |
+| `use(r)` | 27.3.3.7: 3, 4 | закрытый стек — ReferenceError; запись та же, что у `using` |
+| `defer(fn)` | 27.3.3.3: 3, 4 | функция обязана быть вызываемой |
+| `adopt(v, fn)` | 27.3.3.1: 5.a | при закрытии `fn(v)` с `this` = `undefined`; сам `adopt` возвращает `v` |
+| `dispose()` | 27.3.3.4: 3, 5 | второй вызов ничего не делает; иначе DisposeResources |
+| `move()` | 27.3.3.6: 6–8 | записи — новому стеку, старый помечен закрытым без уборки |
+| `[Symbol.dispose]` | 27.3.3.8 | та же функция, что `dispose` |
+
+<Remember>
+MDN: «A DisposableStack is not exactly a "stack" in terms of its interface» — положить можно, снять одну запись
+нельзя. `move()` в последней строке даёт «всё или ничего»: сорвалось открытие — `using stack` закрыл уже открытое;
+всё открылось — записи уехали наружу. `AsyncDisposableStack` устроен так же, но закрывает через `disposeAsync()`,
+ждёт каждую функцию и принимает синхронные ресурсы; `disposed` у него `true` сразу после вызова.
+</Remember>
+
+## await using
+
+```js
+const log = [];
+const res = (name) => ({ [Symbol.dispose]() { log.push("закрыт " + name); } });
+async function withNull() {
+  using s = res("s");
+  await using n = null;
+}
+withNull().then(() => log.push("готова"));
+Promise.resolve().then(() => log.push("микрозадача"));
+await new Promise((r) => setTimeout(r, 10));
+console.log(log.join(" | "));   // закрыт s | микрозадача | готова — null дал одно ожидание перед синхронным s
+log.length = 0;
+{
+  await using a = { async [Symbol.asyncDispose]() { await new Promise((r) => setTimeout(r, 20)); log.push("a"); } };
+  await using b = { [Symbol.dispose]() { log.push("b"); } };
+}
+console.log(log.join(" | "));   // b | a — с конца и по очереди; у b взят [Symbol.dispose]
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| поиск метода | 7.5.3: 4, 6–10 | сначала `[Symbol.asyncDispose]`, иначе `[Symbol.dispose]` в обёртке, которая возвращает обещание |
+| ожидание | 7.5.4: 4.e.ii | каждое закрытие ждут, по одному |
+| `null` | 7.5.2: 2.b–2.c; 7.5.4: 4.d, 4.f, 5 | только флаг; одно ожидание — перед синхронным ресурсом или в конце, если ожиданий ещё не было |
+
+<Remember>
+Две ошибки MDN, найденные на дне. Справочник `using` («Error handling») рисует цепочку наоборот: снаружи оказывается
+ошибка ресурса, закрытого последним, а исходная — глубже всех. Пример двух вызовов на странице `await using`
+обещает `required 1` раньше `required 2`; по шагам 7.5.4 и в Chrome наоборот: `null` перед асинхронным ресурсом
+ожидания не добавляет.
+</Remember>
+
+<Homework>
+1. Три `using` подряд — `a`, `b`, `c`; тело бросает «тело», при закрытии бросают `b` и `a`. Что окажется в
+   `e.error`, `e.suppressed.error` и `e.suppressed.suppressed`? Пройдите шаги 4.e.iii раздела 7.5.4 и проверьте.
+2. Почему каждая строка — синтаксическая ошибка и какое место черновика её запрещает: `using x = null;` на верхнем
+   уровне скрипта; `switch (k) { case 1: using r = open(); }`; `for (using k in obj) {}`; `using { a } = obj;`;
+   `using r;`?
+3. Перепишите вложенный `try…finally` учебника MDN (два `reader`) на `using`, а функцию `openThree`, которая
+   открывает три ресурса и отдаёт их наружу, — на `DisposableStack` с `move`. Проверьте: если третий не открылся,
+   первые два закрыты, второй раньше первого; если открылись все — закрываются только после `dispose()` снаружи.
+4. Пример MDN с двумя вызовами `example(1, true)` и `example(2, false)`: в какой микрозадаче закрывается `required 2`
+   и почему? Уберите во втором вызове строку с `optional` совсем — изменится ли порядок? Объясните шагами 4.d, 4.f и 5.
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Resource_management)
+(JavaScript resource management, using, await using, DisposableStack, SuppressedError,
+авторы — Mozilla Contributors), лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+черновик спецификации [ECMA-262 2027](https://tc39.es/ecma262/) от 12 ноября 2026 года.
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

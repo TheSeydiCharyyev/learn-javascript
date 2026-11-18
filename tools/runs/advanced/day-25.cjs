@@ -22,7 +22,12 @@
 // the comments of its console.log lines say; homework 1 — the chain of SuppressedError; 2 — five SyntaxErrors with the
 // texts of Chrome; 3 — the reference solution (two using for nested try…finally, openThree with DisposableStack and
 // move); 4 — the experiment of lecture 14 without the null resource; their quotes (the one of the draft in its place),
-// the steps of their tables, the footer and the links.
+// the steps of their tables, the footer and the links. The tasks: the warm-ups, the given copyCard and task 9 print what
+// EXPECT says; every line of the 5 examples holds with the reference solutions (SOLUTIONS, an awaited check); the
+// experiments of the criteria — a resource that cannot close during a failed openAll, three ways of copyCard when read
+// and both close throw (try…finally keeps one error, a stack glues its own two first — 27.3.3.4 step 5, two using glue
+// around the error of read), a DisposableStack refuses an async-only resource, for…of with break closes the generator;
+// the steps of 27.1.4.1, the quotes, the link and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -39,6 +44,72 @@ const DRAFT_RAW = path.join(ROOT, 'tools/.cache/ecma262-draft-2026-11-12.raw.htm
 const SPEC_2026 = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const ORIGIN = 'http://127.0.0.1:5592';
 const quiet = process.argv.includes('--quiet');
+// a block of the tasks without a result-box: its output by "tasks #index" (js blocks of the page); the tasks ask to
+// predict these, and #5 is the given copyCard — a definition, no output
+const EXPECT = {
+  'tasks #0': ['S(b, c) cba', 'S(b, S(c, тело)) cba'],
+  'tasks #1': ['ok SyntaxError SyntaxError ok ok SyntaxError ok'],
+  'tasks #2': ['7 true false', 'use | defer | adopt 7 ReferenceError ReferenceError ok'],
+  'tasks #5': [],
+  'tasks #9': ['next 1 | finally | function | undefined | TypeError'],
+};
+// reference solutions of the tasks: every "expression;   // value" line of an example must give the comment; the check is
+// awaited, so a line may await too. No template literals inside: Node reads these strings as templates first.
+const SOLUTIONS = {
+  startAutosave: `function startAutosave(save, ms) {
+  let id = setInterval(save, ms);
+  let stops = 0;
+  const handle = {
+    get active() { return id !== null; },
+    get stops() { return stops; },
+    stop() {
+      if (id === null) return;
+      clearInterval(id);
+      id = null;
+      stops++;
+    },
+  };
+  handle[Symbol.dispose] = handle.stop;
+  return handle;
+}`,
+  openAll: `function openAll(openers) {
+  using stack = new DisposableStack();
+  for (const open of openers) stack.use(open());
+  return stack.move();
+}`,
+  copyCardUsing: `function copyCardUsing(open, card) {
+  using stack = new DisposableStack();
+  const src = stack.adopt(open("src"), (r) => r.close());
+  const dst = stack.adopt(open("dst"), (r) => r.close());
+  dst.write(src.read(card));
+}`,
+  openSession: `function openSession(name, log) {
+  log.push("открыта " + name);
+  return {
+    async [Symbol.asyncDispose]() {
+      await new Promise((r) => setTimeout(r, 10));
+      log.push("сохранена " + name);
+    },
+  };
+}`,
+  lines: `function* lines(open, name) {
+  using file = open(name);
+  for (const row of file.rows) yield row;
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(\s*)(?!const |let )(\S.*?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `${m[1]}await __check(${JSON.stringify(m[2])}, async () => (${m[2]}), ${JSON.stringify(m[3])});` : line;
+  });
+  return `async function __check(text, fn, want) {
+  const got = JSON.stringify(await fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 const LF = String.fromCharCode(10);
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -134,6 +205,9 @@ const swap = (code, from, to) => (code.split(from).length === 2 ? code.replace(f
   await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
   const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
   const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
+  const taskBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => ({ code: pre.textContent, file: pre.dataset.file || null, example: !!pre.closest('.example'), box: !!(pre.nextElementSibling && pre.nextElementSibling.matches('.result-box')) })));
+  const tasksText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
   let noNullSame = false; // section 14: the two calls without the null resource keep their order (homework 4 of the notes too)
 
@@ -284,6 +358,63 @@ console.log(log.join(" | "));`), { lines: 3 });
     check(noNullSame && notesText.includes('Уберите во втором вызове строку с optional совсем — изменится ли порядок?'),
       'student homework 4: without the line of optional in the second call the order is the same — the experiment of lecture 14');
   }
+
+  // the tasks: the warm-ups, the given copyCard and task 9 print what EXPECT says; every line of an example holds with
+  // the reference solution
+  {
+    check(taskBlocks.length === 10 && taskBlocks.filter((x) => x.example).length === 5 && taskBlocks.every((x) => !x.file && !x.box)
+      && tasksText.includes('Код пишем в папке дня 22: блок — это main.js.'),
+    `tasks: 10 js blocks — 5 examples, 4 to predict, the given copyCard; no files, no result-box; the folder of day 22 (${taskBlocks.length})`);
+    for (const [i, blk] of taskBlocks.entries()) {
+      const code = blk.example ? checkable(blk.code) : blk.code;
+      const want = blk.example ? null : EXPECT[`tasks #${i}`];
+      const out = await runFolder(b, page(code), { lines: want ? want.length : (code.match(/await __check\(/g) || []).length });
+      if (!quiet) { console.log(`\n--- tasks #${i}${blk.example ? ' (example)' : ''}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      if (blk.example) {
+        for (const l of out.filter((x) => x.startsWith('EX-'))) check(l.startsWith('EX-OK'), `tasks #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(out.length > 0 && out.every((l) => l.startsWith('EX-')) && out.length === (code.match(/await __check\(/g) || []).length, `tasks #${i} example runs with the reference solution: ${out.length} lines`);
+      } else check(!!want && same(out, want), `tasks #${i} ${blk.code.split(LF)[0].slice(0, 60)}: ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the tasks: the experiments of the criteria, with the reference solutions
+  {
+    const chain = 'const chain = (e) => (e instanceof SuppressedError ? "S(" + chain(e.error) + ", " + chain(e.suppressed) + ")" : e.message);';
+    const t5 = await runFolder(b, page(`${SOLUTIONS.openAll}
+${chain}
+const opener = (name) => () => { if (name === "?") throw new Error("не открылся"); return { [Symbol.dispose]() {} }; };
+const stuck = () => ({ [Symbol.dispose]() { throw new Error("z не закрылся"); } });
+try { openAll([stuck, opener("?")]); } catch (e) { console.log(chain(e)); }`), { lines: 1 });
+    check(same(t5, ['S(z не закрылся, не открылся)']), `task 5: a resource that cannot close during a failed open — SuppressedError: error is its own, suppressed «не открылся» ${JSON.stringify(t5)}`);
+    const given = taskBlocks[5]?.code ?? '';
+    const t6 = await runFolder(b, page(`${given}
+${SOLUTIONS.copyCardUsing}
+${chain}
+function copyCardTwoUsing(open, card) {
+  using src = { ...open("src"), [Symbol.dispose]() { this.close(); } };
+  using dst = { ...open("dst"), [Symbol.dispose]() { this.close(); } };
+  dst.write(src.read(card));
+}
+const worse = (name) => ({ read: () => { throw new Error("не читается"); }, write: () => {}, close: () => { throw new Error("не закрылся " + name); } });
+for (const f of [copyCard, copyCardUsing, copyCardTwoUsing]) { try { f(worse, "x"); } catch (e) { console.log(f.name + ": " + chain(e)); } }`), { lines: 3 });
+    check(same(t6, ['copyCard: не закрылся src', 'copyCardUsing: S(S(не закрылся src, не закрылся dst), не читается)', 'copyCardTwoUsing: S(не закрылся src, S(не закрылся dst, не читается))'])
+      && given.includes('} finally {'),
+    `task 6: read and both close throw — try…finally keeps one error of three; the stack keeps all, its own two glued first (27.3.3.4 step 5 — a normal completion), two using glue them around the error of read ${JSON.stringify(t6)}`);
+    const t7 = await runFolder(b, page(`${SOLUTIONS.openSession}
+const log = [];
+async function trainSync(names) {
+  using stack = new DisposableStack();
+  for (const n of names) stack.use(openSession(n, log));
+}
+try { await trainSync(["c"]); } catch (e) { console.log(e.name + ": " + e.message, log.join()); }`), { lines: 1 });
+    check(same(t7, ['TypeError: Symbol(Symbol.dispose) is not a function открыта c']), `task 7: a DisposableStack refuses a resource with only [Symbol.asyncDispose] — at use(), 7.5.3 step 2 finds no method ${JSON.stringify(t7)}`);
+    const t8 = await runFolder(b, page(`${SOLUTIONS.lines}
+const log = [];
+const open = (name) => { log.push("open " + name); return { rows: ["kitap", "galam"], [Symbol.dispose]() { log.push("close " + name); } }; };
+for (const row of lines(open, "c")) { log.push(row); break; }
+console.log(log.join(" | "));`), { lines: 1 });
+    check(same(t8, ['open c | kitap | close c']), `task 8: for…of with break over the generator closes the resource too ${JSON.stringify(t8)}`);
+  }
   await b.close();
 
   // the draft: the snapshot of 12 November 2026; the clauses of the day
@@ -345,6 +476,28 @@ console.log(log.join(" | "));`), { lines: 3 });
       && notesText.replace(/\s+/g, ' ').includes('прямо в case (14.12.1) — «It is a Syntax Error if ContainsUsing of StatementList is true»')
       && nquotes.includes('A DisposableStack is not exactly a "stack" in terms of its interface') && nquotes.includes('Assignment to using variable.'),
     `student: ${nquotes.length} English quotes of the notes — the draft (16.1.1 and 14.12.1, in its place), MDN, the output of Chrome; not found: ${nmissing.join(' | ') || 'none'}`);
+  }
+
+  // the tasks: their quotes (the one of the draft in its place), the sections they ask for, the link, the footer
+  {
+    // «open a», «close a» of task 8 are lines of its log — they are in the code of the example
+    const corpus = [f('sec-disposable-interface'), ...Object.values(M), outputs, ...taskBlocks.map((x) => x.code)].join(' ');
+    const tq = [...tasksText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => m[1].replace(/\s+/g, ' '));
+    const tmissing = tq.filter((x) => !corpus.includes(x));
+    check(tq.length === 4 && tmissing.length === 0 && M['Web/JavaScript/Guide/Resource_management'].includes('But you have to remember to do this every time you have some important resource to release')
+      && tasksText.replace(/\s+/g, ' ').includes('интерфейс Disposable (27.2.1.1) требует, чтобы повторный вызов «should not throw an exception, even if an exception was thrown on the first invocation»')
+      && f('sec-disposable-interface').includes('should not throw an exception, even if an exception was thrown on the first invocation'),
+    `tasks: ${tq.length} English quotes — the guide of MDN (task 6), 27.2.1.1 in its place (task 4), two log lines of task 8; not found: ${tmissing.join(' | ') || 'none'}`);
+    check(['ранняя ошибка 16.1.1', 'какой шаг 14.3.1.3', '(27.3.3.6)', '(27.3.3.8)', '(7.5.4, шаг 4.e.ii)', 'шагом 5 раздела 27.3.3.4', '(27.1.3.3.17)', 'шаги 7.5.3 и 7.5.2', 'параметр +Await у await using'].every((s) => tasksText.replace(/\s+/g, ' ').includes(s)),
+      'tasks: they ask for 16.1.1, 14.3.1.3, 27.3.3.6, 27.3.3.8, 7.5.4 step 4.e.ii, 27.3.3.4 step 5, 27.1.3.3.17, 7.5.3 and 7.5.2, +Await');
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma262\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [decodeURIComponent(m[1]), m[2]]);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(tNamed.length === 1 && tNamed.every(([id, k]) => num(id) === k && spec.includes(`id="${id}"`)) && !/tc39\.es\/ecma262\/2026\//.test(tasksHtml),
+      `tasks: the draft anchor exists with its number (27.1.4.1) ${JSON.stringify(tNamed.map(([, k]) => k))}; no links to the 2026 edition`);
+    check(['JavaScript resource management, DisposableStack, AsyncDisposableStack', 'черновик спецификации <a href="https://tc39.es/ecma262/">ECMA-262 2027</a> от 12 ноября 2026 года', 'Mozilla Contributors'].every((s) => tFooter.includes(s))
+      && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 1,
+    'tasks: the footer names MDN and the draft of ECMA-262 2027 of 12 November 2026; MDN is linked once');
   }
 
   // the notes: the steps of their tables are the ones the lecture names (checked in the list of steps below), the footer
@@ -436,6 +589,11 @@ console.log(log.join(" | "));`), { lines: 3 });
     ['sec-disposablestack.prototype.use', 'Perform ? AddDisposableResource (disposableStack.[[DisposableResourceStack]], value, sync-dispose)', '4'],
     ['sec-asyncdisposablestack.prototype.disposeAsync', 'If asyncDisposableStack.[[AsyncDisposableState]] is disposed, return undefined', '3'],
     ['sec-asyncdisposablestack.prototype.disposeAsync', 'Set asyncDisposableStack.[[AsyncDisposableState]] to disposed', '4'],
+    // task 9: 27.1.4.1 — return is looked up, missing — a resolved promise, present — called and waited for
+    ['sec-%asynciteratorprototype%-%symbol.asyncdispose%', 'Let return be Completion (GetMethod (obj, "return"))', '3'],
+    ['sec-%asynciteratorprototype%-%symbol.asyncdispose%', 'If return is undefined, then', '5'],
+    ['sec-%asynciteratorprototype%-%symbol.asyncdispose%', 'Let result be Completion (Call (return, obj, «»))', '6.a'],
+    ['sec-%asynciteratorprototype%-%symbol.asyncdispose%', 'Perform PerformPromiseThen (resultWrapper, onFulfilled, undefined, promiseCapability)', '6.g'],
   ];
   const wrong = steps.filter(([id, needle, k]) => at(id, needle).join() !== k).map(([id, needle, k]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${k}`);
   check(wrong.length === 0, `draft: ${steps.length} step numbers the lecture names (7.5.2–7.5.4, 14.2.2, 14.3.1.3, 14.7.4.2, 14.7.5.7, 20.5.8.1.1, 27.1.3.3.17, 27.3.1.1, 27.3.3.x, 27.4.3.4): ${wrong.join('; ') || 'all right'}`);

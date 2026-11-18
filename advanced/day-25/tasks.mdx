@@ -1,0 +1,314 @@
+---
+title: День 25 — задания
+---
+
+# День 25. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты черновик спецификации [tc39.es/ecma262](https://tc39.es/ecma262/) и консоль Chrome. Код пишем в папке дня 22: блок — это main.js. Каждое «почему» — с номером раздела и шага черновика (7.5, 14.3.1, 27.3).</Subtitle>
+
+## Разминка
+
+<Task title="1. Порядок и цепочки" level="easy" time="8">
+<Goal>проходить DisposeResources по шагам с вложенными блоками.</Goal>
+
+```js
+const log = [];
+const res = (name, fail) => ({ [Symbol.dispose]() { log.push(name); if (fail) throw new Error(name); } });
+function work(failBody) {
+  using a = res("a");
+  using b = res("b", true);
+  {
+    using c = res("c", true);
+    if (failBody) throw new Error("тело");
+  }
+  using d = res("d");
+  return "готово";
+}
+const chain = (e) => (e instanceof SuppressedError ? "S(" + chain(e.error) + ", " + chain(e.suppressed) + ")" : e.message);
+const run = (f) => { try { return f(); } catch (e) { return chain(e); } };
+console.log(run(() => work(false)), log.join(""));
+log.length = 0;
+console.log(run(() => work(true)), log.join(""));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- для каждого SuppressedError назван шаг 7.5.4, который его создал, и почему в первой строке ошибка `c` не
+  обёрнута;
+- объяснено, почему `d` не закрывается ни разу: какой шаг 14.3.1.3 до него не дошёл.
+</Criteria>
+</Task>
+
+<Task title="2. Где можно" level="easy" time="6">
+<Goal>знать места, где using разрешён, и правила, которые запрещают остальные.</Goal>
+
+```js
+const syntax = (src, script) => { try { script ? (0, eval)(src) : new Function(src); return "ok"; } catch (e) { return e.name; } };
+console.log([
+  syntax("{ using x = null; }", true),
+  syntax("using x = null;", true),
+  syntax("if (true) using x = null;"),
+  syntax("label: { using x = null; }"),
+  syntax("for (using x of []) {}"),
+  syntax("for (await using x of []) {}"),
+  syntax("async function f() { await using x = null; }"),
+].join(" "));
+```
+
+<Criteria>
+- предсказана строка;
+- для каждой SyntaxError назван запрет: ранняя ошибка 16.1.1, объявление вместо оператора в `if`, параметр
+  `+Await` у `await using`;
+- объяснено, почему в первой строке скрипт с блоком внутри разрешён, хотя скрипту `using` запрещён.
+</Criteria>
+</Task>
+
+<Task title="3. Стек вручную" level="easy" time="6">
+<Goal>проходить методы DisposableStack по шагам.</Goal>
+
+```js
+const log = [];
+const stack = new DisposableStack();
+const id = stack.adopt(7, (v) => log.push("adopt " + v));
+stack.defer(() => log.push("defer"));
+const moved = stack.move();
+console.log(id, stack.disposed, moved.disposed);
+moved.use({ [Symbol.dispose]() { log.push("use"); } });
+moved[Symbol.dispose]();
+moved.dispose();
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+console.log(log.join(" | "), run(() => stack.defer(() => {})), run(() => moved.use(null)), run(() => stack.dispose()));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- назван шаг, после которого `stack` закрыт, хотя ничего не убрано (27.3.3.6), и почему второй `dispose()` молчит,
+  а `use` бросает;
+- объяснено, почему `moved[Symbol.dispose]()` и `moved.dispose()` — одно и то же (27.3.3.8).
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. «Карточки 2.0»: автосохранение, которое можно закрыть дважды" level="medium" time="12">
+<Goal>писать ресурс по интерфейсу Disposable.</Goal>
+
+Напишите `startAutosave(save, ms)`: вызывает `save` каждые `ms` миллисекунд и возвращает объект с `stop()`,
+геттерами `active` и `stops` (сколько раз таймер действительно остановлен) и методом `[Symbol.dispose]`.
+Повторная остановка ничего не делает и не бросает.
+
+<Example>
+```js
+let saves = 0;
+const autosave = startAutosave(() => saves++, 10);
+await new Promise((r) => setTimeout(r, 35));
+autosave.active;                     // true
+{
+  using a = autosave;
+  a.stop();
+}
+autosave.active;                     // false
+autosave.stops;                      // 1
+const after = saves;
+await new Promise((r) => setTimeout(r, 30));
+saves > 0 && saves === after;        // true
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- объяснено, зачем проверка в `stop()`: интерфейс Disposable (27.2.1.1) требует, чтобы повторный вызов «should not
+  throw an exception, even if an exception was thrown on the first invocation», но проверять это некому;
+- `[Symbol.dispose]` сделан псевдонимом `stop`, как советует учебник MDN, а не копией кода.
+</Criteria>
+</Task>
+
+<Task title="5. Всё или ничего" level="medium" time="12">
+<Goal>открывать несколько ресурсов через DisposableStack и move.</Goal>
+
+Напишите `openAll(openers)`: `openers` — массив функций, каждая открывает ресурс и возвращает освобождаемый объект.
+Откройте все по порядку. Если какая-то бросила — уже открытые закрываются в обратном порядке, ошибка уходит
+наружу. Если открылись все — верните `DisposableStack`, который их закроет.
+
+<Example>
+```js
+const log = [];
+const opener = (name) => () => {
+  if (name === "?") throw new Error("не открылся");
+  log.push("+" + name);
+  return { [Symbol.dispose]() { log.push("-" + name); } };
+};
+const all = openAll([opener("a"), opener("b")]);
+all.disposed;                        // false
+all.dispose();
+log.join(" ");                       // "+a +b -b -a"
+log.length = 0;
+let failed = "";
+try { openAll([opener("x"), opener("y"), opener("?")]); } catch (e) { failed = e.message; }
+failed;                              // "не открылся"
+log.join(" ");                       // "+x +y -y -x"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- ресурс, который сам не закрывается, при сорванном открытии даёт SuppressedError: `error` — его ошибка,
+  `suppressed` — «не открылся»;
+- объяснено, почему `move()` стоит последней строкой (27.3.3.6) и что было бы, поставь его до цикла.
+</Criteria>
+</Task>
+
+<Task title="6. Без try…finally" level="medium" time="13">
+<Goal>заменять вложенные try…finally стеком и сравнивать ошибки.</Goal>
+
+Учебник MDN о вложенных `try…finally`: «But you have to remember to do this every time you have some important
+resource to release». Вот такая функция:
+
+```js
+function copyCard(open, card) {
+  const src = open("src");
+  try {
+    const dst = open("dst");
+    try {
+      dst.write(src.read(card));
+    } finally {
+      dst.close();
+    }
+  } finally {
+    src.close();
+  }
+}
+```
+
+У объектов из `open` есть `read`, `write` и `close`, но нет `[Symbol.dispose]`. Напишите `copyCardUsing(open, card)`
+с тем же поведением — через `DisposableStack` и `adopt`, без единого `try`.
+
+<Example>
+```js
+const log = [];
+const open = (name) => ({
+  read: (card) => { log.push("read " + name); return card.toUpperCase(); },
+  write: (text) => { log.push("write " + name + " " + text); },
+  close: () => log.push("close " + name),
+});
+copyCardUsing(open, "kitap");
+log.join(" | ");                     // "read src | write dst KITAP | close dst | close src"
+log.length = 0;
+const broken = (name) => ({ ...open(name), read: () => { throw new Error("не читается"); } });
+let message = "";
+try { copyCardUsing(broken, "galam"); } catch (e) { message = e.message; }
+message;                             // "не читается"
+log.join(" | ");                     // "close dst | close src"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- `read` и оба `close` бросают: `copyCard` теряет две ошибки из трёх (день 11), `copyCardUsing` сохраняет все;
+- строение ошибки `copyCardUsing` сравнено с двумя `using` подряд: у стека снаружи SuppressedError из двух ошибок
+  `close`, а ошибка `read` — в `suppressed`; объяснено шагом 5 раздела 27.3.3.4 (с каким итогом `dispose()` зовёт
+  DisposeResources).
+</Criteria>
+</Task>
+
+<Task title="7. Асинхронная уборка" level="medium" time="13">
+<Goal>писать асинхронный ресурс и закрывать его через await using.</Goal>
+
+Напишите `openSession(name, log)`: пишет в `log` «открыта name» и возвращает объект, у которого
+`[Symbol.asyncDispose]` ждёт 10 мс («сохраняет» сессию) и пишет «сохранена name».
+
+<Example>
+```js
+const log = [];
+async function train(names) {
+  await using stack = new AsyncDisposableStack();
+  for (const n of names) stack.use(openSession(n, log));
+  log.push("тренировка");
+}
+await train(["a", "b"]);
+log.join(" | ");                     // "открыта a | открыта b | тренировка | сохранена b | сохранена a"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- объяснено, почему `b` сохраняется целиком раньше, чем начнётся сохранение `a` (7.5.4, шаг 4.e.ii);
+- `train` с обычным `using` и `DisposableStack` падает уже на `use`: назван текст ошибки Chrome и шаг 7.5.3, который
+  не нашёл метода.
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Генератор держит ресурс" level="hard" time="12">
+<Goal>видеть, когда закрывается ресурс внутри генератора.</Goal>
+
+Напишите генератор `lines(open, name)`: открывает ресурс через `using`, отдаёт по одной строки из его поля `rows` и
+закрывает ресурс, когда генератор кончился или его закрыли раньше.
+
+<Example>
+```js
+const log = [];
+const open = (name) => {
+  log.push("open " + name);
+  return { rows: ["kitap", "galam", "depder"], [Symbol.dispose]() { log.push("close " + name); } };
+};
+{
+  using it = lines(open, "a");
+  log.push("создан");
+  it.next().value;                   // "kitap"
+}
+[...lines(open, "b")].length;        // 3
+log.join(" | ");                     // "создан | open a | close a | open b | close b"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- объяснено, почему «open a» стоит после «создан», а «close a» — сразу после первого слова: что вызвал `using it`
+  (27.1.3.3.17) и как `return()` проходит через `using file` внутри генератора;
+- `for…of` с `break` по генератору тоже закрывает ресурс — проверено.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: асинхронный итератор под await using" level="hard" time="8">
+<Goal>читать алгоритм, который заранее не разбирали.</Goal>
+
+Прочитайте %AsyncIteratorPrototype% \[ %Symbol.asyncDispose% \]
+([27.1.4.1](https://tc39.es/ecma262/#sec-%25asynciteratorprototype%25-%25symbol.asyncdispose%25)) и предскажите:
+
+```js
+const log = [];
+async function* feed() {
+  try { yield 1; yield 2; } finally { log.push("finally"); }
+}
+const plain = {
+  [Symbol.asyncIterator]() { return this; },
+  next: async () => ({ value: 1, done: false }),
+};
+{
+  await using it = feed();
+  log.push("next " + (await it.next()).value);
+}
+log.push(typeof feed.prototype[Symbol.asyncDispose], typeof plain[Symbol.asyncDispose]);
+const run = async (f) => { try { await f(); return "ok"; } catch (e) { return e.name; } };
+log.push(await run(async () => { await using p = plain; }));
+console.log(log.join(" | "));
+```
+
+<Criteria>
+- предсказана строка;
+- названы шаги 27.1.4.1, которые вызывают `return` и ждут его, и шаг, который выполняется, когда `return` нет;
+- объяснено, почему `plain` — асинхронный итератор по протоколу, но не годится для `await using`: чей прототип
+  даёт метод и какие шаги 7.5.3 и 7.5.2 приводят к TypeError.
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Resource_management)
+(JavaScript resource management, DisposableStack, AsyncDisposableStack,
+авторы — Mozilla Contributors), лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+черновик спецификации [ECMA-262 2027](https://tc39.es/ecma262/) от 12 ноября 2026 года.
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

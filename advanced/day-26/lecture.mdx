@@ -1,0 +1,587 @@
+---
+title: "День 26 — ECMA-402 изнутри: языковые теги и согласование локалей"
+day: День 26 • урок 1
+heading: "ECMA-402 изнутри: языковые теги и согласование локалей"
+lead: Курс 3, Advanced. Модуль «Intl целиком; числа и даты по спецификации» — первый день. 45 минут.
+css: |
+  h1 { border-bottom-color: #0891b2; }
+  h2 { color: #4f46e5; background: #ecfeff; border-left-color: #0891b2; }
+  h3 { color: #3730a3; }
+  .step-number { background: #0891b2; }
+  .toc a { color: #4f46e5; }
+---
+
+<Goals>
+- читать языковой тег по частям и знать, какой тег `Intl` примет, а какой нет;
+- проходить по шагам канонизацию, выбор локали (lookup и best fit) и ResolveLocale;
+- узнавать у браузера, какие языки, валюты и пояса он знает, — и не верить молчаливой подмене;
+- объяснять, откуда берутся `"tk"` → язык браузера и пропавшее расширение `-u-`.
+</Goals>
+
+<Toc />
+
+## 1. Зачем {#why}
+
+На дне 1 мы обещали: второй документ комитета, ECMA-402, «целиком займёт модуль A7». На дне 25 курса 2 мы им
+пользовались — числа, даты, `localeCompare` — и наткнулись на загадку: `"tk"` молча превращается в язык
+браузера. Сегодня читаем, как это устроено. Источник —
+[ECMA-402 2026](https://tc39.es/ecma402/2026/), страница
+[Intl](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl) на MDN и Chrome.
+Блоки можно запускать в папке дня 22, как раньше. Модуль A7 — пять дней: теги и выбор локали сегодня, потом
+`Intl.Locale` и сравнение строк, множественное число и списки, названия и длительности, числа и даты.
+
+## 2. Что внутри ECMA-402 {#inside}
+
+ECMA-402 дополняет ECMA-262: обзор API ([4.2](https://tc39.es/ecma402/2026/#sec-api-overview)) говорит, что
+пользоваться им можно двумя способами. Прямо — через служебные конструкторы (`NumberFormat`, `DateTimeFormat`…):
+передать список языков и опции, вызвать главный метод (`format`, `compare`, `select`), а настройки узнать через
+`resolvedOptions`. Косвенно — через функции ECMA-262 вроде `toLocaleString` и `toLocaleUpperCase`: ECMA-402
+переопределяет их так, чтобы они принимали те же аргументы. Всё собрано в одном объекте: «The Intl object is used to
+package all functionality defined in this specification in order to avoid name collisions».
+
+| Главы | О чём | Сегодня |
+| --- | --- | --- |
+| 1–5 | область, соответствие, ссылки, обзор, соглашения | кратко |
+| 6 | как называют локали, валюты, пояса, единицы, системы счисления, сортировки, календари | теги — подробно |
+| 7 | требования к встроенным объектам | кратко |
+| 8 | объект `Intl` | подробно |
+| 9 | согласование локалей и параметров | подробно |
+| 10–19 | служебные конструкторы | дни 27–29 |
+| 20–21 | функции ECMA-262, зависящие от локали | день 30 |
+
+Многое ECMA-402 оставляет реализации: какие языки поддержать, откуда брать данные
+([4.4](https://tc39.es/ecma402/2026/#sec-implementation-dependencies)). Поэтому разные браузеры отвечают по-разному,
+и проверять надо у своего. Косвенный путь виден на регистре — турецкая «i» с точкой:
+
+```js
+console.log("istanbul".toLocaleUpperCase("tr"), "istanbul".toUpperCase(), "ISTANBUL".toLocaleLowerCase("tr"), "ýüz".toLocaleUpperCase("tk"));
+```
+
+<ResultBox>
+İSTANBUL ISTANBUL ıstanbul ÝÜZ
+</ResultBox>
+
+## 3. Объект Intl {#intl-object}
+
+Раздел [8](https://tc39.es/ecma402/2026/#intl-object) перечисляет, чем `Intl` не является: «is not a function
+object», без \[\[Construct\]\] и \[\[Call\]\] — ни `new Intl()`, ни `Intl()`. Это обычный объект, как `Math`, с
+конструкторами (8.2) и двумя функциями (8.3).
+
+```js
+const run = (f) => { try { return f(); } catch (e) { return e.name + ": " + e.message; } };
+console.log(typeof Intl, Object.prototype.toString.call(Intl), Object.getPrototypeOf(Intl) === Object.prototype);
+console.log(Object.getOwnPropertyNames(Intl).join());
+console.log(run(() => Intl()), "|", run(() => new Intl()));
+```
+
+<ResultBox>
+object \[object Intl\] true\
+getCanonicalLocales,supportedValuesOf,DateTimeFormat,NumberFormat,Collator,v8BreakIterator,PluralRules,RelativeTimeFormat,ListFormat,Locale,DisplayNames,Segmenter,DurationFormat\
+TypeError: Intl is not a function | TypeError: Intl is not a constructor
+</ResultBox>
+
+`[object Intl]` — от \[%Symbol.toStringTag%\] (8.1.1). Конструкторов в 8.2 десять, а Chrome показывает
+одиннадцать: `v8BreakIterator` — добавка V8, в стандарте её нет. Стандарт это разрешает: реализация вправе
+добавлять свои свойства (глава 7), но полагаться на них нельзя.
+
+## 4. Языковой тег {#tags}
+
+Локаль `Intl` называет тегом — «Unicode BCP 47 locale identifier» из стандарта Unicode UTS #35
+([6.2](https://tc39.es/ecma402/2026/#sec-language-tags)). Тег — подтеги через дефис, регистр не важен. MDN
+перечисляет части: язык (2–3 или 5–8 букв), письменность (4 буквы), регион (2 буквы или 3 цифры), варианты,
+расширения и в конце частное `-x-…`. Расширение `-u-` — ключи Unicode: `ca` календарь, `nu` система счисления,
+`co` сортировка, `hc` часы. Остальное `Intl` не читает.
+
+<Scheme src="scheme-tag.svg">Тег по частям: язык, письменность, регион, расширение -u- и частная часть -x-</Scheme>
+
+Не всё, что годится в BCP 47, годится `Intl`: «tags like "en-GB-oed", "i-navajo", and "x-foo" are valid according to
+BCP 47 but are not Unicode BCP 47 locale identifiers». А расширение `-u-` — только до первого одиночного подтега
+(синглтона). Пример 6.2: у `"en-US-u-fw-mon-x-u-ex-foobar"` расширение — `-u-fw-mon`, а `-u-ex-foobar` спрятано в
+частной части.
+
+## 5. Правильно ли записан тег {#well-formed}
+
+Проверяет IsWellFormedLanguageTag ([6.2.1](https://tc39.es/ecma402/2026/#sec-iswellformedlanguagetag)): шаг 2 —
+грамматика `unicode_locale_id`, шаг 3 — без старого синтаксиса (`i-navajo`), шаг 6.a — варианты без повторов, шаг
+11.a — синглтоны без повторов. Неправильный тег — RangeError:
+
+```js
+const run = (f) => { try { return JSON.stringify(f()); } catch (e) { return e.name + ": " + e.message; } };
+const c = (tag) => run(() => Intl.getCanonicalLocales(tag));
+console.log(c("en_US"), "|", c("e"), "|", c("x-foo"), "|", c("i-navajo"));
+console.log(c("en-GB-oed"), "|", c("de-de-1996-1996"), "|", c("de-a-foo-a-foo"), "|", c("tk-Latn-TM"));
+```
+
+<ResultBox>
+RangeError: Invalid language tag: en_US | RangeError: Invalid language tag: e | RangeError: Invalid language tag: x-foo | RangeError: Invalid language tag: i-navajo\
+RangeError: Invalid language tag: en-GB-oed | RangeError: Invalid language tag: de-de-1996-1996 | RangeError: Invalid language tag: de-a-foo-a-foo | \["tk-Latn-TM"\]
+</ResultBox>
+
+Подчёркивание вместо дефиса — частая ошибка из других систем. MDN в примере показывает текст «invalid language tag:
+"EN_US"» — это Firefox; у Chrome «Invalid language tag: EN_US», без кавычек и с заглавной.
+
+## 6. Канонизация {#canonical}
+
+CanonicalizeUnicodeLocaleId ([6.2.2](https://tc39.es/ecma402/2026/#sec-canonicalizeunicodelocaleid)) приводит тег к
+одному виду по приложению C UTS #35: регистр (язык строчными, письменность с заглавной, регион заглавными), старые
+коды — на новые, ключи `-u-` — по алфавиту. Шаг 2 оставляет из повторов `-u-` только первый: «only the first
+keyword for a given key». Снаружи это видно через `Intl.getCanonicalLocales`
+([8.3.1](https://tc39.es/ecma402/2026/#sec-intl.getcanonicallocales)):
+
+```js
+const c = (x) => JSON.stringify(Intl.getCanonicalLocales(x));
+console.log(c("EN-us"), c("tk-tm"), c("TK-latn-TM"), c(["ru", "RU", "ru-ru"]));
+console.log(c("iw"), c("in"), c("sh"), c("zh-hant-tw"));
+console.log(c("ru-u-ca-gregory-ca-buddhist"), c("en-u-nu-latn-ca-gregory"), c("en-US-u-fw-mon-x-u-ex-foobar"));
+```
+
+<ResultBox>
+\["en-US"\] \["tk-TM"\] \["tk-Latn-TM"\] \["ru","ru-RU"\]\
+\["he"\] \["id"\] \["sr-Latn"\] \["zh-Hant-TW"\]\
+\["ru-u-ca-gregory"\] \["en-u-ca-gregory-nu-latn"\] \["en-US-u-fw-mon-x-u-ex-foobar"\]
+</ResultBox>
+
+`iw` — старый код иврита, `in` — индонезийского, `sh` — сербохорватский латиницей. `"ru"` и `"RU"` после
+канонизации одинаковы, и второй выпал — это шаг 7.c.vii CanonicalizeLocaleList. Частную часть `-x-…` канонизация не
+трогает.
+
+## 7. Что принимает список локалей {#list}
+
+CanonicalizeLocaleList ([9.2.1](https://tc39.es/ecma402/2026/#sec-canonicalizelocalelist)) — вход всех конструкторов.
+Шаг 1: `undefined` — пустой список (значит, язык по умолчанию). Шаг 3: строка — список из одного тега. Шаг 4:
+остальное — ToObject и перебор как массива. Шаг 7.c.ii: элемент — только строка или объект.
+
+```js
+const run = (f) => { try { return JSON.stringify(f()); } catch (e) { return e.name + ": " + e.message; } };
+const c = (x) => run(() => Intl.getCanonicalLocales(x));
+console.log(c(undefined), "|", c(null), "|", c(NaN), "|", c([NaN]), "|", c([1]));
+console.log(c({ length: 2, 0: "ru", 1: "tk" }), "|", c(["tk", "x_y", "ru"]), "|", c("ru"));
+```
+
+<ResultBox>
+\[\] | TypeError: Cannot convert undefined or null to object | \[\] | TypeError: Language ID should be string or object. | TypeError: Language ID should be string or object.\
+\["ru","tk"\] | RangeError: Invalid language tag: x_y | \["ru"\]
+</ResultBox>
+
+Сюрприз — `NaN`: не ошибка, а пустой список. Шаг 4 превращает число в объект `Number`, а у него нет длины —
+LengthOfArrayLike даёт 0. Заметка 2 про `NaN` («will not be interpreted as the language tag "nan"») — об
+элементах списка: `[NaN]` уже ошибка шага 7.c.ii. Объект с `length` и индексами работает как массив. Один неверный
+тег в списке рушит весь вызов.
+
+## 8. Язык по умолчанию {#default}
+
+Если ни один запрошенный язык не подошёл, берётся DefaultLocale
+([6.2.3](https://tc39.es/ecma402/2026/#sec-defaultlocale)) — язык среды. Заметка к нему: это «a potential
+fingerprinting vector», и в браузере он «should match navigator.language». MDN добавляет пример: `"default"` —
+правильно записанный тег, которого нет ни в одном списке, поэтому он тоже даёт язык по умолчанию.
+
+```js
+const nf = (tag) => new Intl.NumberFormat(tag).resolvedOptions().locale;
+console.log(navigator.language, nf(), nf([]), nf("default"), nf("tk"), nf(["tk", "xx"]));
+```
+
+<ResultBox>
+ru-RU ru-RU ru-RU ru-RU ru-RU ru-RU
+</ResultBox>
+
+Вывод для русского Chrome; в вашем браузере все шесть совпадут с его `navigator.language`. Это и есть ответ на
+загадку дня 25 курса 2: `"tk"` правильный тег, но `NumberFormat` его не знает, и выбор падает на шаг 4
+ResolveLocale — язык по умолчанию (раздел 13).
+
+## 9. Каталоги: валюты, пояса, единицы {#catalogs}
+
+Глава 6 описывает не только теги. Валюты — коды ISO 4217 (6.3), пояса — база IANA (6.5), единицы (6.6), системы
+счисления (6.7), сортировки (6.8), календари (6.9). Узнать, что знает браузер, можно через
+`Intl.supportedValuesOf` ([8.3.2](https://tc39.es/ecma402/2026/#sec-intl.supportedvaluesof)): шаги 2–7 — шесть
+ключей, шаг 8 — RangeError для остальных. MDN: массив отсортирован и без повторов.
+
+```js
+const v = (k) => Intl.supportedValuesOf(k);
+const run = (f) => { try { return f(); } catch (e) { return e.name + ": " + e.message; } };
+console.log(["calendar", "collation", "currency", "numberingSystem", "timeZone", "unit"].map((k) => k + " " + v(k).length).join(", "));
+console.log(v("currency").includes("TMT"), v("currency").includes("TMM"), v("timeZone").includes("Asia/Ashgabat"), v("timeZone").includes("Asia/Ashkhabad"));
+console.log(run(() => v("locale")), "|", run(() => v("Currency")), "|", v("unit").slice(0, 4).join());
+console.log(new Intl.NumberFormat("ru", { style: "currency", currency: "TMT" }).format(1234.5));
+```
+
+<ResultBox>
+calendar 18, collation 10, currency 159, numberingSystem 78, timeZone 418, unit 45\
+true false true false\
+RangeError: Invalid key : locale | RangeError: Invalid key : Currency | acre,bit,byte,celsius\
+1&nbsp;234,50&nbsp;ТМТ
+</ResultBox>
+
+Манат `TMT` есть, старого `TMM` (до 2009 года) нет. Пояс `Asia/Ashgabat` есть, а старое написание
+`Asia/Ashkhabad` браузер тоже знает, но в список не включает: шаг 6 берёт AvailablePrimaryTimeZoneIdentifiers
+(6.5.3) — только основные имена, без синонимов. Ключи чувствительны к регистру: `"Currency"` — ошибка. Языков в этом
+списке нет совсем: какие языки знает браузер, у каждого конструктора спрашивают отдельно.
+
+## 10. Служебные конструкторы и их слоты {#slots}
+
+У каждого служебного конструктора свои внутренние слоты ([9.1](https://tc39.es/ecma402/2026/#sec-internal-slots)):
+\[\[AvailableLocales\]\] — языки, которые он умеет; \[\[RelevantExtensionKeys\]\] — ключи `-u-`, которые ему важны
+(`nu` для чисел, `ca` и `hc` для дат); \[\[ResolutionOptionDescriptors\]\] — опции, читаемые при выборе локали;
+\[\[LocaleData\]\] — данные по языкам. Список языков обязан содержать язык по умолчанию и более общие теги: «If
+\[\[AvailableLocales\]\] contains "de-DE", then it must also contain "de"». Списки разные у разных конструкторов:
+
+```js
+const langs = ["ru", "en", "tk", "tr", "uz"];
+const names = ["Collator", "DateTimeFormat", "DisplayNames", "DurationFormat", "ListFormat", "NumberFormat", "PluralRules", "RelativeTimeFormat", "Segmenter"];
+for (const name of names) console.log(name, Intl[name].supportedLocalesOf(langs).join());
+```
+
+<ResultBox>
+Collator ru,en,tr\
+DateTimeFormat ru,en,tr,uz\
+DisplayNames ru,en,tr,uz\
+DurationFormat ru,en,tr,uz\
+ListFormat ru,en,tr\
+NumberFormat ru,en,tr,uz\
+PluralRules ru,en,tk,tr,uz\
+RelativeTimeFormat ru,en,tr,uz\
+Segmenter ru,en,tk,tr,uz
+</ResultBox>
+
+Туркменский в Chrome всё-таки есть — у двух конструкторов из девяти, которым хватает простых правил. Узбекского
+нет у сравнения строк и списков. На дне 25 курса 2 мы смотрели только на `DateTimeFormat`, а проверять надо у
+того конструктора, которым пользуетесь. Сами конструкторы — дни 27–29; сегодня только их списки.
+
+## 11. Lookup: отрезаем по подтегу {#lookup}
+
+Как найти лучший доступный язык для запроса? Первый алгоритм — LookupMatchingLocaleByPrefix
+([9.2.3](https://tc39.es/ecma402/2026/#sec-lookupmatchinglocalebyprefix)), «lookup» из RFC 4647. Для каждого
+запрошенного тега по порядку: шаг 1.b снимает расширение `-u-`, шаг 1.d ищет тег в списке и, если нет, отрезает
+последний подтег (шаг 1.d.iii заодно отрезает одиночный синглтон перед ним). Тег кончился — следующий запрошенный.
+Никто не подошёл — `undefined`, и ResolveLocale берёт язык по умолчанию.
+
+<Scheme src="scheme-lookup.svg">Lookup: отрезать по подтегу, пока тег не найдётся</Scheme>
+
+```js
+const loc = (tag) => new Intl.NumberFormat(tag, { localeMatcher: "lookup" }).resolvedOptions().locale;
+console.log(loc("de-XX"), loc("de-Latn-XX"), loc("az-Cyrl-XX"), loc("en-ZZ"), loc("tk-TM"), loc(["tk", "tr", "ru"]));
+```
+
+<ResultBox>
+de de az-Cyrl en ru-RU tr
+</ResultBox>
+
+`de-XX` → `de`: региона XX нет, общий немецкий есть. `az-Cyrl-XX` → `az-Cyrl`: азербайджанский кириллицей есть
+целиком. `tk-TM` → `tk` → пусто → язык по умолчанию. А список `["tk", "tr", "ru"]` дал `tr`: `tk` не нашёлся, и
+алгоритм перешёл ко второму запрошенному.
+
+## 12. Best fit и FilterLocales {#best-fit}
+
+Второй алгоритм — LookupMatchingLocaleByBestFit ([9.2.4](https://tc39.es/ecma402/2026/#sec-lookupmatchinglocalebybestfit))
+— целиком на совести реализации: он «should produce results that a typical user of the requested locales would
+consider at least as good as those produced by the LookupMatchingLocaleByPrefix algorithm». Он стоит по
+умолчанию (`localeMatcher: "best fit"`). FilterLocales ([9.2.9](https://tc39.es/ecma402/2026/#sec-filterlocales))
+— сердце `supportedLocalesOf`: оставляет из запроса те теги, для которых нашлась пара, в прежнем порядке.
+
+```js
+const tags = ["zh-HK", "zh-TW", "sr-ME", "pa-PK", "az-IR", "uz-AF", "mo", "no-NO", "es-MX", "pt-PT", "fil", "iw-IL", "ar-001", "kk-Arab", "nb-NO"];
+let diff = 0;
+for (const tag of tags) for (const make of [(o) => new Intl.NumberFormat(tag, o), (o) => new Intl.DateTimeFormat(tag, o)]) {
+  if (make({ localeMatcher: "lookup" }).resolvedOptions().locale !== make({ localeMatcher: "best fit" }).resolvedOptions().locale) diff++;
+}
+const req = ["tk-TM", "uz-Cyrl-UZ", "sr-ME", "ru-UA", "en-ZZ", "kk"];
+console.log("различий:", diff, "|", Intl.DateTimeFormat.supportedLocalesOf(req, { localeMatcher: "lookup" }).join(), "|", Intl.DateTimeFormat.supportedLocalesOf(req).join());
+```
+
+<ResultBox>
+различий: 0 | uz-Cyrl-UZ,sr-ME,ru-UA,en-ZZ,kk | uz-Cyrl-UZ,sr-ME,ru-UA,en-ZZ,kk
+</ResultBox>
+
+В Chrome best fit и lookup на этих тегах не разошлись ни разу — стандарт и не требует различий. В других браузерах
+best fit бывает умнее (скажем, `zh-HK` → `zh-Hant`), поэтому результат `"best fit"` в коде на конкретный тег лучше
+не завязывать. `supportedLocalesOf` вернул запрошенные теги как есть — `en-ZZ` подошёл, потому что есть `en`.
+
+## 13. ResolveLocale по шагам {#resolve}
+
+Выбор локали целиком делает ResolveLocale ([9.2.7](https://tc39.es/ecma402/2026/#sec-resolvelocale)). Шаги 1–3 —
+lookup или best fit по опции `localeMatcher`. Шаг 4 — нет пары: «set r to the Record \{ \[\[locale\]\]:
+DefaultLocale(), \[\[extension\]\]: empty \}». Шаг 10 разбирает расширение найденного запроса на ключи
+(UnicodeExtensionComponents, 9.2.5). Шаг 13 — для каждого ключа из \[\[RelevantExtensionKeys\]\]: значение по
+умолчанию из данных языка (13.c), потом значение из `-u-`, если оно поддержано (13.f), потом из опций — и тогда
+ключ выпадает из тега (13.k). Шаг 14 вставляет оставшиеся ключи обратно в тег
+(InsertUnicodeExtensionAndCanonicalize, 9.2.6).
+
+<Scheme src="scheme-resolve.svg">ResolveLocale: пара по тегу, потом каждый ключ — данные языка, -u-, опции</Scheme>
+
+```js
+const nf = (tag, opts) => { const f = new Intl.NumberFormat(tag, opts); return f.format(1234.5) + " " + f.resolvedOptions().locale + " " + f.resolvedOptions().numberingSystem; };
+console.log(nf("ru-u-nu-arab"));
+console.log(nf("ru-u-nu-arab", { numberingSystem: "latn" }));
+console.log(nf("ru-u-nu-latn", { numberingSystem: "arab" }));
+console.log(nf("ru-u-nu-xxxx"));
+console.log(nf("ru-u-ca-buddhist-nu-thai"));
+console.log(nf("ru-u-zz-abc"));
+```
+
+<ResultBox>
+١٬٢٣٤٫٥ ru-u-nu-arab arab\
+1&nbsp;234,5 ru latn\
+١٬٢٣٤٫٥ ru arab\
+1&nbsp;234,5 ru latn\
+๑&nbsp;๒๓๔,๕ ru-u-nu-thai thai\
+1&nbsp;234,5 ru latn
+</ResultBox>
+
+Первая строка — арабские цифры из `-u-nu-arab`, и ключ остался в теге. Вторая: опция перекрыла расширение (13.k), и
+ключ ушёл из тега — по тегу видно, откуда взялась настройка. Третья — опция победила и наоборот. `xxxx` не
+поддержан — 13.f.iii.1 его пропустил. `ca` для чисел не важен — его нет в \[\[RelevantExtensionKeys\]\], и он
+выпал; `nu-thai` остался. Неизвестный ключ `zz` выпал тоже.
+
+## 14. Расширения у дат {#dates}
+
+У `DateTimeFormat` важные ключи другие — `ca`, `hc`, `nu`. Опция `hour12` действует как `hc`:
+
+```js
+const dt = (tag, opts) => { const f = new Intl.DateTimeFormat(tag, opts); const o = f.resolvedOptions(); return o.locale + " " + o.calendar + " " + f.format(new Date(2026, 10, 18, 15, 30)); };
+console.log(dt("ru-u-ca-buddhist", { dateStyle: "long" }));
+console.log(dt("ru-u-ca-islamic-umalqura", { dateStyle: "medium" }));
+console.log(dt("en-u-hc-h23", { timeStyle: "short" }));
+console.log(dt("en-u-hc-h23", { timeStyle: "short", hour12: true }));
+```
+
+<ResultBox>
+ru-u-ca-buddhist buddhist 18 ноября 2569 г. BE\
+ru-u-ca-islamic-umalqura islamic-umalqura 8 джум. II 1448 г. AH\
+en-u-hc-h23 gregory 15:30\
+en gregory 03:30 PM
+</ResultBox>
+
+18 ноября 2026 года — 2569 год буддийского календаря и 1448 год хиджры. В последней строке опция `hour12`
+перекрыла `-u-hc-h23`, и ключ ушёл из тега, как в разделе 13.
+
+## 15. Расширение пропадает вместе с языком {#lost}
+
+Шаг 4 ResolveLocale берёт язык по умолчанию с **пустым** расширением. Значит, если язык не нашёлся, его `-u-`
+пропадает вместе с ним — даже то, что браузер умеет:
+
+```js
+const nf = (tag) => { const f = new Intl.NumberFormat(tag); return f.format(1234.5) + " " + f.resolvedOptions().locale; };
+console.log(nf("tk-TM-u-nu-arab"), "|", nf("ru-u-nu-arab"), "|", nf(["tk-u-nu-arab", "ru"]));
+```
+
+<ResultBox>
+1&nbsp;234,5 ru-RU | ١٬٢٣٤٫٥ ru-u-nu-arab | 1&nbsp;234,5 ru
+</ResultBox>
+
+Хотели туркменский с арабскими цифрами — получили русский с обычными. В третьем вызове `ru` нашёлся вторым, но
+расширение берётся только у того тега, что совпал (шаг 10), — у `"ru"` его нет. Нужна настройка независимо от
+языка — передавайте её опцией: опции ResolveLocale читает всегда (шаг 13.h).
+
+## 16. ResolveOptions и GetOption {#options}
+
+Перед ResolveLocale конструктор вызывает ResolveOptions ([9.2.8](https://tc39.es/ecma402/2026/#sec-resolveoptions)):
+шаг 1 — CanonicalizeLocaleList, шаг 3 — опции в объект (CoerceOptionsToObject,
+[9.2.10](https://tc39.es/ecma402/2026/#sec-coerceoptionstoobject), или более строгий GetOptionsObject), шаг 4 —
+`localeMatcher`, шаг 6 — опции-ключи вроде `numberingSystem`, и значение обязано подходить под грамматику
+Unicode-типа (шаг 6.d.ii). Каждую опцию читает GetOption ([9.2.11](https://tc39.es/ecma402/2026/#sec-getoption)):
+шаг 4.b — ToString, шаг 5 — RangeError, если значения нет среди разрешённых. Порядок чтения видно через `Proxy`:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+console.log(run(() => new Intl.NumberFormat("ru", { localeMatcher: "fast" })));
+console.log(run(() => new Intl.NumberFormat("ru", { numberingSystem: "!!!" })));
+console.log(run(() => Intl.NumberFormat.supportedLocalesOf("ru", null)), "|", run(() => Intl.NumberFormat.supportedLocalesOf("ru", 5)));
+const seen = [];
+new Intl.NumberFormat("ru", new Proxy({}, { get(t, k) { if (typeof k === "string") seen.push(k); return undefined; } }));
+console.log(seen.slice(0, 5).join());
+```
+
+<ResultBox>
+RangeError: Value fast out of range for Intl.NumberFormat options property localeMatcher\
+RangeError: Invalid numberingSystem : !!!\
+TypeError: Intl.NumberFormat.supportedLocalesOf called on null or undefined | ok\
+localeMatcher,numberingSystem,style,currency,currencyDisplay
+</ResultBox>
+
+`null` вместо опций — TypeError: CoerceOptionsToObject делает ToObject, а у `null` объекта нет; число `5`
+превращается в объект без нужных свойств и проходит. Порядок чтения начинается с `localeMatcher` и
+`numberingSystem` — это шаги 4 и 6 ResolveOptions; остальные опции конструктор читает уже после выбора локали.
+
+## 17. Вызов без new и \[\[FallbackSymbol\]\] {#fallback}
+
+У `Intl` есть скрытый слот \[\[FallbackSymbol\]\] — символ с описанием «IntlLegacyConstructedSymbol» (раздел 8).
+Он нужен старому коду, который вызывал `NumberFormat` и `DateTimeFormat` без `new` на готовом объекте: такой вызов
+кладёт настоящий форматировщик в свойство под этим символом.
+
+```js
+const o = Object.create(Intl.NumberFormat.prototype);
+const r = Intl.NumberFormat.call(o, "ru");
+const syms = Object.getOwnPropertySymbols(r);
+console.log(r === o, syms.length, syms[0].description, r.format(1234.5));
+```
+
+<ResultBox>
+true 1 IntlLegacyConstructedSymbol 1&nbsp;234,5
+</ResultBox>
+
+Вызов вернул тот же объект `o`, но с новым символьным свойством — внутри него и живёт форматировщик. Писать так не
+нужно; важно знать, откуда в старом коде берётся странный символ.
+
+## 18. «Карточки 2.0»: язык интерфейса {#cards}
+
+«Карточки 2.0» показывают цену курса и дату. Пользователь может выбрать языки в настройках — строкой через запятую.
+Разберём её: неправильные теги выбросим, остальные канонизируем, а потом спросим у нужного конструктора, что из
+этого он знает. Язык браузера — последний запасной вариант.
+
+```js
+function pickLanguages(text, Ctor) {
+  const tags = [];
+  for (const raw of text.split(",")) {
+    try { tags.push(...Intl.getCanonicalLocales(raw.trim())); } catch { }
+  }
+  const supported = Ctor.supportedLocalesOf(tags);
+  return supported.length > 0 ? supported : [navigator.language];
+}
+const wanted = "TK-tm, tr_TR, tr, RU";
+const forNumbers = pickLanguages(wanted, Intl.NumberFormat);
+const forDates = pickLanguages(wanted, Intl.DateTimeFormat);
+const price = new Intl.NumberFormat(forNumbers, { style: "currency", currency: "TMT" }).format(450);
+const start = new Intl.DateTimeFormat(forDates, { dateStyle: "long" }).format(new Date(2026, 11, 1));
+console.log(forNumbers.join(), "|", price, "|", start);
+```
+
+<ResultBox>
+tr,ru | TMT&nbsp;450,00 | 1 Aralık 2026
+</ResultBox>
+
+`tr_TR` — ошибка записи, его отбросили. `tk-TM` правильный, но ни числа, ни даты его не знают, и
+`supportedLocalesOf` его отфильтровал. Первым остался турецкий: манаты и дата по-турецки. Без фильтра
+`NumberFormat` сам бы выбрал тот же `tr` — но мы бы не узнали, что `tk` пропущен, и не смогли бы сказать об этом
+пользователю.
+
+## 19. Ошибки дня и что будет завтра {#errors-next}
+
+| Что случилось | Текст в Chrome | Где искать |
+| --- | --- | --- |
+| тег с `_`, пустой, `x-foo`, `i-navajo`, повтор варианта или синглтона | `RangeError: Invalid language tag: en_US` | 6.2.1 |
+| элемент списка — не строка и не объект | `TypeError: Language ID should be string or object.` | 9.2.1, шаг 7.c.ii |
+| `null` вместо списка | `TypeError: Cannot convert undefined or null to object` | 9.2.1, шаг 4 |
+| неизвестный ключ `supportedValuesOf` | `RangeError: Invalid key : locale` | 8.3.2, шаг 8 |
+| неверное значение опции | `RangeError: Value fast out of range for Intl.NumberFormat options property localeMatcher` | 9.2.11, шаг 5 |
+| значение-ключ не по грамматике | `RangeError: Invalid numberingSystem : !!!` | 9.2.8, шаг 6.d.ii |
+| `null` вместо опций | `TypeError: Intl.NumberFormat.supportedLocalesOf called on null or undefined` | 9.2.10 |
+| `Intl()` или `new Intl()` | `TypeError: Intl is not a function` / `is not a constructor` | 8 |
+
+Без ошибки, но с подменой: язык, которого нет у конструктора, — язык по умолчанию вместе с потерей `-u-`. Завтра —
+день 27: `Intl.Locale` (тег как объект: `maximize`, `minimize`, неделя и пояса Туркменистана) и `Intl.Collator`.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [1 Scope](https://tc39.es/ecma402/2026/#scope) | что описывает ECMA-402 | <Brief /> |
+| [2 Conformance](https://tc39.es/ecma402/2026/#conformance) | что обязана реализация | <Brief /> |
+| [3 Normative References](https://tc39.es/ecma402/2026/#normative-references) | ECMA-262, BCP 47, UTS #35, ISO 4217, IANA | <Brief /> |
+| [4 Overview](https://tc39.es/ecma402/2026/#overview) | обзор | <Brief /> |
+| [4.1 Internationalization, Localization, and Globalization](https://tc39.es/ecma402/2026/#sec-internationalization-localization-globalization) | термины | <Brief /> |
+| [4.2 API Overview](https://tc39.es/ecma402/2026/#sec-api-overview) | прямой и косвенный путь; раздел 2 | <Full /> |
+| [4.3 API Conventions](https://tc39.es/ecma402/2026/#sec-api-conventions) | `locales` и `options` у всех | <Brief /> |
+| [4.4 Implementation Dependencies](https://tc39.es/ecma402/2026/#sec-implementation-dependencies) | языки и данные — на реализации | <Brief /> |
+| [4.4.1 Compatibility across implementations](https://tc39.es/ecma402/2026/#sec-compatibility) | результаты разных браузеров | <Brief /> |
+| [5 Notational Conventions](https://tc39.es/ecma402/2026/#conventions) | обозначения | <Brief /> |
+| [5.1 Well-Known Intrinsic Objects](https://tc39.es/ecma402/2026/#sec-402-well-known-intrinsic-objects) | `%Intl%` и другие | <Brief /> |
+| [6 Identification of Locales, Currencies, Time Zones, Measurement Units, Numbering Systems, Collations, and Calendars](https://tc39.es/ecma402/2026/#locales-currencies-tz) | имена всего; раздел 9 | <Brief /> |
+| [6.1 Case Sensitivity and Case Mapping](https://tc39.es/ecma402/2026/#sec-case-sensitivity-and-case-mapping) | регистр в идентификаторах | <Brief /> |
+| [6.2 Language Tags](https://tc39.es/ecma402/2026/#sec-language-tags) | тег по частям; разделы 4–6 | <Full /> |
+| [6.2.1 IsWellFormedLanguageTag](https://tc39.es/ecma402/2026/#sec-iswellformedlanguagetag) | правильная запись; раздел 5 | <Brief /> |
+| [6.2.2 CanonicalizeUnicodeLocaleId](https://tc39.es/ecma402/2026/#sec-canonicalizeunicodelocaleid) | канонизация; раздел 6 | <Brief /> |
+| [6.2.3 DefaultLocale](https://tc39.es/ecma402/2026/#sec-defaultlocale) | язык по умолчанию; раздел 8 | <Brief /> |
+| [6.3 Currency Codes](https://tc39.es/ecma402/2026/#sec-currency-codes) | коды ISO 4217 | <Brief /> |
+| [6.3.1 IsWellFormedCurrencyCode](https://tc39.es/ecma402/2026/#sec-iswellformedcurrencycode) | три буквы | <Brief /> |
+| [6.4 AvailableCanonicalCurrencies](https://tc39.es/ecma402/2026/#sec-availablecanonicalcurrencies) | список валют | <Brief /> |
+| [6.5 Use of the IANA Time Zone Database](https://tc39.es/ecma402/2026/#sec-use-of-iana-time-zone-database) | пояса | <Brief /> |
+| [6.5.1 AvailableNamedTimeZoneIdentifiers](https://tc39.es/ecma402/2026/#sup-availablenamedtimezoneidentifiers) | все имена поясов | <Brief /> |
+| [6.5.2 GetAvailableNamedTimeZoneIdentifier](https://tc39.es/ecma402/2026/#sec-getavailablenamedtimezoneidentifier) | поиск пояса по имени | <Brief /> |
+| [6.5.3 AvailablePrimaryTimeZoneIdentifiers](https://tc39.es/ecma402/2026/#sec-availableprimarytimezoneidentifiers) | только основные имена | <Brief /> |
+| [6.5.4 StringSplitToList](https://tc39.es/ecma402/2026/#sec-string-split-to-list) | разбор строки | <Brief /> |
+| [6.6 Measurement Unit Identifiers](https://tc39.es/ecma402/2026/#sec-measurement-unit-identifiers) | единицы | <Brief /> |
+| [6.6.1 IsWellFormedUnitIdentifier](https://tc39.es/ecma402/2026/#sec-iswellformedunitidentifier) | единица или «a-per-b» | <Brief /> |
+| [6.6.2 IsSanctionedSingleUnitIdentifier](https://tc39.es/ecma402/2026/#sec-issanctionedsingleunitidentifier) | разрешённые единицы | <Brief /> |
+| [6.6.3 AvailableCanonicalUnits](https://tc39.es/ecma402/2026/#sec-availablecanonicalunits) | список единиц | <Brief /> |
+| [6.7 Numbering System Identifiers](https://tc39.es/ecma402/2026/#sec-numberingsystem-identifiers) | системы счисления | <Brief /> |
+| [6.7.1 AvailableCanonicalNumberingSystems](https://tc39.es/ecma402/2026/#sec-availablecanonicalnumberingsystems) | их список | <Brief /> |
+| [6.8 Collation Types](https://tc39.es/ecma402/2026/#sec-collation-types) | виды сортировки | <Brief /> |
+| [6.8.1 AvailableCanonicalCollations](https://tc39.es/ecma402/2026/#sec-availablecanonicalcollations) | их список | <Brief /> |
+| [6.9 Calendar Types](https://tc39.es/ecma402/2026/#sec-calendar-types) | календари | <Brief /> |
+| [6.9.1 AvailableCalendars](https://tc39.es/ecma402/2026/#sec-availablecalendars) | их список | <Brief /> |
+| [6.10 Pattern String Types](https://tc39.es/ecma402/2026/#sec-pattern-string-types) | шаблоны с подстановками | <Brief /> |
+| [7 Requirements for Standard Built-in ECMAScript Objects](https://tc39.es/ecma402/2026/#requirements) | свои свойства реализации; раздел 3 | <Brief /> |
+| [8 The Intl Object](https://tc39.es/ecma402/2026/#intl-object) | не функция, \[\[FallbackSymbol\]\]; разделы 3, 17 | <Full /> |
+| [8.1 Value Properties of the Intl Object](https://tc39.es/ecma402/2026/#sec-value-properties-of-the-intl-object) | свойства-значения | <Brief /> |
+| [8.1.1 Intl \[ %Symbol.toStringTag% \]](https://tc39.es/ecma402/2026/#sec-intl-%25symbol.tostringtag%25) | `[object Intl]` | <Brief /> |
+| [8.2 Constructor Properties of the Intl Object](https://tc39.es/ecma402/2026/#sec-constructor-properties-of-the-intl-object) | десять конструкторов | <Brief /> |
+| [8.2.1 Intl.Collator](https://tc39.es/ecma402/2026/#sec-intl.collator-intro) | сравнение строк — день 27 | <Brief /> |
+| [8.2.2 Intl.DateTimeFormat](https://tc39.es/ecma402/2026/#sec-intl.datetimeformat-intro) | даты | <Brief /> |
+| [8.2.3 Intl.DisplayNames](https://tc39.es/ecma402/2026/#sec-intl.displaynames-intro) | названия — день 29 | <Brief /> |
+| [8.2.4 Intl.DurationFormat](https://tc39.es/ecma402/2026/#sec-intl.durationformat-intro) | длительности — день 29 | <Brief /> |
+| [8.2.5 Intl.ListFormat](https://tc39.es/ecma402/2026/#sec-intl.listformat-intro) | списки — день 28 | <Brief /> |
+| [8.2.6 Intl.Locale](https://tc39.es/ecma402/2026/#sec-intl.locale-intro) | тег как объект — день 27 | <Brief /> |
+| [8.2.7 Intl.NumberFormat](https://tc39.es/ecma402/2026/#sec-intl.numberformat-intro) | числа | <Brief /> |
+| [8.2.8 Intl.PluralRules](https://tc39.es/ecma402/2026/#sec-intl.pluralrules-intro) | множественное число — день 28 | <Brief /> |
+| [8.2.9 Intl.RelativeTimeFormat](https://tc39.es/ecma402/2026/#sec-intl.relativetimeformat-intro) | «вчера» — день 28 | <Brief /> |
+| [8.2.10 Intl.Segmenter](https://tc39.es/ecma402/2026/#sec-intl.segmenter-intro) | слова и графемы — день 29 | <Brief /> |
+| [8.3 Function Properties of the Intl Object](https://tc39.es/ecma402/2026/#sec-function-properties-of-the-intl-object) | две функции | <Brief /> |
+| [8.3.1 Intl.getCanonicalLocales](https://tc39.es/ecma402/2026/#sec-intl.getcanonicallocales) | канонизация списка; раздел 6 | <Brief /> |
+| [8.3.2 Intl.supportedValuesOf](https://tc39.es/ecma402/2026/#sec-intl.supportedvaluesof) | шесть каталогов; раздел 9 | <Brief /> |
+| [9 Locale and Parameter Negotiation](https://tc39.es/ecma402/2026/#locale-and-parameter-negotiation) | согласование | <Brief /> |
+| [9.1 Internal slots of Service Constructors](https://tc39.es/ecma402/2026/#sec-internal-slots) | свой список языков у каждого; раздел 10 | <Full /> |
+| [9.2 Abstract Operations](https://tc39.es/ecma402/2026/#sec-abstract-operations) | операции согласования; разделы 7, 11–16 | <Full /> |
+| [9.2.1 CanonicalizeLocaleList](https://tc39.es/ecma402/2026/#sec-canonicalizelocalelist) | вход всех конструкторов; раздел 7 | <Brief /> |
+| [9.2.2 CanonicalizeUValue](https://tc39.es/ecma402/2026/#sec-canonicalizeuvalue) | канонизация значения ключа | <Brief /> |
+| [9.2.3 LookupMatchingLocaleByPrefix](https://tc39.es/ecma402/2026/#sec-lookupmatchinglocalebyprefix) | lookup; раздел 11 | <Brief /> |
+| [9.2.4 LookupMatchingLocaleByBestFit](https://tc39.es/ecma402/2026/#sec-lookupmatchinglocalebybestfit) | best fit; раздел 12 | <Brief /> |
+| [9.2.5 UnicodeExtensionComponents](https://tc39.es/ecma402/2026/#sec-unicode-extension-components) | разбор `-u-` | <Brief /> |
+| [9.2.6 InsertUnicodeExtensionAndCanonicalize](https://tc39.es/ecma402/2026/#sec-insert-unicode-extension-and-canonicalize) | `-u-` обратно в тег | <Brief /> |
+| [9.2.7 ResolveLocale](https://tc39.es/ecma402/2026/#sec-resolvelocale) | выбор локали и ключей; разделы 13–15 | <Brief /> |
+| [9.2.8 ResolveOptions](https://tc39.es/ecma402/2026/#sec-resolveoptions) | чтение опций; раздел 16 | <Brief /> |
+| [9.2.9 FilterLocales](https://tc39.es/ecma402/2026/#sec-filterlocales) | `supportedLocalesOf`; раздел 12 | <Brief /> |
+| [9.2.10 CoerceOptionsToObject](https://tc39.es/ecma402/2026/#sec-coerceoptionstoobject) | опции в объект | <Brief /> |
+| [9.2.11 GetOption](https://tc39.es/ecma402/2026/#sec-getoption) | одна опция, RangeError | <Brief /> |
+| [9.2.12 GetBooleanOrStringNumberFormatOption](https://tc39.es/ecma402/2026/#sec-getbooleanorstringnumberformatoption) | опция «да/нет или строка» | <Brief /> |
+| [9.2.13 DefaultNumberOption](https://tc39.es/ecma402/2026/#sec-defaultnumberoption) | число в границах | <Brief /> |
+| [9.2.14 GetNumberOption](https://tc39.es/ecma402/2026/#sec-getnumberoption) | числовая опция | <Brief /> |
+| [9.2.15 PartitionPattern](https://tc39.es/ecma402/2026/#sec-partitionpattern) | разбор шаблона `{…}` | <Brief /> |
+| [MDN: Intl](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl) | теги, `locales`, `options`, согласование; разделы 1, 4, 8 | <Full /> |
+| [MDN: Intl.getCanonicalLocales()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/getCanonicalLocales) | канонические теги без повторов; разделы 5–7 | <Full /> |
+| [MDN: Intl.supportedValuesOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/supportedValuesOf) | каталоги браузера; раздел 9 | <Full /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// тег: язык[-Письменность][-РЕГИОН][-варианты][-u-ключ-значение…][-x-частное]; регистр не важен
+// Intl.getCanonicalLocales(x) — проверка и канонизация; ошибка записи — RangeError (6.2.1)
+// Intl.supportedValuesOf("currency" | "timeZone" | "calendar" | "collation" | "numberingSystem" | "unit")
+// у каждого конструктора свой список языков: Ctor.supportedLocalesOf(список)
+// выбор: lookup отрезает по подтегу; best fit — как решит браузер; нет пары — язык по умолчанию без -u-
+// -u- ключ остаётся в resolvedOptions().locale, только если он важен конструктору и не перекрыт опцией
+// настройку, которая нужна всегда, — опцией, а не в -u-
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `Intl.getCanonicalLocales("en_US")` бросает, а `"default"` проходит?
+   <Answer>Подчёркивание не подходит под грамматику тега (6.2.1, шаг 2) — RangeError. `"default"` — правильный тег
+   языка из 7 букв, просто ему нет пары, и выбор падает на язык по умолчанию.</Answer>
+2. Что сделает lookup с запросом `"de-Latn-XX"`, если есть только `"de"`?
+   <Answer>Отрежет `XX`, потом `Latn` и найдёт `de` (9.2.3, шаг 1.d).</Answer>
+3. Почему у `new Intl.NumberFormat("tk-TM-u-nu-arab")` цифры обычные?
+   <Answer>`tk` нет у `NumberFormat`; шаг 4 ResolveLocale берёт язык по умолчанию с пустым расширением, и `nu-arab`
+   пропадает. Арабские цифры надёжнее просить опцией `numberingSystem`.</Answer>
+4. Почему `resolvedOptions().locale` у `new Intl.NumberFormat("ru-u-nu-arab", { numberingSystem: "latn" })` — `"ru"`?
+   <Answer>Опция перекрыла значение из расширения, и ключ убран из тега (9.2.7, шаг 13.k).</Answer>
+5. Есть ли туркменский в Chrome?
+   <Answer>Смотря у кого: `PluralRules` и `Segmenter` его знают, `NumberFormat`, `DateTimeFormat` и остальные — нет.
+   Списки языков у служебных конструкторов разные (9.1).</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl)
+(Intl, Intl.getCanonicalLocales(), Intl.supportedValuesOf(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-402 2026](https://tc39.es/ecma402/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

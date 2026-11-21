@@ -1,0 +1,221 @@
+---
+title: День 26 — задания
+---
+
+# День 26. Задания
+
+<Subtitle>Уроки 2 и 3, 90 минут. Разминка — 20 минут, основные — 50 минут, со звёздочкой — 20 минут. Открыты спецификация [tc39.es/ecma402/2026](https://tc39.es/ecma402/2026/) и консоль Chrome. Код пишем в папке дня 22: блок — это main.js. Каждое «почему» — с номером раздела и шага ECMA-402 (6.2, 9.2).</Subtitle>
+
+## Разминка
+
+<Task title="1. Канонизация по шагам" level="easy" time="7">
+<Goal>предсказывать, что сделают с тегом проверка, канонизация и список локалей.</Goal>
+
+```js
+const run = (f) => { try { return JSON.stringify(f()); } catch (e) { return e.name; } };
+const c = (x) => run(() => Intl.getCanonicalLocales(x));
+console.log(c("ZH-hant-tw"), c("mo"), c("tk-SU"), c("ru-SU"), c(["sr-latn", "SR-Latn", "sr-Latn-RS"]));
+console.log(c("en-u-ca-gregory-nu-latn-ca-buddhist"), c("tk-TM-X-AHAL"), c("de-DE-1996-1996"), c({ length: 1, 0: "tk" }), c("root"));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- для каждого тега назван шаг: 6.2.1 (какой), 6.2.2 или 9.2.1;
+- объяснено, почему `tk-SU` и `ru-SU` получили разные регионы (у старого кода SU несколько замен в приложении C
+  UTS #35) и что канонизация сделала с частной частью `-X-AHAL`.
+</Criteria>
+</Task>
+
+<Task title="2. Что знает браузер" level="easy" time="6">
+<Goal>спрашивать у браузера каталоги и списки языков и сверять ответ с текстом.</Goal>
+
+```js
+const v = (k) => Intl.supportedValuesOf(k);
+const run = (f) => { try { return f(); } catch (e) { return e.name; } };
+console.log(v("calendar").includes("persian"), v("timeZone").includes("Europe/Kiev"), v("timeZone").includes("Europe/Kyiv"), run(() => v("Unit")));
+console.log(Intl.NumberFormat.supportedLocalesOf(["tk-TM", "tr-TR", "ru-RU", "en-ZZ"]).join(), Intl.DateTimeFormat.supportedLocalesOf("tk").length, new Intl.DateTimeFormat("ru", { timeZone: "Europe/Kyiv" }).resolvedOptions().timeZone);
+```
+
+<Criteria>
+- предсказаны обе строки для Chrome;
+- названы шаги 8.3.2 и 9.2.9, которые дают `RangeError` и теги «как есть»;
+- прочитан раздел 6.5: «in 2022 "Europe/Kiev" was deprecated to a Link resolving to a new "Europe/Kyiv" Zone», а
+  сделать новое имя основным советуют после ожидания — «the recommended rename waiting period is two years»;
+  объяснено, почему Chrome и сейчас отдаёт старое имя даже на `"Europe/Kyiv"` и почему это расхождение с советом, а
+  не с обязательным правилом (6.5.1, шаг про rename waiting period).
+</Criteria>
+</Task>
+
+<Task title="3. Lookup вручную" level="easy" time="7">
+<Goal>проходить LookupMatchingLocaleByPrefix и ResolveLocale по шагам.</Goal>
+
+```js
+const loc = (tag) => new Intl.NumberFormat(tag, { localeMatcher: "lookup" }).resolvedOptions().locale;
+console.log(loc("sr-Latn-ME-u-nu-arab"), loc("en-US-x-tk"), loc("uz-Arab-TM-u-nu-latn"), loc("tk-TM-u-nu-arab"));
+console.log(loc(["tk-TM", "az-Latn-TM"]), loc("ru-TM-u-nu-arab"), loc("de-CH-1996"));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- для `"en-US-x-tk"` пройдены шаги 1.d 9.2.3: почему пропала и `x`, а не только `tk`;
+- объяснено, почему `-u-nu-latn` вернулся к `uz-Arab`, а у `tk-TM` расширение пропало (9.2.7, шаги 4 и 10).
+</Criteria>
+</Task>
+
+## Основные задания
+
+<Task title="4. «Карточки 2.0»: цена курса в манатах" level="medium" time="12">
+<Goal>выбирать язык форматирования так, чтобы подмена была видна, а настройка не терялась.</Goal>
+
+Напишите `formatPrice(amount, wanted, digits)`: `wanted` — языки пользователя строкой через запятую, `digits` —
+необязательная система счисления. Неправильные теги отбросьте, остальные отфильтруйте `supportedLocalesOf` числового
+конструктора, пустой результат замените языком браузера. Цена — в манатах `TMT`. Верните `{ locale, text }`, где в
+`text` все пробелы заменены обычными: `Intl` ставит неразрывные, и сравнение со строкой из кода иначе не сходится.
+
+<Example>
+```js
+formatPrice(450, "TK-tm, tr_TR, tr, RU");       // { locale: "tr", text: "TMT 450,00" }
+formatPrice(1234.5, "en-GB, ru");               // { locale: "en-GB", text: "TMT 1,234.50" }
+formatPrice(450, "tk");                         // { locale: "ru-RU", text: "450,00 ТМТ" } — язык браузера, здесь русский
+formatPrice(450, "tk-TM-u-nu-arab");            // { locale: "ru-RU", text: "450,00 ТМТ" } — -u- пропал вместе с языком
+formatPrice(450, "tk-TM", "arab");              // { locale: "ru-RU", text: "٤٥٠٫٠٠ ТМТ" }
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- система счисления передаётся опцией, а не через `-u-`: объяснено шагами 4 и 13.h ResolveLocale;
+- без замены пробелов `formatPrice(450, "tr").text === "TMT 450,00"` даёт `false` — проверено, назван код символа.
+</Criteria>
+</Task>
+
+<Task title="5. Свой lookup" level="medium" time="13">
+<Goal>переводить алгоритм спецификации в код шаг за шагом.</Goal>
+
+Напишите `lookupLocale(requested, available)` по шагам LookupMatchingLocaleByPrefix (9.2.3): `requested` — тег или
+список (канонизируйте через `Intl.getCanonicalLocales`), `available` — массив доступных тегов. Верните
+`{ locale, extension }` — найденный тег и расширение `-u-…` запроса (или пустую строку) — либо `undefined`.
+
+<Example>
+```js
+const available = ["ru", "tr", "az-Cyrl", "en", "en-US"];
+lookupLocale(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab"], available);   // { locale: "az-Cyrl", extension: "-u-nu-arab" }
+lookupLocale("en-US-x-tk", available);                             // { locale: "en-US", extension: "" }
+lookupLocale("TR-tm", available);                                  // { locale: "tr", extension: "" }
+lookupLocale(["tk", "xx"], available);                             // undefined
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- у каждого шага 1.a–1.d.iv в коде есть своя строка, и по ней видно, какая;
+- `lookupLocale("ru-u-zz-abc-nu-arab", ["ru"])` сравнен с `resolvedOptions().locale` того же тега у
+  `NumberFormat`: lookup отдаёт расширение целиком, а ключи отбирает ResolveLocale — названы шаги 10, 13 и 14.
+</Criteria>
+</Task>
+
+<Task title="6. Откуда взялась настройка" level="medium" time="12">
+<Goal>видеть по resolvedOptions, какой шаг 13 ResolveLocale выбрал значение.</Goal>
+
+Напишите `numberingSource(tag, options)`: создаёт `Intl.NumberFormat` и возвращает строку «система из -u-», «система
+из опции» или «система из данных языка». Отличить можно по `resolvedOptions()`: ключ из `-u-` остаётся в `locale`.
+
+<Example>
+```js
+numberingSource("ru-u-nu-arab");                                // "arab из -u-"
+numberingSource("ru-u-nu-arab", { numberingSystem: "latn" });   // "latn из опции"
+numberingSource("tk-TM-u-nu-arab");                             // "latn из данных языка"
+numberingSource("ru", { numberingSystem: "xxxx" });             // "latn из данных языка"
+numberingSource("ru-u-nu-latn", { numberingSystem: "latn" });   // "latn из -u-"
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- каждая строка объяснена шагом 9.2.7: 4, 13.c, 13.f или 13.k;
+- объяснено, почему `"xxxx"` — не RangeError (9.2.8, шаг 6.d.ii), но и не настройка, и почему в последней строке
+  ключ остался в теге, хотя опция задана.
+</Criteria>
+</Task>
+
+<Task title="7. Порядок чтения опций" level="medium" time="13">
+<Goal>видеть ResolveOptions снаружи через Proxy.</Goal>
+
+Напишите `optionOrder(make)`: `make` получает объект опций и создаёт что-то из `Intl`; функция возвращает имена
+свойств, которые прочитаны у этого объекта, по порядку.
+
+<Example>
+```js
+optionOrder((o) => new Intl.NumberFormat("ru", o)).slice(0, 2);      // ["localeMatcher", "numberingSystem"]
+optionOrder((o) => new Intl.DateTimeFormat("ru", o)).slice(0, 5);    // ["localeMatcher", "calendar", "numberingSystem", "hour12", "hourCycle"]
+optionOrder((o) => Intl.NumberFormat.supportedLocalesOf("ru", o));   // ["localeMatcher"]
+optionOrder((o) => (5).toLocaleString("ru", o)).join() === optionOrder((o) => new Intl.NumberFormat("ru", o)).join();   // true
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- первые имена объяснены шагами 4 и 6 ResolveOptions и слотом \[\[ResolutionOptionDescriptors\]\]: у чисел — 16.2.3,
+  у дат — 11.2.3;
+- объяснено, почему `supportedLocalesOf` читает одно имя (9.2.9) и почему `toLocaleString` читает те же (4.2,
+  косвенный путь).
+</Criteria>
+</Task>
+
+## Со звёздочкой
+
+<Task title="8. Только регистр" level="hard" time="12">
+<Goal>отделять в канонизации регистр от замены кодов.</Goal>
+
+Напишите `caseOnly(tag)`, которая меняет в теге только регистр, как в каноническом виде UTS #35: язык строчными,
+письменность (4 буквы) с заглавной, регион (2 буквы или 3 цифры) заглавными, остальное строчными; после первого
+синглтона — всё строчными.
+
+<Example>
+```js
+caseOnly("TK-latn-tm");                // "tk-Latn-TM"
+caseOnly("ES-419");                    // "es-419"
+caseOnly("en-US-U-CA-GREGORY");        // "en-US-u-ca-gregory"
+caseOnly("de-x-Latn-AB");              // "de-x-latn-ab"
+["iw", "sh", "mo", "tk-SU", "en-u-nu-latn-ca-gregory", "TK-latn-tm", "ES-419"].filter((t) => caseOnly(t) !== Intl.getCanonicalLocales(t)[0]);   // ["iw", "sh", "mo", "tk-SU", "en-u-nu-latn-ca-gregory"]
+```
+</Example>
+
+<Criteria>
+- все строки примера дают то, что в комментариях;
+- объяснено, почему `Latn` после `x` — не письменность;
+- для каждого тега из последней строки назван вид замены, который делает 6.2.2 сверх регистра: язык, регион или
+  порядок ключей `-u-`.
+</Criteria>
+</Task>
+
+<Task title="9. Незнакомый раздел: единицы измерения" level="hard" time="8">
+<Goal>читать алгоритм, который заранее не разбирали.</Goal>
+
+Прочитайте IsWellFormedUnitIdentifier ([6.6.1](https://tc39.es/ecma402/2026/#sec-iswellformedunitidentifier)) и
+таблицу единиц 6.6.2 и предскажите:
+
+```js
+const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name; } };
+const u = (unit) => run(() => new Intl.NumberFormat("ru", { style: "unit", unit }));
+console.log(u("kilometer-per-hour"), u("percent-per-acre"), u("kilometer-per-hour-per-second"), u("square-meter"), u("KILOMETER"), u("-per-hour"));
+console.log(run(() => new Intl.NumberFormat("ru", { style: "unit" })), Intl.supportedValuesOf("unit").includes("kilometer-per-hour"));
+```
+
+<Criteria>
+- предсказаны обе строки;
+- для каждой RangeError назван шаг 6.6.1, который вернул `false`, и объяснено, почему бессмысленная
+  `percent-per-acre` проходит;
+- объяснено, почему `KILOMETER` — ошибка, хотя `"TK-latn-tm"` годится: что перечисляет раздел 6.1; и почему составной
+  единицы нет в `supportedValuesOf` (6.6.3).
+</Criteria>
+</Task>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl)
+(Intl, Intl.getCanonicalLocales(), Intl.supportedValuesOf(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-402 2026](https://tc39.es/ecma402/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

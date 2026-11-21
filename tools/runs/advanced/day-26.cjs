@@ -20,7 +20,12 @@
 // each of their 3 blocks prints what the comments of its console.log lines say; homework 1 — six canonicalizations;
 // 2 — five errors with the texts of Chrome; 3 — the reference solution of pickLanguages with use, skipped and bad; 4 —
 // lookup of tk-Latn-TM, az-Cyrl-XX-u-nu-arab, ru keeps the extension, a missing tk-TM loses it; their English quotes
-// (the 4 of ECMA-402 in their places), the steps of their tables and the footer.
+// (the 4 of ECMA-402 in their places), the steps of their tables and the footer. The tasks: the 4 blocks to predict print
+// what EXPECT says (task 2: Chrome keeps Europe/Kiev as the primary name, 6.5 recommends Europe/Kyiv after a waiting
+// period); every line of the 5 examples holds with the reference solutions (SOLUTIONS, an awaited check); the
+// experiments of the criteria — U+00A0 in a price, lookup hands back the whole extension, "xxxx" fits the grammar and is
+// ignored; the descriptors of 11.2.3 and 16.2.3, table 2 of 6.6.2, 6.1 and 6.6.3; the steps of 9.2.3 and 6.6.1; the 2
+// quotes of 6.5 in their place, the sections they ask for, the link 6.6.1 and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -35,6 +40,79 @@ const DAY22 = path.join(ROOT, 'advanced/day-22');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma402-2026.html');
 const ORIGIN = 'http://127.0.0.1:5593';
 const quiet = process.argv.includes('--quiet');
+// a block of the tasks without an example: its output by "tasks #index" (js blocks of the page); the tasks ask to predict
+// these (Chrome, Russian: task 2 prints what Chrome keeps as the primary time zone name)
+const EXPECT = {
+  'tasks #0': ['["zh-Hant-TW"] ["ro"] ["tk-TM"] ["ru-RU"] ["sr-Latn","sr-Latn-RS"]', '["en-u-ca-gregory-nu-latn"] ["tk-TM-x-ahal"] RangeError ["tk"] RangeError'],
+  'tasks #1': ['true true false RangeError', 'tr-TR,ru-RU,en-ZZ 0 Europe/Kiev'],
+  'tasks #2': ['sr-Latn-ME-u-nu-arab en-US uz-Arab-u-nu-latn ru-RU', 'az ru-u-nu-arab de-CH'],
+  'tasks #8': ['ok ok RangeError RangeError RangeError RangeError', 'TypeError false'],
+};
+// reference solutions of the tasks: every "expression;   // value" line of an example must give the comment; the check is
+// awaited, so a line may await too. No template literals inside: Node reads these strings as templates first (so \\s).
+const SOLUTIONS = {
+  formatPrice: `function formatPrice(amount, wanted, digits) {
+  const tags = [];
+  for (const raw of wanted.split(",")) {
+    try { tags.push(...Intl.getCanonicalLocales(raw.trim())); } catch { }
+  }
+  const supported = Intl.NumberFormat.supportedLocalesOf(tags);
+  const options = { style: "currency", currency: "TMT" };
+  if (digits) options.numberingSystem = digits;
+  const f = new Intl.NumberFormat(supported.length > 0 ? supported : navigator.language, options);
+  return { locale: f.resolvedOptions().locale, text: f.format(amount).replace(/\\s/g, " ") };
+}`,
+  lookupLocale: `function lookupLocale(requested, available) {
+  for (const tag of Intl.getCanonicalLocales(requested)) {
+    const extension = (tag.split("-x-")[0].match(/-u(?:-[a-z0-9]{2,8})+/) || [""])[0];
+    let prefix = tag.replace(extension, "");
+    while (prefix !== "") {
+      if (available.includes(prefix)) return { locale: prefix, extension };
+      let pos = prefix.lastIndexOf("-");
+      if (pos === -1) pos = 0;
+      while (pos >= 2 && prefix[pos - 2] === "-") pos -= 2;
+      prefix = prefix.slice(0, pos);
+    }
+  }
+  return undefined;
+}`,
+  numberingSource: `function numberingSource(tag, options = {}) {
+  const r = new Intl.NumberFormat(tag, options).resolvedOptions();
+  const fromTag = (r.locale.match(/-u-(?:[a-z0-9-]*-)?nu-([a-z0-9]+)/) || [])[1];
+  if (fromTag === r.numberingSystem) return r.numberingSystem + " из -u-";
+  if (options.numberingSystem === r.numberingSystem) return r.numberingSystem + " из опции";
+  return r.numberingSystem + " из данных языка";
+}`,
+  optionOrder: `function optionOrder(make) {
+  const seen = [];
+  make(new Proxy({}, { get(target, key) { if (typeof key === "string") seen.push(key); return undefined; } }));
+  return seen;
+}`,
+  caseOnly: `function caseOnly(tag) {
+  let afterSingleton = false;
+  return tag.split("-").map((part, i) => {
+    const p = part.toLowerCase();
+    if (i === 0 || afterSingleton) return p;
+    if (p.length === 1) { afterSingleton = true; return p; }
+    if (p.length === 4 && /^[a-z]+$/.test(p)) return p[0].toUpperCase() + p.slice(1);
+    if ((p.length === 2 && /^[a-z]+$/.test(p)) || /^[0-9]{3}$/.test(p)) return p.toUpperCase();
+    return p;
+  }).join("-");
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(\s*)(?!const |let )(\S.*?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `${m[1]}await __check(${JSON.stringify(m[2])}, async () => (${m[2]}), ${JSON.stringify(m[3])});` : line;
+  });
+  return `async function __check(text, fn, want) {
+  const got = JSON.stringify(await fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 const LF = String.fromCharCode(10);
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -130,6 +208,9 @@ const stepPaths = (html, needle) => {
   await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
   const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
   const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
+  const taskBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => ({ code: pre.textContent, file: pre.dataset.file || null, example: !!pre.closest('.example'), box: !!(pre.nextElementSibling && pre.nextElementSibling.matches('.result-box')) })));
+  const tasksText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -247,6 +328,38 @@ console.log(loc(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"]) + " | " + loc("tk-
       && notesText.includes('new Intl.NumberFormat(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"], { localeMatcher: "lookup" })'),
     `student homework 4: tk-Latn-TM, tk-Latn, tk have no pair, az-Cyrl-XX is cut to az-Cyrl and keeps -u-nu-arab; a missing tk-TM loses it ${JSON.stringify(hw4)}`);
   }
+
+  // the tasks: the blocks to predict print what EXPECT says; every line of an example holds with the reference solution
+  {
+    check(taskBlocks.length === 9 && taskBlocks.filter((x) => x.example).length === 5 && taskBlocks.every((x) => !x.file && !x.box)
+      && tasksText.includes('Код пишем в папке дня 22: блок — это main.js.'),
+    `tasks: 9 js blocks — 5 examples, 4 to predict; no files, no result-box; the folder of day 22 (${taskBlocks.length})`);
+    for (const [i, blk] of taskBlocks.entries()) {
+      const code = blk.example ? checkable(blk.code) : blk.code;
+      const want = blk.example ? null : EXPECT[`tasks #${i}`];
+      const out = await runFolder(b, page(code), { lines: want ? want.length : (code.match(/await __check\(/g) || []).length });
+      if (!quiet) { console.log(`\n--- tasks #${i}${blk.example ? ' (example)' : ''}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      if (blk.example) {
+        for (const l of out.filter((x) => x.startsWith('EX-'))) check(l.startsWith('EX-OK'), `tasks #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(out.length > 0 && out.every((l) => l.startsWith('EX-')) && out.length === (code.match(/await __check\(/g) || []).length, `tasks #${i} example runs with the reference solution: ${out.length} lines`);
+      } else check(!!want && same(out, want), `tasks #${i} ${blk.code.split(LF)[0].slice(0, 60)}: ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the tasks: the experiments of the criteria, with the reference solutions
+  {
+    const t4 = await runFolder(b, page(`${SOLUTIONS.formatPrice}
+const raw = new Intl.NumberFormat("tr", { style: "currency", currency: "TMT" }).format(450);
+console.log(raw === "TMT 450,00", raw.charCodeAt(3).toString(16), formatPrice(450, "tr").text === "TMT 450,00");`), { lines: 1 });
+    check(same(t4, ['false a0 true']), `task 4: without the replacement the price does not equal "TMT 450,00" — Intl puts U+00A0 there ${JSON.stringify(t4)}`);
+    const t5 = await runFolder(b, page(`${SOLUTIONS.lookupLocale}
+console.log(JSON.stringify(lookupLocale("ru-u-zz-abc-nu-arab", ["ru"])), new Intl.NumberFormat("ru-u-zz-abc-nu-arab", { localeMatcher: "lookup" }).resolvedOptions().locale);`), { lines: 1 });
+    check(same(t5, ['{"locale":"ru","extension":"-u-nu-arab-zz-abc"} ru-u-nu-arab']),
+      `task 5: lookup hands back the whole extension (canonicalized, keys sorted), ResolveLocale keeps only the relevant supported key ${JSON.stringify(t5)}`);
+    const t6 = await runFolder(b, page(`const ns = (v) => { try { return new Intl.NumberFormat("ru", { numberingSystem: v }).resolvedOptions().numberingSystem; } catch (e) { return e.name; } };
+console.log(ns("xxxx"), ns("xx"), ns("arab"));`), { lines: 1 });
+    check(same(t6, ['latn RangeError arab']), `task 6: "xxxx" fits the grammar of a type (3–8 letters) and is ignored, "xx" does not fit — RangeError ${JSON.stringify(t6)}`);
+  }
   await b.close();
 
   // ECMA-402 2026 and the MDN pages of the day
@@ -317,6 +430,49 @@ console.log(loc(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"]) + " | " + loc("tk-
     'student: the footer names the MDN pages and ECMA-402 2026; MDN is linked once; section numbers without links');
   }
 
+  // the tasks: what ECMA-402 says behind their criteria; their quotes (in their place in 6.5); the sections they ask for;
+  // the link; the footer. The spec writes "<code>Europe/Kiev</code>" — spaces around quotes are dropped on both sides
+  {
+    const slots = (id) => { const t = tight(f(id)); return t.slice(t.indexOf('[[ResolutionOptionDescriptors]]'), t.indexOf('[[LocaleData]]')); };
+    const dtf = slots('sec-intl.datetimeformat-internal-slots');
+    const order = ['"calendar"', '"numberingSystem"', '"hour12"', '"hourCycle"'].map((s) => dtf.indexOf(s));
+    check(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1])) && slots('sec-intl.numberformat-internal-slots').includes('"numberingSystem"')
+      && !slots('sec-intl.numberformat-internal-slots').includes('"calendar"'),
+    `task 7: [[ResolutionOptionDescriptors]] — DateTimeFormat (11.2.3) calendar, numberingSystem, hour12, hourCycle in this order; NumberFormat (16.2.3) numberingSystem only ${JSON.stringify(order)}`);
+    const units = ` ${f('sec-issanctionedsingleunitidentifier').split('Single Unit Identifier')[1] ?? ''} `;
+    check(['acre', 'percent', 'kilometer', 'hour'].every((u) => units.includes(` ${u} `)) && !units.includes('square') && !units.includes('-per-')
+      && f('sec-case-sensitivity-and-case-mapping').includes('The String values used to identify locales, currencies, scripts, and time zones are interpreted in an ASCII-case-insensitive manner')
+      && f('sec-availablecanonicalunits').includes('simple unit identifiers listed in every row of Table 2'),
+    'task 9: table 2 of 6.6.2 has acre, percent, kilometer, hour, no square-meter and no -per-; 6.1 makes only locales, currencies, scripts and time zones case-insensitive; 6.6.3 lists table 2 only');
+    const nq = (s) => tight(s).replace(/\s*"\s*/g, '"');
+    const corpus = nq([...daySpec.map((c) => f(c[0])), ...Object.values(M), ...outputs].join(' '));
+    const tq = [...tasksText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => nq(m[1]));
+    const tmissing = tq.filter((x) => !corpus.includes(x));
+    const own65 = nq(f('sec-use-of-iana-time-zone-database'));
+    const tplace = ['раздел 6.5: «in 2022 "Europe/Kiev" was deprecated to a Link resolving to a new "Europe/Kyiv" Zone»', 'советуют после ожидания — «the recommended rename waiting period is two years»'];
+    check(tq.length === 2 && tmissing.length === 0 && tplace.every((s) => nq(tasksText).includes(nq(s)))
+      && own65.includes(nq('in 2022 "Europe/Kiev" was deprecated to a Link resolving to a new "Europe/Kyiv" Zone')) && own65.includes('the recommended rename waiting period is two years')
+      && f('sup-availablenamedtimezoneidentifiers').includes('If primary is a replacement time zone identifier and its rename waiting period has not concluded'),
+    `tasks: ${tq.length} English quotes — 6.5 twice, in their place (task 2); 6.5.1 has the step of the waiting period; not found: ${tmissing.join(' | ') || 'none'}`);
+    const asks = ['6.2.1 (какой), 6.2.2 или 9.2.1', 'шаги 8.3.2 и 9.2.9', '(6.5.1, шаг про rename waiting period)', 'шаги 1.d 9.2.3', '(9.2.7, шаги 4 и 10)', 'шагами 4 и 13.h ResolveLocale',
+      'LookupMatchingLocaleByPrefix (9.2.3)', 'у каждого шага 1.a–1.d.iv', 'названы шаги 10, 13 и 14', 'шагом 9.2.7: 4, 13.c, 13.f или 13.k', '(9.2.8, шаг 6.d.ii)', 'шагами 4 и 6 ResolveOptions',
+      'у чисел — 16.2.3, у дат — 11.2.3', 'читает одно имя (9.2.9)', '(4.2, косвенный путь)', 'который делает 6.2.2', 'таблицу единиц 6.6.2', 'назван шаг 6.6.1', 'что перечисляет раздел 6.1', 'supportedValuesOf (6.6.3)'];
+    const flatTasks = tasksText.replace(/\s+/g, ' ');
+    check(asks.every((s) => flatTasks.includes(s)), `tasks: they ask for ${asks.length} places of ECMA-402: missing ${asks.filter((s) => !flatTasks.includes(s)).join(' | ') || 'none'}`);
+    const tnums = { 'sec-use-of-iana-time-zone-database': '6.5', 'sup-availablenamedtimezoneidentifiers': '6.5.1', 'sec-intl.numberformat-internal-slots': '16.2.3', 'sec-intl.datetimeformat-internal-slots': '11.2.3',
+      'sec-issanctionedsingleunitidentifier': '6.6.2', 'sec-availablecanonicalunits': '6.6.3', 'sec-case-sensitivity-and-case-mapping': '6.1', 'sec-filterlocales': '9.2.9', 'sec-api-overview': '4.2' };
+    const tWrong = Object.entries(tnums).filter(([id, k]) => num(id) !== k).map(([id, k]) => `${id}: ${num(id)}≠${k}`);
+    check(tWrong.length === 0, `tasks: ${Object.keys(tnums).length} section numbers they name without links (6.5, 6.5.1, 16.2.3, 11.2.3, 6.6.2, 6.6.3, 6.1, 9.2.9, 4.2): ${tWrong.join('; ') || 'all right'}`);
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma402\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [decodeURIComponent(m[1]), m[2]]);
+    check(tNamed.length === 1 && tNamed.every(([id, k]) => num(id) === k && spec.includes(`id="${id}"`)) && !/tc39\.es\/ecma262\//.test(tasksHtml),
+      `tasks: the one anchor of ECMA-402 exists with its number (6.6.1) ${JSON.stringify(tNamed.map(([, k]) => k))}; no links to ECMA-262`);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(['Intl, Intl.getCanonicalLocales(), Intl.supportedValuesOf()', 'спецификация <a href="https://tc39.es/ecma402/2026/">ECMA-402 2026</a>', 'Mozilla Contributors'].every((s) => tFooter.includes(s))
+      && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 1,
+    'tasks: the footer names the MDN pages and ECMA-402 2026; MDN is linked once');
+  }
+
   // the MDN texts the lecture retells
   {
     check(hasAll(intlPage, ['A language subtag with 2–3 or 5–8 letters', 'A script subtag with 4 letters', 'A region subtag with either 2 letters or 3 digits', '"de-a-foo-a-foo" is invalid',
@@ -345,6 +501,13 @@ console.log(loc(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"]) + " | " + loc("tk-
     ['sec-lookupmatchinglocalebyprefix', 'If locale contains a Unicode locale extension sequence, then', '1.b'],
     ['sec-lookupmatchinglocalebyprefix', 'Repeat, while prefix is not the empty String,', '1.d'],
     ['sec-lookupmatchinglocalebyprefix', 'Repeat, while pos ≥ 2', '1.d.iii'],
+    ['sec-lookupmatchinglocalebyprefix', 'Let extension be empty', '1.a'],
+    ['sec-lookupmatchinglocalebyprefix', 'If availableLocales contains prefix, return the Record', '1.d.i'],
+    ['sec-lookupmatchinglocalebyprefix', 'let pos be the index into prefix of the last occurrence of "-"', '1.d.ii'],
+    ['sec-lookupmatchinglocalebyprefix', 'Set prefix to the substring of prefix from 0 to pos', '1.d.iv'],
+    ['sec-iswellformedunitidentifier', 'If IsSanctionedSingleUnitIdentifier (unitIdentifier) is true, then', '1'],
+    ['sec-iswellformedunitidentifier', 'is not not-found, then', '3'],
+    ['sec-iswellformedunitidentifier', 'If IsSanctionedSingleUnitIdentifier (numerator) and IsSanctionedSingleUnitIdentifier (denominator) are both true, then', '7'],
     ['sec-resolvelocale', 'If matcher is "lookup", then', '2'],
     ['sec-resolvelocale', 'If r is undefined, set r to the Record', '4'],
     ['sec-resolvelocale', 'If r.[[extension]] is not empty, then', '10'],
@@ -366,7 +529,7 @@ console.log(loc(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"]) + " | " + loc("tk-
     ['sec-getoption', 'If values is not empty and values does not contain value, throw a RangeError exception', '5'],
   ];
   const wrong = steps.filter(([id, needle, k]) => at(id, needle).join() !== k).map(([id, needle, k]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${k}`);
-  check(wrong.length === 0, `ECMA-402: ${steps.length} step numbers the lecture names (6.2.1, 6.2.2, 8.3.2, 9.2.1, 9.2.3, 9.2.7, 9.2.8, 9.2.9, 9.2.10, 9.2.11): ${wrong.join('; ') || 'all right'}`);
+  check(wrong.length === 0, `ECMA-402: ${steps.length} step numbers the lecture, the notes and the tasks name (6.2.1, 6.2.2, 8.3.2, 9.2.1, 9.2.3, 9.2.7, 9.2.8, 9.2.9, 9.2.10, 9.2.11; 6.6.1 of task 9):${wrong.join('; ') || 'all right'}`);
   const nums = { 'sec-implementation-dependencies': '4.4', 'sec-intl-%symbol.tostringtag%': '8.1.1', 'sec-constructor-properties-of-the-intl-object': '8.2',
     'sec-function-properties-of-the-intl-object': '8.3', 'sec-currency-codes': '6.3', 'sec-use-of-iana-time-zone-database': '6.5', 'sec-availableprimarytimezoneidentifiers': '6.5.3',
     'sec-measurement-unit-identifiers': '6.6', 'sec-numberingsystem-identifiers': '6.7', 'sec-collation-types': '6.8', 'sec-calendar-types': '6.9', requirements: '7',

@@ -263,7 +263,8 @@ for (const name of ["NumberFormat", "DateTimeFormat", "Collator", "DisplayNames"
   pairs++;
   if (make("lookup") !== make("best fit")) diff++;
 }
-console.log(pairs, diff);`), { lines: 8 });
+console.log(pairs, diff);
+console.log(JSON.stringify(Intl.getCanonicalLocales(["tk-TM-X-AHAL", "tk-x-u-nu-latn-ca-gregory"])));`), { lines: 8 });
   check(facts[0] === 'RangeError: Invalid language tag: EN_US' && lectureText.includes('у Chrome «Invalid language tag: EN_US», без кавычек и с заглавной'),
     `lecture 5: Chrome's message for "EN_US" — ${JSON.stringify(facts[0])}; MDN shows the one of Firefox`);
   check(!!facts[1] && !facts[1].startsWith('RangeError') && outputs.includes('true false true false'),
@@ -548,6 +549,11 @@ console.log(ns("xxxx"), ns("xx"), ns("arab"));`), { lines: 1 });
       && clause(spec, 'sec-lookupmatchinglocalebybestfit').includes('type="implementation-defined abstract operation"')
       && f('sec-implementation-dependencies').includes('this specification has to leave several details implementation dependent') && lectureText.includes('Конструкторов в 8.2 десять, а Chrome показывает одиннадцать'),
     `ECMA-402: 4.2 — the direct and the indirect way, toLocaleUpperCase; 8 — no [[Construct]], no [[Call]], IntlLegacyConstructedSymbol; 8.2 — ${new Set(ctors).size} constructors; 6.2 — the example of -u-fw-mon; 9.1 — the four slots; 9.2.4 — implementation-defined; 4.4 — implementation dependent`);
+    // section 6: the private part is only lowercased — 6.2.2 returns the canonical and case-regularized form; a -u- inside
+    // it is no extension, its keys stay in their order
+    check(facts[7] === '["tk-TM-x-ahal","tk-x-u-nu-latn-ca-gregory"]' && f('sec-canonicalizeunicodelocaleid').includes('It returns the canonical and case-regularized form of locale')
+      && lectureText.replace(/\s+/g, ' ').includes('Частную часть -x-… канонизация только переводит в строчные ("tk-TM-X-AHAL" → ["tk-TM-x-ahal"]): -u- внутри неё — не расширение, его ключи не сортируются.'),
+    `lecture 6: the private part is lowercased, its -u- keys are not sorted (6.2.2: «canonical and case-regularized form») ${JSON.stringify(facts[7])}`);
     // additional properties (v8BreakIterator) are allowed by clause 2, not 7: 7 only points to the rules of ECMA-262
     const lecture = builtSite.htmlOfFile(path.join(DAY, 'lecture.html'));
     const refTable = lecture.slice(lecture.indexOf('<div class="ref">'), lecture.indexOf('<div class="cheatsheet">'));

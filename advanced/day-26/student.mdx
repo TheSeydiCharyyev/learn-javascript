@@ -1,0 +1,119 @@
+---
+title: День 26 — конспект
+css: |
+  h1 { border-bottom-color: #0891b2; }
+  h2 { color: #4f46e5; background: #ecfeff; border-left-color: #0891b2; }
+---
+
+# День 26. ECMA-402 изнутри: языковые теги и согласование локалей
+
+<Subtitle>Выжимка лекции: объект Intl, тег и канонизация, каталоги, списки языков конструкторов, lookup, ResolveLocale и опции.</Subtitle>
+
+## Главное
+
+<Definition>
+ECMA-402 — второй стандарт комитета: он дополняет ECMA-262 объектом `Intl`. `Intl` — обычный объект, как `Math`: не
+функция, десять конструкторов (8.2) и две функции (8.3). Локаль — тег, «Unicode BCP 47 locale identifier» из UTS #35.
+Каждый конструктор канонизирует список тегов (9.2.1) и ищет пару в **своём** списке языков (9.2.7); пары нет — язык по
+умолчанию, а расширение `-u-` пропадает. Источник — ECMA-402 2026.
+</Definition>
+
+## Тег: проверка и канонизация
+
+Блоки конспекта — это `main.js` в папке дня 22, как в лекции.
+
+```js
+const run = (f) => { try { return JSON.stringify(f()); } catch (e) { return e.name + ": " + e.message; } };
+const c = (x) => run(() => Intl.getCanonicalLocales(x));
+console.log(c("TK-latn-tm") + " " + c("iw") + " " + c(["ru", "RU", "ru-ru"]));   // ["tk-Latn-TM"] ["he"] ["ru","ru-RU"] — регистр, новый код иврита, повтор выпал
+console.log(c("ru-u-nu-thai-nu-arab-ca-buddhist"));   // ["ru-u-ca-buddhist-nu-thai"] — из двух nu остался первый, ключи по алфавиту
+console.log(c("tk_TM") + " | " + c("i-navajo"));   // RangeError: Invalid language tag: tk_TM | RangeError: Invalid language tag: i-navajo — подчёркивание и старый синтаксис
+console.log(c(NaN) + " | " + c([NaN]));   // [] | TypeError: Language ID should be string or object. — у числа нет длины; элемент — только строка или объект
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| правильная запись | 6.2.1: 2, 3, 6.a, 11.a | грамматика `unicode_locale_id`; без старого синтаксиса; без повторов вариантов и синглтонов |
+| канонизация | 6.2.2: 2; 8.3.1 | регистр, новые коды, ключи `-u-` по алфавиту; из повторов ключа — первый |
+| список локалей | 9.2.1: 1, 3, 4, 7.c.ii, 7.c.vii | `undefined` — пусто; строка — один тег; иначе ToObject; элемент — строка или объект; повторы выпадают |
+
+<Remember>
+Части тега: язык, письменность, регион, варианты, расширения и частное `-x-…`. Не всё из BCP 47 годится `Intl`: «tags
+like "en-GB-oed", "i-navajo", and "x-foo" are valid according to BCP 47 but are not Unicode BCP 47 locale identifiers»
+(6.2). Расширение `-u-` — только до первого синглтона. `"default"` — правильный тег, которому нет пары. Тексты ошибок
+в примерах MDN — из Firefox («invalid language tag: "EN_US"»), у Chrome — «Invalid language tag: EN_US».
+</Remember>
+
+## Каталоги и списки языков
+
+```js
+const v = (k) => Intl.supportedValuesOf(k);
+console.log(v("currency").includes("TMT") + " " + v("timeZone").includes("Asia/Ashgabat") + " " + v("timeZone").includes("Asia/Ashkhabad"));   // true true false — синонима пояса в списке нет
+console.log(Intl.NumberFormat.supportedLocalesOf(["tk", "tr", "ru"]).join() + " | " + Intl.DateTimeFormat.supportedLocalesOf(["tk-TM", "uz", "ru"]).join());   // tr,ru | uz,ru — туркменского нет ни у чисел, ни у дат
+console.log(navigator.language + " " + new Intl.NumberFormat("tk").resolvedOptions().locale + " " + new Intl.DateTimeFormat(["tk", "xx"]).resolvedOptions().locale);   // ru-RU ru-RU ru-RU — язык по умолчанию: у вас — ваш navigator.language
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| `supportedValuesOf(k)` | 8.3.2: 2–7, 8.a | шесть ключей, остальные — RangeError; пояса — только основные имена (6.a) |
+| слоты | 9.1 | \[\[AvailableLocales\]\], \[\[RelevantExtensionKeys\]\], \[\[ResolutionOptionDescriptors\]\], \[\[LocaleData\]\] |
+| `supportedLocalesOf` | 9.2.9: 4.c | запрошенные теги, у которых есть пара, в прежнем порядке |
+| язык по умолчанию | 6.2.3 | в браузере «should match navigator.language» |
+
+<Remember>
+Списки языков у конструкторов разные (9.1): туркменский знают только `PluralRules` и `Segmenter` (дни 28–29),
+узбекского нет у `Collator` и `ListFormat`. Проверяйте у своего конструктора: `"tk"` — правильный тег, поэтому вместо
+ошибки будет молчаливая подмена. Список обязан содержать и общие теги: «If \[\[AvailableLocales\]\] contains "de-DE",
+then it must also contain "de"».
+</Remember>
+
+## Выбор локали: lookup, ResolveLocale, опции
+
+```js
+const nf = (tag, opts) => { const f = new Intl.NumberFormat(tag, opts); return f.format(12.5) + " " + f.resolvedOptions().locale; };
+console.log(new Intl.NumberFormat("de-Latn-XX", { localeMatcher: "lookup" }).resolvedOptions().locale + " " + new Intl.NumberFormat(["tk-TM", "tr"], { localeMatcher: "lookup" }).resolvedOptions().locale);   // de tr — отрезаны XX и Latn; tk нет, взят следующий
+console.log(nf("ru-u-nu-arab") + " | " + nf("ru-u-nu-arab", { numberingSystem: "latn" }));   // ١٢٫٥ ru-u-nu-arab | 12,5 ru — опция перекрыла -u-, и ключ ушёл из тега
+console.log(nf("ru-u-ca-buddhist-nu-thai"));   // ๑๒,๕ ru-u-nu-thai — календарь числам не важен и выпал
+console.log(nf("tk-TM-u-nu-arab") + " | " + nf("tk-TM", { numberingSystem: "arab" }));   // 12,5 ru-RU | ١٢٫٥ ru-RU — с языком пропало и -u-, а опция осталась
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| lookup | 9.2.3: 1.b, 1.d, 1.d.iii | снять `-u-`; нет тега — отрезать последний подтег; кончился — следующий запрошенный |
+| best fit | 9.2.4 | по умолчанию; на совести реализации; в Chrome совпал с lookup |
+| нет пары | 9.2.7: 4 | язык по умолчанию с пустым расширением |
+| ключи `-u-` | 9.2.7: 10, 13.c, 13.f, 13.k, 14 | данные языка, потом `-u-`, если поддержан, потом опция (ключ уходит из тега); остальные — обратно в тег |
+| опции | 9.2.8: 4, 6.d.ii; 9.2.11: 4.b, 5 | `localeMatcher` и опции-ключи по грамматике; ToString; чужое значение — RangeError |
+
+<Remember>
+Настройку, нужную при любом языке, передавайте опцией: опции ResolveLocale читает всегда (шаг 13.h), а `-u-` пропадает
+вместе с ненайденным языком. Ключ остаётся в `resolvedOptions().locale`, только если он важен конструктору (`nu` у
+чисел; `ca`, `hc`, `nu` у дат) и не перекрыт опцией. «Карточки 2.0»: языки пользователя канонизировать, неправильные
+отбросить, остальные — через `supportedLocalesOf` нужного конструктора; запасной — `navigator.language`.
+`v8BreakIterator` и другие добавки стандарт разрешает (раздел 2), но полагаться на них нельзя.
+</Remember>
+
+<Homework>
+1. Не запуская, напишите, что вернёт `Intl.getCanonicalLocales` для `"EN-gb"`, `"sh"`, `"in-ID"`,
+   `"ru-u-nu-arab-nu-thai"`, `["tk", "TK", "tk-tm"]` и `"en-US-u-fw-mon-x-u-ex-foobar"` и каким шагом 6.2.2 или 9.2.1
+   объясняется каждый ответ; потом проверьте.
+2. Почему каждая строка бросает и какое место ECMA-402 даёт ошибку: `Intl.getCanonicalLocales("en-GB-oed")`;
+   `Intl.getCanonicalLocales([1])`; `Intl.supportedValuesOf("region")`;
+   `new Intl.NumberFormat("ru", { localeMatcher: "exact" })`; `new Intl.NumberFormat("ru", { numberingSystem: "a" })`?
+3. Доработайте `pickLanguages` из раздела 18 лекции, чтобы она возвращала `{ use, skipped, bad }`: языки для
+   конструктора, правильные теги, которых он не знает, и неправильные записи. Проверьте: `"TK-tm, tr_TR, tr, RU"` с
+   `Intl.NumberFormat` — `tr,ru`, `tk-TM`, `tr_TR`; `"tk, xx_YY"` с `Intl.DateTimeFormat` — язык браузера, `tk`, `xx_YY`.
+4. Пройдите шаги 9.2.3 для
+   `new Intl.NumberFormat(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"], { localeMatcher: "lookup" })`: какие теги
+   пробуются по очереди, что покажет `resolvedOptions().locale` и какими цифрами выйдет `format(12.5)`? Почему
+   `-u-nu-arab` здесь сохранился, а у `"tk-TM-u-nu-arab"` пропадает?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl)
+(Intl, Intl.getCanonicalLocales(), Intl.supportedValuesOf(), авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-402 2026](https://tc39.es/ecma402/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

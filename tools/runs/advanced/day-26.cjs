@@ -16,7 +16,11 @@
 // names (6.2.1, 6.2.2, 8.3.2, 9.2.1, 9.2.3, 9.2.7, 9.2.8, 9.2.9, 9.2.10, 9.2.11) is checked against the text, and so are
 // the section numbers it names without links and the texts it retells; the days it points to say what it says; the
 // reference table holds all 75 rows of the day's plan (72 of ECMA-402, 3 of MDN) with their marks and titles, every
-// anchor exists and every link whose text starts with a number names the section of that number; the footer.
+// anchor exists and every link whose text starts with a number names the section of that number; the footer. The notes:
+// each of their 3 blocks prints what the comments of its console.log lines say; homework 1 — six canonicalizations;
+// 2 — five errors with the texts of Chrome; 3 — the reference solution of pickLanguages with use, skipped and bad; 4 —
+// lookup of tk-Latn-TM, az-Cyrl-XX-u-nu-arab, ru keeps the extension, a missing tk-TM loses it; their English quotes
+// (the 4 of ECMA-402 in their places), the steps of their tables and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -123,6 +127,9 @@ const stepPaths = (html, needle) => {
   const lectureText = await src.evaluate(() => document.querySelector('.container').innerText);
   await src.goto(builtSite.urlOfFile(path.join(DAY22, 'lecture.html')));
   const indexHtml = await src.evaluate(() => [...document.querySelectorAll('pre.code[data-file]')].find((pre) => pre.dataset.file === 'index.html')?.textContent);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
+  const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
+  const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -189,6 +196,57 @@ console.log(pairs, diff);`), { lines: 8 });
     `lecture 18: NumberFormat alone picks "tr" from tk-TM, tr, ru ${JSON.stringify(facts[5])}`);
   check(facts[6] === '120 0' && lectureText.includes('В Chrome best fit и lookup на этих тегах не разошлись ни разу'),
     `lecture 12: lookup and best fit agree on ${facts[6]?.split(' ')[0]} pairs of 30 tags and 4 constructors (differences: ${facts[6]?.split(' ')[1]})`);
+
+  // the notes: every console.log line writes its output in its comment
+  {
+    const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+      .map((l) => l.slice(l.lastIndexOf('//') + 2).trim().split(' — ')[0]);
+    check(notesBlocks.length === 3 && notesBlocks.every((x) => x.js && !x.file)
+      && notesText.includes('Блоки конспекта — это main.js в папке дня 22, как в лекции.'),
+    `student: 3 js blocks without a file name, main.js of the folder of day 22 (${notesBlocks.length})`);
+    for (const [i, blk] of notesBlocks.entries()) {
+      const want = commented(blk.code);
+      const out = await runFolder(b, page(blk.code), { lines: want.length });
+      if (!quiet) { console.log(`\n--- student #${i}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      check(want.length > 0 && same(out, want), `student #${i}: output = comments ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the notes, homework 1–4: by experiment
+  {
+    const hw1 = await runFolder(b, page(`const c = (x) => JSON.stringify(Intl.getCanonicalLocales(x));
+console.log([c("EN-gb"), c("sh"), c("in-ID"), c("ru-u-nu-arab-nu-thai"), c(["tk", "TK", "tk-tm"]), c("en-US-u-fw-mon-x-u-ex-foobar")].join(" "));`), { lines: 1 });
+    check(same(hw1, ['["en-GB"] ["sr-Latn"] ["id-ID"] ["ru-u-nu-arab"] ["tk","tk-TM"] ["en-US-u-fw-mon-x-u-ex-foobar"]'])
+      && ['"EN-gb"', '"sh"', '"in-ID"', '"ru-u-nu-arab-nu-thai"', '["tk", "TK", "tk-tm"]', '"en-US-u-fw-mon-x-u-ex-foobar"'].every((s) => notesText.includes(s)),
+    `student homework 1: case, old codes, the first of two nu, a duplicate after canonicalization, the private part untouched ${JSON.stringify(hw1)}`);
+    const hw2 = await runFolder(b, page(`const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+console.log([run(() => Intl.getCanonicalLocales("en-GB-oed")), run(() => Intl.getCanonicalLocales([1])), run(() => Intl.supportedValuesOf("region")), run(() => new Intl.NumberFormat("ru", { localeMatcher: "exact" })), run(() => new Intl.NumberFormat("ru", { numberingSystem: "a" }))].join(" | "));`), { lines: 1 });
+    check(same(hw2, ['RangeError: Invalid language tag: en-GB-oed | TypeError: Language ID should be string or object. | RangeError: Invalid key : region | RangeError: Value exact out of range for Intl.NumberFormat options property localeMatcher | RangeError: Invalid numberingSystem : a'])
+      && notesText.includes('new Intl.NumberFormat("ru", { numberingSystem: "a" })') && notesText.includes('Intl.supportedValuesOf("region")'),
+    `student homework 2: five errors — 6.2.1, 9.2.1 step 7.c.ii, 8.3.2 step 8.a, 9.2.11 step 5, 9.2.8 step 6.d.ii ${JSON.stringify(hw2)}`);
+    const hw3 = await runFolder(b, page(`function pickLanguages(text, Ctor) {
+  const good = [], bad = [];
+  for (const raw of text.split(",")) {
+    const t = raw.trim();
+    try { good.push(...Intl.getCanonicalLocales(t)); } catch { bad.push(t); }
+  }
+  const supported = Ctor.supportedLocalesOf(good);
+  return { use: supported.length > 0 ? supported : [navigator.language], skipped: good.filter((t) => !supported.includes(t)), bad };
+}
+const show = (r) => r.use.join() + " / " + r.skipped.join() + " / " + r.bad.join();
+console.log(show(pickLanguages("TK-tm, tr_TR, tr, RU", Intl.NumberFormat)));
+console.log(show(pickLanguages("tk, xx_YY", Intl.DateTimeFormat)));`), { lines: 2 });
+    check(same(hw3, ['tr,ru / tk-TM / tr_TR', 'ru-RU / tk / xx_YY'])
+      && notesText.includes('{ use, skipped, bad }') && notesText.includes('"TK-tm, tr_TR, tr, RU" с Intl.NumberFormat — tr,ru, tk-TM, tr_TR')
+      && notesText.includes('"tk, xx_YY" с Intl.DateTimeFormat — язык браузера, tk, xx_YY'),
+    `student homework 3: the reference solution — use, skipped, bad as the notes say ${JSON.stringify(hw3)}`);
+    const hw4 = await runFolder(b, page(`const loc = (tag) => { const f = new Intl.NumberFormat(tag, { localeMatcher: "lookup" }); return f.resolvedOptions().locale + " " + f.resolvedOptions().numberingSystem + " " + f.format(12.5); };
+console.log(Intl.NumberFormat.supportedLocalesOf(["tk-Latn-TM", "tk-Latn", "tk", "az-Cyrl-XX", "az-Cyrl"], { localeMatcher: "lookup" }).join());
+console.log(loc(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"]) + " | " + loc("tk-TM-u-nu-arab"));`), { lines: 2 });
+    check(same(hw4, ['az-Cyrl-XX,az-Cyrl', 'az-Cyrl-u-nu-arab arab ١٢٫٥ | ru-RU latn 12,5'])
+      && notesText.includes('new Intl.NumberFormat(["tk-Latn-TM", "az-Cyrl-XX-u-nu-arab", "ru"], { localeMatcher: "lookup" })'),
+    `student homework 4: tk-Latn-TM, tk-Latn, tk have no pair, az-Cyrl-XX is cut to az-Cyrl and keeps -u-nu-arab; a missing tk-TM loses it ${JSON.stringify(hw4)}`);
+  }
   await b.close();
 
   // ECMA-402 2026 and the MDN pages of the day
@@ -232,6 +290,31 @@ console.log(pairs, diff);`), { lines: 8 });
     ];
     const lost = fromSpec.filter(([inLecture, id, quote]) => !tight(lectureText).includes(tight(inLecture)) || !tight(f(id)).includes(tight(quote))).map(([, id, quote]) => `${num(id)} «${quote.slice(0, 30)}»`);
     check(lost.length === 0, `quotes: ${fromSpec.length} quotes the lecture gives to ECMA-402 stand in their places and in their clauses (4.2, 8, 6.2 twice, 6.2.2, 9.2.1, 6.2.3, 9.1, 9.2.4, 9.2.7, 2): ${lost.join(' | ') || 'all'}`);
+  }
+
+  // the notes: their English quotes are in the same corpus, the ones of ECMA-402 in their places and clauses; the steps of
+  // their tables are the ones the lecture names (checked in the list of steps below); the footer
+  {
+    const corpus = tight([...daySpec.map((c) => f(c[0])), ...Object.values(M), ...outputs, facts[0]].join(' '));
+    const nquotes = [...notesText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => tight(m[1]));
+    const nmissing = nquotes.filter((x) => !corpus.includes(x));
+    const nFromSpec = [
+      ['Локаль — тег, «Unicode BCP 47 locale identifier»', 'sec-language-tags', 'Unicode BCP 47 locale identifier'],
+      ['Не всё из BCP 47 годится Intl: «tags like "en-GB-oed", "i-navajo", and "x-foo" are valid according to BCP 47 but are not Unicode BCP 47 locale identifiers» (6.2)', 'sec-language-tags', 'tags like "en-GB-oed", "i-navajo", and "x-foo" are valid according to BCP 47 but are not Unicode BCP 47 locale identifiers'],
+      ['в браузере «should match navigator.language»', 'sec-defaultlocale', 'should match navigator.language'],
+      ['Список обязан содержать и общие теги: «If [[AvailableLocales]] contains "de-DE", then it must also contain "de"»', 'sec-internal-slots', 'If [[AvailableLocales]] contains "de-DE", then it must also contain "de"'],
+    ];
+    const nlost = nFromSpec.filter(([inNotes, id, quote]) => !tight(notesText).includes(tight(inNotes)) || !tight(f(id)).includes(tight(quote))).map(([, id, quote]) => `${num(id)} «${quote.slice(0, 30)}»`);
+    check(nquotes.length === 6 && nmissing.length === 0 && nlost.length === 0,
+      `student: ${nquotes.length} English quotes of the notes in ECMA-402, MDN or the output of Chrome (not found: ${nmissing.join(' | ') || 'none'}); the ${nFromSpec.length} of ECMA-402 in their places and clauses 6.2, 6.2.3, 9.1 (lost: ${nlost.join(' | ') || 'none'})`);
+    const table = ['6.2.1: 2, 3, 6.a, 11.a', '6.2.2: 2; 8.3.1', '9.2.1: 1, 3, 4, 7.c.ii, 7.c.vii', '8.3.2: 2–7, 8.a', 'только основные имена (6.a)', '9.2.9: 4.c',
+      '9.2.3: 1.b, 1.d, 1.d.iii', '9.2.7: 4', '9.2.7: 10, 13.c, 13.f, 13.k, 14', '9.2.8: 4, 6.d.ii; 9.2.11: 4.b, 5', 'опции ResolveLocale читает всегда (шаг 13.h)', 'стандарт разрешает (раздел 2)'];
+    check(table.every((s) => notesText.includes(s)), `student: the tables and notes name the steps of the lecture (${table.length}: 6.2.1, 6.2.2, 9.2.1, 8.3.2, 9.2.9, 9.2.3, 9.2.7, 9.2.8, 9.2.11, 13.h, clause 2): missing ${table.filter((s) => !notesText.includes(s)).join(' | ') || 'none'}`);
+    const notesHtml = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
+    const nFooter = notesHtml.slice(notesHtml.indexOf('<div class="sources">'));
+    check(['Intl, Intl.getCanonicalLocales(), Intl.supportedValuesOf()', 'спецификация <a href="https://tc39.es/ecma402/2026/">ECMA-402 2026</a>', 'Mozilla Contributors'].every((s) => nFooter.includes(s))
+      && (notesHtml.match(/developer\.mozilla\.org/g) || []).length === 1 && !/tc39\.es\/ecma402\/2026\/#/.test(notesHtml),
+    'student: the footer names the MDN pages and ECMA-402 2026; MDN is linked once; section numbers without links');
   }
 
   // the MDN texts the lecture retells

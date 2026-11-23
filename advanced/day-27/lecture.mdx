@@ -1,0 +1,615 @@
+---
+title: "День 27 — Intl.Locale и Intl.Collator"
+day: День 27 • урок 1
+heading: "Intl.Locale и Intl.Collator"
+lead: Курс 3, Advanced. Модуль «Intl целиком; числа и даты по спецификации» — второй день. 45 минут.
+css: |
+  h1 { border-bottom-color: #0891b2; }
+  h2 { color: #4f46e5; background: #ecfeff; border-left-color: #0891b2; }
+  h3 { color: #3730a3; }
+  .step-number { background: #0891b2; }
+  .toc a { color: #4f46e5; }
+---
+
+<Goals>
+- разбирать тег на части через `Intl.Locale` и собирать его из опций;
+- дописывать и убирать вероятные части тега (`maximize`, `minimize`) и узнавать неделю и пояса региона;
+- сортировать и искать строки через `Intl.Collator`, выбирая, какие различия считать;
+- писать своё сравнение там, где правил языка нет, — для туркменского алфавита.
+</Goals>
+
+<Toc />
+
+## 1. Зачем {#why}
+
+На дне 26 `Intl.Locale` и `Intl.Collator` прозвучали только именами. Сегодня закрываем обещания: тег как объект;
+`maximize` и `minimize` — почему `tk-SU` стал `tk-TM` в задании 1 дня 26; неделя и пояса Туркменистана из шапки
+плана; и алфавит — день 5 обещал «для алфавита — localeCompare и Intl.Collator, день 27», а задание 9 дня 25 курса 2
+писало туркменский порядок вручную. Источник — главы [15](https://tc39.es/ecma402/2026/#locale-objects) и
+[10](https://tc39.es/ecma402/2026/#collator-objects) ECMA-402 2026, страницы
+[Intl.Locale](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale) и
+[Intl.Collator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator) на
+MDN и Chrome. Блоки запускаем в папке дня 22.
+
+## 2. Тег как объект {#locale}
+
+`Intl.Locale` хранит тег и показывает его части свойствами. MDN: «The information above is exactly provided as-is
+when the Locale object is constructed, without consulting any external database» — объект знает только написанное
+и ничего не выбирает.
+
+```js
+const kurs = new Intl.Locale("TK-latn-tm-u-ca-persian-hc-h11");
+console.log(kurs.toString(), "|", kurs.baseName, kurs.language, kurs.script, kurs.region, kurs.calendar, kurs.hourCycle);
+console.log(typeof kurs, Object.prototype.toString.call(kurs), Object.keys(kurs).length, kurs.variants, kurs.collation);
+```
+
+<ResultBox>
+tk-Latn-TM-u-ca-persian-hc-h11 | tk-Latn-TM tk Latn TM persian h11\
+object \[object Intl.Locale\] 0 undefined undefined
+</ResultBox>
+
+Тег уже канонизирован (день 26). `toString` отдаёт его целиком
+([15.3.15](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.toString)), `baseName` — основу без расширений
+([15.5.1](https://tc39.es/ecma402/2026/#sec-getlocalebasename)). Своих свойств нет: части — геттеры на прототипе
+([15.3](https://tc39.es/ecma402/2026/#sec-properties-of-intl-locale-prototype-object)). Чего в теге нет, то
+`undefined`.
+
+## 3. Конструктор по шагам {#constructor}
+
+Intl.Locale ([15.1.1](https://tc39.es/ecma402/2026/#sec-Intl.Locale)) начинается с проверок. Шаг 1: без `new` —
+TypeError; MDN: «Intl.Locale() can only be constructed with new». `NumberFormat` и `Collator` так не строги (день 26,
+раздел 17). Шаг 7: тег — строка или объект. Шаг 8: объект `Locale` отдаёт свой тег, остальное проходит ToString
+(шаг 9.a), а шаг 11 проверяет запись.
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+console.log(run(() => Intl.Locale("tk")));
+console.log(run(() => new Intl.Locale(5)));
+console.log(run(() => new Intl.Locale(["tk"])), "|", run(() => new Intl.Locale(["tk", "ru"])));
+console.log(run(() => new Intl.Locale(new Intl.Locale("tk-TM"))), "|", run(() => new Intl.Locale("tk_TM")));
+```
+
+<ResultBox>
+TypeError: Constructor Intl.Locale requires 'new'\
+TypeError: First argument to Intl.Locale constructor can't be empty or missing\
+tk | RangeError: Incorrect locale information provided\
+tk-TM | RangeError: Incorrect locale information provided
+</ResultBox>
+
+Число `5` — не строка и не объект (шаг 7), хотя текст V8 говорит о пустом аргументе. Массив — объект без слота
+\[\[InitializedLocale\]\]: ToString даёт `"tk"` и `"tk,ru"`, а запятая — ошибка шага 11. Списка тегов
+`Intl.Locale`, в отличие от большинства конструкторов `Intl`, не принимает (MDN); массив из одного тега работает
+случайно.
+
+<Scheme src="scheme-locale.svg">Конструктор Locale: проверки, канонизация, потом опции — сначала части основы, затем ключи -u-</Scheme>
+
+## 4. Опции перекрывают тег {#options}
+
+Шаг 13 канонизирует тег, шаг 14 — UpdateLanguageId ([15.1.2](https://tc39.es/ecma402/2026/#sec-updatelanguageid)):
+опции `language`, `script`, `region` и `variants` заменяют части основы, каждая проверяется по грамматике. Шаг 35 —
+MakeLocaleRecord ([15.1.3](https://tc39.es/ecma402/2026/#sec-makelocalerecord)): опции-ключи ложатся поверх `-u-`.
+MDN: «Option values here take priority over extension keys in the locale identifier». Почему сначала канонизация,
+объясняет примечание шага 12: «Because LanguageId canonicalization can alter tag in arbitrary ways according to Alias
+Rules from supplementalMetadata.xml, it is necessary to perform such canonicalization before applying overrides from
+options».
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+console.log(new Intl.Locale("tk-TM-u-ca-persian", { region: "TR", script: "Latn", calendar: "gregory" }).toString());
+console.log(new Intl.Locale("sh").toString(), new Intl.Locale("sh", { script: "Cyrl" }).toString(), new Intl.Locale("tk-SU").toString(), new Intl.Locale("iw", { region: "TM" }).toString());
+console.log(run(() => new Intl.Locale("tk", { region: "Turkmenistan" })), "|", run(() => new Intl.Locale("tk", { hourCycle: "h25" })));
+```
+
+<ResultBox>
+tk-Latn-TR-u-ca-gregory\
+sr-Latn sr-Cyrl tk-TM he-TM\
+RangeError: Incorrect locale information provided | RangeError: Value h25 out of range for locale options property hourCycle
+</ResultBox>
+
+`sh` — старый код сербохорватского латиницей: канонизация дала `sr-Latn`, и уже потом опция заменила письменность.
+Регион — две буквы или три цифры, значений `hourCycle` — четыре.
+
+## 5. Порядок опций и ловушка numeric {#numeric}
+
+Порядок чтения опций виден через `Proxy`, как на дне 26:
+
+```js
+const seen = [];
+new Intl.Locale("tk", new Proxy({}, { get(t, k) { if (typeof k === "string") seen.push(k); return undefined; } }));
+console.log(seen.join());
+console.log(new Intl.Locale("en", { numeric: "false" }).numeric, new Intl.Locale("en", { numeric: false }).numeric, new Intl.Locale("en-u-kn").numeric, new Intl.Locale("en", { numeric: true }).toString());
+```
+
+<ResultBox>
+language,script,region,variants,calendar,collation,firstDayOfWeek,hourCycle,caseFirst,numeric,numberingSystem\
+true false true en-u-kn
+</ResultBox>
+
+Сначала четыре части основы, потом ключи `-u-` в порядке шагов 15.1.1. Ловушка — `numeric`: шаг 29 читает его как
+булеву опцию, а GetOption ([9.2.11](https://tc39.es/ecma402/2026/#sec-getoption)) для булевых делает ToBoolean.
+Непустая строка `"false"` — это `true`. Ключ `kn` без значения тоже значит «да», и в каноническом теге значение
+`true` не пишется: `en-u-kn`.
+
+## 6. Ключи -u- свойствами {#keys}
+
+Какие ключи знает `Locale`, задаёт \[\[LocaleExtensionKeys\]\]
+([15.2.2](https://tc39.es/ecma402/2026/#sec-intl.locale-internal-slots)): `ca`, `co`, `fw`, `hc`, `nu` и ещё `kf` и
+`kn`, если их знает `Collator`; у каждого — своё свойство. Значения проверяются только по грамматике. Ключ `fw` — первый день недели; страницы MDN о
+`firstDayOfWeek` в наборе дня нет, есть раздел 15.3.6.
+
+```js
+const fw = (o) => new Intl.Locale("en-US", o).toString();
+console.log(fw({ firstDayOfWeek: 1 }), fw({ firstDayOfWeek: 0 }), fw({ firstDayOfWeek: 7 }), fw({ firstDayOfWeek: "monday" }));
+console.log(new Intl.Locale("en-US").getWeekInfo().firstDay, new Intl.Locale("en-US-u-fw-mon").getWeekInfo().firstDay, new Intl.Locale("en-US-u-fw-monday").getWeekInfo().firstDay);
+```
+
+<ResultBox>
+en-US-u-fw-mon en-US-u-fw-sun en-US-u-fw-sun en-US-u-fw-monday\
+7 1 7
+</ResultBox>
+
+Число опции становится строкой, а WeekdayToUValue ([15.5.15](https://tc39.es/ecma402/2026/#sec-weekdaytouvalue),
+шаг 23.a конструктора) по таблице 26 меняет `"0"`–`"7"` на дни; и `"0"`, и `"7"` — воскресенье. Другие строки
+проходят как есть, если подходят под грамматику, — `"monday"` проходит. Обратная WeekdayUValueToNumber
+([15.5.16](https://tc39.es/ecma402/2026/#sec-weekdayuvaluetonumber)) такого дня не знает, и неделя остаётся
+американской.
+
+## 7. maximize: дописать вероятное {#maximize}
+
+maximize ([15.3.9](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.maximize)) — алгоритм Add Likely Subtags
+из UTS #35: по языку дописывает вероятные письменность и регион, по региону — язык. При ошибке тег остаётся прежним
+(шаг 3); результат — новый объект.
+
+```js
+const max = (t) => new Intl.Locale(t).maximize().toString();
+console.log(max("tk"), max("ru"), max("uz"), max("uz-Arab"), max("ru-TM"));
+console.log(max("und"), max("und-TM"), max("und-Arab"), max("en-GB-u-ca-gregory"));
+const tk = new Intl.Locale("tk");
+console.log(tk.maximize() === tk, tk.maximize().maximize().baseName);
+```
+
+<ResultBox>
+tk-Latn-TM ru-Cyrl-RU uz-Latn-UZ uz-Arab-AF ru-Cyrl-TM\
+en-Latn-US tk-Latn-TM ar-Arab-EG en-Latn-GB-u-ca-gregory\
+false tk-Latn-TM
+</ResultBox>
+
+Туркменский пишут латиницей в Туркменистане, узбекский арабским письмом — в Афганистане. `und` — «язык не задан»:
+`und-TM` дал `tk-Latn-TM`, язык выбран по региону. Так и `tk-SU` дня 26: из многих замен SU выбран регион, вероятный
+для языка. Расширение `maximize` не трогает (MDN), повторный вызов ничего не добавляет.
+
+<Scheme src="scheme-likely.svg">maximize и minimize: дописать вероятное и убрать то, что выводится обратно</Scheme>
+
+## 8. minimize: убрать выводимое {#minimize}
+
+minimize ([15.3.10](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.minimize)) — алгоритм Remove Likely
+Subtags: убирает части, которые `maximize` вернул бы сам.
+
+```js
+const min = (t) => new Intl.Locale(t).minimize().toString();
+console.log(min("tk-Latn-TM"), min("ru-Cyrl-TM"), min("ru-Latn"), min("uz-Cyrl-UZ"));
+console.log(min("zh-Hant-TW"), min("zh-Hans-CN"), min("sr-Latn-RS"), min("en-Latn-US-u-hc-h23"));
+```
+
+<ResultBox>
+tk ru-TM ru-Latn uz-Cyrl\
+zh-TW zh sr-Latn en-u-hc-h23
+</ResultBox>
+
+`ru-Cyrl-TM` теряет только письменность: Туркменистан для русского не вероятен. `ru-Latn` остаётся — латиница для
+русского не выводится. `zh-Hant-TW` стал `zh-TW`: письменность выводится из региона, и регион алгоритм оставляет.
+Так получают самый короткий тег; а сравнивают теги, расширив оба `maximize`.
+
+## 9. Неделя Туркменистана {#week}
+
+getWeekInfo ([15.3.22](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getWeekInfo)) отдаёт запись
+WeekInfoOfLocale ([15.5.17](https://tc39.es/ecma402/2026/#sec-weekinfooflocale)). По таблице 27 полей два:
+`firstDay` — первый день недели по ISO 8601 (понедельник — 1, воскресенье — 7) и `weekend` — выходные.
+
+```js
+const week = (t) => { const w = new Intl.Locale(t).getWeekInfo(); return t + " " + w.firstDay + " / " + w.weekend.join(","); };
+console.log(week("tk-TM"), "|", week("tk"), "|", week("en-US"), "|", week("fa-IR"), "|", week("ar-AF"));
+console.log(Object.keys(new Intl.Locale("tk-TM").getWeekInfo()).join(), new Intl.Locale("tk-TM-u-fw-sun").getWeekInfo().firstDay, "weekInfo" in Intl.Locale.prototype);
+```
+
+<ResultBox>
+tk-TM 1 / 6,7 | tk 1 / 6,7 | en-US 7 / 6,7 | fa-IR 6 / 5 | ar-AF 6 / 4,5\
+firstDay,weekend 7 false
+</ResultBox>
+
+В Туркменистане неделя с понедельника, выходные — суббота и воскресенье. Для `tk` без региона Chrome отвечает так
+же: значения «based on locale» выбирает реализация. В Иране выходной один — пятница, неделя с субботы; в Афганистане
+выходные — четверг и пятница. `-u-fw-sun` перекрывает первый день (шаг 5). А MDN пишет, что метод «returns a weekInfo
+object with the properties firstDay, weekend and minimalDays», и печатает `minimalDays` в каждом примере; в тексте
+2026 года и в Chrome 158 этого поля нет. Старое свойство `weekInfo` тоже исчезло.
+
+## 10. Пояса Туркменистана {#zones}
+
+getTimeZones ([15.3.20](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getTimeZones)) отдаёт пояса
+региона тега — TimeZonesOfLocale ([15.5.13](https://tc39.es/ecma402/2026/#sec-timezonesoflocale)).
+
+```js
+const zones = (t) => String(new Intl.Locale(t).getTimeZones());
+console.log(zones("tk-TM"), "|", zones("tk"), "|", zones("uz-UZ"), "|", zones("uk-UA"), "|", zones("en-IN"));
+console.log(new Intl.Locale("tk").maximize().getTimeZones().join());
+```
+
+<ResultBox>
+Asia/Ashgabat | undefined | Asia/Samarkand,Asia/Tashkent | Europe/Kiev,Europe/Simferopol | Asia/Calcutta\
+Asia/Ashgabat
+</ResultBox>
+
+У Туркменистана пояс один. Шаг 2 строг: нет региона в теге — `undefined`, выводить его операция не пытается;
+поможет `maximize()`. Текст требует «canonical Zone name» базы IANA, а Chrome отдаёт свои основные имена:
+`Europe/Kiev` вместо `Europe/Kyiv` и `Asia/Calcutta` вместо `Asia/Kolkata` — как в задании 2 дня 26.
+
+## 11. Календари, часы, цифры, письмо {#info}
+
+Ещё пять методов: getCalendars ([15.3.16](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getCalendars)),
+getHourCycles, getNumberingSystems, getCollations и getTextInfo. Календари и часы берут регион через RegionPreference
+([15.5.8](https://tc39.es/ecma402/2026/#sec-regionpreference)): нет региона — его дописывает Add Likely Subtags.
+Если ключ задан в теге, список состоит из него одного (CalendarsOfLocale, шаг 1).
+
+```js
+const info = (t, m) => new Intl.Locale(t)[m]().join();
+console.log(info("tk-TM", "getCalendars"), "|", info("fa-IR", "getCalendars"), "|", info("tk-TM-u-ca-persian", "getCalendars"));
+console.log(info("tk-TM", "getHourCycles"), info("en-US", "getHourCycles"), "|", info("tk-TM", "getNumberingSystems"), info("fa-IR", "getNumberingSystems"), "|", info("de", "getCollations"), "|", info("tk", "getCollations"));
+console.log(new Intl.Locale("tk").getTextInfo().direction, new Intl.Locale("tk-Arab").getTextInfo().direction, new Intl.Locale("fa").getTextInfo().direction);
+```
+
+<ResultBox>
+gregory,islamic-civil,islamic-tbla | persian,gregory,islamic,islamic-civil,islamic-tbla | persian\
+h23 h12 | latn arabext | emoji,eor,phonebk | emoji,eor\
+ltr rtl rtl
+</ResultBox>
+
+Иран считает по календарю `persian`, у немецкого есть «телефонная книга» `phonebk`. Направление письма TextDirectionOfLocale
+([15.5.14](https://tc39.es/ecma402/2026/#sec-textdirectionoflocale)) берёт из письменности, но примечание
+предупреждает: «Web developers should not rely too much on this API to decide the direction of the text».
+
+## 12. Locale вместо строки {#use}
+
+Объект `Locale` принимает любой конструктор `Intl`: CanonicalizeLocaleList
+([9.2.1](https://tc39.es/ecma402/2026/#sec-canonicalizelocalelist)) на шаге 3 кладёт его в список из одного элемента,
+как строку, а шаг 7.c.iii берёт у элемента-`Locale` тег без новых проверок.
+
+```js
+const ruArab = new Intl.Locale("ru", { numberingSystem: "arab" });
+const f = new Intl.NumberFormat(ruArab);
+console.log(f.format(12.5), f.resolvedOptions().locale, Intl.getCanonicalLocales([new Intl.Locale("TK-tm"), "ru"]).join());
+console.log(new Intl.DateTimeFormat(new Intl.Locale("tk-TM", { calendar: "persian" })).resolvedOptions().locale, new Intl.DateTimeFormat(new Intl.Locale("tk-TM"), { calendar: "persian" }).resolvedOptions().calendar);
+```
+
+<ResultBox>
+١٢٫٥ ru-u-nu-arab tk-TM,ru\
+ru-RU persian
+</ResultBox>
+
+Опции `Locale` стали ключами тега и прошли ResolveLocale дня 26: `nu-arab` сработал. Но туркменского нет у
+`DateTimeFormat`, и календарь из тега пропал вместе с языком (день 26, раздел 15), а опция форматировщика дошла.
+Локаль удобно собирать объектом, а обязательную настройку — передавать опцией.
+
+## 13. Intl.Collator {#collator}
+
+`Intl.Collator` ([10.1](https://tc39.es/ecma402/2026/#sec-intl-collator-constructor)) сравнивает строки по правилам
+языка; вызывают его и без `new` (шаг 1 раздела [10.1.1](https://tc39.es/ecma402/2026/#sec-intl.collator); MDN:
+«Both create a new Intl.Collator instance»). Шаг 7 читает `usage` раньше выбора локали: от неё зависят данные —
+\[\[SortLocaleData\]\] или \[\[SearchLocaleData\]\]. Шаг 11 — ResolveOptions дня 26 с ключами `co`, `kn`, `kf`.
+
+```js
+const letters = ["Z", "a", "z", "ä"];
+console.log(letters.toSorted().join(), "|", letters.toSorted(new Intl.Collator("de").compare).join(), "|", letters.toSorted(new Intl.Collator("sv").compare).join(), "|", letters.toSorted(Intl.Collator("de", { caseFirst: "upper" }).compare).join());
+console.log("ä".localeCompare("z", "sv") === new Intl.Collator("sv").compare("ä", "z"), Intl.Collator.supportedLocalesOf(["tk", "tr", "ru", "uz"]).join());
+```
+
+<ResultBox>
+Z,a,z,ä | a,ä,z,Z | a,z,Z,ä | a,ä,Z,z\
+true tr,ru
+</ResultBox>
+
+Без функции `toSorted` сравнивает номера символов. `localeCompare`
+(день 25 курса 2) по разделу [20.1.1](https://tc39.es/ecma402/2026/#sup-String.prototype.localeCompare) строит
+такой же `Collator` при каждом вызове — ответы совпадают. Из четырёх языков сортировку Chrome знает для турецкого и
+русского.
+
+## 14. compare изнутри {#compare}
+
+`compare` — не метод, а геттер ([10.3.3](https://tc39.es/ecma402/2026/#sec-intl.collator.prototype.compare)): при
+первом чтении он создаёт функцию со ссылкой на свой `Collator` и запоминает её в \[\[BoundCompare\]\] (шаг 3).
+Примечание: «The returned function is bound to collator so that it can be passed directly to Array.prototype.sort or
+other functions».
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const c = new Intl.Collator("ru");
+const d = Object.getOwnPropertyDescriptor(Intl.Collator.prototype, "compare");
+console.log(typeof d.get, d.set, c.compare === c.compare, JSON.stringify(c.compare.name), c.compare.length);
+console.log(c.compare(1, 10), c.compare(), c.compare("é", "e\u0301"), "é" === "e\u0301");
+console.log(run(() => Intl.Collator.prototype.compare));
+```
+
+<ResultBox>
+function undefined true "" 2\
+\-1 0 0 false\
+TypeError: Method get Intl.Collator.prototype.compare called on incompatible receiver #&lt;Collator>
+</ResultBox>
+
+Функция одна, имени нет, длина 2 ([10.3.3.1](https://tc39.es/ecma402/2026/#sec-collator-compare-functions));
+аргументы проходят ToString (шаг 5): `compare(1, 10)` сравнивает `"1"` и `"10"`, без аргументов — две `"undefined"`.
+Само сравнение — CompareStrings ([10.3.3.2](https://tc39.es/ecma402/2026/#sec-collator-comparestrings)), операция
+реализации: важен знак, MDN предупреждает про «-1, or some other negative value». Обязательно одно: канонически
+равные строки дают ноль, хотя `===` их различает (день 20 курса 2). Прототип — не `Collator`
+([10.3](https://tc39.es/ecma402/2026/#sec-properties-of-the-intl-collator-prototype-object)), и геттер на нём бросает
+(шаг 2).
+
+## 15. sensitivity: какие различия считать {#sensitivity}
+
+CompareStrings делит различия на уровни. Основа буквы важна всегда: «different base letters always compare as
+unequal». Остальное решает \[\[Sensitivity\]\] по таблице 4: `base` — только основа, `accent` — ещё знаки, `case` —
+ещё регистр, `variant` — всё. Для сортировки по умолчанию `variant` (шаг 19).
+
+<Scheme src="scheme-levels.svg">Уровни сравнения: основа буквы, знаки над ней, регистр — и четыре значения sensitivity</Scheme>
+
+```js
+const row = (s) => { const c = new Intl.Collator("ru", { sensitivity: s }); return s + ": " + [c.compare("a", "á"), c.compare("a", "A"), c.compare("е", "ё"), c.compare("a", "b")].join(" "); };
+console.log(["base", "accent", "case", "variant"].map(row).join(" | "));
+const find = new Intl.Collator("ru", { usage: "search", sensitivity: "base" });
+console.log(["Ýusup", "yusup", "Jusup", "ÝUSUP", "Yusuf"].filter((n) => find.compare(n, "yusup") === 0).join(", "), "|", new Intl.Collator("ru", { usage: "search" }).resolvedOptions().sensitivity);
+```
+
+<ResultBox>
+base: 0 0 0 -1 | accent: -1 0 -1 -1 | case: 0 -1 0 -1 | variant: -1 -1 -1 -1\
+Ýusup, yusup, ÝUSUP | variant
+</ResultBox>
+
+Для русского «ё» — «е» со знаком: при `base` они равны, при `accent` — нет. Поиск с `base` находит имя в любом
+регистре и без знаков, но `Jusup` и `Yusuf` — другие буквы. Сортировать коллатором поиска нельзя: «this collation
+is not guaranteed to be in any particular order» (примечание 10.1.1). Чувствительность поиска по умолчанию — из
+данных языка, у русского `variant`, поэтому `base` пишут явно.
+
+## 16. numeric, caseFirst, ignorePunctuation, collation {#collator-options}
+
+`numeric` (ключ `kn`) сравнивает цифры как числа, `caseFirst` (ключ `kf`) ставит первыми заглавные или строчные,
+`ignorePunctuation` пропускает знаки препинания — по умолчанию из данных языка (шаг 21); MDN: «The default is true
+for Thai (th) and false for all other languages». `collation` (ключ `co`) выбирает особую сортировку языка.
+
+```js
+const lessons = ["урок 10", "урок 2", "Урок 3", "урок 1"];
+console.log(lessons.toSorted(new Intl.Collator("ru").compare).join(", "), "|", lessons.toSorted(new Intl.Collator("ru-u-kn").compare).join(", "));
+console.log(["b", "a", "B", "A"].toSorted(new Intl.Collator("ru", { caseFirst: "upper" }).compare).join(""), ["b", "a", "B", "A"].toSorted(new Intl.Collator("ru").compare).join(""), new Intl.Collator("th").resolvedOptions().ignorePunctuation, new Intl.Collator("ru").compare("a-b", "ab"), new Intl.Collator("ru", { ignorePunctuation: true }).compare("a-b", "ab"));
+const opts = (t, o) => { const r = new Intl.Collator(t, o).resolvedOptions(); return r.locale + " " + r.collation + " " + r.numeric; };
+console.log(opts("ru-u-kn-true", { numeric: false }), "|", opts("de-u-co-phonebk"), "|", opts("de-u-co-search"), "|", opts("ru", { collation: "phonebk" }));
+```
+
+<ResultBox>
+урок 1, урок 10, урок 2, Урок 3 | урок 1, урок 2, Урок 3, урок 10\
+AaBb aAbB true -1 0\
+ru default false | de-u-co-phonebk phonebk false | de default false | ru default false
+</ResultBox>
+
+`kn` в теге работает как `numeric: true`. Опция сильнее ключа: `numeric: false` убрала `kn-true` из тега. Значения
+`search` и `standard` в \[\[SortLocaleData\]\] запрещены ([10.2.3](https://tc39.es/ecma402/2026/#sec-intl-collator-internal-slots)),
+поэтому `-u-co-search` выпал, а `phonebk` для русского тихо пропущен. Тот же раздел запрещает ключи `kb`, `kh`, `kk`,
+`kr` и `vt` — своих правил порядка не задать. Итог — `resolvedOptions`
+([10.3.2](https://tc39.es/ecma402/2026/#sec-intl.collator.prototype.resolvedoptions), таблица 3).
+
+## 17. Чужие алфавиты {#alphabets}
+
+Правила языков берутся из CLDR — так советует примечание 2 к CompareStrings. Примечание 1 даёт примеры: «in Swedish,
+"ö" is a base letter that differs from "o", and "v" and "w" are considered to be the same base letter», в словацком
+«ch» — одна буква.
+
+```js
+const sorted = (t, list) => list.toSorted(new Intl.Collator(t).compare).join(" ");
+console.log(sorted("de", ["Offenbach", "Österreich", "Odenwald"]), "|", sorted("de-u-co-phonebk", ["Offenbach", "Österreich", "Odenwald"]));
+console.log(sorted("sv", ["O", "Ö", "Z", "P"]), "|", sorted("sk", ["i", "ch", "h", "cz"]));
+const base = (t) => new Intl.Collator(t, { sensitivity: "base" }).compare("v", "w");
+console.log(base("sv"), base("sv-u-co-trad"));
+```
+
+<ResultBox>
+Odenwald Offenbach Österreich | Odenwald Österreich Offenbach\
+O P Z Ö | cz h ch i\
+\-1 0
+</ResultBox>
+
+В «телефонной книге» немцев «ö» читается как «oe» — пример MDN. Шведская «Ö» — после «Z», словацкое «ch» — после
+«h». А «v» и «w» шведы в Chrome различают: одной буквой они остались только в традиционной сортировке `trad`.
+Примечание 3 прямо предупреждает: порядок может смениться с новой версией браузера.
+
+## 18. «Карточки 2.0»: туркменский алфавит {#cards}
+
+Карточки сортируют слова по-туркменски, порядок букв: `abçdeäfghijžklmnňoöprsştuüwyýz`. Что предложит браузер?
+
+```js
+const words = ["öň", "ot", "üç", "uly", "şol", "suw", "äpet", "et", "ýyl", "yz", "žurnal", "kitap"];
+console.log(new Intl.Collator("tk").resolvedOptions().locale, "|", words.toSorted(new Intl.Collator("tk").compare).join(" "));
+console.log(words.toSorted(new Intl.Collator("tr").compare).join(" "));
+```
+
+<ResultBox>
+ru-RU | äpet et kitap öň ot şol suw üç uly ýyl yz žurnal\
+äpet et kitap ot öň suw şol uly üç ýyl yz žurnal
+</ResultBox>
+
+Туркменской сортировки в Chrome нет, и `"tk"` стал языком браузера (день 26). Русские правила считают «ö», «ü», «ş»
+вариантами «o», «u», «s» — «öň» встал раньше «ot». Турецкий ближе: там эти буквы отдельные, и пары стоят верно. Но
+«ä», «ý» и «ž» не знает и он. Своих правил ECMA-402 не даёт (раздел 16) — пишем сравнение сами: номер буквы решает
+порядок, а `Collator` — остальное, например регистр.
+
+```js
+const ALPHABET = "abçdeäfghijžklmnňoöprsştuüwyýz";
+const rank = (ch) => { const i = ALPHABET.indexOf(ch); return i === -1 ? 100 + ch.codePointAt(0) : i; };
+const tie = new Intl.Collator("ru", { caseFirst: "upper" });
+function compareTk(a, b) {
+  const x = a.normalize("NFC").toLowerCase(), y = b.normalize("NFC").toLowerCase();
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = rank(x[i]) - rank(y[i]);
+    if (d !== 0) return d;
+  }
+  return x.length - y.length || tie.compare(a, b);
+}
+const words = ["öň", "ot", "üç", "uly", "şol", "suw", "äpet", "et", "ýyl", "yz", "žurnal", "kitap"];
+const names = ["Çaryýew", "Annaýew", "Şirow", "Öwezow", "Ýazmuhammedow", "Ärsaryýew", "Babaýew", "Zarow", "Esenow", "Ýusupow", "Yslamow"];
+console.log(words.toSorted(compareTk).join(" "));
+console.log(names.toSorted(compareTk).join(" "));
+console.log(["Ot", "ot", "OT"].toSorted(compareTk).join(" "), "|", ["et", "a\u0308pet", "f"].toSorted(compareTk).map((w) => w.normalize("NFC")).join(" "));
+```
+
+<ResultBox>
+et äpet žurnal kitap ot öň suw şol uly üç yz ýyl\
+Annaýew Babaýew Çaryýew Esenow Ärsaryýew Öwezow Şirow Yslamow Ýazmuhammedow Ýusupow Zarow\
+OT Ot ot | et äpet f
+</ResultBox>
+
+Фамилии встали, как требовало задание 9 дня 25 курса 2. `normalize("NFC")` склеивает «a» и знак в «ä» (день 20
+курса 2), иначе слово получило бы номер буквы «a». Буквы вне алфавита идут после него по коду, а слова, равные без
+регистра, `Collator` ставит заглавными вперёд.
+
+## 19. Ошибки дня и что будет завтра {#errors-next}
+
+| Что случилось | Текст в Chrome | Где искать |
+| --- | --- | --- |
+| `Intl.Locale("tk")` без `new` | `TypeError: Constructor Intl.Locale requires 'new'` | 15.1.1, шаг 1 |
+| тег — число | `TypeError: First argument to Intl.Locale constructor can't be empty or missing` | 15.1.1, шаг 7 |
+| неправильный тег или часть основы в опциях | `RangeError: Incorrect locale information provided` | 15.1.1, шаг 11; 15.1.2 |
+| `hourCycle: "h25"` | `RangeError: Value h25 out of range for locale options property hourCycle` | 9.2.11, шаг 5 |
+| `sensitivity: "high"` у `Collator` | `RangeError: Value high out of range for Intl.Collator options property sensitivity` | 10.1.1; 9.2.11, шаг 5 |
+| `Intl.Collator.prototype.compare` | `TypeError: Method get Intl.Collator.prototype.compare called on incompatible receiver #<Collator>` | 10.3.3, шаг 2 |
+
+Тихие подмены: `numeric: "false"` — это `true`; `firstDayOfWeek: "monday"` недели не меняет; `getTimeZones()` без
+региона — `undefined`; `Collator("tk")` сортирует по языку браузера; `-u-co-search` выпадает. Завтра — день 28:
+`PluralRules` («1 урок, 2 урока, 5 уроков»), `ListFormat` и `RelativeTimeFormat`.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [10 Collator Objects](https://tc39.es/ecma402/2026/#collator-objects) | сравнение строк; разделы 13–18 | <Brief /> |
+| [10.1 The Intl.Collator Constructor](https://tc39.es/ecma402/2026/#sec-intl-collator-constructor) | конструктор; раздел 13 | <Full /> |
+| [10.1.1 Intl.Collator ( \[ locales \[ , options \] \] )](https://tc39.es/ecma402/2026/#sec-intl.collator) | `usage` до выбора локали; разделы 13, 15 | <Brief /> |
+| [10.2 Properties of the Intl.Collator Constructor](https://tc39.es/ecma402/2026/#sec-properties-of-the-intl-collator-constructor) | свойства конструктора | <Brief /> |
+| [10.2.1 Intl.Collator.prototype](https://tc39.es/ecma402/2026/#sec-intl.collator.prototype) | прототип | <Brief /> |
+| [10.2.2 Intl.Collator.supportedLocalesOf ( locales \[ , options \] )](https://tc39.es/ecma402/2026/#sec-intl.collator.supportedlocalesof) | какие языки знает сортировка; разделы 13, 18 | <Brief /> |
+| [10.2.3 Internal slots](https://tc39.es/ecma402/2026/#sec-intl-collator-internal-slots) | ключи `co`, `kn`, `kf`; раздел 16 | <Brief /> |
+| [10.3 Properties of the Intl.Collator Prototype Object](https://tc39.es/ecma402/2026/#sec-properties-of-the-intl-collator-prototype-object) | прототип — не `Collator`; раздел 14 | <Full /> |
+| [10.3.1 Intl.Collator.prototype.constructor](https://tc39.es/ecma402/2026/#sec-intl.collator.prototype.constructor) | ссылка на конструктор | <Brief /> |
+| [10.3.2 Intl.Collator.prototype.resolvedOptions ( )](https://tc39.es/ecma402/2026/#sec-intl.collator.prototype.resolvedoptions) | итоговые настройки; раздел 16 | <Brief /> |
+| [10.3.3 get Intl.Collator.prototype.compare](https://tc39.es/ecma402/2026/#sec-intl.collator.prototype.compare) | геттер и \[\[BoundCompare\]\]; раздел 14 | <Brief /> |
+| [10.3.4 Intl.Collator.prototype \[ %Symbol.toStringTag% \]](https://tc39.es/ecma402/2026/#sec-intl.collator.prototype-%25symbol.tostringtag%25) | `[object Intl.Collator]` | <Brief /> |
+| [10.4 Properties of Intl.Collator Instances](https://tc39.es/ecma402/2026/#sec-properties-of-intl-collator-instances) | слоты экземпляра; раздел 16 | <Brief /> |
+| [15 Locale Objects](https://tc39.es/ecma402/2026/#locale-objects) | тег как объект; разделы 2–12 | <Brief /> |
+| [15.1 The Intl.Locale Constructor](https://tc39.es/ecma402/2026/#sec-intl-locale-constructor) | конструктор `Locale`; разделы 2–5 | <Full /> |
+| [15.1.1 Intl.Locale ( tag \[ , options \] )](https://tc39.es/ecma402/2026/#sec-Intl.Locale) | шаги конструктора; разделы 3–6 | <Brief /> |
+| [15.1.2 UpdateLanguageId ( tag, options )](https://tc39.es/ecma402/2026/#sec-updatelanguageid) | части основы из опций; раздел 4 | <Brief /> |
+| [15.1.3 MakeLocaleRecord ( tag, options, localeExtensionKeys )](https://tc39.es/ecma402/2026/#sec-makelocalerecord) | опции-ключи поверх `-u-`; раздел 4 | <Brief /> |
+| [15.2 Properties of the Intl.Locale Constructor](https://tc39.es/ecma402/2026/#sec-properties-of-intl-locale-constructor) | свойства конструктора | <Brief /> |
+| [15.2.1 Intl.Locale.prototype](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype) | прототип | <Brief /> |
+| [15.2.2 Internal slots](https://tc39.es/ecma402/2026/#sec-intl.locale-internal-slots) | ключи `-u-` объекта; раздел 6 | <Brief /> |
+| [15.3 Properties of the Intl.Locale Prototype Object](https://tc39.es/ecma402/2026/#sec-properties-of-intl-locale-prototype-object) | геттеры на прототипе; раздел 2 | <Brief /> |
+| [15.3.1 Intl.Locale.prototype.constructor](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.constructor) | ссылка на конструктор | <Brief /> |
+| [15.3.2 get Intl.Locale.prototype.baseName](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.baseName) | основа тега; раздел 2 | <Brief /> |
+| [15.3.3 get Intl.Locale.prototype.calendar](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.calendar) | ключ `ca`; раздел 6 | <Brief /> |
+| [15.3.4 get Intl.Locale.prototype.caseFirst](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.caseFirst) | ключ `kf`; раздел 6 | <Brief /> |
+| [15.3.5 get Intl.Locale.prototype.collation](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.collation) | ключ `co`; раздел 6 | <Brief /> |
+| [15.3.6 get Intl.Locale.prototype.firstDayOfWeek](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.firstDayOfWeek) | ключ `fw`; раздел 6 | <Brief /> |
+| [15.3.7 get Intl.Locale.prototype.hourCycle](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.hourCycle) | ключ `hc`; раздел 6 | <Brief /> |
+| [15.3.8 get Intl.Locale.prototype.language](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.language) | язык; раздел 2 | <Brief /> |
+| [15.3.9 Intl.Locale.prototype.maximize ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.maximize) | Add Likely Subtags; раздел 7 | <Brief /> |
+| [15.3.10 Intl.Locale.prototype.minimize ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.minimize) | Remove Likely Subtags; раздел 8 | <Brief /> |
+| [15.3.11 get Intl.Locale.prototype.numberingSystem](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.numberingSystem) | ключ `nu`; раздел 6 | <Brief /> |
+| [15.3.12 get Intl.Locale.prototype.numeric](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.numeric) | ключ `kn`; раздел 5 | <Brief /> |
+| [15.3.13 get Intl.Locale.prototype.region](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.region) | регион; раздел 2 | <Brief /> |
+| [15.3.14 get Intl.Locale.prototype.script](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.script) | письменность; раздел 2 | <Brief /> |
+| [15.3.15 Intl.Locale.prototype.toString ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.toString) | тег целиком; раздел 2 | <Brief /> |
+| [15.3.16 Intl.Locale.prototype.getCalendars ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getCalendars) | календари; раздел 11 | <Brief /> |
+| [15.3.17 Intl.Locale.prototype.getCollations ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getCollations) | виды сортировки; раздел 11 | <Brief /> |
+| [15.3.18 Intl.Locale.prototype.getHourCycles ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getHourCycles) | часы; раздел 11 | <Brief /> |
+| [15.3.19 Intl.Locale.prototype.getNumberingSystems ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getNumberingSystems) | цифры; раздел 11 | <Brief /> |
+| [15.3.20 Intl.Locale.prototype.getTimeZones ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getTimeZones) | пояса региона; раздел 10 | <Brief /> |
+| [15.3.21 Intl.Locale.prototype.getTextInfo ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getTextInfo) | направление письма; раздел 11 | <Brief /> |
+| [15.3.22 Intl.Locale.prototype.getWeekInfo ( )](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.getWeekInfo) | первый день и выходные; раздел 9 | <Brief /> |
+| [15.3.23 get Intl.Locale.prototype.variants](https://tc39.es/ecma402/2026/#sec-Intl.Locale.prototype.variants) | варианты; раздел 2 | <Brief /> |
+| [15.3.24 Intl.Locale.prototype \[ %Symbol.toStringTag% \]](https://tc39.es/ecma402/2026/#sec-intl.locale.prototype-%25symbol.tostringtag%25) | `[object Intl.Locale]`; раздел 2 | <Brief /> |
+| [15.4 Properties of Intl.Locale Instances](https://tc39.es/ecma402/2026/#sec-properties-of-intl-locale-instances) | слоты экземпляра | <Brief /> |
+| [15.5 Abstract Operations for Locale Objects](https://tc39.es/ecma402/2026/#sec-intl-locale-abstracts) | операции для `Locale` | <Brief /> |
+| [15.5.1 GetLocaleBaseName ( locale )](https://tc39.es/ecma402/2026/#sec-getlocalebasename) | основа тега | <Brief /> |
+| [15.5.2 GetLocaleLanguage ( locale )](https://tc39.es/ecma402/2026/#sec-getlocalelanguage) | язык из основы | <Brief /> |
+| [15.5.3 GetLocaleScript ( locale )](https://tc39.es/ecma402/2026/#sec-getlocalescript) | письменность из основы | <Brief /> |
+| [15.5.4 GetLocaleRegion ( locale )](https://tc39.es/ecma402/2026/#sec-getlocaleregion) | регион из основы | <Brief /> |
+| [15.5.5 GetLocaleVariants ( locale )](https://tc39.es/ecma402/2026/#sec-getlocalevariants) | варианты из основы | <Brief /> |
+| [15.5.6 UnicodeExtensionValue ( locale, key )](https://tc39.es/ecma402/2026/#sec-unicodeextensionvalue) | значение ключа `-u-` | <Brief /> |
+| [15.5.7 CanonicalUnicodeSubdivision ( locale, key )](https://tc39.es/ecma402/2026/#sec-canonicalunicodesubdivision) | ключи `rg` и `sd` | <Brief /> |
+| [15.5.8 RegionPreference ( locale )](https://tc39.es/ecma402/2026/#sec-regionpreference) | регион через likely subtags; раздел 11 | <Brief /> |
+| [15.5.9 CalendarsOfLocale ( loc )](https://tc39.es/ecma402/2026/#sec-calendarsoflocale) | календари региона; раздел 11 | <Brief /> |
+| [15.5.10 CollationsOfLocale ( loc )](https://tc39.es/ecma402/2026/#sec-collationsoflocale) | виды сортировки языка; раздел 11 | <Brief /> |
+| [15.5.11 HourCyclesOfLocale ( loc )](https://tc39.es/ecma402/2026/#sec-hourcyclesoflocale) | часы региона; раздел 11 | <Brief /> |
+| [15.5.12 NumberingSystemsOfLocale ( loc )](https://tc39.es/ecma402/2026/#sec-numberingsystemsoflocale) | цифры; раздел 11 | <Brief /> |
+| [15.5.13 TimeZonesOfLocale ( loc )](https://tc39.es/ecma402/2026/#sec-timezonesoflocale) | без региона — `undefined`; раздел 10 | <Brief /> |
+| [15.5.14 TextDirectionOfLocale ( loc )](https://tc39.es/ecma402/2026/#sec-textdirectionoflocale) | `ltr` или `rtl`; раздел 11 | <Brief /> |
+| [15.5.15 WeekdayToUValue ( fw )](https://tc39.es/ecma402/2026/#sec-weekdaytouvalue) | `"0"` и `"7"` — `sun`; раздел 6 | <Brief /> |
+| [15.5.16 WeekdayUValueToNumber ( fw )](https://tc39.es/ecma402/2026/#sec-weekdayuvaluetonumber) | `sun` — 7; раздел 9 | <Brief /> |
+| [15.5.17 WeekInfoOfLocale ( loc )](https://tc39.es/ecma402/2026/#sec-weekinfooflocale) | таблица 27; раздел 9 | <Brief /> |
+| [MDN: Intl.Collator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator) | сравнение по правилам языка; разделы 13–17 | <Full /> |
+| [MDN: Intl.Collator() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator/Collator) | опции; разделы 13, 15, 16 | <Full /> |
+| [MDN: Intl.Collator.prototype.compare()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator/compare) | сортировка и поиск; разделы 14, 15 | <Full /> |
+| [MDN: Intl.Collator.prototype.resolvedOptions()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator/resolvedOptions) | итоговые настройки; раздел 16 | <Brief /> |
+| [MDN: Intl.Collator.supportedLocalesOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator/supportedLocalesOf) | языки сортировки; разделы 13, 18 | <Brief /> |
+| [MDN: Intl.Locale](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale) | тег как объект; разделы 1, 2 | <Full /> |
+| [MDN: Intl.Locale.prototype.baseName](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/baseName) | основа тега; раздел 2 | <Full /> |
+| [MDN: Intl.Locale.prototype.calendar](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/calendar) | ключ `ca`; раздел 6 | <Brief /> |
+| [MDN: Intl.Locale.prototype.caseFirst](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/caseFirst) | ключ `kf`; раздел 6 | <Brief /> |
+| [MDN: Intl.Locale.prototype.collation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/collation) | ключ `co`; раздел 6 | <Brief /> |
+| [MDN: Intl.Locale.prototype.getCalendars()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getCalendars) | календари; раздел 11 | <Brief /> |
+| [MDN: Intl.Locale.prototype.getCollations()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getCollations) | виды сортировки; раздел 11 | <Brief /> |
+| [MDN: Intl.Locale.prototype.getHourCycles()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getHourCycles) | часы; раздел 11 | <Brief /> |
+| [MDN: Intl.Locale.prototype.getNumberingSystems()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getNumberingSystems) | цифры; раздел 11 | <Brief /> |
+| [MDN: Intl.Locale.prototype.getTextInfo()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getTextInfo) | направление письма; раздел 11 | <Brief /> |
+| [MDN: Intl.Locale.prototype.getTimeZones()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getTimeZones) | пояса; раздел 10 | <Brief /> |
+| [MDN: Intl.Locale.prototype.getWeekInfo()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getWeekInfo) | неделя; `minimalDays` устарел; раздел 9 | <Full /> |
+| [MDN: Intl.Locale.prototype.hourCycle](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/hourCycle) | ключ `hc`; раздел 6 | <Brief /> |
+| [MDN: Intl.Locale.prototype.language](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/language) | язык; раздел 2 | <Brief /> |
+| [MDN: Intl.Locale() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/Locale) | опции; только с `new`; разделы 3–5 | <Full /> |
+| [MDN: Intl.Locale.prototype.maximize()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/maximize) | дописать вероятное; раздел 7 | <Full /> |
+| [MDN: Intl.Locale.prototype.minimize()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/minimize) | убрать выводимое; раздел 8 | <Full /> |
+| [MDN: Intl.Locale.prototype.numberingSystem](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/numberingSystem) | ключ `nu`; раздел 6 | <Brief /> |
+| [MDN: Intl.Locale.prototype.numeric](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/numeric) | ключ `kn`; раздел 5 | <Brief /> |
+| [MDN: Intl.Locale.prototype.region](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/region) | регион; раздел 2 | <Brief /> |
+| [MDN: Intl.Locale.prototype.script](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/script) | письменность; раздел 2 | <Brief /> |
+| [MDN: Intl.Locale.prototype.toString()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/toString) | тег целиком; раздел 2 | <Brief /> |
+| [MDN: Intl.Locale.prototype.variants](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/variants) | варианты; раздел 2 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// new Intl.Locale(тег, опции) — только с new; сначала канонизация, потом опции: части основы, затем ключи -u-
+// loc.maximize() / loc.minimize() — новые объекты: дописать вероятное / убрать выводимое
+// loc.getWeekInfo() — firstDay и weekend; loc.getTimeZones() — нужен регион в теге
+// булевы опции — через ToBoolean: numeric: "false" даёт true
+// list.toSorted(new Intl.Collator("ru", { numeric: true }).compare) — compare уже привязан
+// своего алфавита в Intl нет: номер буквы решает порядок, Collator — остальное
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `new Intl.Locale(["tk"])` работает, а `new Intl.Locale(["tk", "ru"])` бросает RangeError?
+   <Answer>Шаг 9.a делает ToString: `"tk"` и `"tk,ru"`. Второе — неправильный тег (шаг 11).</Answer>
+2. Что вернёт `new Intl.Locale("ru-Cyrl-TM").minimize().toString()` и почему не `"ru"`?
+   <Answer>`"ru-TM"`: кириллица для русского выводится, Туркменистан — нет.</Answer>
+3. Почему у `new Intl.Locale("tk")` неделя есть, а `getTimeZones()` — `undefined`?
+   <Answer>Пояса берут регион только из тега (15.5.13, шаг 2), неделю реализация выводит сама; поможет
+   `maximize()`.</Answer>
+4. Можно ли сортировать список коллатором с `usage: "search"`?
+   <Answer>Нет: его порядок не гарантирован (примечание 10.1.1), он отвечает только «ноль или не ноль».</Answer>
+5. Почему с `numeric: true` строки `"x02"` и `"x2"` равны, а `"1.5"` стоит раньше `"1.10"`?
+   <Answer>Цифры сравниваются как целые: 02 и 2 — одно число. Точка — не часть числа: 5 и 10 сравниваются
+   отдельно.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale)
+(Intl.Locale, Intl.Collator и их свойства и методы, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-402 2026](https://tc39.es/ecma402/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

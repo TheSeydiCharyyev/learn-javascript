@@ -1,0 +1,124 @@
+---
+title: День 27 — конспект
+css: |
+  h1 { border-bottom-color: #0891b2; }
+  h2 { color: #4f46e5; background: #ecfeff; border-left-color: #0891b2; }
+---
+
+# День 27. Intl.Locale и Intl.Collator
+
+<Subtitle>Выжимка лекции: Locale — тег как объект, опции, maximize и minimize, неделя и пояса; Collator — compare, sensitivity и свой алфавит.</Subtitle>
+
+## Главное
+
+<Definition>
+`Intl.Locale` — тег как объект: его части и ключи `-u-` — геттеры на прототипе. Конструктор проверяет тег,
+канонизирует его и только потом кладёт опции поверх. `maximize` и `minimize` дописывают и убирают вероятные части
+по UTS #35, методы `get…` рассказывают о регионе: неделя, пояса, календари. `Intl.Collator` сравнивает строки по
+правилам языка, его `compare` — готовая функция для `sort`. Источник — ECMA-402 2026.
+</Definition>
+
+## Locale: тег, опции, maximize
+
+Блоки конспекта — это `main.js` в папке дня 22, как в лекции.
+
+```js
+const loc = new Intl.Locale("tk-SU-u-ca-persian", { script: "Latn", calendar: "gregory" });
+console.log(loc.toString() + " " + loc.region + " " + loc.calendar);   // tk-Latn-TM-u-ca-gregory TM gregory — SU заменила канонизация, опции легли поверх
+console.log(new Intl.Locale("und-TM").maximize().toString() + " " + new Intl.Locale("tk-Latn-TM").minimize().toString() + " " + new Intl.Locale("ru-Cyrl-TM").minimize().toString());   // tk-Latn-TM tk ru-TM — язык по региону; убрано только выводимое
+console.log(new Intl.Locale("en", { numeric: "false" }).numeric + " " + new Intl.Locale("en-US", { firstDayOfWeek: "monday" }).getWeekInfo().firstDay);   // true 7 — ToBoolean и день, которого нет в таблице 26
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| проверки | 15.1.1: 1, 7, 9.a, 11 | без `new` — TypeError; тег — строка или объект, иначе ToString; неправильная запись — RangeError |
+| канонизация и опции | 15.1.1: 13, 14, 35 | сначала канонизация, потом части основы (15.1.2), потом ключи `-u-` (15.1.3) |
+| вероятные части | 15.3.9, 15.3.10 | Add и Remove Likely Subtags; результат — новый объект |
+| первый день | 15.1.1: 23.a; 15.5.15 | `"0"` и `"7"` — `sun`; другие строки — как есть |
+
+<Remember>
+MDN: «Intl.Locale() can only be constructed with new» и «Option values here take priority over extension keys in
+the locale identifier». Значения опций проверяются только грамматикой: `calendar: "xxxx"` сохранится, а
+`numeric: "false"` станет `true` — булевы опции проходят ToBoolean.
+</Remember>
+
+## Неделя, пояса, календари
+
+```js
+const week = new Intl.Locale("tk-TM").getWeekInfo();
+console.log(week.firstDay + " " + week.weekend.join(",") + " " + Object.keys(week).join());   // 1 6,7 firstDay,weekend — с понедельника, выходные суббота и воскресенье
+console.log(String(new Intl.Locale("tk").getTimeZones()) + " " + new Intl.Locale("tk").maximize().getTimeZones().join());   // undefined Asia/Ashgabat — поясам нужен регион в теге
+console.log(new Intl.Locale("tk-TM").getHourCycles().join() + " " + new Intl.Locale("tk-TM-u-ca-persian").getCalendars().join() + " " + new Intl.Locale("tk-Arab").getTextInfo().direction);   // h23 persian rtl — часы 24-часовые; ключ сужает список; арабица справа налево
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| `getWeekInfo()` | 15.3.22; 15.5.17, таблица 27 | `firstDay` (1 — понедельник, 7 — воскресенье) и `weekend`; ключ `fw` перекрывает первый день |
+| `getTimeZones()` | 15.5.13: 2 | регион только из тега, нет его — `undefined` |
+| календари и часы | 15.5.9: 1; 15.5.8 | ключ задан — список из него одного; нет региона — его дописывают likely subtags |
+| `getTextInfo()` | 15.5.14 | `ltr` или `rtl` по письменности |
+
+<Remember>
+Страница MDN говорит, что метод «returns a weekInfo object with the properties firstDay, weekend and minimalDays», но в
+ECMA-402 2026 и в Chrome 158 полей два. Текст требует для поясов «canonical Zone name», а Chrome отдаёт свои имена:
+`Europe/Kiev` вместо `Europe/Kyiv`. Направление письма — лишь запасной вариант: «Web developers should not rely too
+much on this API to decide the direction of the text». `Locale` можно передать любому конструктору (9.2.1, шаг 3),
+но язык, которого у конструктора нет, теряет и свои ключи.
+</Remember>
+
+## Collator: compare, sensitivity, свой алфавит
+
+```js
+const c = new Intl.Collator("ru", { numeric: true });
+console.log(["урок 10", "Урок 2", "урок 1"].toSorted(c.compare).join(", ") + " | " + (c.compare === c.compare) + " " + c.compare("é", "é".normalize("NFD")));   // урок 1, Урок 2, урок 10 | true 0 — числа как числа; одна функция; канонически равные — ноль
+const find = new Intl.Collator("ru", { usage: "search", sensitivity: "base" });
+console.log(["Ýusup", "YUSUP", "Jusup"].filter((n) => find.compare(n, "yusup") === 0).join(", ") + " | " + new Intl.Collator("tk").resolvedOptions().locale);   // Ýusup, YUSUP | ru-RU — поиск без знаков и регистра; туркменской сортировки нет
+const ALPHABET = "abçdeäfghijžklmnňoöprsştuüwyýz";
+const key = (w) => [...w.normalize("NFC").toLowerCase()].map((ch) => { const i = ALPHABET.indexOf(ch); return i === -1 ? 100 + ch.codePointAt(0) : i; });
+function compareTk(a, b) {
+  const x = key(a), y = key(b);
+  for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return x.length - y.length;
+}
+console.log(["ýyl", "yz", "äpet", "et"].toSorted(compareTk).join(" ") + " | " + ["ýyl", "yz", "äpet", "et"].toSorted(new Intl.Collator("tk").compare).join(" "));   // et äpet yz ýyl | äpet et ýyl yz — свой алфавит против языка браузера
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| конструктор | 10.1.1: 1, 7, 11, 19 | можно без `new`; `usage` — до выбора локали; ключи `co`, `kn`, `kf`; для сортировки по умолчанию `variant` |
+| `compare` | 10.3.3: 3; 10.3.3.1: 5 | геттер, одна функция в \[\[BoundCompare\]\]; аргументы проходят ToString |
+| сравнение | 10.3.3.2, таблица 4 | `base` — основа, `accent` — и знаки, `case` — и регистр, `variant` — всё |
+| ключи | 10.2.3 | `search` и `standard` нельзя; `kb`, `kh`, `kk`, `kr`, `vt` запрещены |
+
+<Remember>
+Примечание 10.3.3: «The returned function is bound to collator so that it can be passed directly to
+Array.prototype.sort or other functions». Коллатор поиска не для сортировки: «this collation is not guaranteed to be
+in any particular order». Своих правил порядка в `Intl` нет, туркменский алфавит пишем сами: `tr` ближе `ru` — у
+него «ö», «ü», «ş» отдельные буквы, — но «ä», «ý», «ž» не знает и он. Шведские «v» и «w» — одна буква только в
+`sv-u-co-trad`.
+</Remember>
+
+<Homework>
+1. Не запуская, предскажите `toString()`: `new Intl.Locale("sh", { region: "BA" })`,
+   `new Intl.Locale("tk-SU", { numeric: true })`, `new Intl.Locale("en-u-hc-h12", { hourCycle: "h23" })`,
+   `new Intl.Locale("ru-Latn").maximize()`, `new Intl.Locale("en-Latn-US-u-ca-gregory").minimize()`. Какой шаг или
+   раздел объясняет каждый ответ? Проверьте.
+2. Почему каждая строка бросает и на каком шаге: `Intl.Locale("tk")`; `new Intl.Locale(null)`;
+   `new Intl.Locale("tk", { script: "Latin" })`; `new Intl.Locale("tk", { variants: "1996-1996" })`;
+   `new Intl.Collator("ru", { usage: "filter" })`?
+3. Напишите `weekendNames(tag, lang)`: выходные региона тега словами на языке `lang`, через `getWeekInfo` и
+   `DateTimeFormat` с `weekday: "long"`. Проверьте: `"tk-TM"` по-русски — «суббота, воскресенье», `"fa-IR"` —
+   «пятница», `"ar-AF"` — «четверг, пятница», `"he"` по-турецки — «Cuma, Cumartesi».
+4. Напишите `findName(list, query)`: имена, равные запросу без учёта регистра и знаков. Проверьте:
+   `findName(["Ýusup", "yusup", "Jusup", "ÝUSUP", "Gülnar", "Gulnar", "Gülnara"], "gulnar")` — `Gülnar` и `Gulnar`.
+   Почему тем же коллатором нельзя отсортировать список?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale)
+(Intl.Locale, Intl.Collator и их свойства и методы, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-402 2026](https://tc39.es/ecma402/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

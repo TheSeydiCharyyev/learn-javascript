@@ -19,7 +19,11 @@
 // texts of ECMA-402 and MDN it retells; every step and section number it names; the days it points to say what it
 // says; the reference table holds all 93 rows
 // of the day's plan (65 of ECMA-402, 28 of MDN) with their marks and titles, every anchor exists and every link whose
-// text starts with a number names the section of that number; the footer.
+// text starts with a number names the section of that number; the footer. The notes: each of their 3 blocks prints
+// what the comments of its console.log lines say; homework 1 — five toString() to predict; 2 — five errors with the
+// texts of Chrome; 3 — the reference weekendNames (getWeekInfo and the weekday of DateTimeFormat); 4 — the reference
+// findName with a search collator; their English quotes (the 4 of ECMA-402 and the 3 of MDN in their places), the steps
+// of their tables and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -130,6 +134,9 @@ const stepPaths = (html, needle) => {
   const lectureText = await src.evaluate(() => document.querySelector('.container').innerText);
   await src.goto(builtSite.urlOfFile(path.join(DAY22, 'lecture.html')));
   const indexHtml = await src.evaluate(() => [...document.querySelectorAll('pre.code[data-file]')].find((pre) => pre.dataset.file === 'index.html')?.textContent);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
+  const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
+  const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -223,6 +230,52 @@ console.log([err(() => Intl.Locale("tk")), err(() => new Intl.Locale(5)), err(()
     check(out[3] === 'ä z 1 q' && lectureText.includes('Буквы вне алфавита идут после него по коду'),
       `lecture 18: compareTk puts letters outside the alphabet after it, by their codes ${JSON.stringify(out[3])}`);
   }
+
+  // the notes: every console.log line writes its output in its comment
+  {
+    const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+      .map((l) => l.slice(l.lastIndexOf('//') + 2).trim().split(' — ')[0]);
+    check(notesBlocks.length === 3 && notesBlocks.every((x) => x.js && !x.file)
+      && notesText.includes('Блоки конспекта — это main.js в папке дня 22, как в лекции.'),
+    `student: 3 js blocks without a file name, main.js of the folder of day 22 (${notesBlocks.length})`);
+    for (const [i, blk] of notesBlocks.entries()) {
+      const want = commented(blk.code);
+      const out = await runFolder(b, page(blk.code), { lines: want.length });
+      if (!quiet) { console.log(`\n--- student #${i}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      check(want.length > 0 && same(out, want), `student #${i}: output = comments ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the notes, homework 1–4: by experiment (the outputs go into the corpus of the quotes too — «Cuma, Cumartesi»)
+  const homework = [];
+  {
+    const hw1 = await runFolder(b, page(`console.log([new Intl.Locale("sh", { region: "BA" }), new Intl.Locale("tk-SU", { numeric: true }), new Intl.Locale("en-u-hc-h12", { hourCycle: "h23" }), new Intl.Locale("ru-Latn").maximize(), new Intl.Locale("en-Latn-US-u-ca-gregory").minimize()].map(String).join(" "));`), { lines: 1 });
+    check(same(hw1, ['sr-Latn-BA tk-TM-u-kn en-u-hc-h23 ru-Latn-RU en-u-ca-gregory'])
+      && ['new Intl.Locale("sh", { region: "BA" })', 'new Intl.Locale("tk-SU", { numeric: true })', 'new Intl.Locale("en-u-hc-h12", { hourCycle: "h23" })', 'new Intl.Locale("ru-Latn").maximize()', 'new Intl.Locale("en-Latn-US-u-ca-gregory").minimize()'].every((s) => notesText.includes(s)),
+    `student homework 1: canonicalization before the region, SU and kn, the option over -u-, maximize keeps Latn, minimize keeps -u- ${JSON.stringify(hw1)}`);
+    const hw2 = await runFolder(b, page(`const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+console.log([run(() => Intl.Locale("tk")), run(() => new Intl.Locale(null)), run(() => new Intl.Locale("tk", { script: "Latin" })), run(() => new Intl.Locale("tk", { variants: "1996-1996" })), run(() => new Intl.Collator("ru", { usage: "filter" }))].join(" | "));`), { lines: 1 });
+    check(same(hw2, ["TypeError: Constructor Intl.Locale requires 'new' | TypeError: First argument to Intl.Locale constructor can't be empty or missing | RangeError: Incorrect locale information provided | RangeError: Incorrect locale information provided | RangeError: Value filter out of range for Intl.Collator options property usage"])
+      && notesText.includes('new Intl.Locale("tk", { variants: "1996-1996" })') && notesText.includes('new Intl.Collator("ru", { usage: "filter" })'),
+    `student homework 2: five errors — 15.1.1 steps 1 and 7, the grammar of 15.1.2 twice (script, duplicate variants), 10.1.1 step 7 with 9.2.11 step 5 ${JSON.stringify(hw2)}`);
+    const hw3 = await runFolder(b, page(`function weekendNames(tag, lang) {
+  const { weekend } = new Intl.Locale(tag).getWeekInfo();
+  const fmt = new Intl.DateTimeFormat(lang, { weekday: "long", timeZone: "UTC" });
+  return weekend.map((d) => fmt.format(new Date(Date.UTC(2026, 10, 22 + d)))).join(", ");
+}
+console.log([weekendNames("tk-TM", "ru"), weekendNames("fa-IR", "ru"), weekendNames("ar-AF", "ru"), weekendNames("he", "tr")].join(" | "));`), { lines: 1 });
+    check(same(hw3, ['суббота, воскресенье | пятница | четверг, пятница | Cuma, Cumartesi'])
+      && notesText.includes('"tk-TM" по-русски — «суббота, воскресенье», "fa-IR" — «пятница», "ar-AF" — «четверг, пятница», "he" по-турецки — «Cuma, Cumartesi»'),
+    `student homework 3: the reference weekendNames — getWeekInfo and the long weekday of DateTimeFormat (23 November 2026 is a Monday) ${JSON.stringify(hw3)}`);
+    const hw4 = await runFolder(b, page(`function findName(list, query) {
+  const c = new Intl.Collator("ru", { usage: "search", sensitivity: "base" });
+  return list.filter((n) => c.compare(n, query) === 0);
+}
+console.log(findName(["Ýusup", "yusup", "Jusup", "ÝUSUP", "Gülnar", "Gulnar", "Gülnara"], "gulnar").join(", "));`), { lines: 1 });
+    check(same(hw4, ['Gülnar, Gulnar']) && notesText.includes('Почему тем же коллатором нельзя отсортировать список?'),
+      `student homework 4: the reference findName — a search collator with base finds Gülnar and Gulnar, not Gülnara ${JSON.stringify(hw4)}`);
+    homework.push(...hw1, ...hw2, ...hw3, ...hw4);
+  }
   await b.close();
 
   // ECMA-402 2026 and the MDN pages of the day
@@ -278,6 +331,39 @@ console.log([err(() => Intl.Locale("tk")), err(() => new Intl.Locale(5)), err(()
     check(lostMdn.length === 0, `quotes: ${fromMdn.length} quotes the lecture gives to MDN stand in their places and on their pages (Locale, Locale() twice, Collator() twice, getWeekInfo, Collator): ${lostMdn.join(' | ') || 'all'}`);
   }
 
+  // the notes: their English quotes are in the corpus (with the outputs of the homework), the ones of ECMA-402 and MDN in
+  // their places and their own clause or page; the steps of their tables are those of the lecture (in the list of steps
+  // below); the footer
+  {
+    const ns = tight(notesText);
+    const corpus = tight([...daySpec.map((c) => f(c[0])), f('sec-collator-comparestrings'), ...Object.values(M), ...outputs, ...homework].join(' '));
+    const nquotes = [...notesText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => tight(m[1])).filter((x) => !/[а-яё]/i.test(x) && x.length > 3);
+    const nmissing = nquotes.filter((x) => !corpus.includes(x));
+    const nFromSpec = [
+      ['Текст требует для поясов «canonical Zone name»', 'sec-timezonesoflocale', 'canonical Zone name of the IANA Time Zone Database'],
+      ['Направление письма — лишь запасной вариант: «Web developers should not rely too much on this API to decide the direction of the text»', 'sec-textdirectionoflocale', 'Web developers should not rely too much on this API to decide the direction of the text'],
+      ['Примечание 10.3.3: «The returned function is bound to collator so that it can be passed directly to Array.prototype.sort or other functions»', 'sec-intl.collator.prototype.compare', 'The returned function is bound to collator so that it can be passed directly to Array.prototype.sort or other functions'],
+      ['Коллатор поиска не для сортировки: «this collation is not guaranteed to be in any particular order»', 'sec-intl.collator', 'Note The collation associated with the "search" value for the "usage" option should only be used to find matching strings, since this collation is not guaranteed to be in any particular order'],
+    ];
+    const nFromMdn = [
+      ['MDN: «Intl.Locale() can only be constructed with new»', 'Locale/Locale', 'Intl.Locale() can only be constructed with new'],
+      ['и «Option values here take priority over extension keys in the locale identifier»', 'Locale/Locale', 'Option values here take priority over extension keys in the locale identifier'],
+      ['Страница MDN говорит, что метод «returns a weekInfo object with the properties firstDay, weekend and minimalDays»', 'Locale/getWeekInfo', 'returns a weekInfo object with the properties firstDay, weekend and minimalDays'],
+    ];
+    const nlost = [...nFromSpec.filter(([inNotes, id, quote]) => !ns.includes(tight(inNotes)) || !tight(f(id)).includes(tight(quote))).map(([, id, quote]) => `${num(id)} «${quote.slice(0, 30)}»`),
+      ...nFromMdn.filter(([inNotes, p, quote]) => !ns.includes(tight(inNotes)) || !tight(M[G + p] ?? '').includes(tight(quote))).map(([, p, quote]) => `${p} «${quote.slice(0, 30)}»`)];
+    check(nquotes.length === 8 && nmissing.length === 0 && nlost.length === 0,
+      `student: ${nquotes.length} English quotes of the notes in ECMA-402, MDN or the output of Chrome (not found: ${nmissing.join(' | ') || 'none'}); the 4 of ECMA-402 (15.5.13, 15.5.14, 10.3.3, 10.1.1) and the 3 of MDN (Locale() twice, getWeekInfo) in their places (lost: ${nlost.join(' | ') || 'none'})`);
+    const table = ['15.1.1: 1, 7, 9.a, 11', '15.1.1: 13, 14, 35', '(15.1.2)', '(15.1.3)', '15.3.9, 15.3.10', '15.1.1: 23.a; 15.5.15', '15.3.22; 15.5.17, таблица 27', '15.5.13: 2', '15.5.9: 1; 15.5.8', '15.5.14',
+      '10.1.1: 1, 7, 11, 19', '10.3.3: 3; 10.3.3.1: 5', '10.3.3.2, таблица 4', '10.2.3', '(9.2.1, шаг 3)', 'Примечание 10.3.3'];
+    check(table.every((s) => notesText.includes(s)), `student: the tables and notes name the steps of the lecture (${table.length}): missing ${table.filter((s) => !notesText.includes(s)).join(' | ') || 'none'}`);
+    const notesHtml = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
+    const nFooter = notesHtml.slice(notesHtml.indexOf('<div class="sources">'));
+    check(['Intl.Locale, Intl.Collator и их свойства и методы', 'спецификация <a href="https://tc39.es/ecma402/2026/">ECMA-402 2026</a>', 'Mozilla Contributors'].every((s) => nFooter.includes(s))
+      && (notesHtml.match(/developer\.mozilla\.org/g) || []).length === 1 && !/tc39\.es\/ecma402\/2026\/#/.test(notesHtml),
+    'student: the footer names the MDN pages and ECMA-402 2026; MDN is linked once; section numbers without links');
+  }
+
   // the MDN texts the lecture retells
   {
     const week = md[`${G}Locale/getWeekInfo`];
@@ -320,9 +406,11 @@ console.log([err(() => Intl.Locale("tk")), err(() => new Intl.Locale(5)), err(()
     ['sec-weekinfooflocale', 'If fw is not undefined, then', '5'],
     ['sec-calendarsoflocale', 'If loc.[[Calendar]] is not undefined, then', '1'],
     ['sec-getoption', 'If values is not empty and values does not contain value, throw a RangeError exception', '5'],
+    ['sec-updatelanguageid', 'If script cannot be matched by the unicode_script_subtag Unicode locale nonterminal, throw a RangeError exception', '5.a'],
+    ['sec-updatelanguageid', 'If variantSubtags contains any duplicate elements, throw a RangeError exception', '9.e'],
   ];
   const wrong = steps.filter(([id, needle, k]) => at(id, needle).join() !== k).map(([id, needle, k]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${k}`);
-  check(wrong.length === 0, `ECMA-402: ${steps.length} step numbers the lecture names (15.1.1, 10.1.1, 10.3.3, 10.3.3.1, 9.2.1, 15.3.9, 15.5.13, 15.5.17, 15.5.9, 9.2.11): ${wrong.join('; ') || 'all right'}`);
+  check(wrong.length === 0, `ECMA-402: ${steps.length} step numbers the lecture names (15.1.1, 10.1.1, 10.3.3, 10.3.3.1, 9.2.1, 15.3.9, 15.5.13, 15.5.17, 15.5.9, 9.2.11; 15.1.2 of homework 2 of the notes):${wrong.join('; ') || 'all right'}`);
   const nums = { 'sec-Intl.Locale.prototype.firstDayOfWeek': '15.3.6', 'sec-collator-comparestrings': '10.3.3.2', 'sec-collator-compare-functions': '10.3.3.1',
     'sec-calendarsoflocale': '15.5.9', 'sec-getoption': '9.2.11', 'sup-String.prototype.localeCompare': '20.1.1' };
   const wrongNums = Object.entries(nums).filter(([id, k]) => num(id) !== k).map(([id, k]) => `${id}: ${num(id)}≠${k}`);

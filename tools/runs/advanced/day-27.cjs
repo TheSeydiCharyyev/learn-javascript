@@ -23,7 +23,12 @@
 // what the comments of its console.log lines say; homework 1 — five toString() to predict; 2 — five errors with the
 // texts of Chrome; 3 — the reference weekendNames (getWeekInfo and the weekday of DateTimeFormat); 4 — the reference
 // findName with a search collator; their English quotes (the 4 of ECMA-402 and the 3 of MDN in their places), the steps
-// of their tables and the footer.
+// of their tables and the footer. The tasks: the 4 blocks to predict print what EXPECT says; every line of the 5
+// examples holds with the reference solutions (SOLUTIONS, an awaited check); the experiments of the criteria — SU and
+// the first replacement RU, localeCompare without numeric, base against accent for ä and ý, the order of the tries of
+// minimize, rg-gb as two keys and sd behind the region of the tag; 15.5.7, 15.5.8 and the override in 15.5.9 and
+// 15.5.11; the 3 quotes in their places (table 4, note 1 of 20.1.1, 15.5.13), the sections they ask for, the link 15.5.8
+// and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -38,6 +43,74 @@ const DAY22 = path.join(ROOT, 'advanced/day-22');
 const SPEC = path.join(ROOT, 'tools/.cache/ecma402-2026.html');
 const ORIGIN = 'http://127.0.0.1:5594';
 const quiet = process.argv.includes('--quiet');
+// a block of the tasks without an example: its output by "tasks #index" (js blocks of the page); the tasks ask to predict
+// these (Chrome, Russian context)
+const EXPECT = {
+  'tasks #0': ['he-Hebr-RU uz-AF tk-TM-u-ca-persian-hc-h23', 'RangeError RangeError ru-RU TypeError'],
+  'tasks #1': ['tk-Arab-TM/tk-Arab az-Arab-IR/az-IR fa-Arab-AF/fa-AF en-Latn-GB/en-GB ru-Cyrl-RU/ru', 'zh-Hans-CN zh-Hant-MO zh-HK uz-AF'],
+  'tasks #2': ['еж Еж ёж Ёж ежи | Еж еж Ёж ёж ежи', '4 2 2 1'],
+  'tasks #8': ['h12 7 gregory | h23 1 gregory | h23 1 gregory | h23 6 persian', 'US undefined en-u-gb-rg'],
+};
+// reference solutions of the tasks: every "expression;   // value" line of an example must give the comment; the check is
+// awaited, so a line may await too. No template literals inside: Node reads these strings as templates first.
+const SOLUTIONS = {
+  weekDays: `function weekDays(tag, lang) {
+  const { firstDay, weekend } = new Intl.Locale(tag).getWeekInfo();
+  const fmt = new Intl.DateTimeFormat(lang, { weekday: "short", timeZone: "UTC" });
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = ((firstDay - 1 + i) % 7) + 1;
+    days.push(fmt.format(new Date(Date.UTC(2026, 10, 22 + d))) + (weekend.includes(d) ? "*" : ""));
+  }
+  return days;
+}`,
+  sortStudents: `function sortStudents(list) {
+  const byGroup = new Intl.Collator("ru", { numeric: true });
+  const byName = new Intl.Collator("ru");
+  return list.toSorted((a, b) => byGroup.compare(a.group, b.group) || byName.compare(a.name, b.name));
+}`,
+  regionInfo: `function regionInfo(region) {
+  const loc = new Intl.Locale("und-" + region).maximize();
+  return { language: loc.language, script: loc.script, zones: loc.getTimeZones(), hours: loc.getHourCycles()[0], weekend: loc.getWeekInfo().weekend };
+}`,
+  makeTurkmen: `function makeTurkmen() {
+  const ALPHABET = "abçdeäfghijžklmnňoöprsştuüwyýz";
+  const tie = new Intl.Collator("ru", { caseFirst: "upper" });
+  const same = new Intl.Collator("ru", { sensitivity: "accent" });
+  const rank = (ch) => { const i = ALPHABET.indexOf(ch); return i === -1 ? 100 + ch.codePointAt(0) : i; };
+  return {
+    compare(a, b) {
+      const x = a.normalize("NFC").toLowerCase(), y = b.normalize("NFC").toLowerCase();
+      for (let i = 0; i < Math.min(x.length, y.length); i++) {
+        const d = rank(x[i]) - rank(y[i]);
+        if (d !== 0) return d;
+      }
+      return x.length - y.length || tie.compare(a, b);
+    },
+    equals: (a, b) => same.compare(a, b) === 0,
+  };
+}`,
+  myMinimize: `function myMinimize(tag) {
+  const full = new Intl.Locale(tag).maximize();
+  const same = (t) => new Intl.Locale(t).maximize().baseName === full.baseName;
+  const { language: l, script: s, region: r } = full;
+  for (const t of [l, l + "-" + r, l + "-" + s]) if (same(t)) return t;
+  return full.baseName;
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(\s*)(?!const |let )(\S.*?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `${m[1]}await __check(${JSON.stringify(m[2])}, async () => (${m[2]}), ${JSON.stringify(m[3])});` : line;
+  });
+  return `async function __check(text, fn, want) {
+  const got = JSON.stringify(await fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 const LF = String.fromCharCode(10);
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -137,6 +210,9 @@ const stepPaths = (html, needle) => {
   await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
   const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
   const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
+  const taskBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => ({ code: pre.textContent, file: pre.dataset.file || null, example: !!pre.closest('.example'), box: !!(pre.nextElementSibling && pre.nextElementSibling.matches('.result-box')) })));
+  const tasksText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -276,6 +352,40 @@ console.log(findName(["Ýusup", "yusup", "Jusup", "ÝUSUP", "Gülnar", "Gulnar",
       `student homework 4: the reference findName — a search collator with base finds Gülnar and Gulnar, not Gülnara ${JSON.stringify(hw4)}`);
     homework.push(...hw1, ...hw2, ...hw3, ...hw4);
   }
+
+  // the tasks: the blocks to predict print what EXPECT says; every line of an example holds with the reference solution
+  {
+    check(taskBlocks.length === 9 && taskBlocks.filter((x) => x.example).length === 5 && taskBlocks.every((x) => !x.file && !x.box)
+      && tasksText.includes('Код пишем в папке дня 22: блок — это main.js.'),
+    `tasks: 9 js blocks — 5 examples, 4 to predict; no files, no result-box; the folder of day 22 (${taskBlocks.length})`);
+    for (const [i, blk] of taskBlocks.entries()) {
+      const code = blk.example ? checkable(blk.code) : blk.code;
+      const want = blk.example ? null : EXPECT[`tasks #${i}`];
+      const out = await runFolder(b, page(code), { lines: want ? want.length : (code.match(/await __check\(/g) || []).length });
+      if (!quiet) { console.log(`\n--- tasks #${i}${blk.example ? ' (example)' : ''}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      if (blk.example) {
+        for (const l of out.filter((x) => x.startsWith('EX-'))) check(l.startsWith('EX-OK'), `tasks #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(out.length > 0 && out.every((l) => l.startsWith('EX-')) && out.length === (code.match(/await __check\(/g) || []).length, `tasks #${i} example runs with the reference solution: ${out.length} lines`);
+      } else check(!!want && same(out, want), `tasks #${i} ${blk.code.split(LF)[0].slice(0, 60)}: ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the tasks: the experiments of the criteria
+  {
+    const t1 = await runFolder(b, page('console.log(Intl.getCanonicalLocales(["he-SU", "en-SU", "de-SU", "tk-SU", "uz-SU"]).join());'), { lines: 1 });
+    check(same(t1, ['he-RU,en-RU,de-RU,tk-TM,uz-UZ']), `task 1: SU becomes the likely region of the language if it is in the list (tk, uz), else the first one, RU (he, en, de) ${JSON.stringify(t1)}`);
+    const t5 = await runFolder(b, page(`const list = [{ name: "Ёлкин", group: "10Б" }, { name: "Абаев", group: "2А" }, { name: "елкин", group: "10Б" }, { name: "Чарыев", group: "2А" }, { name: "Ершов", group: "1В" }, { name: "Елкин", group: "10Б" }];
+console.log(list.toSorted((a, b) => a.group.localeCompare(b.group, "ru") || a.name.localeCompare(b.name, "ru")).map((s) => s.group + " " + s.name).join(", "));`), { lines: 1 });
+    check(same(t5, ['10Б елкин, 10Б Елкин, 10Б Ёлкин, 1В Ершов, 2А Абаев, 2А Чарыев']), `task 5: localeCompare without numeric puts "10Б" first — "1" < "2" ${JSON.stringify(t5)}`);
+    const t7 = await runFolder(b, page(`const b = new Intl.Collator("ru", { sensitivity: "base" }), a = new Intl.Collator("ru", { sensitivity: "accent" });
+console.log(b.compare("äpet", "apet"), b.compare("Ýyl", "yyl"), Number(a.compare("äpet", "apet") !== 0), Number(a.compare("Ýyl", "yyl") !== 0), a.compare("ÄPET", "äpet"));`), { lines: 1 });
+    check(same(t7, ['0 0 1 1 0']), `task 7: for the Russian collator ä and a, ý and y share a base letter — base calls them equal, accent does not, accent ignores the case ${JSON.stringify(t7)}`);
+    const t8 = await runFolder(b, page(`console.log(new Intl.Locale("zh-Hant").maximize().baseName, new Intl.Locale("zh-TW").maximize().baseName, new Intl.Locale("tk-IR").maximize().baseName, new Intl.Locale("tk-Arab").maximize().baseName);`), { lines: 1 });
+    check(same(t8, ['zh-Hant-TW zh-Hant-TW tk-Latn-IR tk-Arab-TM']), `task 8: zh-Hant and zh-TW both expand to zh-Hant-TW — the order decides; tk-IR and tk-Arab expand elsewhere, tk-Arab-IR stays whole ${JSON.stringify(t8)}`);
+    const t9 = await runFolder(b, page(`const info = (t) => { const l = new Intl.Locale(t); return l.getHourCycles().join() + " " + l.getWeekInfo().firstDay; };
+console.log(info("en-u-rg-gb"), "|", info("en-US-u-sd-gbsct"), "|", new Intl.Locale("en-u-rg-gb").toString());`), { lines: 1 });
+    check(same(t9, ['h12 7 | h12 7 | en-u-gb-rg']), `task 9: "rg-gb" is two keys, no subdivision — no override; sd is read only when the tag has no region (step 2) ${JSON.stringify(t9)}`);
+  }
   await b.close();
 
   // ECMA-402 2026 and the MDN pages of the day
@@ -362,6 +472,47 @@ console.log(findName(["Ýusup", "yusup", "Jusup", "ÝUSUP", "Gülnar", "Gulnar",
     check(['Intl.Locale, Intl.Collator и их свойства и методы', 'спецификация <a href="https://tc39.es/ecma402/2026/">ECMA-402 2026</a>', 'Mozilla Contributors'].every((s) => nFooter.includes(s))
       && (notesHtml.match(/developer\.mozilla\.org/g) || []).length === 1 && !/tc39\.es\/ecma402\/2026\/#/.test(notesHtml),
     'student: the footer names the MDN pages and ECMA-402 2026; MDN is linked once; section numbers without links');
+  }
+
+  // the tasks: their quotes in their places and clauses, what ECMA-402 says behind their criteria, the sections they ask
+  // for, the link, the footer
+  {
+    const corpus = tight([...daySpec.map((c) => f(c[0])), f('sec-collator-comparestrings'), f('sup-String.prototype.localeCompare'), ...Object.values(M), ...outputs].join(' '));
+    const tq = [...tasksText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => tight(m[1])).filter((x) => !/[а-яё]/i.test(x) && x.length > 3);
+    const tmissing = tq.filter((x) => !corpus.includes(x));
+    const tplace = [
+      ['для accent таблица говорит: «Characters with the same base letter compare as unequal only if they differ in accents and/or other diacritic marks, regardless of differences in case»', 'sec-collator-comparestrings',
+        '"accent" Characters with the same base letter compare as unequal only if they differ in accents and/or other diacritic marks, regardless of differences in case'],
+      ['его примечание 1 напоминает: «The localeCompare method itself is not directly suitable as an argument to Array.prototype.sort because the latter requires a function of two arguments»', 'sup-String.prototype.localeCompare',
+        'Note 1 The localeCompare method itself is not directly suitable as an argument to Array.prototype.sort because the latter requires a function of two arguments'],
+      ['(15.5.13: «The list is empty if no time zones are commonly used in region»)', 'sec-timezonesoflocale', 'The list is empty if no time zones are commonly used in region'],
+    ];
+    const tt = tight(tasksText);
+    const tlost = tplace.filter(([inTasks, id, quote]) => !tt.includes(tight(inTasks)) || !tight(f(id)).includes(tight(quote))).map(([, id, quote]) => `${num(id)} «${quote.slice(0, 30)}»`);
+    check(tq.length === 3 && tmissing.length === 0 && tlost.length === 0,
+      `tasks: ${tq.length} English quotes — table 4 of 10.3.3.2, note 1 of 20.1.1, 15.5.13 — in their places and clauses (not found: ${tmissing.join(' | ') || 'none'}; lost: ${tlost.join(' | ') || 'none'})`);
+    check(hasNows(f('sec-regionpreference'), ['Let region be GetLocaleRegion (locale)', 'If region is undefined, then Set region to CanonicalUnicodeSubdivision (locale, "sd")', 'Set region to "001"', 'Let regionOverride be CanonicalUnicodeSubdivision (locale, "rg")'])
+      && hasNows(f('sec-canonicalunicodesubdivision'), ['If subdivision cannot be matched by the unicode_subdivision_id Unicode locale nonterminal, return undefined', 'Let region be the longest prefix of subdivision matched by the unicode_region_subtag Unicode locale nonterminal'])
+      && hasNows(f('sec-calendarsoflocale'), ['Let regionOverride be preference.[[RegionOverride]]']) && hasNows(f('sec-hourcyclesoflocale'), ['Let regionOverride be preference.[[RegionOverride]]'])
+      && hasNows(f('sec-timezonesoflocale'), ['Let region be GetLocaleRegion (loc.[[Locale]])']),
+    'task 9: 15.5.8 — the region of the tag, then sd, then likely subtags, else "001"; rg is an override; 15.5.7 — a subdivision by its grammar, its region prefix; calendars and hour cycles read the override, time zones only the region of the tag');
+    const asks = ['шаг 15.1.1 или 15.1.2', '(приложение C UTS #35)', 'куда пропало -u-nu-latn (15.5.1)', 'строкой таблицы 4 раздела 10.3.3.2', 'как в таблице 27 раздела 15.5.17', '(шаг 5 раздела 15.5.17)',
+      'по разделу 20.1.1 строит новый Collator при каждом вызове', 'getTimeZones не видит rg (15.5.13)', 'назван шаг 15.5.8', 'и CanonicalUnicodeSubdivision (15.5.7)'];
+    const flatTasks = tasksText.replace(/\s+/g, ' ');
+    check(asks.every((s) => flatTasks.includes(s)), `tasks: they ask for ${asks.length} places of ECMA-402: missing ${asks.filter((s) => !flatTasks.includes(s)).join(' | ') || 'none'}`);
+    const tnums = { 'sec-getlocalebasename': '15.5.1', 'sec-collator-comparestrings': '10.3.3.2', 'sec-weekinfooflocale': '15.5.17', 'sup-String.prototype.localeCompare': '20.1.1',
+      'sec-timezonesoflocale': '15.5.13', 'sec-canonicalunicodesubdivision': '15.5.7', 'sec-Intl.Locale': '15.1.1', 'sec-updatelanguageid': '15.1.2' };
+    const tWrong = Object.entries(tnums).filter(([id, k]) => num(id) !== k).map(([id, k]) => `${id}: ${num(id)}≠${k}`);
+    check(tWrong.length === 0 && f('sec-weekinfooflocale').includes('Table 27') && f('sec-collator-comparestrings').includes('Table 4'),
+      `tasks: ${Object.keys(tnums).length} section numbers they name without links and tables 27 and 4: ${tWrong.join('; ') || 'all right'}`);
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma402\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [decodeURIComponent(m[1]), m[2]]);
+    check(tNamed.length === 1 && tNamed.every(([id, k]) => num(id) === k && spec.includes(`id="${id}"`)) && !/tc39\.es\/ecma262\//.test(tasksHtml),
+      `tasks: the one anchor of ECMA-402 exists with its number (15.5.8) ${JSON.stringify(tNamed.map(([, k]) => k))}; no links to ECMA-262`);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(['Intl.Locale, Intl.Collator и их свойства и методы', 'спецификация <a href="https://tc39.es/ecma402/2026/">ECMA-402 2026</a>', 'Mozilla Contributors'].every((s) => tFooter.includes(s))
+      && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 1,
+    'tasks: the footer names the MDN pages and ECMA-402 2026; MDN is linked once');
   }
 
   // the MDN texts the lecture retells

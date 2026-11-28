@@ -1,0 +1,116 @@
+---
+title: День 28 — конспект
+css: |
+  h1 { border-bottom-color: #0891b2; }
+  h2 { color: #4f46e5; background: #ecfeff; border-left-color: #0891b2; }
+---
+
+# День 28. PluralRules, ListFormat и RelativeTimeFormat
+
+<Subtitle>Выжимка лекции: PluralRules — категория числа, ListFormat — список, RelativeTimeFormat — «вчера» и «через 3 дня».</Subtitle>
+
+## Главное
+
+<Definition>
+`Intl.PluralRules` называет категорию числа (`one`, `few`, `many`, `other`…), а слова для неё берутся из своей
+таблицы. `Intl.ListFormat` собирает список по шаблонам языка. `Intl.RelativeTimeFormat` пишет «вчера» и «через 3 дня»,
+а разницу дат считаете вы. Источник — ECMA-402 2026.
+</Definition>
+
+## PluralRules: категория, а не слово
+
+Блоки конспекта — это `main.js` в папке дня 22, как в лекции.
+
+```js
+const pr = new Intl.PluralRules("ru");
+const forms = { one: "урок", few: "урока", many: "уроков", other: "урока" };
+console.log([1, 2, 5, 21, 1.5].map((n) => n.toLocaleString("ru") + " " + forms[pr.select(n)]).join(", "));   // 1 урок, 2 урока, 5 уроков, 21 урок, 1,5 урока — слова наши, категория — от правил
+console.log(new Intl.PluralRules("ru", { minimumFractionDigits: 1 }).select(1) + " " + pr.select(1.0001) + " " + pr.selectRange(2, 4) + " " + pr.selectRange(5, 21));   // other one few one — категория по напечатанной строке; диапазон — по концу
+console.log(pr.select("1000000000000000000001") + " " + new Intl.PluralRules("en").selectRange(1, 1) + " " + new Intl.PluralRules("en", { type: "ordinal" }).select(22));   // many other two — дважды Chrome против текста; 22nd
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| конструктор | 17.1.1: 1, 3, 7, 9–13 | только с `new`; опции строкой — ToObject; `type`, `notation`; дробей от 0 до 3 |
+| `select` | 17.3.3: 3; 17.5.2: 1–4, 10 | `NaN` и бесконечности — `other`; число печатается по опциям цифр, категория — по строке |
+| `pluralCategories` | 17.3.2: 4 | порядок `zero`, `one`, `two`, `few`, `many`, `other` |
+| `selectRange` | 17.3.4: 3; 17.5.4: 1, 4 | нужны оба конца; `NaN` — RangeError; одинаковая печать — категория начала |
+
+<Remember>
+MDN: «Intl.PluralRules() can only be constructed with new», но об опции `notation` страница не знает. Давайте
+правилам те же опции цифр, что и форматировщику, иначе выйдет «1,0 урок». ToIntlMathematicalValue (16.5.16) нужна,
+«so that exact decimal values can be represented», а `select` в Chrome делает ToNumber: `BigInt` — TypeError, длинная
+строка теряет цифры. Туркменский правила знают, но после числа существительное не меняется: «5 sapak».
+</Remember>
+
+## ListFormat: список по шаблонам
+
+```js
+const lf = new Intl.ListFormat("ru");
+console.log(lf.format(["Аман", "Мерет", "Сапар"]) + " | " + new Intl.ListFormat("ru", { type: "disjunction" }).format(["чай", "кофе"]) + " | " + new Intl.ListFormat("ru", { type: "unit" }).format(["1 ч", "30 мин"]));   // Аман, Мерет и Сапар | чай или кофе | 1 ч 30 мин — три типа
+console.log(JSON.stringify(lf.formatToParts(["А", "Б", "В", "Г"]).filter((p) => p.type === "literal").map((p) => p.value)) + " " + JSON.stringify(lf.format([])));   // [", ",", "," и "] "" — Start и Middle — запятая, End — союз; пустой список — пусто
+const run = (f) => { try { return f(); } catch (e) { return e.name + ": " + e.message; } };
+console.log(run(() => lf.format([1, 2])) + " | " + lf.format([1, 2].map(String)) + " | " + new Intl.ListFormat("tk").resolvedOptions().locale);   // TypeError: Iterable yielded 1 which is not a string | 1 и 2 | ru-RU — только строки; туркменского нет
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| конструктор | 14.1.1: 1, 3, 7, 9, 13 | только с `new`; опции — только объект; `type` и `style`; набор шаблонов языка |
+| сборка | 14.5.2: 2, 3, 5, 7 | пусто; два элемента — \[\[Pair\]\]; иначе с конца: \[\[End\]\], \[\[Middle\]\], \[\[Start\]\] |
+| аргумент | 14.5.5: 1, 4.c | `undefined` — пустой список; не строка — TypeError, итератор закрывается |
+
+<Remember>
+«Intl.ListFormat does not have any relevant extension keys» (14.2.3). Шаблонов несколько ради союзов вроде
+испанского: «as in Spanish, where either "y" or "e" may be selected, depending on the following word». MDN ошибается
+дважды: `unit` — значение `type`, а не `style`, и у `en-GB` в `formatToParts` — `" and "`, а не `", and "`. Для
+туркменского союз «we» подставляем сами.
+</Remember>
+
+## RelativeTimeFormat: «вчера» и «через 3 дня»
+
+```js
+const rtf = new Intl.RelativeTimeFormat("ru"), auto = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
+console.log(rtf.format(-1, "day") + " | " + auto.format(-1, "day") + " | " + rtf.format(21, "days") + " | " + rtf.format(-0, "day") + " | " + auto.format(-0, "day"));   // 1 день назад | вчера | через 21 день | 0 дней назад | сегодня — фраза по ToString(value); -0 — прошлое
+console.log(auto.format(0.9999, "day") + " | " + auto.format(-1, "week") + " | " + auto.format(1, "hour"));   // завтра | на прошлой неделе | через 1 час — Chrome округляет до поиска фразы; у часов фраза только для 0
+const today = Temporal.PlainDate.from("2026-11-28");
+console.log(["2026-11-27", "2026-12-01"].map((d) => auto.format(today.until(Temporal.PlainDate.from(d)).days, "day")).join(" | ") + " | " + new Intl.RelativeTimeFormat("tk").resolvedOptions().locale);   // вчера | через 3 дня | ru-RU — разницу считает Temporal; туркменского нет
+```
+
+| Что | Шаги | Коротко |
+| --- | --- | --- |
+| конструктор | 18.1.1: 1, 3, 10, 12, 16–17 | только с `new`; ключ `nu`; `style`; `numeric` — строка; внутри свои `NumberFormat` и `PluralRules` |
+| `format` | 18.3.3: 3, 4 | значение — ToNumber (`BigInt` — TypeError), единица — ToString |
+| шаблон | 18.5.2: 1, 2, 7.a, 8, 11–12 | `NaN` — RangeError; `days` → `day`; фраза для `auto`; знак; число и форма слова |
+| единицы | 18.5.1 | восемь, от `second` до `year`, и их множественное; регистр важен |
+
+<Remember>
+MDN: «When the value is 0, the output may be dependent on the unit», а `unit` в частях `formatToParts` — «for
+programmatic usage and is not localized». По шагу 7.a фраза ищется по ToString(value): «0.9999» её не имеет, но
+Chrome сначала округляет — в `auto` передавайте целые. Туркменские шаблоны берём из CLDR: «düýn», «şu gün», «ertir»,
+`{0} günden`, `{0} gün öň`.
+</Remember>
+
+<Homework>
+1. Не запуская, назовите категорию: `new Intl.PluralRules("ru").select(111)`, `select(1.5)`,
+   `new Intl.PluralRules("ru", { maximumFractionDigits: 0 }).select(4.5)`, `new Intl.PluralRules("ru").selectRange(1, 4)`,
+   `new Intl.PluralRules("en", { type: "ordinal" }).select(113)`. Объясните и проверьте.
+2. Почему каждая строка бросает и на каком шаге: `new Intl.ListFormat("ru", { type: "and" })`;
+   `new Intl.ListFormat("ru").format(["a", 2])`; `new Intl.RelativeTimeFormat("ru").format(1, "millisecond")`;
+   `new Intl.RelativeTimeFormat("ru").format(Infinity, "day")`; `new Intl.PluralRules("ru").selectRange(undefined, 2)`?
+3. Напишите `lessons(n, lang)`: число через `NumberFormat` и слово через `PluralRules` с одними опциями
+   `{ maximumFractionDigits: 1 }`. Проверьте 1, 4, 11, 21, 1.5 и 1.04: по-русски — «1 урок, 4 урока, 11 уроков, 21 урок,
+   1,5 урока, 1 урок», по-английски — «1 lesson, 4 lessons, 11 lessons, 21 lessons, 1.5 lessons, 1 lesson». Что выйдет
+   для 1.04, если `PluralRules` создать без опций?
+4. Напишите `lastSeen(minutes)`: меньше часа — в минутах, меньше суток — в часах, иначе в днях, с округлением и
+   `numeric: "auto"`. Проверьте 0, 5, 90, 1500 и 4320: «в эту минуту», «5 минут назад», «2 часа назад», «вчера», «3 дня
+   назад». Почему для нуля передают `-0` и что напечатал бы `numeric: "always"`?
+</Homework>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules)
+(Intl.PluralRules, Intl.ListFormat, Intl.RelativeTimeFormat и их методы, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-402 2026](https://tc39.es/ecma402/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>

@@ -20,7 +20,11 @@
 // texts of ECMA-402 and MDN it retells (the five MDN errors among them); every step and section number it names; the
 // days it points to say what it says; the reference table holds all 77 rows of the day's plan (59 of ECMA-402, 18 of
 // MDN) with their marks and titles, every anchor exists and every link whose text starts with a number names the
-// section of that number; the footer.
+// section of that number; the footer. The notes: each of their 3 blocks prints what the comments of its console.log
+// lines say; homework 1 — five categories to predict; 2 — five errors with the texts of Chrome; 3 — the reference
+// lessons(n, lang) with one set of digit options for NumberFormat and PluralRules (and «1 урока» without it); 4 — the
+// reference lastSeen(minutes) with numeric "auto" and -0; their English quotes (the 3 of ECMA-402 and the 3 of MDN in
+// their places), what they retell of MDN and of the Turkmen templates, the steps of their tables and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -131,6 +135,9 @@ const stepPaths = (html, needle) => {
   const lectureText = await src.evaluate(() => document.querySelector('.container').innerText);
   await src.goto(builtSite.urlOfFile(path.join(DAY22, 'lecture.html')));
   const indexHtml = await src.evaluate(() => [...document.querySelectorAll('pre.code[data-file]')].find((pre) => pre.dataset.file === 'index.html')?.textContent);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
+  const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
+  const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -266,6 +273,62 @@ console.log(new Intl.RelativeTimeFormat("tk").resolvedOptions().locale, JSON.str
     check(same(unit, ['1 gün', '5 gün', '21 gün']) && cats === 'one,other' && lectureText.includes('Таблица слов не нужна: форма «söz» одна для любого числа.')
       && lectureText.includes('после числа существительное не меняется: «1 sapak», «5 sapak»'),
     `lecture 6, 16: in Turkmen the noun after a number keeps one form — CLDR writes 1, 5 and 21 «gün» alike, though tk has one and other ${JSON.stringify([unit, cats])}`);
+    const tpl = [new Intl.RelativeTimeFormat('tk').format(3, 'day'), new Intl.RelativeTimeFormat('tk').format(-3, 'day')];
+    check(same(tpl, ['3 günden', '3 gün öň']) && notesText.includes('Туркменские шаблоны берём из CLDR: «düýn», «şu gün», «ertir», {0} günden, {0} gün öň.')
+      && nodeWhen.includes('düýn, şu gün, ertir'),
+    `student: the Turkmen templates of the notes are those of CLDR (Node) ${JSON.stringify(tpl)}`);
+  }
+
+  // the notes: every console.log line writes its output in its comment
+  {
+    const commented = (code) => code.split(LF).filter((l) => l.includes('console.log(') && l.includes('//'))
+      .map((l) => l.slice(l.lastIndexOf('//') + 2).trim().split(' — ')[0]);
+    check(notesBlocks.length === 3 && notesBlocks.every((x) => x.js && !x.file)
+      && notesText.includes('Блоки конспекта — это main.js в папке дня 22, как в лекции.'),
+    `student: 3 js blocks without a file name, main.js of the folder of day 22 (${notesBlocks.length})`);
+    for (const [i, blk] of notesBlocks.entries()) {
+      const want = commented(blk.code);
+      const out = await runFolder(b, page(blk.code), { lines: want.length });
+      if (!quiet) { console.log(`\n--- student #${i}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      check(want.length === 3 && same(out, want), `student #${i}: output = comments ${JSON.stringify(out)}`);
+    }
+  }
+
+  // the notes, homework 1–4: by experiment
+  const homework = [];
+  {
+    const hw1 = await runFolder(b, page(`console.log([new Intl.PluralRules("ru").select(111), new Intl.PluralRules("ru").select(1.5), new Intl.PluralRules("ru", { maximumFractionDigits: 0 }).select(4.5), new Intl.PluralRules("ru").selectRange(1, 4), new Intl.PluralRules("en", { type: "ordinal" }).select(113)].join(" "));`), { lines: 1 });
+    check(same(hw1, ['many other many few other'])
+      && ['new Intl.PluralRules("ru").select(111)', 'select(1.5)', 'new Intl.PluralRules("ru", { maximumFractionDigits: 0 }).select(4.5)', 'new Intl.PluralRules("ru").selectRange(1, 4)', 'new Intl.PluralRules("en", { type: "ordinal" }).select(113)'].every((s) => notesText.includes(s)),
+    `student homework 1: 111 — many, 1.5 — other, 4.5 without fractions prints 5 — many, 1–4 — few by its end, 113th — other ${JSON.stringify(hw1)}`);
+    const hw2 = await runFolder(b, page(`const run = (f) => { try { f(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+console.log([run(() => new Intl.ListFormat("ru", { type: "and" })), run(() => new Intl.ListFormat("ru").format(["a", 2])), run(() => new Intl.RelativeTimeFormat("ru").format(1, "millisecond")), run(() => new Intl.RelativeTimeFormat("ru").format(Infinity, "day")), run(() => new Intl.PluralRules("ru").selectRange(undefined, 2))].join(" | "));`), { lines: 1 });
+    check(same(hw2, ["RangeError: Value and out of range for Intl.ListFormat options property type | TypeError: Iterable yielded 2 which is not a string | RangeError: Invalid unit argument for Intl.RelativeTimeFormat.prototype.format() 'millisecond' | RangeError: Value need to be finite number for Intl.RelativeTimeFormat.prototype.format() | TypeError: Invalid startRange : undefined"])
+      && ['new Intl.ListFormat("ru", { type: "and" })', 'new Intl.ListFormat("ru").format(["a", 2])', 'new Intl.RelativeTimeFormat("ru").format(1, "millisecond")', 'new Intl.RelativeTimeFormat("ru").format(Infinity, "day")', 'new Intl.PluralRules("ru").selectRange(undefined, 2)'].every((s) => notesText.includes(s)),
+    `student homework 2: five errors — 14.1.1 step 7 with 9.2.11 step 5, 14.5.5 step 4.c, 18.5.1 step 9, 18.5.2 step 1, 17.3.4 step 3 ${JSON.stringify(hw2)}`);
+    const hw3 = await runFolder(b, page(`const FORMS = { ru: { one: "урок", few: "урока", many: "уроков", other: "урока" }, en: { one: "lesson", other: "lessons" } };
+function lessons(n, lang) {
+  const o = { maximumFractionDigits: 1 };
+  return new Intl.NumberFormat(lang, o).format(n) + " " + FORMS[lang][new Intl.PluralRules(lang, o).select(n)];
+}
+console.log(["ru", "en"].map((l) => [1, 4, 11, 21, 1.5, 1.04].map((n) => lessons(n, l)).join(", ")).join(" | "));
+console.log(new Intl.NumberFormat("ru", { maximumFractionDigits: 1 }).format(1.04) + " " + FORMS.ru[new Intl.PluralRules("ru").select(1.04)]);`), { lines: 2 });
+    check(same(hw3, ['1 урок, 4 урока, 11 уроков, 21 урок, 1,5 урока, 1 урок | 1 lesson, 4 lessons, 11 lessons, 21 lessons, 1.5 lessons, 1 lesson', '1 урока'])
+      && notesText.includes('по-русски — «1 урок, 4 урока, 11 уроков, 21 урок, 1,5 урока, 1 урок», по-английски — «1 lesson, 4 lessons, 11 lessons, 21 lessons, 1.5 lessons, 1 lesson»')
+      && notesText.includes('Что выйдет для 1.04, если PluralRules создать без опций?'),
+    `student homework 3: the reference lessons — one set of digit options for both; without it 1.04 prints «1» but takes «урока» ${JSON.stringify(hw3)}`);
+    const hw4 = await runFolder(b, page(`const auto = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
+function lastSeen(minutes) {
+  if (minutes < 60) return auto.format(-Math.round(minutes), "minute");
+  if (minutes < 1440) return auto.format(-Math.round(minutes / 60), "hour");
+  return auto.format(-Math.round(minutes / 1440), "day");
+}
+console.log([0, 5, 90, 1500, 4320].map(lastSeen).join(" | "), "|", new Intl.RelativeTimeFormat("ru").format(-0, "minute"));`), { lines: 1 });
+    check(same(hw4, ['в эту минуту | 5 минут назад | 2 часа назад | вчера | 3 дня назад | 0 минут назад'])
+      && notesText.includes('Проверьте 0, 5, 90, 1500 и 4320: «в эту минуту», «5 минут назад», «2 часа назад», «вчера», «3 дня назад».')
+      && notesText.includes('Почему для нуля передают -0 и что напечатал бы numeric: "always"?'),
+    `student homework 4: the reference lastSeen — minutes, hours, days, auto; -0 is «в эту минуту», always prints «0 минут назад» ${JSON.stringify(hw4)}`);
+    homework.push(...hw1, ...hw2, ...hw3, ...hw4);
   }
   await b.close();
 
@@ -328,6 +391,43 @@ console.log(new Intl.RelativeTimeFormat("tk").resolvedOptions().locale, JSON.str
     check(lostMdn.length === 0, `quotes: ${fromMdn.length} quotes the lecture gives to MDN stand in their places and on their pages (PluralRules, PluralRules() twice, select, selectRange, ListFormat() twice, RelativeTimeFormat formatToParts and constructor): ${lostMdn.join(' | ') || 'all'}`);
   }
 
+  // the notes: their English quotes are in the corpus (with the outputs of the homework), the ones of ECMA-402 and MDN in
+  // their places and their own clause or page; what they retell of MDN; the steps of their tables are those of the lecture
+  // (in the list of steps below); the footer
+  {
+    const ns = tight(notesText);
+    const corpus = tight([...daySpec.map((c) => f(c[0])), f('sec-tointlmathematicalvalue'), f('sec-coerceoptionstoobject'), ...Object.values(M), ...outputs, ...homework].join(' '));
+    const nquotes = [...notesText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => tight(m[1])).filter((x) => !/[а-яё]/i.test(x) && x.length > 3);
+    const nmissing = nquotes.filter((x) => !corpus.includes(x));
+    const nFromSpec = [
+      ['ToIntlMathematicalValue (16.5.16) нужна, «so that exact decimal values can be represented»', 'sec-tointlmathematicalvalue', 'a mathematical value can be returned instead of a Number or BigInt, so that exact decimal values can be represented'],
+      ['«Intl.ListFormat does not have any relevant extension keys» (14.2.3)', 'sec-Intl.ListFormat-internal-slots', 'Note 1 Intl.ListFormat does not have any relevant extension keys'],
+      ['Шаблонов несколько ради союзов вроде испанского: «as in Spanish, where either "y" or "e" may be selected, depending on the following word»', 'sec-createpartsfromlist',
+        'permits the conjunction to be dependent on the context, as in Spanish, where either "y" or "e" may be selected, depending on the following word'],
+    ];
+    const nFromMdn = [
+      ['MDN: «Intl.PluralRules() can only be constructed with new»', 'PluralRules/PluralRules', 'Intl.PluralRules() can only be constructed with new'],
+      ['MDN: «When the value is 0, the output may be dependent on the unit»', 'RelativeTimeFormat/RelativeTimeFormat', 'When the value is 0, the output may be dependent on the unit'],
+      ['а unit в частях formatToParts — «for programmatic usage and is not localized»', 'RelativeTimeFormat/formatToParts', 'this is for programmatic usage and is not localized'],
+    ];
+    const nlost = [...nFromSpec.filter(([inNotes, id, quote]) => !ns.includes(tight(inNotes)) || !tight(f(id)).includes(tight(quote))).map(([, id, quote]) => `${num(id)} «${quote.slice(0, 30)}»`),
+      ...nFromMdn.filter(([inNotes, p, quote]) => !ns.includes(tight(inNotes)) || !tight(M[G + p] ?? '').includes(tight(quote))).map(([, p, quote]) => `${p} «${quote.slice(0, 30)}»`)];
+    check(nquotes.length === 8 && nmissing.length === 0 && nlost.length === 0,
+      `student: ${nquotes.length} English quotes of the notes in ECMA-402, MDN or the output of Chrome (not found: ${nmissing.join(' | ') || 'none'}); the 3 of ECMA-402 (16.5.16, 14.2.3, 14.5.2) and the 3 of MDN (PluralRules(), RelativeTimeFormat() and formatToParts) in their places (lost: ${nlost.join(' | ') || 'none'})`);
+    check(hasAll(notesText, ['но об опции notation страница не знает', 'MDN ошибается дважды: unit — значение type, а не style, и у en-GB в formatToParts — " and ", а не ", and ".',
+      'а select в Chrome делает ToNumber: BigInt — TypeError, длинная строка теряет цифры', 'Chrome сначала округляет — в auto передавайте целые', 'после числа существительное не меняется: «5 sapak»']),
+    'student: what the notes retell — the MDN errors (notation, unit, en-GB), the three places where Chrome differs, the Turkmen noun (checked above for the lecture)');
+    const table = ['17.1.1: 1, 3, 7, 9–13', '17.3.3: 3; 17.5.2: 1–4, 10', '17.3.2: 4', '17.3.4: 3; 17.5.4: 1, 4', '14.1.1: 1, 3, 7, 9, 13', '14.5.2: 2, 3, 5, 7', '14.5.5: 1, 4.c',
+      '18.1.1: 1, 3, 10, 12, 16–17', '18.3.3: 3, 4', '18.5.2: 1, 2, 7.a, 8, 11–12', '| 18.5.1 |', '(16.5.16)', '(14.2.3)', 'По шагу 7.a'];
+    const notesSrc = fs.readFileSync(path.join(DAY, 'student.mdx'), 'utf8');
+    check(table.every((s) => notesText.includes(s) || notesSrc.includes(s)), `student: the tables and notes name the steps of the lecture (${table.length}): missing ${table.filter((s) => !notesText.includes(s) && !notesSrc.includes(s)).join(' | ') || 'none'}`);
+    const notesHtml = builtSite.htmlOfFile(path.join(DAY, 'student.html'));
+    const nFooter = notesHtml.slice(notesHtml.indexOf('<div class="sources">'));
+    check(['Intl.PluralRules, Intl.ListFormat, Intl.RelativeTimeFormat и их методы', 'спецификация <a href="https://tc39.es/ecma402/2026/">ECMA-402 2026</a>', 'Mozilla Contributors'].every((s) => nFooter.includes(s))
+      && (notesHtml.match(/developer\.mozilla\.org/g) || []).length === 1 && !/tc39\.es\/ecma402\/2026\/#/.test(notesHtml),
+    'student: the footer names the MDN pages and ECMA-402 2026; MDN is linked once; section numbers without links');
+  }
+
   // the MDN texts the lecture retells — its five errors among them
   {
     const ctor = md[`${G}PluralRules/PluralRules`];
@@ -362,6 +462,7 @@ console.log(new Intl.RelativeTimeFormat("tk").resolvedOptions().locale, JSON.str
     ['sec-intl.pluralrules', 'Let optionsResolution be ? ResolveOptions', '3'],
     ['sec-intl.pluralrules', 'Let t be ? GetOption (options, "type"', '7'],
     ['sec-intl.pluralrules', 'Let notation be ? GetOption (options, "notation"', '9'],
+    ['sec-intl.pluralrules', 'Let compactDisplay be ? GetOption (options, "compactDisplay"', '11'],
     ['sec-intl.pluralrules', 'If notation is "compact", then', '12'],
     ['sec-intl.pluralrules', 'Perform ? SetNumberFormatDigitOptions', '13'],
     ['sec-intl.pluralrules.prototype.resolvedoptions', 'Let pluralCategories be a List of Strings', '4'],
@@ -412,9 +513,10 @@ console.log(new Intl.RelativeTimeFormat("tk").resolvedOptions().locale, JSON.str
     ['sec-getoption', 'If values is not empty and values does not contain value, throw a RangeError exception', '5'],
   ];
   const wrong = steps.filter(([id, needle, k]) => at(id, needle).join() !== k).map(([id, needle, k]) => `${num(id)} «${needle.slice(0, 40)}» ${JSON.stringify(at(id, needle))}≠${k}`);
-  check(wrong.length === 0, `ECMA-402: ${steps.length} step numbers the lecture and its schemes name (17.1.1, 17.3.2, 17.3.3, 17.3.4, 17.5.2, 17.5.4, 16.5.16, 14.1.1, 14.5.2, 14.5.5, 14.3.3, 18.1.1, 18.3.3, 18.5.2, 18.5.1, 9.2.8, 9.2.11): ${wrong.join('; ') || 'all right'}`);
+  check(wrong.length === 0, `ECMA-402: ${steps.length} step numbers the lecture, its schemes and the notes name (17.1.1, 17.3.2, 17.3.3, 17.3.4, 17.5.2, 17.5.4, 16.5.16, 14.1.1, 14.5.2, 14.5.5, 14.3.3, 18.1.1, 18.3.3, 18.5.2, 18.5.1, 9.2.8, 9.2.11): ${wrong.join('; ') || 'all right'}`);
   const nums = { 'sec-intl.pluralrules.prototype.resolvedoptions': '17.3.2', 'sec-pluralruleselectrange': '17.5.3', 'sec-getoption': '9.2.11',
-    'sec-intl.pluralrules-internal-slots': '17.2.3', 'sec-resolveoptions': '9.2.8' };
+    'sec-intl.pluralrules-internal-slots': '17.2.3', 'sec-resolveoptions': '9.2.8', 'sec-tointlmathematicalvalue': '16.5.16',
+    'sec-Intl.ListFormat-internal-slots': '14.2.3', 'sec-singularrelativetimeunit': '18.5.1' };
   const wrongNums = Object.entries(nums).filter(([id, k]) => num(id) !== k).map(([id, k]) => `${id}: ${num(id)}≠${k}`);
   const num262 = (clause(spec262, 'sec-getoptionsobject').match(/<span class="secnum">([^<]+)<\/span>/) || [])[1];
   const tables = [['sec-Intl.ListFormat.prototype.resolvedoptions', 'Table 25: Resolved Options of ListFormat Instances'], ['sec-intl.pluralrules.prototype.resolvedoptions', 'Table 32: Resolved Options of PluralRules Instances'],
@@ -422,7 +524,7 @@ console.log(new Intl.RelativeTimeFormat("tk").resolvedOptions().locale, JSON.str
   const wrongTables = tables.filter(([id, t]) => !f(id).includes(t)).map(([id]) => id);
   check(wrongNums.length === 0 && wrongTables.length === 0 && num262 === '7.3.36' && hasNows(flat(clause(spec262, 'sec-getoptionsobject')), ['If options is an Object, then Return options. Throw a TypeError exception'])
     && hasAll(f('sec-intl.pluralrules-internal-slots'), ['Note 1', 'Note 2']) && hasAll(f('sec-Intl.ListFormat-internal-slots'), ['Note 1', 'Note 2', 'Note 3']),
-  `ECMA-402: ${Object.keys(nums).length} section numbers named without links (17.3.2, 17.5.3, 9.2.11, 17.2.3, 9.2.8), ECMA-262 7.3.36 GetOptionsObject throws for a non-object, tables 25, 32, 33, notes of 17.2.3 and 14.2.3: ${[...wrongNums, ...wrongTables, num262].join('; ')}`);
+  `ECMA-402: ${Object.keys(nums).length} section numbers named without links (17.3.2, 17.5.3, 9.2.11, 17.2.3, 9.2.8; in the notes 16.5.16, 14.2.3, 18.5.1), ECMA-262 7.3.36 GetOptionsObject throws for a non-object, tables 25, 32, 33, notes of 17.2.3 and 14.2.3: ${[...wrongNums, ...wrongTables, num262].join('; ')}`);
 
   // the texts the lecture retells
   check(hasNows(f('sec-intl.pluralrules'), ['« coerce-options »', 'Perform ? SetNumberFormatDigitOptions (pluralRules, options, 0, 3, notation)', 'If notation is "compact", then Set pluralRules.[[CompactDisplay]] to compactDisplay'])

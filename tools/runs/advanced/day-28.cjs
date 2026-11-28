@@ -25,6 +25,12 @@
 // lessons(n, lang) with one set of digit options for NumberFormat and PluralRules (and «1 урока» without it); 4 — the
 // reference lastSeen(minutes) with numeric "auto" and -0; their English quotes (the 3 of ECMA-402 and the 3 of MDN in
 // their places), what they retell of MDN and of the Turkmen templates, the steps of their tables and the footer.
+// The tasks: the 4 blocks to predict print what EXPECT says; every line of the 5 examples holds with the reference
+// solutions (SOLUTIONS, an awaited check); the experiments of the criteria — the strings NumberFormat prints with the
+// options of task 1, the entries of a Map are arrays, en selectRange(1, 1), the parts of a number carry unit, a naive
+// replace breaks on "{1}" and "$&", select of a long string in Chrome, the phrases of narrow and short; what ECMA-402
+// says behind them (14.5.1, 14.5.2, 18.2.3, 18.5.2 step 6, 18.5.3); the 5 quotes in their places (14.2.3, 17.2.3,
+// 18.2.3, MDN twice), the sections they ask for, the link 18.2.3 and the footer.
 // Playwright comes from NODE_PATH, see the header of tools/check-day.sh.
 const { chromium } = require('playwright');
 const builtSite = require('../../lib/site.cjs'); // the built site (site/out) — stage 4 of the move to Next.js
@@ -40,6 +46,74 @@ const SPEC = path.join(ROOT, 'tools/.cache/ecma402-2026.html');
 const SPEC262 = path.join(ROOT, 'tools/.cache/ecma262-2026.html');
 const ORIGIN = 'http://127.0.0.1:5594';
 const quiet = process.argv.includes('--quiet');
+// a block of the tasks without an example: its output by "tasks #index" (js blocks of the page); the tasks ask to predict
+// these (Chrome, Russian context)
+const EXPECT = {
+  'tasks #0': ['many one many one one many one other', 'many one one TypeError many'],
+  'tasks #1': ['чай | чай или кофе | a | TypeError | ""', '5 lb 12 oz | A, B und C | RangeError'],
+  'tasks #2': ['2 месяца назад, в прошлом месяце, в этом месяце, в следующем месяце, через 2 месяца', '7 дней назад | -2 ч | this quarter | literal,integer,decimal,fraction,literal'],
+  'tasks #8': ['через 3 дня | через 3 дн. | +3 дн. | вчера | на следующей нед.', 'in 1 month | in 1 mo. | in 1mo | latn'],
+};
+// reference solutions of the tasks: every "expression;   // value" line of an example must give the comment; the check is
+// awaited, so a line may await too. No template literals inside: Node reads these strings as templates first.
+const SOLUTIONS = {
+  countLabel: `function countLabel(min, max, lang) {
+  const FORMS = { ru: { one: "карточка", few: "карточки", many: "карточек", other: "карточки" }, en: { one: "card", other: "cards" } };
+  const pr = new Intl.PluralRules(lang);
+  if (min === max) return min + " " + FORMS[lang][pr.select(min)];
+  return min + "–" + max + " " + FORMS[lang][pr.selectRange(min, max)];
+}`,
+  shortList: `function shortList(items, max, lang) {
+  const MORE = { one: "тема", few: "темы", many: "тем", other: "темы" };
+  const lf = new Intl.ListFormat(lang);
+  if (items.length <= max) return lf.format(items);
+  const rest = items.length - max;
+  const more = lang === "ru" ? "ещё " + rest + " " + MORE[new Intl.PluralRules("ru").select(rest)] : rest + " more";
+  return lf.format([...items.slice(0, max), more]);
+}`,
+  highlight: `function highlight(value, unit, lang) {
+  const parts = new Intl.RelativeTimeFormat(lang, { numeric: "auto" }).formatToParts(value, unit);
+  let out = "", open = false;
+  for (const p of parts) {
+    if (p.unit && !open) { out += "["; open = true; }
+    if (!p.unit && open) { out += "]"; open = false; }
+    out += p.value;
+  }
+  return open ? out + "]" : out;
+}`,
+  makeList: `function makeList({ pair, start, middle, end }) {
+  const fill = (p, a, b) => p.replace(/\\{([01])\\}/g, (_, k) => (k === "0" ? a : b));
+  return (list) => {
+    const n = list.length;
+    if (n === 0) return "";
+    if (n === 2) return fill(pair, list[0], list[1]);
+    let parts = list[n - 1];
+    for (let i = n - 2; i >= 0; i--) parts = fill(i === 0 ? start : i < n - 2 ? middle : end, list[i], parts);
+    return parts;
+  };
+}`,
+  selectExact: `function selectExact(value) {
+  const s = String(value);
+  if (!/^\\d+$/.test(s)) return new Intl.PluralRules("ru").select(Number(s));
+  const i100 = Number(s.slice(-2)), i10 = i100 % 10;
+  if (i10 === 1 && i100 !== 11) return "one";
+  if (i10 >= 2 && i10 <= 4 && (i100 < 12 || i100 > 14)) return "few";
+  return "many";
+}`,
+};
+const checkable = (code) => {
+  const names = Object.keys(SOLUTIONS).filter((n) => code.includes(`${n}(`));
+  const lines = code.split('\n').map((line) => {
+    const m = line.match(/^(\s*)(?!const |let )(\S.*?);\s*\/\/\s*(.+?)(?:\s+—.*)?$/);
+    return m ? `${m[1]}await __check(${JSON.stringify(m[2])}, async () => (${m[2]}), ${JSON.stringify(m[3])});` : line;
+  });
+  return `async function __check(text, fn, want) {
+  const got = JSON.stringify(await fn()), exp = JSON.stringify((0, eval)("(" + want + ")"));
+  console.log((got === exp ? "EX-OK " : "EX-BAD ") + text + " = " + got + (got === exp ? "" : ", comment: " + want));
+}
+${names.map((n) => SOLUTIONS[n]).join('\n')}
+${lines.join('\n')}`;
+};
 
 const LF = String.fromCharCode(10);
 const q = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
@@ -138,6 +212,9 @@ const stepPaths = (html, needle) => {
   await src.goto(builtSite.urlOfFile(path.join(DAY, 'student.html')));
   const notesBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code')].map((pre) => ({ js: pre.matches('.js'), file: pre.dataset.file || null, code: pre.textContent })));
   const notesText = await src.evaluate(() => document.querySelector('.container').innerText);
+  await src.goto(builtSite.urlOfFile(path.join(DAY, 'tasks.html')));
+  const taskBlocks = await src.evaluate(() => [...document.querySelectorAll('pre.code.js')].map((pre) => ({ code: pre.textContent, file: pre.dataset.file || null, example: !!pre.closest('.example'), box: !!(pre.nextElementSibling && pre.nextElementSibling.matches('.result-box')) })));
+  const tasksText = await src.evaluate(() => document.querySelector('.container').innerText);
   await ctx0.close();
 
   let section = 0;
@@ -330,6 +407,42 @@ console.log([0, 5, 90, 1500, 4320].map(lastSeen).join(" | "), "|", new Intl.Rela
     `student homework 4: the reference lastSeen — minutes, hours, days, auto; -0 is «в эту минуту», always prints «0 минут назад» ${JSON.stringify(hw4)}`);
     homework.push(...hw1, ...hw2, ...hw3, ...hw4);
   }
+
+  // the tasks: the blocks to predict print what EXPECT says; every line of an example holds with the reference solution
+  const taskOutputs = [];
+  {
+    check(taskBlocks.length === 9 && taskBlocks.filter((x) => x.example).length === 5 && taskBlocks.every((x) => !x.file && !x.box)
+      && tasksText.includes('Код пишем в папке дня 22: блок — это main.js.'),
+    `tasks: 9 js blocks — 5 examples, 4 to predict; no files, no result-box; the folder of day 22 (${taskBlocks.length})`);
+    for (const [i, blk] of taskBlocks.entries()) {
+      const code = blk.example ? checkable(blk.code) : blk.code;
+      const want = blk.example ? null : EXPECT[`tasks #${i}`];
+      const out = await runFolder(b, page(code), { lines: want ? want.length : (code.match(/await __check\(/g) || []).length });
+      if (!quiet) { console.log(`\n--- tasks #${i}${blk.example ? ' (example)' : ''}: ${blk.code.split(LF)[0].slice(0, 70)}`); for (const l of out) console.log(`    > ${l}`); }
+      if (blk.example) {
+        for (const l of out.filter((x) => x.startsWith('EX-'))) check(l.startsWith('EX-OK'), `tasks #${i} example: ${l.slice(l.indexOf(' ') + 1)}`);
+        check(out.length > 0 && out.every((l) => l.startsWith('EX-')) && out.length === (code.match(/await __check\(/g) || []).length, `tasks #${i} example runs with the reference solution: ${out.length} lines`);
+      } else { check(!!want && same(out, want), `tasks #${i} ${blk.code.split(LF)[0].slice(0, 60)}: ${JSON.stringify(out)}`); taskOutputs.push(...out); }
+    }
+  }
+
+  // the tasks: the experiments of the criteria
+  {
+    const t1 = await runFolder(b, page('console.log(new Intl.NumberFormat("ru", { maximumSignificantDigits: 1 }).format(21), new Intl.NumberFormat("ru", { minimumIntegerDigits: 3 }).format(1), new Intl.NumberFormat("ru", { roundingMode: "floor", maximumFractionDigits: 0 }).format(1.9), new Intl.NumberFormat("ru").format(1n));'), { lines: 1 });
+    check(same(t1, ['20 001 1 1']), `task 1: NumberFormat with the same options prints 20, 001, 1 — the strings the categories come from; it takes 1n ${JSON.stringify(t1)}`);
+    const t2 = await runFolder(b, page('console.log(Array.isArray([...new Map([["a", 1]])][0]), typeof [...new Map([["a", 1]]).keys()][0], [..."" ].length);'), { lines: 1 });
+    check(same(t2, ['true string 0']), `task 2: a Map yields arrays [key, value], its keys() strings; "" yields nothing ${JSON.stringify(t2)}`);
+    const t4 = await runFolder(b, page('console.log(new Intl.PluralRules("en").selectRange(1, 1), new Intl.PluralRules("en").select(1), new Intl.PluralRules("ru").selectRange(1, 21));'), { lines: 1 });
+    check(same(t4, ['other one one']), `task 4: en selectRange(1, 1) is other in Chrome, select(1) one; ru 1–21 is one ${JSON.stringify(t4)}`);
+    const t6 = await runFolder(b, page('console.log(new Intl.RelativeTimeFormat("ru").formatToParts(2.5, "hours").map((p) => p.type + ":" + (p.unit ?? "-")).join(), new Intl.RelativeTimeFormat("ru", { numeric: "auto" }).formatToParts(-1, "day").length);'), { lines: 1 });
+    check(same(t6, ['literal:-,integer:hour,decimal:hour,fraction:hour,literal:- 1']), `task 6: the three parts of 2,5 carry unit "hour", the literals do not; «вчера» is one literal ${JSON.stringify(t6)}`);
+    const t7 = await runFolder(b, page('const naive = (p, a, b) => p.replace("{0}", a).replace("{1}", b);\nconsole.log(naive("{0}, {1}", "{1}", "x we y"), "|", naive("{0}, {1}", "$&", "y"));'), { lines: 1 });
+    check(same(t7, ['x we y, {1} | {0}, y']), `task 7: a naive replace breaks — the element "{1}" catches the second replace, "$&" puts the match back ${JSON.stringify(t7)}`);
+    const t8 = await runFolder(b, page('console.log(new Intl.PluralRules("ru").select("1000000000000000000001"));'), { lines: 1 });
+    check(same(t8, ['many']), `task 8: select of the long string in Chrome is many — ToNumber, not 16.5.16 ${JSON.stringify(t8)}`);
+    const t9 = await runFolder(b, page('const n = (u) => new Intl.RelativeTimeFormat("ru", { style: "narrow", numeric: "auto" }).format(-1, u);\nconsole.log(["day", "week", "month", "second"].map(n).join(" | "));'), { lines: 1 });
+    check(same(t9, ['вчера | на пр. нед. | в пр. мес. | -1 с']), `task 9: the narrow data have their own phrases for -1 (day, week, month), seconds none ${JSON.stringify(t9)}`);
+  }
   await b.close();
 
   // ECMA-402 2026 and the MDN pages of the day
@@ -428,6 +541,52 @@ console.log([0, 5, 90, 1500, 4320].map(lastSeen).join(" | "), "|", new Intl.Rela
     'student: the footer names the MDN pages and ECMA-402 2026; MDN is linked once; section numbers without links');
   }
 
+  // the tasks: their quotes in their places and clauses, what ECMA-402 says behind their criteria, the sections they ask
+  // for, the link, the footer
+  {
+    const corpus = tight([...daySpec.map((c) => f(c[0])), ...Object.values(M), ...outputs, ...taskOutputs].join(' '));
+    const tq = [...tasksText.matchAll(/«([A-Za-z][^»]*)»/g)].map((m) => tight(m[1])).filter((x) => !/[а-яё]/i.test(x) && x.length > 3);
+    const tmissing = tq.filter((x) => !corpus.includes(x));
+    const tplace = [
+      ['14.2.3 требует: «Each template string must contain the substrings "{0}" and "{1}" exactly once»', 'sec-Intl.ListFormat-internal-slots', 'Each template string must contain the substrings "{0}" and "{1}" exactly once'],
+      ['примечание 2 к 17.2.3 — «It is recommended that implementations use the locale data provided by the Common Locale Data Repository»', 'sec-intl.pluralrules-internal-slots',
+        'Note 2 It is recommended that implementations use the locale data provided by the Common Locale Data Repository'],
+      ['18.2.3: «Additional fields may exist with the previous names concatenated with the strings "-narrow" or "-short"»', 'sec-Intl.RelativeTimeFormat-internal-slots',
+        'Additional fields may exist with the previous names concatenated with the strings "-narrow" or "-short"'],
+    ];
+    const tplaceMdn = [
+      ['сравнено с примером MDN для narrow («in 1 mo.»)', 'RelativeTimeFormat/RelativeTimeFormat', '"narrow" - : E.g., "in 1 mo.". The narrow style'],
+      ['страница честно пишет «The narrow style could be similar to the short style for some locales»', 'RelativeTimeFormat/RelativeTimeFormat', 'The narrow style could be similar to the short style for some locales'],
+    ];
+    const tt = tight(tasksText);
+    const tlost = [...tplace.filter(([inTasks, id, quote]) => !tt.includes(tight(inTasks)) || !tight(f(id)).includes(tight(quote))).map(([, id, quote]) => `${num(id)} «${quote.slice(0, 30)}»`),
+      ...tplaceMdn.filter(([inTasks, p, quote]) => !tt.includes(tight(inTasks)) || !tight(M[G + p] ?? '').includes(tight(quote))).map(([, p, quote]) => `${p} «${quote.slice(0, 30)}»`)];
+    check(tq.length === 5 && tmissing.length === 0 && tlost.length === 0,
+      `tasks: ${tq.length} English quotes — 14.2.3, note 2 of 17.2.3, 18.2.3, MDN RelativeTimeFormat() twice — in their places and clauses (not found: ${tmissing.join(' | ') || 'none'}; lost: ${tlost.join(' | ') || 'none'})`);
+    check(hasNows(f('sec-deconstructpattern'), ['Let patternParts be PartitionPattern (pattern)']) && hasNows(f('sec-createpartsfromlist'), ['Return DeconstructPattern (pattern, placeables)', 'Set parts to DeconstructPattern (pattern, placeables)'])
+      && hasNows(f('sec-Intl.RelativeTimeFormat-internal-slots'), ['Optionally, additional fields whose key is the result of ToString of a Number', 'must not include the values "native", "traditio", or "finance"'])
+      && hasNows(f('sec-PartitionRelativeTimePattern'), ['Let key be the string-concatenation of unit, "-", and style', 'If fields has a field [[<key>]], set patterns to fields.[[<key>]]'])
+      && hasNows(f('sec-makepartslist'), ['[[Type]]: "literal", [[Value]]: patternPart.[[Value]], [[Unit]]: empty', '[[Type]]: part.[[Type]], [[Value]]: part.[[Value]], [[Unit]]: unit']),
+    'tasks 6, 7, 9: 14.5.1 parts the pattern (PartitionPattern), 14.5.2 fills it by DeconstructPattern; 18.2.3 — phrases by ToString of a number, no native; 18.5.2 step 6 — the key unit-style if it is there; 18.5.3 — only the parts of the number get the unit');
+    const asks = ['шаг 4 раздела 17.5.2', 'по 16.5.16 не должен', 'назван шаг 14.5.2', '(14.5.5, шаг 4.c)', 'на шаге 7.a раздела 18.5.2', '(18.5.3)', '(17.5.3 — данные языка)', '(шаг 4 раздела 17.5.4)',
+      'не принимает (14.5.5)', '(MakePartsList, 18.5.3)', '(шаг 7.a раздела 18.5.2)', 'по шаблонам, как 14.5.2', '14.2.3 требует', 'как в шаге 7 раздела 14.5.2', 'DeconstructPattern (14.5.1)',
+      '(16.5.16, шаг 3, против ToNumber)', 'примечание 2 к 17.2.3', 'и шаг 6 раздела 18.5.2', 'которое ищет шаг 6'];
+    const flatTasks = tasksText.replace(/\s+/g, ' ');
+    check(asks.every((s) => flatTasks.includes(s)), `tasks: they ask for ${asks.length} places of ECMA-402: missing ${asks.filter((s) => !flatTasks.includes(s)).join(' | ') || 'none'}`);
+    const tnums = { 'sec-resolveplural': '17.5.2', 'sec-tointlmathematicalvalue': '16.5.16', 'sec-createpartsfromlist': '14.5.2', 'sec-createstringlistfromiterable': '14.5.5', 'sec-PartitionRelativeTimePattern': '18.5.2',
+      'sec-makepartslist': '18.5.3', 'sec-pluralruleselectrange': '17.5.3', 'sec-resolvepluralrange': '17.5.4', 'sec-Intl.ListFormat-internal-slots': '14.2.3', 'sec-deconstructpattern': '14.5.1', 'sec-intl.pluralrules-internal-slots': '17.2.3' };
+    const tWrong = Object.entries(tnums).filter(([id, k]) => num(id) !== k).map(([id, k]) => `${id}: ${num(id)}≠${k}`);
+    check(tWrong.length === 0, `tasks: ${Object.keys(tnums).length} section numbers they name without links: ${tWrong.join('; ') || 'all right'}`);
+    const tasksHtml = builtSite.htmlOfFile(path.join(DAY, 'tasks.html'));
+    const tNamed = [...tasksHtml.matchAll(/<a href="https:\/\/tc39\.es\/ecma402\/2026\/#([\w.%-]+)">([0-9][0-9.]*)[ <]/g)].map((m) => [decodeURIComponent(m[1]), m[2]]);
+    check(tNamed.length === 1 && tNamed.every(([id, k]) => num(id) === k && spec.includes(`id="${id}"`)) && !/tc39\.es\/ecma262\//.test(tasksHtml),
+      `tasks: the one anchor of ECMA-402 exists with its number (18.2.3) ${JSON.stringify(tNamed.map(([, k]) => k))}; no links to ECMA-262`);
+    const tFooter = tasksHtml.slice(tasksHtml.indexOf('<div class="sources">'));
+    check(['Intl.PluralRules, Intl.ListFormat, Intl.RelativeTimeFormat и их методы', 'спецификация <a href="https://tc39.es/ecma402/2026/">ECMA-402 2026</a>', 'Mozilla Contributors'].every((s) => tFooter.includes(s))
+      && (tasksHtml.match(/developer\.mozilla\.org/g) || []).length === 1,
+    'tasks: the footer names the MDN pages and ECMA-402 2026; MDN is linked once');
+  }
+
   // the MDN texts the lecture retells — its five errors among them
   {
     const ctor = md[`${G}PluralRules/PluralRules`];
@@ -502,6 +661,7 @@ console.log([0, 5, 90, 1500, 4320].map(lastSeen).join(" | "), "|", new Intl.Rela
     ['sec-Intl.RelativeTimeFormat.prototype.format', 'Let unit be ? ToString (unit)', '4'],
     ['sec-PartitionRelativeTimePattern', 'If value is NaN', '1'],
     ['sec-PartitionRelativeTimePattern', 'Let unit be ? SingularRelativeTimeUnit (unit)', '2'],
+    ['sec-PartitionRelativeTimePattern', 'If style is "short" or "narrow", then', '6'],
     ['sec-PartitionRelativeTimePattern', 'If relativeTimeFormat.[[Numeric]] is "auto", then', '7'],
     ['sec-PartitionRelativeTimePattern', 'Let valueString be ! ToString (value)', '7.a'],
     ['sec-PartitionRelativeTimePattern', 'If value is -0', '8'],

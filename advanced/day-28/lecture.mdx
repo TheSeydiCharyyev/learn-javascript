@@ -1,0 +1,582 @@
+---
+title: "День 28 — PluralRules, ListFormat и RelativeTimeFormat"
+day: День 28 • урок 1
+heading: "PluralRules, ListFormat и RelativeTimeFormat"
+lead: Курс 3, Advanced. Модуль «Intl целиком; числа и даты по спецификации» — третий день. 45 минут.
+css: |
+  h1 { border-bottom-color: #0891b2; }
+  h2 { color: #4f46e5; background: #ecfeff; border-left-color: #0891b2; }
+  h3 { color: #3730a3; }
+  .step-number { background: #0891b2; }
+  .toc a { color: #4f46e5; }
+---
+
+<Goals>
+- выбирать форму слова после числа через `Intl.PluralRules` — «1 урок, 2 урока, 5 уроков»;
+- собирать списки «Аман, Мерет и Сапар» через `Intl.ListFormat`;
+- писать «вчера» и «через 3 дня» через `Intl.RelativeTimeFormat` и считать для него разницу дат;
+- видеть, где Chrome расходится с текстом, и подставлять свои данные там, где языка нет.
+</Goals>
+
+<Toc />
+
+## 1. Зачем {#why}
+
+На дне 26 три сегодняшних класса прозвучали только списками языков: туркменский знает `PluralRules`, а `ListFormat`
+и `RelativeTimeFormat` — нет. День 27 обещал «1 урок, 2 урока, 5 уроков». А на дне 25 курса 2 `NumberFormat`
+склонял только свои единицы — «5 часов»; слова «урок» он не знает. Сегодня три задачи интерфейса: форма слова после
+числа, список и относительное время. Источник — главы [17](https://tc39.es/ecma402/2026/#pluralrules-objects),
+[14](https://tc39.es/ecma402/2026/#listformat-objects) и [18](https://tc39.es/ecma402/2026/#relativetimeformat-objects)
+ECMA-402 2026, страницы
+[Intl.PluralRules](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules),
+[Intl.ListFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat) и
+[Intl.RelativeTimeFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat)
+на MDN и Chrome. Блоки запускаем в папке дня 22.
+
+## 2. PluralRules: категория, а не слово {#plural}
+
+`select` слов не склоняет. MDN: методы возвращают «a tag that represents the plural form of a single or a range of
+numbers, cardinal or ordinal». Меток шесть — `zero`, `one`, `two`, `few`, `many`, `other`, и каждый язык берёт свою
+часть. Слова — наша таблица.
+
+```js
+const pr = new Intl.PluralRules("ru");
+const forms = { one: "урок", few: "урока", many: "уроков", other: "урока" };
+const lessons = (n) => n.toLocaleString("ru") + " " + forms[pr.select(n)];
+console.log([1, 2, 5, 21, 11, 0, 1.5].map(lessons).join(", "));
+console.log([1, 2, 5, 21].map((n) => pr.select(n)).join(), "|", pr.resolvedOptions().pluralCategories.join(), "|", new Intl.PluralRules("en").select(1), new Intl.PluralRules("en").select(5));
+```
+
+<ResultBox>
+1 урок, 2 урока, 5 уроков, 21 урок, 11 уроков, 0 уроков, 1,5 урока\
+one,few,many,one | one,few,many,other | one other
+</ResultBox>
+
+У русского четыре категории: `one` — 1, 21, 101, но не 11; `few` — 2–4, 22–24; `many` — 0, 5–20, 25; `other` —
+дроби, «1,5 урока». Правила языков — из CLDR, как советует примечание 2 к
+[17.2.3](https://tc39.es/ecma402/2026/#sec-intl.pluralrules-internal-slots).
+
+## 3. Конструктор по шагам {#plural-constructor}
+
+Intl.PluralRules ([17.1.1](https://tc39.es/ecma402/2026/#sec-intl.pluralrules)): шаг 1 — без `new` TypeError (MDN:
+«Intl.PluralRules() can only be constructed with new»); шаг 3 — ResolveOptions
+([9.2.8](https://tc39.es/ecma402/2026/#sec-resolveoptions)) с пометкой coerce-options; шаг 7 — `type`; шаги 9–12 —
+`notation` и `compactDisplay`; шаг 13 — SetNumberFormatDigitOptions
+([16.1.2](https://tc39.es/ecma402/2026/#sec-setnfdigitoptions)) с дробями от 0 до 3, как у `NumberFormat`. Ключей
+`-u-` у правил нет.
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const seen = [];
+new Intl.PluralRules("ru", new Proxy({}, { get(t, k) { if (typeof k === "string") seen.push(k); return undefined; } }));
+console.log(seen.join());
+console.log(run(() => Intl.PluralRules("ru")), "|", run(() => new Intl.PluralRules("ru", { type: "plural" })));
+const o = new Intl.PluralRules("ru-u-nu-arab", { notation: "compact" }).resolvedOptions();
+console.log(o.locale, o.notation, o.compactDisplay, new Intl.PluralRules("ru").resolvedOptions().compactDisplay, "|", new Intl.PluralRules("fr").select(1500000), new Intl.PluralRules("fr", { notation: "compact" }).select(1500000), "|", new Intl.PluralRules("ru", "abc").resolvedOptions().type);
+```
+
+<ResultBox>
+localeMatcher,type,notation,compactDisplay,minimumIntegerDigits,minimumFractionDigits,maximumFractionDigits,minimumSignificantDigits,maximumSignificantDigits,roundingIncrement,roundingMode,roundingPriority,trailingZeroDisplay\
+TypeError: Constructor Intl.PluralRules requires 'new' | RangeError: Value plural out of range for Intl.PluralRules options property type\
+ru compact short undefined | other many | cardinal
+</ResultBox>
+
+Опции цифр — те же, что у чисел (день 25 курса 2). `notation` важна не всем языкам: французскому «1,5 million»
+нужна другая форма, чем 1 500 000. Страница MDN о конструкторе `notation` не знает: «These options are interpreted
+as if the notation option from Intl.NumberFormat is "standard" and style is "decimal"», — а текст 2026 года и Chrome
+158 её читают. `compactDisplay` хранится только при `compact` (шаг 12), ключ `nu` пропал. Строка вместо опций
+прошла: coerce-options — это ToObject (CoerceOptionsToObject,
+[9.2.10](https://tc39.es/ecma402/2026/#sec-coerceoptionstoobject)), и текст его не хвалит: «its use is discouraged
+for new functionality in favour of GetOptionsObject».
+
+## 4. select изнутри {#select}
+
+select ([17.3.3](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype.select)) на шаге 3 приводит аргумент
+ToIntlMathematicalValue и зовёт ResolvePlural ([17.5.2](https://tc39.es/ecma402/2026/#sec-resolveplural)). Шаги 1–3:
+`NaN` и бесконечности — `other`. Шаг 4 — FormatNumericToString
+([16.5.3](https://tc39.es/ecma402/2026/#sec-formatnumberstring)) печатает число по опциям цифр. Шаг 10 —
+PluralRuleSelect ([17.5.1](https://tc39.es/ecma402/2026/#sec-pluralruleselect)), операция реализации, — получает
+уже строку.
+
+<Scheme src="scheme-plural.svg">select: число печатается по опциям цифр, категория выбирается по строке</Scheme>
+
+```js
+const pr = new Intl.PluralRules("ru");
+console.log(pr.select(1.0001), pr.select(1.0005), new Intl.PluralRules("ru", { minimumFractionDigits: 1 }).select(1), new Intl.PluralRules("ru", { maximumFractionDigits: 0 }).select(1.5));
+console.log(pr.select(NaN), pr.select(Infinity), pr.select("21"), pr.select(null), pr.select(), pr.select(-21));
+```
+
+<ResultBox>
+one other other few\
+other other one many other one
+</ResultBox>
+
+При трёх знаках после запятой 1.0001 печатается как «1» — `one`, а 1.0005 — как «1,001» — `other`. С
+`minimumFractionDigits: 1` единица стала «1,0» — «1,0 урока»; без дробей 1,5 округлилось до «2» — «2 урока».
+Правило: давайте правилам те же опции цифр, что и форматировщику, иначе выйдет «1,0 урок». `"21"` читается как
+число, `null` — как ноль, пустой вызов — `NaN`; знак не важен.
+
+## 5. Chrome против текста: точные числа {#exact}
+
+ToIntlMathematicalValue ([16.5.16](https://tc39.es/ecma402/2026/#sec-tointlmathematicalvalue)) нужна, «so that exact
+decimal values can be represented»: шаг 2 берёт `BigInt` как есть, шаг 3 разбирает строку без потери цифр.
+`NumberFormat` в Chrome так и делает. А `select`?
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const pr = new Intl.PluralRules("ru"), nf = new Intl.NumberFormat("ru");
+const big = "1000000000000000000001";
+console.log(nf.format(big), "|", pr.select(big), "|", pr.select(Number(big)));
+console.log(nf.format(21n), "|", run(() => pr.select(21n)), "|", pr.select(Number(21n)));
+```
+
+<ResultBox>
+1&nbsp;000&nbsp;000&nbsp;000&nbsp;000&nbsp;000&nbsp;000&nbsp;001 | many | many\
+21 | TypeError: Cannot convert a BigInt value to a number | one
+</ResultBox>
+
+Число кончается на 1, и по тексту ответ — `one`: «…001 урок». Chrome дал `many`, как для `Number(big)`: строка
+прошла через обычное число и стала 1e21. `BigInt` он не принимает вовсе, хотя форматировщик его печатает. Значит,
+`select` в Chrome 158 делает ToNumber, а не ToIntlMathematicalValue. Пока так — приводите к числу сами и только там,
+где оно точное: до `Number.MAX_SAFE_INTEGER` (день 21 курса 2).
+
+## 6. Порядковые числа и чужие языки {#ordinal}
+
+Шаг 7 конструктора читает `type`: `cardinal` — сколько, `ordinal` — какой по счёту. Пример MDN — английские
+окончания.
+
+```js
+const ord = new Intl.PluralRules("en", { type: "ordinal" });
+const suffixes = { one: "st", two: "nd", few: "rd", other: "th" };
+console.log([1, 2, 3, 4, 11, 12, 21, 22, 103].map((n) => n + suffixes[ord.select(n)]).join(" "), "|", new Intl.PluralRules("ru", { type: "ordinal" }).resolvedOptions().pluralCategories.join());
+const cats = (t) => t + ": " + new Intl.PluralRules(t).resolvedOptions().pluralCategories.join();
+console.log(["ar", "en", "zh", "tk"].map(cats).join(" | "), "|", [0, 1, 2, 6, 18, 100].map((n) => new Intl.PluralRules("ar").select(n)).join());
+```
+
+<ResultBox>
+1st 2nd 3rd 4th 11th 12th 21st 22nd 103rd | other\
+ar: zero,one,two,few,many,other | en: one,other | zh: other | tk: one,other | zero,one,two,few,many,other
+</ResultBox>
+
+Русским порядковым категория не нужна. `pluralCategories` идут в порядке `zero`, `one`, `two`, `few`, `many`,
+`other` (17.3.2, шаг 4), а пример MDN к `resolvedOptions` печатает старый порядок `["few", "many", "one", "other"]`.
+У арабского шесть категорий — так пишет и главная страница MDN, но страница `select` после пяти примеров говорит
+«Note that Arabic has 5 forms for cardinal numbers, as shown»; шестая, `other`, — у сотни. Туркменский Chrome знает
+(день 26), но после числа существительное не меняется: «1 sapak», «5 sapak».
+
+## 7. selectRange: «2–4 урока» {#range}
+
+selectRange ([17.3.4](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype.selectrange)) на шаге 3 требует
+оба конца и зовёт ResolvePluralRange ([17.5.4](https://tc39.es/ecma402/2026/#sec-resolvepluralrange)). Шаг 1: `NaN` —
+RangeError. Шаг 4: если концы печатаются одинаково — категория начала. Иначе — PluralRuleSelectRange (17.5.3),
+данные языка о диапазонах.
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const pr = new Intl.PluralRules("ru");
+const forms = { one: "урок", few: "урока", many: "уроков", other: "урока" };
+console.log([[1, 5], [2, 4], [1, 2], [5, 21], [5, 1]].map(([a, b]) => a + "–" + b + " " + forms[pr.selectRange(a, b)]).join(", "));
+console.log(run(() => pr.selectRange(1)), "|", run(() => pr.selectRange(NaN, 2)));
+console.log(new Intl.PluralRules("en").selectRange(1, 1), new Intl.PluralRules("en").select(1), new Intl.PluralRules("fr").selectRange(1, 1));
+```
+
+<ResultBox>
+1–5 уроков, 2–4 урока, 1–2 урока, 5–21 урок, 5–1 урок\
+TypeError: Invalid endRange : undefined | RangeError: Invalid startRange : NaN\
+other one one
+</ResultBox>
+
+По-русски форму диапазона решает конец; обратный диапазон 5–1 текст не запрещает. Третья строка — расхождение
+Chrome с текстом: у английского «1» и «1» печатаются одинаково, и шаг 4 велит вернуть категорию начала, `one`, а
+Chrome берёт `other` из таблицы диапазонов. MDN описывает Chrome: «In English there is only one plural form, such as
+"1–10 apples", and the method will return other». У французского таблица сама даёт `one`.
+
+## 8. ListFormat: «Аман, Мерет и Сапар» {#list}
+
+Intl.ListFormat ([14.1.1](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat)): шаг 1 — только с `new`; шаг 3 —
+ResolveOptions без пометок; шаг 7 — `type`, шаг 9 — `style`; шаг 13 берёт из данных языка шаблоны для этой пары.
+Ключей нет: «Intl.ListFormat does not have any relevant extension keys»
+([14.2.3](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat-internal-slots)). Типы объясняет примечание 3:
+«conjunction stands for "and"-based lists (e.g., "A, B, and C"), disjunction stands for "or"-based lists (e.g., "A,
+B, or C"), and unit stands for lists of values with units (e.g., "5 pounds, 12 ounces")».
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const names = ["Аман", "Мерет", "Сапар"];
+console.log(new Intl.ListFormat("ru").format(names));
+for (const type of ["conjunction", "disjunction", "unit"]) console.log(type + ": " + ["long", "short", "narrow"].map((style) => new Intl.ListFormat("ru", { type, style }).format(names)).join(" | "));
+console.log(JSON.stringify(new Intl.ListFormat("ru-u-nu-arab").resolvedOptions()), "|", run(() => new Intl.ListFormat("ru", { style: "unit" })));
+```
+
+<ResultBox>
+Аман, Мерет и Сапар\
+conjunction: Аман, Мерет и Сапар | Аман, Мерет и Сапар | Аман, Мерет, Сапар\
+disjunction: Аман, Мерет или Сапар | Аман, Мерет или Сапар | Аман, Мерет или Сапар\
+unit: Аман Мерет Сапар | Аман Мерет Сапар | Аман Мерет Сапар\
+\{"locale":"ru","type":"conjunction","style":"long"\} | RangeError: Value unit out of range for Intl.ListFormat options property style
+</ResultBox>
+
+Русский `unit` — через пробел, как «1 ч 30 мин». Это значение `type`, а не `style`; MDN в разделе «Unit
+formatting» ошибается: «Use style: "unit" to format the list items as a compound unit», — а в коде пишет
+`type: "unit"`.
+
+## 9. Список собирается с конца {#parts}
+
+`format` склеивает части CreatePartsFromList ([14.5.2](https://tc39.es/ecma402/2026/#sec-createpartsfromlist)). Шаг
+2: пустой список — пусто. Шаг 3: два элемента — шаблон \[\[Pair\]\]. Иначе шаг 5 берёт последний элемент, и цикл
+шага 7 идёт к началу: первым — \[\[End\]\], дальше — \[\[Middle\]\], у первого элемента — \[\[Start\]\] (шаг 7.c).
+`formatToParts` отдаёт те же части с типами `element` и `literal`.
+
+<Scheme src="scheme-list.svg">CreatePartsFromList: шаблон за шаблоном от последнего элемента к первому</Scheme>
+
+```js
+const lf = new Intl.ListFormat("ru");
+console.log([[], ["Аман"], ["Аман", "Мерет"], ["Аман", "Мерет", "Сапар", "Огулгерек"]].map((l) => JSON.stringify(lf.format(l))).join(" "));
+console.log(lf.formatToParts(["Аман", "Мерет", "Сапар"]).map((p) => p.type + ":" + JSON.stringify(p.value)).join(" "));
+const es = new Intl.ListFormat("es");
+console.log(es.format(["fuerte", "indomable"]), "|", es.format(["indomable", "fuerte"]), "|", es.format(["agua", "hielo"]), "|", new Intl.ListFormat("es", { type: "disjunction" }).format(["siete", "ocho"]));
+```
+
+<ResultBox>
+"" "Аман" "Аман и Мерет" "Аман, Мерет, Сапар и Огулгерек"\
+element:"Аман" literal:", " element:"Мерет" literal:" и " element:"Сапар"\
+fuerte e indomable | indomable y fuerte | agua y hielo | siete u ocho
+</ResultBox>
+
+Зачем шаблонов несколько (индекс `n`, шаг 7.b)? Примечание: «as in Spanish, where either "y" or "e" may be selected,
+depending on the following word». Перед звуком «и» союз «y» становится «e» — пример MDN; «hielo» начинается с
+другого звука, и Chrome это знает. Так же «o» перед «o» становится «u».
+
+## 10. Только строки {#strings}
+
+Шаг 3 `format` — StringListFromIterable ([14.5.5](https://tc39.es/ecma402/2026/#sec-createstringlistfromiterable)).
+Шаг 1: `undefined` — пустой список. Дальше аргумент перебирается итератором; не строка — TypeError (шаг 4.c), и
+итератор закрывается (шаг 4.c.ii). Почему так строго: «because there is no obvious locale-aware coercion for
+arbitrary values».
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const lf = new Intl.ListFormat("ru");
+console.log(JSON.stringify(lf.format()), "|", lf.format("abc"), "|", lf.format(new Set(["еда", "школа", "еда"])), "|", run(() => lf.format([1, 2, 3])));
+const log = [];
+function* topics() { try { yield "еда"; yield 2; yield "город"; } finally { log.push("finally"); } }
+console.log(run(() => lf.format(topics())), "|", log.join(), "|", lf.format([1, 2, 3].map(String)), "|", run(() => new Intl.ListFormat("ru", "long")));
+```
+
+<ResultBox>
+"" | a, b и c | еда и школа | TypeError: Iterable yielded 1 which is not a string\
+TypeError: Iterable yielded 2 which is not a string | finally | 1, 2 и 3 | TypeError: invalid\_argument
+</ResultBox>
+
+Строка тоже перебирается — «abc» распалась на буквы; `Set` выбросил повтор. Генератор закрылся — сработал его
+`finally` (день 12 курса 2). Числа превращайте в строки сами, лучше через `NumberFormat`. У `ListFormat` нет пометки
+coerce-options: шаг 3 ResolveOptions зовёт GetOptionsObject (ECMA-262, 7.3.36), и строка вместо опций — TypeError с
+текстом-кодом V8. `PluralRules` ту же строку принял (раздел 3).
+
+## 11. Списки на других языках {#list-langs}
+
+```js
+const list = ["Motorcycle", "Bus", "Car"];
+console.log(new Intl.ListFormat("en-US").format(list), "|", new Intl.ListFormat("en-GB").format(list), "|", new Intl.ListFormat("en-US", { style: "short" }).format(list));
+console.log(new Intl.ListFormat("en-GB").formatToParts(list).map((p) => JSON.stringify(p.value)).join(" "));
+const tk = new Intl.ListFormat("tk");
+console.log(tk.resolvedOptions().locale, "|", tk.format(["Aman", "Meret", "Sapar"]), "|", new Intl.ListFormat("tr").format(["Aman", "Meret", "Sapar"]), "|", Intl.ListFormat.supportedLocalesOf(["tk", "tr", "uz", "kk", "az"]).join());
+```
+
+<ResultBox>
+Motorcycle, Bus, and Car | Motorcycle, Bus and Car | Motorcycle, Bus, & Car\
+"Motorcycle" ", " "Bus" " and " "Car"\
+ru-RU | Aman, Meret и Sapar | Aman, Meret ve Sapar | tr,kk
+</ResultBox>
+
+Американский английский ставит запятую перед «and», британский — нет (раздел MDN «Oxford comma»). А главная страница
+MDN `Intl.ListFormat` в примере `formatToParts` для `en-GB` печатает `", and "`; Chrome и страница `formatToParts`
+дают `" and "`. Туркменского у `ListFormat` нет, `"tk"` стал языком браузера (день 26), и в туркменские имена попал
+союз «и». Турецкий даёт «ve», туркменское «we» подставим сами (раздел 16).
+
+## 12. RelativeTimeFormat: «вчера» и «через 3 дня» {#relative}
+
+Intl.RelativeTimeFormat ([18.1.1](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat)): шаг 1 — только с
+`new`; шаг 3 — ResolveOptions с coerce-options и ключом `nu`
+([18.2.3](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat-internal-slots)); шаг 10 — `style`; шаг 12 —
+`numeric`. Шаги 16–17 строят внутри два объекта: \[\[NumberFormat\]\] для числа и \[\[PluralRules\]\] для формы
+слова.
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const always = new Intl.RelativeTimeFormat("ru"), auto = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
+console.log(always.format(-1, "day"), "|", always.format(3, "day"), "|", auto.format(-1, "day"), "|", auto.format(3, "day"), "|", auto.format(-2, "day"), "|", auto.format(2, "day"));
+console.log(JSON.stringify(always.resolvedOptions()), "|", new Intl.RelativeTimeFormat("ru", { numberingSystem: "arab" }).format(3, "day"), "|", run(() => new Intl.RelativeTimeFormat("ru", { numeric: true })));
+const real = Intl.PluralRules;
+Intl.PluralRules = function () { throw new Error("подмена"); };
+console.log(always.format(5, "day"), "|", new Intl.RelativeTimeFormat("ru").format(21, "day"));
+Intl.PluralRules = real;
+```
+
+<ResultBox>
+1 день назад | через 3 дня | вчера | через 3 дня | позавчера | послезавтра\
+\{"locale":"ru","style":"long","numeric":"always","numberingSystem":"latn"\} | через ٣ дня | RangeError: Value true out of range for Intl.RelativeTimeFormat options property numeric\
+через 5 дней | через 21 день
+</ResultBox>
+
+`numeric` здесь — строка, а не булева опция, как у `Locale` (день 27): `true` — RangeError. Подмена
+`Intl.PluralRules` ничего не сломала: шаг 17 строит %Intl.PluralRules% — исходный конструктор, а не то, что лежит в
+свойстве `Intl`. Правила внутри те же, что в разделе 2.
+
+## 13. format по шагам {#relative-steps}
+
+format ([18.3.3](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat.prototype.format)): шаг 3 — ToNumber для
+значения, шаг 4 — ToString для единицы. Дальше — PartitionRelativeTimePattern
+([18.5.2](https://tc39.es/ecma402/2026/#sec-PartitionRelativeTimePattern)).
+
+<Scheme src="scheme-relative.svg">format: проверки, единица, готовая фраза, знак, число и форма слова</Scheme>
+
+```js
+const run = (f) => { try { return String(f()); } catch (e) { return e.name + ": " + e.message; } };
+const rtf = new Intl.RelativeTimeFormat("ru");
+console.log(rtf.format(3, "days"), "|", rtf.format("3", "week"), "|", rtf.format(-0, "day"), "|", rtf.format(0, "day"), "|", rtf.format(1.5, "day"), "|", rtf.format(21, "day"));
+console.log(run(() => rtf.format(1, "Day")), "|", run(() => rtf.format(NaN, "day")), "|", run(() => rtf.format(1n, "day")));
+console.log(rtf.formatToParts(-21, "days").map((p) => p.type + ":" + JSON.stringify(p.value) + (p.unit ? ":" + p.unit : "")).join(" "));
+```
+
+<ResultBox>
+через 3 дня | через 3 недели | 0 дней назад | через 0 дней | через 1,5 дня | через 21 день\
+RangeError: Invalid unit argument for Intl.RelativeTimeFormat.prototype.format() 'Day' | RangeError: Value need to be finite number for Intl.RelativeTimeFormat.prototype.format() | TypeError: Cannot convert a BigInt value to a number\
+integer:"21":day literal:" день назад"
+</ResultBox>
+
+Шаг 1 не пускает `NaN` и бесконечности. Шаг 2 — SingularRelativeTimeUnit
+([18.5.1](https://tc39.es/ecma402/2026/#sec-singularrelativetimeunit)): `"days"` становится `"day"`, единиц восемь,
+регистр важен. Шаг 8: `-0` и отрицательные — прошлое, отсюда «0 дней назад». Шаги 11–12 печатают число и выбирают
+форму: дробь — `other`, «1,5 дня». `BigInt` здесь ломается по тексту: шаг 3 — ToNumber. `formatToParts` помечает
+куски числа единицей; MDN: «this is for programmatic usage and is not localized».
+
+## 14. numeric: "auto" — готовые фразы {#auto}
+
+При `auto` шаг 7.a ищет в данных языка поле с именем ToString(value); нашлось — фраза целиком, без числа. У секунд,
+минут и часов есть только «0», у дней, недель, месяцев, кварталов и лет — ещё «-1» и «1», у русских дней — и «-2»,
+«2». MDN: «When the value is 0, the output may be dependent on the unit».
+
+```js
+const auto = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
+console.log(["second", "minute", "day", "week", "month", "year"].map((u) => auto.format(0, u)).join(" | "));
+console.log(auto.format(-2, "week"), "|", auto.format(-1, "week"), "|", auto.format(1, "quarter"), "|", auto.format(-0, "day"), "|", JSON.stringify(auto.formatToParts(-1, "day")));
+console.log(auto.format(0.9999, "day"), "|", auto.format(1.0001, "day"), "|", auto.format(-0.0004, "day"), "|", new Intl.RelativeTimeFormat("ru").format(0.9999, "day"));
+```
+
+<ResultBox>
+сейчас | в эту минуту | сегодня | на этой неделе | в этом месяце | в этом году\
+2 недели назад | на прошлой неделе | в следующем квартале | сегодня | \[\{"type":"literal","value":"вчера"\}\]\
+завтра | завтра | сегодня | через 1 день
+</ResultBox>
+
+ToString(-0) — «0», поэтому `-0` здесь «сегодня». Третья строка — расхождение Chrome с текстом: ToString(0.9999) —
+«0.9999», такого поля нет, и по шагу 7 нужен числовой вид «через 1 день». Chrome сначала округляет, как при печати,
+и находит «завтра». В `auto` передавайте целые.
+
+## 15. Из дат — в «через 3 дня» {#dates}
+
+`RelativeTimeFormat` не считает разницу дат: число и единицу выбираете вы. Разницу считает `Temporal` — `until` из дня
+22 курса 2.
+
+```js
+const auto = new Intl.RelativeTimeFormat("ru", { numeric: "auto" }), always = new Intl.RelativeTimeFormat("ru");
+function when(date, today) {
+  const { days } = today.until(date);
+  if (Math.abs(days) < 7) return auto.format(days, "day");
+  if (Math.abs(days) < 31) return always.format(Math.trunc(days / 7), "week");
+  return always.format(today.until(date, { largestUnit: "month" }).months, "month");
+}
+const today = Temporal.PlainDate.from("2026-11-28");
+console.log(["2026-11-27", "2026-11-28", "2026-12-01", "2026-11-14", "2026-12-08", "2027-01-15"].map((d) => when(Temporal.PlainDate.from(d), today)).join(" | "));
+console.log(auto.format(1, "week"), "|", always.format(1, "week"));
+```
+
+<ResultBox>
+вчера | сегодня | через 3 дня | 2 недели назад | через 1 неделю | через 1 месяц\
+на следующей неделе | через 1 неделю
+</ResultBox>
+
+`until` без опций считает в днях. Для недель взят `always`: «на следующей неделе» — календарная неделя, а 8 декабря —
+уже через одну (28 ноября 2026 года — суббота). Как округлять — решение интерфейса, а не `Intl`.
+
+## 16. «Карточки 2.0»: строка состояния {#cards}
+
+Под колодой — строка: сколько слов, какие темы и когда повтор.
+
+```js
+const TEXT = {
+  ru: { words: { one: "слово", few: "слова", many: "слов", other: "слова" }, next: "повтор" },
+  en: { words: { one: "word", other: "words" }, next: "review" },
+};
+function status(locale, count, topics, days) {
+  const t = TEXT[locale];
+  const word = t.words[new Intl.PluralRules(locale).select(count)];
+  const list = new Intl.ListFormat(locale).format(topics);
+  const when = new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day");
+  return `${count} ${word}: ${list}; ${t.next} ${when}`;
+}
+console.log(status("ru", 21, ["еда", "школа", "город"], 3));
+console.log(status("ru", 5, ["еда"], 1));
+console.log(status("en", 21, ["food", "school", "city"], 3));
+```
+
+<ResultBox>
+21 слово: еда, школа и город; повтор через 3 дня\
+5 слов: еда; повтор завтра\
+21 words: food, school, and city; review in 3 days
+</ResultBox>
+
+Для туркменского Chrome вставил бы «и» и «через». Шаблоны возьмём из данных CLDR, которых в Chrome нет, — их
+показывает Node с полной ICU (день 25 курса 2): пара `{0} we {1}`, «düýn», «şu gün», «ertir», `{0} günden` и
+`{0} gün öň`.
+
+```js
+const TK = { and: " we ", days: { "-1": "düýn", "0": "şu gün", "1": "ertir" } };
+const tkList = (items) => (items.length < 2 ? items.join("") : items.slice(0, -1).join(", ") + TK.and + items.at(-1));
+const tkWhen = (days) => TK.days[days] ?? (days > 0 ? days + " günden" : -days + " gün öň");
+console.log(new Intl.ListFormat("tk").format(["iýmit", "mekdep", "şäher"]), "|", tkList(["iýmit", "mekdep", "şäher"]), "|", tkList(["iýmit", "mekdep"]));
+console.log(new Intl.RelativeTimeFormat("tk", { numeric: "auto" }).format(3, "day"), "|", [-3, -1, 0, 1, 3].map(tkWhen).join(", "), "|", new Intl.PluralRules("tk").select(21) + ": 21 söz");
+```
+
+<ResultBox>
+iýmit, mekdep и şäher | iýmit, mekdep we şäher | iýmit we mekdep\
+через 3 дня | 3 gün öň, düýn, şu gün, ertir, 3 günden | other: 21 söz
+</ResultBox>
+
+`tkList` повторяет шаблоны CreatePartsFromList: запятая в \[\[Start\]\] и \[\[Middle\]\], союз в \[\[End\]\] и
+\[\[Pair\]\]. Таблица слов не нужна: форма «söz» одна для любого числа.
+
+## 17. Ошибки дня и что будет завтра {#errors-next}
+
+| Что случилось | Текст в Chrome | Где искать |
+| --- | --- | --- |
+| `Intl.PluralRules("ru")` без `new` | `TypeError: Constructor Intl.PluralRules requires 'new'` | 17.1.1, шаг 1 |
+| `type: "plural"` | `RangeError: Value plural out of range for Intl.PluralRules options property type` | 17.1.1, шаг 7; 9.2.11, шаг 5 |
+| `select(21n)` | `TypeError: Cannot convert a BigInt value to a number` | 17.3.3 — Chrome против 16.5.16 |
+| `selectRange(1)` | `TypeError: Invalid endRange : undefined` | 17.3.4, шаг 3 |
+| `format([1, 2, 3])` у `ListFormat` | `TypeError: Iterable yielded 1 which is not a string` | 14.5.5, шаг 4.c |
+| опции строкой у `ListFormat` | `TypeError: invalid_argument` | 9.2.8, шаг 3 |
+| `format(1, "Day")` | `RangeError: Invalid unit argument for Intl.RelativeTimeFormat.prototype.format() 'Day'` | 18.5.1, шаг 9 |
+| `format(NaN, "day")` | `RangeError: Value need to be finite number for Intl.RelativeTimeFormat.prototype.format()` | 18.5.2, шаг 1 |
+
+Тихие подмены: категорию решает напечатанная строка («1,0 урока»); `"tk"` у `ListFormat` и `RelativeTimeFormat` —
+язык браузера; в `auto` дробь 0.9999 — «завтра». Завтра — день 29:
+`DisplayNames`, `DurationFormat` и `Segmenter`.
+
+<Ref>
+| Раздел | Что делает и где мы это видели | Как разбираем |
+| --- | --- | --- |
+| [14 ListFormat Objects](https://tc39.es/ecma402/2026/#listformat-objects) | списки; разделы 8–11 | <Brief /> |
+| [14.1 The Intl.ListFormat Constructor](https://tc39.es/ecma402/2026/#sec-intl-listformat-constructor) | конструктор; раздел 8 | <Full /> |
+| [14.1.1 Intl.ListFormat ( \[ locales \[ , options \] \] )](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat) | шаги 1, 3, 7, 9, 13; раздел 8 | <Brief /> |
+| [14.2 Properties of the Intl.ListFormat Constructor](https://tc39.es/ecma402/2026/#sec-properties-of-intl-listformat-constructor) | свойства конструктора | <Brief /> |
+| [14.2.1 Intl.ListFormat.prototype](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat.prototype) | прототип | <Brief /> |
+| [14.2.2 Intl.ListFormat.supportedLocalesOf ( locales \[ , options \] )](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat.supportedLocalesOf) | языки списков; раздел 11 | <Brief /> |
+| [14.2.3 Internal slots](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat-internal-slots) | ключей нет; шаблоны Pair, Start, Middle, End; разделы 8, 9 | <Brief /> |
+| [14.3 Properties of the Intl.ListFormat Prototype Object](https://tc39.es/ecma402/2026/#sec-properties-of-intl-listformat-prototype-object) | прототип — не `ListFormat` | <Brief /> |
+| [14.3.1 Intl.ListFormat.prototype.constructor](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat.prototype.constructor) | ссылка на конструктор | <Brief /> |
+| [14.3.2 Intl.ListFormat.prototype.resolvedOptions ( )](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat.prototype.resolvedoptions) | таблица 25; раздел 8 | <Brief /> |
+| [14.3.3 Intl.ListFormat.prototype.format ( list )](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat.prototype.format) | StringListFromIterable и FormatList; разделы 9, 10 | <Brief /> |
+| [14.3.4 Intl.ListFormat.prototype.formatToParts ( list )](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat.prototype.formatToParts) | части `element` и `literal`; разделы 9, 11 | <Brief /> |
+| [14.3.5 Intl.ListFormat.prototype \[ %Symbol.toStringTag% \]](https://tc39.es/ecma402/2026/#sec-Intl.ListFormat.prototype-toStringTag) | `[object Intl.ListFormat]` | <Brief /> |
+| [14.4 Properties of Intl.ListFormat Instances](https://tc39.es/ecma402/2026/#sec-properties-of-intl-listformat-instances) | слоты экземпляра | <Brief /> |
+| [14.5 Abstract Operations for ListFormat Objects](https://tc39.es/ecma402/2026/#sec-intl-listformat-abstracts) | операции для `ListFormat` | <Brief /> |
+| [14.5.1 DeconstructPattern ( pattern, placeables )](https://tc39.es/ecma402/2026/#sec-deconstructpattern) | шаблон на части | <Brief /> |
+| [14.5.2 CreatePartsFromList ( listFormat, list )](https://tc39.es/ecma402/2026/#sec-createpartsfromlist) | список с конца; раздел 9 | <Brief /> |
+| [14.5.3 FormatList ( listFormat, list )](https://tc39.es/ecma402/2026/#sec-formatlist) | склейка частей; раздел 9 | <Brief /> |
+| [14.5.4 FormatListToParts ( listFormat, list )](https://tc39.es/ecma402/2026/#sec-formatlisttoparts) | массив частей; раздел 9 | <Brief /> |
+| [14.5.5 StringListFromIterable ( iterable )](https://tc39.es/ecma402/2026/#sec-createstringlistfromiterable) | только строки; раздел 10 | <Brief /> |
+| [17 PluralRules Objects](https://tc39.es/ecma402/2026/#pluralrules-objects) | категории чисел; разделы 2–7 | <Brief /> |
+| [17.1 The Intl.PluralRules Constructor](https://tc39.es/ecma402/2026/#sec-intl-pluralrules-constructor) | конструктор; раздел 3 | <Full /> |
+| [17.1.1 Intl.PluralRules ( \[ locales \[ , options \] \] )](https://tc39.es/ecma402/2026/#sec-intl.pluralrules) | шаги 1, 3, 7, 9–13; раздел 3 | <Brief /> |
+| [17.2 Properties of the Intl.PluralRules Constructor](https://tc39.es/ecma402/2026/#sec-properties-of-intl-pluralrules-constructor) | свойства конструктора | <Brief /> |
+| [17.2.1 Intl.PluralRules.prototype](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype) | прототип | <Brief /> |
+| [17.2.2 Intl.PluralRules.supportedLocalesOf ( locales \[ , options \] )](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.supportedlocalesof) | языки правил; раздел 6 | <Brief /> |
+| [17.2.3 Internal slots](https://tc39.es/ecma402/2026/#sec-intl.pluralrules-internal-slots) | ключей нет, данные — CLDR; разделы 2, 3 | <Brief /> |
+| [17.3 Properties of the Intl.PluralRules Prototype Object](https://tc39.es/ecma402/2026/#sec-properties-of-intl-pluralrules-prototype-object) | прототип — не `PluralRules` | <Brief /> |
+| [17.3.1 Intl.PluralRules.prototype.constructor](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype.constructor) | ссылка на конструктор | <Brief /> |
+| [17.3.2 Intl.PluralRules.prototype.resolvedOptions ( )](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype.resolvedoptions) | `pluralCategories` по порядку; разделы 3, 6 | <Brief /> |
+| [17.3.3 Intl.PluralRules.prototype.select ( value )](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype.select) | ToIntlMathematicalValue и ResolvePlural; разделы 4, 5 | <Brief /> |
+| [17.3.4 Intl.PluralRules.prototype.selectRange ( start, end )](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype.selectrange) | оба конца обязательны; раздел 7 | <Brief /> |
+| [17.3.5 Intl.PluralRules.prototype \[ %Symbol.toStringTag% \]](https://tc39.es/ecma402/2026/#sec-intl.pluralrules.prototype-%25symbol.tostringtag%25) | `[object Intl.PluralRules]` | <Brief /> |
+| [17.4 Properties of Intl.PluralRules Instances](https://tc39.es/ecma402/2026/#sec-properties-of-intl-pluralrules-instances) | слоты экземпляра | <Brief /> |
+| [17.5 Abstract Operations for PluralRules Objects](https://tc39.es/ecma402/2026/#sec-intl-pluralrules-abstracts) | операции для `PluralRules` | <Brief /> |
+| [17.5.1 PluralRuleSelect ( locale, type, notation, compactDisplay, s )](https://tc39.es/ecma402/2026/#sec-pluralruleselect) | категория строки — операция реализации; раздел 4 | <Brief /> |
+| [17.5.2 ResolvePlural ( pluralRules, n )](https://tc39.es/ecma402/2026/#sec-resolveplural) | сначала печать, потом категория; раздел 4 | <Brief /> |
+| [17.5.3 PluralRuleSelectRange ( locale, type, notation, compactDisplay, xp, yp )](https://tc39.es/ecma402/2026/#sec-pluralruleselectrange) | данные о диапазонах; раздел 7 | <Brief /> |
+| [17.5.4 ResolvePluralRange ( pluralRules, x, y )](https://tc39.es/ecma402/2026/#sec-resolvepluralrange) | одинаковая печать — категория начала; раздел 7 | <Brief /> |
+| [18 RelativeTimeFormat Objects](https://tc39.es/ecma402/2026/#relativetimeformat-objects) | «вчера» и «через 3 дня»; разделы 12–15 | <Brief /> |
+| [18.1 The Intl.RelativeTimeFormat Constructor](https://tc39.es/ecma402/2026/#sec-intl-relativetimeformat-constructor) | конструктор; раздел 12 | <Full /> |
+| [18.1.1 Intl.RelativeTimeFormat ( \[ locales \[ , options \] \] )](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat) | шаги 1, 3, 10, 12, 16–17; раздел 12 | <Brief /> |
+| [18.2 Properties of the Intl.RelativeTimeFormat Constructor](https://tc39.es/ecma402/2026/#sec-properties-of-intl-relativetimeformat-constructor) | свойства конструктора | <Brief /> |
+| [18.2.1 Intl.RelativeTimeFormat.prototype](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat.prototype) | прототип | <Brief /> |
+| [18.2.2 Intl.RelativeTimeFormat.supportedLocalesOf ( locales \[ , options \] )](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat.supportedLocalesOf) | языки; раздел 16 | <Brief /> |
+| [18.2.3 Internal slots](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat-internal-slots) | ключ `nu`; раздел 12 | <Brief /> |
+| [18.3 Properties of the Intl.RelativeTimeFormat Prototype Object](https://tc39.es/ecma402/2026/#sec-properties-of-intl-relativetimeformat-prototype-object) | прототип — не `RelativeTimeFormat` | <Brief /> |
+| [18.3.1 Intl.RelativeTimeFormat.prototype.constructor](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat.prototype.constructor) | ссылка на конструктор | <Brief /> |
+| [18.3.2 Intl.RelativeTimeFormat.prototype.resolvedOptions ( )](https://tc39.es/ecma402/2026/#sec-intl.relativetimeformat.prototype.resolvedoptions) | таблица 33; раздел 12 | <Brief /> |
+| [18.3.3 Intl.RelativeTimeFormat.prototype.format ( value, unit )](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat.prototype.format) | ToNumber и ToString; раздел 13 | <Brief /> |
+| [18.3.4 Intl.RelativeTimeFormat.prototype.formatToParts ( value, unit )](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat.prototype.formatToParts) | части с `unit`; разделы 13, 14 | <Brief /> |
+| [18.3.5 Intl.RelativeTimeFormat.prototype \[ %Symbol.toStringTag% \]](https://tc39.es/ecma402/2026/#sec-Intl.RelativeTimeFormat.prototype-toStringTag) | `[object Intl.RelativeTimeFormat]` | <Brief /> |
+| [18.4 Properties of Intl.RelativeTimeFormat Instances](https://tc39.es/ecma402/2026/#sec-properties-of-intl-relativetimeformat-instances) | слоты экземпляра; раздел 12 | <Brief /> |
+| [18.5 Abstract Operations for RelativeTimeFormat Objects](https://tc39.es/ecma402/2026/#sec-intl-relativetimeformat--abstracts) | операции для `RelativeTimeFormat` | <Brief /> |
+| [18.5.1 SingularRelativeTimeUnit ( unit )](https://tc39.es/ecma402/2026/#sec-singularrelativetimeunit) | `days` → `day`; раздел 13 | <Brief /> |
+| [18.5.2 PartitionRelativeTimePattern ( relativeTimeFormat, value, unit )](https://tc39.es/ecma402/2026/#sec-PartitionRelativeTimePattern) | проверки, фраза, знак, форма; разделы 13, 14 | <Brief /> |
+| [18.5.3 MakePartsList ( pattern, unit, parts )](https://tc39.es/ecma402/2026/#sec-makepartslist) | части с единицей; раздел 13 | <Brief /> |
+| [18.5.4 FormatRelativeTime ( relativeTimeFormat, value, unit )](https://tc39.es/ecma402/2026/#sec-FormatRelativeTime) | склейка частей; раздел 13 | <Brief /> |
+| [18.5.5 FormatRelativeTimeToParts ( relativeTimeFormat, value, unit )](https://tc39.es/ecma402/2026/#sec-FormatRelativeTimeToParts) | массив частей; раздел 13 | <Brief /> |
+| [MDN: Intl.ListFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat) | списки по правилам языка; разделы 8, 11 | <Full /> |
+| [MDN: Intl.ListFormat.prototype.format()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/format) | только строки; разделы 9, 10 | <Full /> |
+| [MDN: Intl.ListFormat.prototype.formatToParts()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/formatToParts) | части списка; разделы 9, 11 | <Brief /> |
+| [MDN: Intl.ListFormat() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/ListFormat) | `type` и `style`; разделы 8, 9, 11 | <Full /> |
+| [MDN: Intl.ListFormat.prototype.resolvedOptions()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/resolvedOptions) | итоговые настройки; раздел 8 | <Brief /> |
+| [MDN: Intl.ListFormat.supportedLocalesOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/supportedLocalesOf) | языки списков; раздел 11 | <Brief /> |
+| [MDN: Intl.PluralRules](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules) | метки и порядковые числа; разделы 2, 6 | <Full /> |
+| [MDN: Intl.PluralRules() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules/PluralRules) | опции; нет `notation`; раздел 3 | <Full /> |
+| [MDN: Intl.PluralRules.prototype.resolvedOptions()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules/resolvedOptions) | `pluralCategories`; разделы 3, 6 | <Brief /> |
+| [MDN: Intl.PluralRules.prototype.select()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules/select) | категория числа; разделы 2, 4, 6 | <Full /> |
+| [MDN: Intl.PluralRules.prototype.selectRange()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules/selectRange) | диапазоны; раздел 7 | <Brief /> |
+| [MDN: Intl.PluralRules.supportedLocalesOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules/supportedLocalesOf) | языки правил; раздел 6 | <Brief /> |
+| [MDN: Intl.RelativeTimeFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat) | относительное время; разделы 1, 12 | <Full /> |
+| [MDN: Intl.RelativeTimeFormat.prototype.format()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/format) | единицы и `auto`; разделы 13, 14 | <Full /> |
+| [MDN: Intl.RelativeTimeFormat.prototype.formatToParts()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/formatToParts) | `unit` не переводится; разделы 13, 14 | <Brief /> |
+| [MDN: Intl.RelativeTimeFormat() constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/RelativeTimeFormat) | `style`, `numeric`, ключ `nu`; разделы 12, 14 | <Full /> |
+| [MDN: Intl.RelativeTimeFormat.prototype.resolvedOptions()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/resolvedOptions) | итоговые настройки; раздел 12 | <Brief /> |
+| [MDN: Intl.RelativeTimeFormat.supportedLocalesOf()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/supportedLocalesOf) | языки; раздел 16 | <Brief /> |
+</Ref>
+
+<Cheatsheet>
+```js
+// new Intl.PluralRules("ru").select(n) — категория one / few / many / other; слово — из своей таблицы
+// категорию выбирают по напечатанной строке: опции цифр — те же, что у форматировщика числа
+// new Intl.ListFormat("ru", { type, style }).format(["А", "Б", "В"]) — только строки; Pair, Start, Middle, End
+// new Intl.RelativeTimeFormat("ru", { numeric: "auto" }).format(-1, "day") — «вчера»; разницу дат считаете сами
+// в auto — только целые; -0 — прошлое; единица в единственном или множественном числе, регистр важен
+// tk: PluralRules есть, ListFormat и RelativeTimeFormat — нет, будет язык браузера
+```
+</Cheatsheet>
+
+<Selfcheck>
+1. Почему `new Intl.PluralRules("ru", { minimumFractionDigits: 1 }).select(1)` — `other`?
+   <Answer>Шаг 4 ResolvePlural печатает «1.0», а категорию выбирают по строке: «1,0 урока».</Answer>
+2. Что сделает `new Intl.ListFormat("ru").format([1, 2])` и как это исправить?
+   <Answer>TypeError: StringListFromIterable пропускает только строки (14.5.5). Числа — в строки сами: `map(String)`
+   или `NumberFormat`.</Answer>
+3. Почему `format(-0, "day")` даёт «0 дней назад», а с `numeric: "auto"` — «сегодня»?
+   <Answer>Шаг 8: `-0` — прошлое. При `auto` шаг 7.a ищет поле ToString(-0), то есть «0», — фразу «сегодня».</Answer>
+4. Как узнать, что `"tk"` у `RelativeTimeFormat` подменён?
+   <Answer>`resolvedOptions().locale` — язык браузера, а `supportedLocalesOf(["tk"])` — пустой массив.</Answer>
+5. Почему `new Intl.PluralRules("en").selectRange(1, 1)` в Chrome — `other`?
+   <Answer>Chrome берёт ответ из таблицы диапазонов. По тексту шаг 4 ResolvePluralRange вернул бы категорию начала —
+   `one`.</Answer>
+</Selfcheck>
+
+<Sources>
+По материалам [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/PluralRules)
+(Intl.PluralRules, Intl.ListFormat, Intl.RelativeTimeFormat и их методы, авторы — Mozilla Contributors),
+лицензия [CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); главный источник дня —
+спецификация [ECMA-402 2026](https://tc39.es/ecma402/2026/).
+Эта страница — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+условия целиком в [LICENSE](../../LICENSE).
+</Sources>
